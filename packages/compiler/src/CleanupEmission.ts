@@ -58,15 +58,15 @@ export const prepareInitialization = (fn: FunctionLowering): ReadonlyArray<Mir.O
           initialized: true,
           provenance: generated(fn.registry.spanOf(fn.owner.function.declaration.anchor)),
         })
-        return Object.freeze({ path, local })
+        return { path, local }
       })
-    fn.initializationFlags.set(root, Object.freeze(flags))
+    fn.initializationFlags.set(root, flags)
   }
   for (const binding of fn.ownership?.bindings ?? []) {
     const local = ownershipLocal(fn, binding.site)
     if (local !== undefined) fn.initializationFlagRoots.set(Ownership.siteKey(binding.site), local)
   }
-  return Object.freeze(operations)
+  return operations
 }
 
 /** Resets an acquired binding's sparse flags, including on repeated loop entry. */
@@ -116,10 +116,10 @@ export const initializationFor = (
     flag.path.length >= path.length &&
     MovePath.overlaps(flag.path, path) &&
     required.has(MovePath.key(flag.path.slice(path.length)))
-      ? [{ path: Object.freeze(flag.path.slice(path.length)), local: flag.local }]
+      ? [{ path: flag.path.slice(path.length), local: flag.local }]
       : [],
   )
-  return Object.freeze({ state, flags: Object.freeze(flags) })
+  return { state, flags: flags }
 }
 
 export const transitionAt = (
@@ -158,12 +158,10 @@ export const ownershipLocal = (
 export const initializationFlagsOf = (
   fn: FunctionLowering,
 ): NonNullable<Mir.MirFunction['initializationFlags']> =>
-  Object.freeze(
-    [...fn.initializationFlags].flatMap(([identity, flags]) => {
-      const root = fn.initializationFlagRoots.get(identity)
-      return root === undefined ? [] : [{ root, flags }]
-    }),
-  )
+  [...fn.initializationFlags].flatMap(([identity, flags]) => {
+    const root = fn.initializationFlagRoots.get(identity)
+    return root === undefined ? [] : [{ root, flags }]
+  })
 
 /** Resolves canonical field and variant identities through the actual specialized owner type. */
 export const lowerOwnershipPath = (
@@ -233,7 +231,7 @@ export const lowerOwnershipPath = (
     type = Type.substitute(field.declaredType.type, substitution)
     variantFields = undefined
   }
-  return Object.freeze(selectors)
+  return selectors
 }
 
 export const indexExits = (plan: Ownership.FunctionOwnership | undefined): ExitIndex => {
@@ -283,15 +281,13 @@ export const cleanupForLocal = (
     return ConcreteCleanup.forEffect(fn, localType, new Set())
   }
   if (localType._tag === 'EffectComposite') {
-    return Object.freeze({
+    return {
       _tag: 'EffectCompositeCleanup',
       type: localType.type,
-      alternatives: Object.freeze(
-        localType.alternatives.map((alternative) =>
-          ConcreteCleanup.forEffect(fn, alternative, new Set()),
-        ),
+      alternatives: localType.alternatives.map((alternative) =>
+        ConcreteCleanup.forEffect(fn, alternative, new Set()),
       ),
-    })
+    }
   }
   if (localType._tag !== 'CallableValue') {
     return specialized
@@ -299,30 +295,28 @@ export const cleanupForLocal = (
   if (localType.storage === undefined) return ConcreteCleanup.forCallable(fn, localType)
   if (specialized._tag !== 'CallableCleanup') return specialized
   const fields = localType.environment?.fields ?? []
-  return Object.freeze({
+  return {
     _tag: 'CallableCleanup',
     type: localType.type,
     environment:
       localType.environment === undefined
         ? specialized.environment
-        : Object.freeze({
+        : {
             _tag: 'CallableEnvironmentIdentity',
             identity: Instances.callableEnvironmentIdentity(localType.environment.callable),
-          }),
-    slots: Object.freeze(
-      specialized.slots.flatMap((slot) => {
-        const field = fields.find((candidate) => candidate.ordinal === slot.ordinal)
-        return field === undefined
-          ? []
-          : [
-              Object.freeze({
-                ordinal: slot.ordinal,
-                cleanup: ConcreteCleanup.forType(fn, field.type),
-              }),
-            ]
-      }),
-    ),
-  })
+          },
+    slots: specialized.slots.flatMap((slot) => {
+      const field = fields.find((candidate) => candidate.ordinal === slot.ordinal)
+      return field === undefined
+        ? []
+        : [
+            {
+              ordinal: slot.ordinal,
+              cleanup: ConcreteCleanup.forType(fn, field.type),
+            },
+          ]
+    }),
+  }
 }
 
 /** Materializes hidden-owner cleanup at the final loan ending, including rewritten exits. */
@@ -424,10 +418,8 @@ export const propagationReleases = (
     })
     retained.add(temporary.local.ordinal)
   }
-  return Object.freeze(
-    orderedCleanup(fn, releases).flatMap((release) =>
-      release._tag === 'Drop' && release.cleanup._tag !== 'NoCleanup' ? [release] : [],
-    ),
+  return orderedCleanup(fn, releases).flatMap((release) =>
+    release._tag === 'Drop' && release.cleanup._tag !== 'NoCleanup' ? [release] : [],
   )
 }
 
@@ -450,13 +442,11 @@ export const dependencyOrderedLoanEndings = (
     }
     return result
   }
-  return Object.freeze(
-    [...endings].sort((left, right) => {
-      const leftKey = borrowKey(left.borrow)
-      const rightKey = borrowKey(right.borrow)
-      return depth(rightKey) - depth(leftKey) || leftKey.localeCompare(rightKey)
-    }),
-  )
+  return [...endings].sort((left, right) => {
+    const leftKey = borrowKey(left.borrow)
+    const rightKey = borrowKey(right.borrow)
+    return depth(rightKey) - depth(leftKey) || leftKey.localeCompare(rightKey)
+  })
 }
 
 export const propagationLoanEnds = (
@@ -470,12 +460,12 @@ export const propagationLoanEnds = (
       return borrow === undefined
         ? []
         : [
-            Object.freeze({
+            {
               _tag: 'EndLoan' as const,
               borrow,
               slice,
               provenance: generated(span),
-            }),
+            },
           ]
     }),
   )
@@ -487,14 +477,12 @@ export const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | un
       if (slice === undefined) continue
       const call = BodyView.node(fn.owner.view, borrow.call)
       if (call === undefined) throw new RangeError('loan refers to a node outside its body')
-      fn.emit(
-        Object.freeze({
-          _tag: 'EndLoan',
-          borrow,
-          slice,
-          provenance: generated(exit?.span ?? call.span),
-        }),
-      )
+      fn.emit({
+        _tag: 'EndLoan',
+        borrow,
+        slice,
+        provenance: generated(exit?.span ?? call.span),
+      })
       fn.loanLocals.delete(borrowKey(borrow))
     }
     if (exit?.kind === 'Return') {
@@ -571,26 +559,24 @@ const exitDrops = (
         span: temporary.span,
       })
   }
-  return Object.freeze(
-    releases
-      .sort((left, right) => right.ordinal - left.ordinal)
-      .flatMap((release): ReadonlyArray<Mir.DropOperation> => {
-        const localType = fn.localTypes.at(release.local.ordinal)
-        return localType === undefined
-          ? []
-          : [
-              Object.freeze({
-                _tag: 'Drop',
-                local: release.local,
-                cleanup: cleanupForLocal(fn, release.cleanup, localType),
-                ...(release.initialization === undefined
-                  ? {}
-                  : { initialization: release.initialization }),
-                provenance: generated(release.span),
-              }),
-            ]
-      }),
-  )
+  return releases
+    .sort((left, right) => right.ordinal - left.ordinal)
+    .flatMap((release): ReadonlyArray<Mir.DropOperation> => {
+      const localType = fn.localTypes.at(release.local.ordinal)
+      return localType === undefined
+        ? []
+        : [
+            {
+              _tag: 'Drop',
+              local: release.local,
+              cleanup: cleanupForLocal(fn, release.cleanup, localType),
+              ...(release.initialization === undefined
+                ? {}
+                : { initialization: release.initialization }),
+              provenance: generated(release.span),
+            },
+          ]
+    })
 }
 
 export const matchCleanupKey = (
@@ -608,11 +594,15 @@ export const ownerFields = (
   ownerLoop: Mir.LoopId | undefined,
 ): { readonly ownerLoop?: Mir.LoopId } => (ownerLoop === undefined ? {} : { ownerLoop })
 
-export const generated = (span: SourceSpan.SourceSpan): Mir.Provenance =>
-  Object.freeze({ span, generated: true })
+export const generated = (span: SourceSpan.SourceSpan): Mir.Provenance => ({
+  span,
+  generated: true,
+})
 
-export const authored = (span: SourceSpan.SourceSpan): Mir.Provenance =>
-  Object.freeze({ span, generated: false })
+export const authored = (span: SourceSpan.SourceSpan): Mir.Provenance => ({
+  span,
+  generated: false,
+})
 
 /** Splits a projected place at stored references so each path addresses one allocation. */
 export const lowerReferencePlace = (
@@ -641,7 +631,7 @@ export const lowerReferencePlace = (
         _tag: 'ReadPlace',
         destination,
         root,
-        selectors: Object.freeze(remaining),
+        selectors: remaining,
         type,
         provenance,
       })
@@ -678,7 +668,7 @@ export const lowerReferencePlace = (
     else return undefined
   }
   if (continuation !== undefined && !loadReferences(continuation)) return undefined
-  return { root, selectors: Object.freeze(remaining) }
+  return { root, selectors: remaining }
 }
 
 /** Lowers an owned selector prefix and loads stored references before writing their referents. */
@@ -727,23 +717,21 @@ export const lowerBorrowedWritePlace = (
       const type = fn.type(current)
       if (type === undefined) return undefined
       const destination = fn.alloc(type)
-      fn.emit(
-        Object.freeze({
-          _tag: 'ReadPlace',
-          destination,
-          root,
-          selectors: Object.freeze(remaining),
-          type,
-          provenance: authored(selector.span),
-        }),
-      )
+      fn.emit({
+        _tag: 'ReadPlace',
+        destination,
+        root,
+        selectors: remaining,
+        type,
+        provenance: authored(selector.span),
+      })
       root = destination
       remaining = []
       current = current.target
       if (ordinal < declared.length - 1) break
     }
   }
-  return { root, selectors: Object.freeze(remaining) }
+  return { root, selectors: remaining }
 }
 
 export const lowerWriteSelectors = (
@@ -753,37 +741,33 @@ export const lowerWriteSelectors = (
   const lowered: Array<Mir.PlaceSelector> = []
   for (const selector of selectors) {
     if (selector._tag === 'Field') {
-      lowered.push(
-        Object.freeze({
-          _tag: 'FieldSelector',
-          field: selector.field,
-          provenance: authored(selector.span),
-        }),
-      )
+      lowered.push({
+        _tag: 'FieldSelector',
+        field: selector.field,
+        provenance: authored(selector.span),
+      })
       continue
     }
     const index =
       selector.bounds._tag === 'Proven'
-        ? Object.freeze({ _tag: 'Proven' as const, value: selector.bounds.index })
+        ? { _tag: 'Proven' as const, value: selector.bounds.index }
         : (() => {
             const expression = lowerExpression(fn, selector.index)
             if (expression === 'Transferred') return expression
             return expression === undefined
               ? undefined
-              : Object.freeze({ _tag: 'Runtime' as const, local: expression.result })
+              : { _tag: 'Runtime' as const, local: expression.result }
           })()
     if (index === 'Transferred') return index
     if (index === undefined) return undefined
-    lowered.push(
-      Object.freeze({
-        _tag: 'ElementSelector',
-        length: selector.array.length,
-        index,
-        provenance: authored(selector.span),
-      }),
-    )
+    lowered.push({
+      _tag: 'ElementSelector',
+      length: selector.array.length,
+      index,
+      provenance: authored(selector.span),
+    })
   }
-  return Object.freeze(lowered)
+  return lowered
 }
 
 /** Evaluates each borrow selector only after loading the preceding reference boundary. */
@@ -831,13 +815,13 @@ const lowerBorrowSelector = (
   }
   const index =
     selector.bounds._tag === 'Proven'
-      ? Object.freeze({ _tag: 'Proven' as const, value: selector.bounds.index })
+      ? { _tag: 'Proven' as const, value: selector.bounds.index }
       : (() => {
           const expression = lowerExpression(fn, selector.index)
           if (expression === 'Transferred') return expression
           return expression === undefined
             ? undefined
-            : Object.freeze({ _tag: 'Runtime' as const, local: expression.result })
+            : { _tag: 'Runtime' as const, local: expression.result }
         })()
   if (index === undefined || index === 'Transferred') return index
   return {
@@ -855,51 +839,45 @@ export const lowerBorrowedWriteSelectors = (
   const lowered: Array<Mir.PlaceSelector> = []
   for (const selector of selectors) {
     if (selector._tag === 'Field') {
-      lowered.push(
-        Object.freeze({
-          _tag: 'FieldSelector',
-          field: selector.field,
-          provenance: authored(selector.span),
-        }),
-      )
+      lowered.push({
+        _tag: 'FieldSelector',
+        field: selector.field,
+        provenance: authored(selector.span),
+      })
       continue
     }
     if (selector._tag === 'Index') {
       const index =
         selector.bounds._tag === 'Proven'
-          ? Object.freeze({ _tag: 'Proven' as const, value: selector.bounds.index })
+          ? { _tag: 'Proven' as const, value: selector.bounds.index }
           : (() => {
               const expression = lowerExpression(fn, selector.index)
               if (expression === 'Transferred') return expression
               return expression === undefined
                 ? undefined
-                : Object.freeze({ _tag: 'Runtime' as const, local: expression.result })
+                : { _tag: 'Runtime' as const, local: expression.result }
             })()
       if (index === 'Transferred') return index
       if (index === undefined) return undefined
-      lowered.push(
-        Object.freeze({
-          _tag: 'ElementSelector',
-          length: selector.array.length,
-          index,
-          provenance: authored(selector.span),
-        }),
-      )
+      lowered.push({
+        _tag: 'ElementSelector',
+        length: selector.array.length,
+        index,
+        provenance: authored(selector.span),
+      })
       continue
     }
     const index = lowerExpression(fn, selector.index)
     if (index === 'Transferred') return index
     if (index === undefined) return undefined
-    lowered.push(
-      Object.freeze({
-        _tag: 'SliceElementSelector',
-        index: index.result,
-        access: selector.slice.access,
-        provenance: authored(selector.span),
-      }),
-    )
+    lowered.push({
+      _tag: 'SliceElementSelector',
+      index: index.result,
+      access: selector.slice.access,
+      provenance: authored(selector.span),
+    })
   }
-  return Object.freeze(lowered)
+  return lowered
 }
 
 export const withoutLoanEndings = (
@@ -907,72 +885,66 @@ export const withoutLoanEndings = (
   loans: ReadonlySet<string>,
   owners: ReadonlySet<number>,
 ): ReadonlyArray<Mir.Operation> =>
-  Object.freeze(
-    operations.flatMap((operation): ReadonlyArray<Mir.Operation> => {
-      if (operation._tag === 'EndLoan' && loans.has(borrowKey(operation.borrow))) return []
-      if (operation._tag === 'Drop' && owners.has(operation.local.ordinal)) return []
-      if (operation._tag === 'DiagnosticScope')
-        return [
-          Object.freeze({
-            ...operation,
-            body: Mir.mapExecutionOperations(operation.body, (operations) =>
-              withoutLoanEndings(operations, loans, owners),
-            ),
-          }),
-        ]
-      if (operation._tag === 'Conditional')
-        return [
-          Object.freeze({
-            ...operation,
-            taken: Mir.mapExecutionOperations(operation.taken, (operations) =>
-              withoutLoanEndings(operations, loans, owners),
-            ),
-            otherwise: Mir.mapExecutionOperations(operation.otherwise, (operations) =>
-              withoutLoanEndings(operations, loans, owners),
-            ),
-          }),
-        ]
-      if (operation._tag === 'ShortCircuit')
-        return [
-          Object.freeze({
-            ...operation,
-            right: Mir.mapExecutionOperations(operation.right, (operations) =>
-              withoutLoanEndings(operations, loans, owners),
-            ),
-          }),
-        ]
-      if (operation._tag === 'Match')
-        return [
-          Object.freeze({
-            ...operation,
-            arms: Object.freeze(
-              operation.arms.map((arm) =>
-                Object.freeze({
-                  ...arm,
-                  ...(arm.guard === undefined
-                    ? {}
-                    : {
-                        guard: Object.freeze({
-                          ...arm.guard,
-                          execution: Mir.mapExecutionOperations(arm.guard.execution, (operations) =>
-                            withoutLoanEndings(operations, loans, owners),
-                          ),
-                        }),
-                      }),
-                  selected: Object.freeze({
-                    ...arm.selected,
-                    execution: Mir.mapExecutionOperations(arm.selected.execution, (operations) =>
+  operations.flatMap((operation): ReadonlyArray<Mir.Operation> => {
+    if (operation._tag === 'EndLoan' && loans.has(borrowKey(operation.borrow))) return []
+    if (operation._tag === 'Drop' && owners.has(operation.local.ordinal)) return []
+    if (operation._tag === 'DiagnosticScope')
+      return [
+        {
+          ...operation,
+          body: Mir.mapExecutionOperations(operation.body, (operations) =>
+            withoutLoanEndings(operations, loans, owners),
+          ),
+        },
+      ]
+    if (operation._tag === 'Conditional')
+      return [
+        {
+          ...operation,
+          taken: Mir.mapExecutionOperations(operation.taken, (operations) =>
+            withoutLoanEndings(operations, loans, owners),
+          ),
+          otherwise: Mir.mapExecutionOperations(operation.otherwise, (operations) =>
+            withoutLoanEndings(operations, loans, owners),
+          ),
+        },
+      ]
+    if (operation._tag === 'ShortCircuit')
+      return [
+        {
+          ...operation,
+          right: Mir.mapExecutionOperations(operation.right, (operations) =>
+            withoutLoanEndings(operations, loans, owners),
+          ),
+        },
+      ]
+    if (operation._tag === 'Match')
+      return [
+        {
+          ...operation,
+          arms: operation.arms.map((arm) => ({
+            ...arm,
+            ...(arm.guard === undefined
+              ? {}
+              : {
+                  guard: {
+                    ...arm.guard,
+                    execution: Mir.mapExecutionOperations(arm.guard.execution, (operations) =>
                       withoutLoanEndings(operations, loans, owners),
                     ),
-                  }),
+                  },
                 }),
+            selected: {
+              ...arm.selected,
+              execution: Mir.mapExecutionOperations(arm.selected.execution, (operations) =>
+                withoutLoanEndings(operations, loans, owners),
               ),
-            ),
-          }),
-        ]
-      return [operation]
-    }),
-  )
+            },
+          })),
+        },
+      ]
+    return [operation]
+  })
 
 export interface DelayedLoopLoan {
   readonly key: string
@@ -985,15 +957,11 @@ export const delayedLoopLoans = (
   keys: ReadonlySet<string>,
   entry: DelayedEffectState,
 ): ReadonlyArray<DelayedLoopLoan> => {
-  return Object.freeze(
-    [...keys].flatMap((key): ReadonlyArray<DelayedLoopLoan> => {
-      const borrow = fn.loanIds.get(key)
-      const slice = entry.loanLocals.get(key)
-      return borrow === undefined || slice === undefined
-        ? []
-        : [Object.freeze({ key, borrow, slice })]
-    }),
-  )
+  return [...keys].flatMap((key): ReadonlyArray<DelayedLoopLoan> => {
+    const borrow = fn.loanIds.get(key)
+    const slice = entry.loanLocals.get(key)
+    return borrow === undefined || slice === undefined ? [] : [{ key, borrow, slice }]
+  })
 }
 
 export const terminalLoopLoanEndings = (
@@ -1001,17 +969,15 @@ export const terminalLoopLoanEndings = (
   loans: ReadonlyArray<DelayedLoopLoan>,
   outcome: Extract<Mir.Outcome, { readonly _tag: 'Return' | 'Trap' }>,
 ): ReadonlyArray<Mir.EndLoanOperation | Mir.DropOperation> =>
-  Object.freeze(
-    loans.flatMap((loan) => {
-      const ending: Mir.EndLoanOperation = Object.freeze({
-        _tag: 'EndLoan',
-        borrow: loan.borrow,
-        slice: loan.slice,
-        provenance: generated(outcome.provenance.span),
-      })
-      return outcome._tag === 'Trap' ? [ending] : loanEndOperations(fn, ending)
-    }),
-  )
+  loans.flatMap((loan) => {
+    const ending: Mir.EndLoanOperation = {
+      _tag: 'EndLoan',
+      borrow: loan.borrow,
+      slice: loan.slice,
+      provenance: generated(outcome.provenance.span),
+    }
+    return outcome._tag === 'Trap' ? [ending] : loanEndOperations(fn, ending)
+  })
 
 /** Adds loop-entry loans to failure exits after their authored success endings move past the loop. */
 export const withDelayedFailureLoanEndings = (
@@ -1019,114 +985,106 @@ export const withDelayedFailureLoanEndings = (
   operations: ReadonlyArray<Mir.Operation>,
   loans: ReadonlyArray<DelayedLoopLoan>,
 ): ReadonlyArray<Mir.Operation> =>
-  Object.freeze(
-    operations.map((operation): Mir.Operation => {
-      if (operation._tag === 'DiagnosticScope')
-        return Object.freeze({
-          ...operation,
-          body: Mir.mapExecutionOperations(operation.body, (operations) =>
-            withDelayedFailureLoanEndings(fn, operations, loans),
-          ),
-        })
-      if (operation._tag === 'Conditional')
-        return Object.freeze({
-          ...operation,
-          taken: Mir.mapExecutionOperations(operation.taken, (operations) =>
-            withDelayedFailureLoanEndings(fn, operations, loans),
-          ),
-          otherwise: Mir.mapExecutionOperations(operation.otherwise, (operations) =>
-            withDelayedFailureLoanEndings(fn, operations, loans),
-          ),
-        })
-      if (operation._tag === 'ShortCircuit')
-        return Object.freeze({
-          ...operation,
-          right: Mir.mapExecutionOperations(operation.right, (operations) =>
-            withDelayedFailureLoanEndings(fn, operations, loans),
-          ),
-        })
-      if (operation._tag === 'Match')
-        return Object.freeze({
-          ...operation,
-          arms: Object.freeze(
-            operation.arms.map((arm) =>
-              Object.freeze({
-                ...arm,
-                ...(arm.guard === undefined
-                  ? {}
-                  : {
-                      guard: Object.freeze({
-                        ...arm.guard,
-                        execution: Mir.mapExecutionOperations(arm.guard.execution, (operations) =>
-                          withDelayedFailureLoanEndings(fn, operations, loans),
-                        ),
-                      }),
-                    }),
-                selected: Object.freeze({
-                  ...arm.selected,
-                  execution: Mir.mapExecutionOperations(arm.selected.execution, (operations) =>
+  operations.map((operation): Mir.Operation => {
+    if (operation._tag === 'DiagnosticScope')
+      return {
+        ...operation,
+        body: Mir.mapExecutionOperations(operation.body, (operations) =>
+          withDelayedFailureLoanEndings(fn, operations, loans),
+        ),
+      }
+    if (operation._tag === 'Conditional')
+      return {
+        ...operation,
+        taken: Mir.mapExecutionOperations(operation.taken, (operations) =>
+          withDelayedFailureLoanEndings(fn, operations, loans),
+        ),
+        otherwise: Mir.mapExecutionOperations(operation.otherwise, (operations) =>
+          withDelayedFailureLoanEndings(fn, operations, loans),
+        ),
+      }
+    if (operation._tag === 'ShortCircuit')
+      return {
+        ...operation,
+        right: Mir.mapExecutionOperations(operation.right, (operations) =>
+          withDelayedFailureLoanEndings(fn, operations, loans),
+        ),
+      }
+    if (operation._tag === 'Match')
+      return {
+        ...operation,
+        arms: operation.arms.map((arm) => ({
+          ...arm,
+          ...(arm.guard === undefined
+            ? {}
+            : {
+                guard: {
+                  ...arm.guard,
+                  execution: Mir.mapExecutionOperations(arm.guard.execution, (operations) =>
                     withDelayedFailureLoanEndings(fn, operations, loans),
                   ),
-                }),
+                },
               }),
+          selected: {
+            ...arm.selected,
+            execution: Mir.mapExecutionOperations(arm.selected.execution, (operations) =>
+              withDelayedFailureLoanEndings(fn, operations, loans),
             ),
-          ),
-        })
-      if (
-        (operation._tag !== 'RunEffect' &&
-          operation._tag !== 'RunEffectValue' &&
-          operation._tag !== 'RunStaticEffect') ||
-        Type.failureMembers(operation.outcomeType.type).length === 0
-      )
-        return operation
-      const existing = new Set(
-        (operation.failureLoanEnds ?? []).map((ending) => borrowKey(ending.borrow)),
-      )
-      const appended = loans.flatMap((loan): ReadonlyArray<Mir.EndLoanOperation> =>
-        existing.has(loan.key)
-          ? []
-          : [
-              Object.freeze({
-                _tag: 'EndLoan' as const,
-                borrow: loan.borrow,
-                slice: loan.slice,
-                provenance: generated(operation.provenance.span),
-              }),
-            ],
-      )
-      const releases = [...(operation.releases ?? [])]
-      const retained = new Set(releases.map((release) => release.local.ordinal))
-      for (const loan of loans) {
-        const ending: Mir.EndLoanOperation = {
-          _tag: 'EndLoan',
-          borrow: loan.borrow,
-          slice: loan.slice,
-          provenance: generated(operation.provenance.span),
-        }
-        for (const release of loanEndOperations(fn, ending)) {
-          if (
-            release._tag !== 'Drop' ||
-            release.cleanup._tag === 'NoCleanup' ||
-            retained.has(release.local.ordinal)
-          )
-            continue
-          releases.push(release)
-          retained.add(release.local.ordinal)
-        }
+          },
+        })),
       }
-      return appended.length === 0 && releases.length === (operation.releases?.length ?? 0)
-        ? operation
-        : Object.freeze({
-            ...operation,
-            failureLoanEnds: dependencyOrderedLoanEndings(fn, [
-              ...(operation.failureLoanEnds ?? []),
-              ...appended,
-            ]),
-            releases: Object.freeze(
-              orderedCleanup(fn, releases).flatMap((operation) =>
-                operation._tag === 'Drop' ? [operation] : [],
-              ),
-            ),
-          })
-    }),
-  )
+    if (
+      (operation._tag !== 'RunEffect' &&
+        operation._tag !== 'RunEffectValue' &&
+        operation._tag !== 'RunStaticEffect') ||
+      Type.failureMembers(operation.outcomeType.type).length === 0
+    )
+      return operation
+    const existing = new Set(
+      (operation.failureLoanEnds ?? []).map((ending) => borrowKey(ending.borrow)),
+    )
+    const appended = loans.flatMap((loan): ReadonlyArray<Mir.EndLoanOperation> =>
+      existing.has(loan.key)
+        ? []
+        : [
+            {
+              _tag: 'EndLoan' as const,
+              borrow: loan.borrow,
+              slice: loan.slice,
+              provenance: generated(operation.provenance.span),
+            },
+          ],
+    )
+    const releases = [...(operation.releases ?? [])]
+    const retained = new Set(releases.map((release) => release.local.ordinal))
+    for (const loan of loans) {
+      const ending: Mir.EndLoanOperation = {
+        _tag: 'EndLoan',
+        borrow: loan.borrow,
+        slice: loan.slice,
+        provenance: generated(operation.provenance.span),
+      }
+      for (const release of loanEndOperations(fn, ending)) {
+        if (
+          release._tag !== 'Drop' ||
+          release.cleanup._tag === 'NoCleanup' ||
+          retained.has(release.local.ordinal)
+        )
+          continue
+        releases.push(release)
+        retained.add(release.local.ordinal)
+      }
+    }
+    return appended.length === 0 && releases.length === (operation.releases?.length ?? 0)
+      ? operation
+      : {
+          ...operation,
+          failureLoanEnds: dependencyOrderedLoanEndings(fn, [
+            ...(operation.failureLoanEnds ?? []),
+            ...appended,
+          ]),
+          releases: orderedCleanup(fn, releases).flatMap((operation) =>
+            operation._tag === 'Drop' ? [operation] : [],
+          ),
+        }
+  })

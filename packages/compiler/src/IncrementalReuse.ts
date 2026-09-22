@@ -51,9 +51,9 @@ export const revisions = (
   return new Map(
     closure.modules.map((module): readonly [string, SemanticInvalidation.LocalRevision] => {
       const prior = previousAuthored.get(module.name)
-      if (prior === undefined) return [module.name, Object.freeze({ _tag: 'Fresh' })]
-      if (prior === module.authored) return [module.name, Object.freeze({ _tag: 'Reused' })]
-      return [module.name, Object.freeze({ _tag: 'Changed' })]
+      if (prior === undefined) return [module.name, { _tag: 'Fresh' }]
+      if (prior === module.authored) return [module.name, { _tag: 'Reused' }]
+      return [module.name, { _tag: 'Changed' }]
     }),
   )
 }
@@ -67,22 +67,22 @@ export const invalidate = (options: {
   readonly previous?: ProjectReuseBasis
 }): SemanticInvalidation.SemanticInvalidation =>
   SemanticInvalidation.make({
-    current: Object.freeze({
+    current: {
       closure: options.closure,
       surfaces: options.surfaces,
       opaqueRealizations: options.opaqueRealizations,
       environment: options.environment ?? SemanticInvalidation.environment,
-    }),
+    },
     revisions: revisions(options.closure, options.previous),
     ...(options.previous === undefined
       ? {}
       : {
-          previous: Object.freeze({
+          previous: {
             closure: options.previous.closure,
             surfaces: options.previous.surfaces,
             opaqueRealizations: options.previous.opaqueRealizations,
             environment: options.previous.environment,
-          }),
+          },
         }),
   })
 

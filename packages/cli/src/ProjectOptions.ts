@@ -85,16 +85,14 @@ export const resolve = (input: Input): Result.Result<ProjectOptions, ProjectOpti
   }
   let optimization = input.optimization
   if (input.release) optimization = 'release'
-  return Result.succeed(
-    Object.freeze({
-      ...(input.verifyMir === undefined ? {} : { verifyMir: input.verifyMir }),
-      ...(input.manifestPath === undefined ? {} : { manifestPath: input.manifestPath }),
-      ...(input.targets === undefined || input.targets.length === 0
-        ? {}
-        : { targets: input.targets }),
-      ...(optimization === undefined ? {} : { optimization }),
-      ...(input.profile === undefined ? {} : { profile: input.profile }),
-      ...(input.profileInput === undefined ? {} : { profileInput: input.profileInput }),
-    }),
-  )
+  return Result.succeed({
+    ...(input.verifyMir === undefined ? {} : { verifyMir: input.verifyMir }),
+    ...(input.manifestPath === undefined ? {} : { manifestPath: input.manifestPath }),
+    ...(input.targets === undefined || input.targets.length === 0
+      ? {}
+      : { targets: input.targets }),
+    ...(optimization === undefined ? {} : { optimization }),
+    ...(input.profile === undefined ? {} : { profile: input.profile }),
+    ...(input.profileInput === undefined ? {} : { profileInput: input.profileInput }),
+  })
 }

@@ -139,9 +139,7 @@ const bindGenericArgument = (
     return true
   }
   if (genericArgumentKey(existing) === genericArgumentKey(actual)) return true
-  context.conflicts?.push(
-    Object.freeze({ parameter: parameter_, previous: existing, conflicting: actual }),
-  )
+  context.conflicts?.push({ parameter: parameter_, previous: existing, conflicting: actual })
   return false
 }
 
@@ -236,7 +234,7 @@ const inferFailureRow = (
       ))
   )
     return false
-  const memberContext = Object.freeze({ ...context, allowOpenGenericArguments: false })
+  const memberContext = { ...context, allowOpenGenericArguments: false }
   const matched = inferRowMembers(
     failureMembers(pattern),
     failureMembers(actual),
@@ -312,13 +310,13 @@ const inferRequirementRowArgument = (
       for (const operand of fixed) {
         const operandKey = RowAlgebra.key(requirementRowPolicy(), {
           expression: operand,
-          memberWellFormed: Object.freeze([]),
+          memberWellFormed: [],
         })
         const index = remaining.findIndex(
           (candidate) =>
             RowAlgebra.key(requirementRowPolicy(), {
               expression: candidate,
-              memberWellFormed: Object.freeze([]),
+              memberWellFormed: [],
             }) === operandKey,
         )
         if (index < 0) {
@@ -333,7 +331,7 @@ const inferRequirementRowArgument = (
           (row, expression) =>
             RowAlgebra.union(requirementRowPolicy(), row, {
               expression,
-              memberWellFormed: Object.freeze([]),
+              memberWellFormed: [],
             }),
           RowAlgebra.concrete(requirementRowPolicy(), []),
         )
@@ -358,7 +356,7 @@ const inferRequirementRowArgument = (
       ))
   )
     return false
-  const memberContext = Object.freeze({ ...context, allowOpenGenericArguments: false })
+  const memberContext = { ...context, allowOpenGenericArguments: false }
   const matched = inferRowMembers(
     requirementMembers(pattern),
     requirementMembers(actual),
@@ -521,52 +519,47 @@ const rowInferenceFailure = (pattern: Type, actual: Type): RowInferenceFailure |
     return rowInferenceFailure(pattern.result, actual.result)
   }
   if (!isEffect(pattern) || !isEffect(actual)) return undefined
-  if (requirementRowParameters(actual).length !== 0)
-    return Object.freeze({ _tag: 'NonFiniteRequirementRow' })
+  if (requirementRowParameters(actual).length !== 0) return { _tag: 'NonFiniteRequirementRow' }
   for (const failure of [...failureMembers(pattern), ...failureMemberParameters(pattern)]) {
     if (
       ![...failureMembers(actual), ...failureMemberParameters(actual)].some((supplied) =>
         infer(failure, supplied, new Map()),
       )
     )
-      return Object.freeze({ _tag: 'AbsentFailureMember', member: encode(failure) })
+      return { _tag: 'AbsentFailureMember', member: encode(failure) }
   }
   if (requirementRowParameters(pattern).length > 1)
-    return Object.freeze({
+    return {
       _tag: 'AmbiguousRequirementRemainder',
-      parameters: Object.freeze(
-        requirementRowParameters(pattern).map((parameter_) => parameter_.name),
-      ),
-    })
+      parameters: requirementRowParameters(pattern).map((parameter_) => parameter_.name),
+    }
   for (const requirement of requirementMembers(pattern)) {
     const capabilityMatches = requirementMembers(actual).filter((supplied) =>
       infer(requirement.capability, supplied.capability, new Map()),
     )
     if (capabilityMatches.length === 0)
-      return Object.freeze({
+      return {
         _tag: 'AbsentRequirementMember',
         capability: encode(requirement.capability),
         role: requirement.role,
         access: requirement.access,
-      })
+      }
     const roleMatches = capabilityMatches.filter((supplied) => supplied.role === requirement.role)
     if (roleMatches.length === 0)
-      return Object.freeze({
+      return {
         _tag: 'IncompatibleRequirementRole',
         capability: encode(requirement.capability),
         expected: requirement.role,
-        actual: Object.freeze(
-          [...new Set(capabilityMatches.map((supplied) => supplied.role))].sort(),
-        ),
-      })
+        actual: [...new Set(capabilityMatches.map((supplied) => supplied.role))].sort(),
+      }
     if (!roleMatches.some((supplied) => requirementSatisfies(requirement, supplied)))
-      return Object.freeze({
+      return {
         _tag: 'IncompatibleRequirementAccess',
         capability: encode(requirement.capability),
         role: requirement.role,
         expected: requirement.access,
-        actual: Object.freeze([...new Set(roleMatches.map((supplied) => supplied.access))].sort()),
-      })
+        actual: [...new Set(roleMatches.map((supplied) => supplied.access))].sort(),
+      }
   }
   return undefined
 }
@@ -1090,13 +1083,7 @@ export const infer = (
   actual: Type,
   inferred: Map<string, GenericArgument>,
   lifetimes?: LifetimeInference,
-): boolean =>
-  inferType(
-    pattern,
-    actual,
-    inferred,
-    Object.freeze({ allowOpenGenericArguments: false, lifetimes }),
-  )
+): boolean => inferType(pattern, actual, inferred, { allowOpenGenericArguments: false, lifetimes })
 
 /** Infers through generic arguments that remain open over an enclosing declaration. */
 export const inferOpenGenericArguments = (
@@ -1106,17 +1093,12 @@ export const inferOpenGenericArguments = (
   inferableGenericArguments?: ReadonlySet<string>,
 ): OpenGenericInference => {
   const conflicts: Array<GenericArgumentConflict> = []
-  const matches = inferType(
-    pattern,
-    actual,
-    inferred,
-    Object.freeze({
-      allowOpenGenericArguments: true,
-      ...(inferableGenericArguments === undefined ? {} : { inferableGenericArguments }),
-      conflicts,
-    }),
-  )
-  return Object.freeze({ matches, conflicts: Object.freeze(conflicts) })
+  const matches = inferType(pattern, actual, inferred, {
+    allowOpenGenericArguments: true,
+    ...(inferableGenericArguments === undefined ? {} : { inferableGenericArguments }),
+    conflicts,
+  })
+  return { matches, conflicts: conflicts }
 }
 
 /**
@@ -1241,11 +1223,11 @@ export const selectedSubstitution = (
   const substitution = bindPrefix(declared, arguments_, collect)
   return substitution === undefined
     ? undefined
-    : Object.freeze({
+    : {
         substitution,
         compatibility: TypeCompatibility.context({
           assumptions: Lifetime.assumptions(bounds),
           typeBounds,
         }),
-      })
+      }
 }

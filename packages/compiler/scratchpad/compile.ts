@@ -11,15 +11,22 @@ import * as OtlpSerialization from 'effect/unstable/observability/OtlpSerializat
 import * as OtlpTracer from 'effect/unstable/observability/OtlpTracer'
 import * as Driver from '../src/Driver.js'
 import * as FileSourceResolver from '../src/FileSourceResolver.js'
+import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as NodeHeapObservation from '../src/NodeHeapObservation.js'
+import * as SemanticPersistence from '../src/SemanticPersistence.js'
+import * as Storage from '../src/Storage.js'
+import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 import * as ChromeTrace from './ChromeTrace.js'
 
 const program = Effect.gen(function* () {
+  // Set the default to true here, or use SILK_SCRATCHPAD_CACHE=true for a cached run.
+  // False bypasses semantic persistence and backend artifact caches without deleting them.
+  const cache = yield* Config.boolean('SILK_SCRATCHPAD_CACHE').pipe(Config.withDefault(false))
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const directory = yield* path.fromFileUrl(new URL('.', import.meta.url))
-  // const sourceRoot = path.join(directory, 'hello-world')
-  const sourceRoot = path.join(directory, '../../../compiler/src')
+  const sourceRoot = path.join(directory, 'hello-world')
+  // const sourceRoot = path.join(directory, '../../../compiler/src')
 
   const destination = path.join(directory, 'dist', 'hello-world')
 
@@ -30,6 +37,22 @@ const program = Effect.gen(function* () {
   const defaultArchiver = (yield* fs.exists(siblingArchiver)) ? siblingArchiver : 'llvm-ar'
   const llvmAr = yield* Config.string('SILK_LLVM_AR').pipe(Config.withDefault(defaultArchiver))
   yield* fs.makeDirectory(path.dirname(destination), { recursive: true })
+  const cacheDirectory = yield* Config.string('SILK_SCRATCHPAD_CACHE_DIR').pipe(
+    Config.withDefault(path.join(directory, 'dist', 'cache')),
+  )
+  // One store backs both caches here; each is its own tag, so they can be split by providing
+  // different layers. Off provides neither, and the compiler then does no cache I/O.
+  const storage = Layer.effect(Storage.Storage, Storage.fileSystemService(cacheDirectory))
+  const caches = cache
+    ? Layer.mergeAll(
+        SemanticPersistence.layer({
+          compilerIdentity: ToolchainIntegrity.installed().digest,
+          maximumRecordBytes: 64 * 1024 * 1024,
+        }),
+        Layer.effect(NativeToolchain.ArtifactStorage, Effect.service(Storage.Storage)),
+      ).pipe(Layer.provide(storage))
+    : Layer.empty
+  yield* Console.log(cache ? `Cache: on (${cacheDirectory})` : 'Cache: off')
 
   // Set a breakpoint here, then step into Driver.compile or any compiler phase in src/.
   const outcome = yield* Driver.compile({
@@ -39,9 +62,13 @@ const program = Effect.gen(function* () {
     toolchain: { _tag: 'Toolchain', clang, llvmAr },
     optimization: 'debug',
     destination,
-    cache: false,
+    cache,
     saveTemps: true,
-  }).pipe(Effect.provide(FileSourceResolver.layer(FileSourceResolver.make(sourceRoot))))
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(FileSourceResolver.layer(FileSourceResolver.make(sourceRoot)), caches),
+    ),
+  )
 
   // Inspect outcome.report here for phase timings; rejected builds retain diagnostics/sources.
   if (outcome._tag !== 'Compiled') return yield* Effect.fail(outcome)
@@ -69,7 +96,7 @@ NodeRuntime.runMain(
     const directory = yield* path.fromFileUrl(new URL('.', import.meta.url))
     return yield* ChromeTrace.record(
       program.pipe(Effect.withSpan('Scratchpad.compile')),
-      path.join(directory, 'dist', 'comp.chrome-trace.json'),
+      path.join(directory, 'dist', 'warm.comp.chrome-trace.json'),
     )
   }).pipe(
     Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHeapObservation.layer, TracingLive)),

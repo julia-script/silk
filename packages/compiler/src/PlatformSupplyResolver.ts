@@ -25,7 +25,7 @@ export const make = (
     const value = environment[name]
     if (value !== undefined) values[name] = value
   }
-  return Object.freeze({ environment: Object.freeze(values) })
+  return { environment: values }
 }
 
 export const digest = (bytes: Uint8Array | string): string =>
@@ -110,14 +110,14 @@ export const file = Effect.fn('PlatformSupplyResolver.file')(function* (
 ): Effect.fn.Return<PlatformSupply.File, PlatformSupply.SupplyError, FileSystem.FileSystem> {
   const canonical = yield* physicalPath(path, root)
   const bytes = yield* read(canonical, origin)
-  return Object.freeze({
+  return {
     path: canonical,
     selectedPath: resolve(path),
     root,
     role,
     origin,
     digest: digest(bytes),
-  })
+  }
 })
 
 /** Rejects mutation instead of obtaining a different supply implicitly. */
@@ -228,7 +228,7 @@ export const query = Effect.fn('PlatformSupplyResolver.query')(function* (
         }),
     ),
   )
-  const value = Object.freeze({ command, arguments: Object.freeze([...arguments_]), ...result })
+  const value = { command, arguments: [...arguments_], ...result }
   if (result.status !== 0)
     return yield* new PlatformSupply.SupplyError({
       operation: 'PlatformSupplyResolver.query',
@@ -260,7 +260,7 @@ const tool = Effect.fnUntraced(function* (
     'tool version',
   )
   queries.push(version)
-  return Object.freeze({ ...identity, command: path, version: version.stdout + version.stderr })
+  return { ...identity, command: path, version: version.stdout + version.stderr }
 })
 
 export const within = (root: string, path: string): boolean => {
@@ -313,11 +313,11 @@ export const resolveSupply = Effect.fn('PlatformSupplyResolver.resolveSupply')(f
   const explicit = selected.kind === 'explicit' ? selected : undefined
   const consulted: Record<string, string> = {}
   if (self.environment['PATH'] !== undefined) consulted['PATH'] = self.environment['PATH']
-  const environment = Object.freeze({
+  const environment = {
     PATH: self.environment['PATH'] ?? '',
     LC_ALL: 'C',
     LANG: 'C',
-  })
+  }
   const queries: Array<PlatformSupply.Query> = []
   const files: Array<PlatformSupply.File> = []
   const compiler = yield* tool(self, options.clang, 'compiler', environment, queries)
@@ -476,18 +476,14 @@ export const resolveSupply = Effect.fn('PlatformSupplyResolver.resolveSupply')(f
         installation.origin,
         `Declare support for ${profile.target.id}.`,
       )
-    installations.push(
-      Object.freeze({
-        ...installation,
-        root: yield* fs
-          .realPath(installation.root)
-          .pipe(
-            Effect.mapError((cause) =>
-              storageFailure(installation.root, installation.origin, cause),
-            ),
-          ),
-      }),
-    )
+    installations.push({
+      ...installation,
+      root: yield* fs
+        .realPath(installation.root)
+        .pipe(
+          Effect.mapError((cause) => storageFailure(installation.root, installation.origin, cause)),
+        ),
+    })
   }
   // Compiler-owned builtin support is selected by the frozen compiler, independently of libc.
   const resource = yield* query(
@@ -497,13 +493,11 @@ export const resolveSupply = Effect.fn('PlatformSupplyResolver.resolveSupply')(f
     'compiler resource directory',
   )
   queries.push(resource)
-  installations.push(
-    Object.freeze({
-      root: resolve(resource.stdout.trim()),
-      target: profile.target.id,
-      origin: 'selected compiler support',
-    }),
-  )
+  installations.push({
+    root: resolve(resource.stdout.trim()),
+    target: profile.target.id,
+    origin: 'selected compiler support',
+  })
   let linkerPath = explicit?.linker
   if (linkerPath === undefined) {
     const found = yield* query(
@@ -523,7 +517,7 @@ export const resolveSupply = Effect.fn('PlatformSupplyResolver.resolveSupply')(f
     queries,
     profile.target.operatingSystem === 'darwin',
   )
-  return Object.freeze({
+  return {
     _tag: 'PlatformSupply',
     target: profile.target,
     libc: profile.libc,
@@ -531,22 +525,20 @@ export const resolveSupply = Effect.fn('PlatformSupplyResolver.resolveSupply')(f
     selection,
     root: canonicalRoot,
     version,
-    installations: Object.freeze(installations.map((item) => Object.freeze(item))),
+    installations: installations.map((item) => item),
     compiler,
     linker,
     archiver,
     environment,
-    consultedEnvironment: Object.freeze(consulted),
-    queries: Object.freeze(queries),
-    files: Object.freeze(files),
-    libraryRoots: Object.freeze(libraryRoots),
-    frameworkRoots: Object.freeze(frameworkRoots),
-    compilationArguments: Object.freeze(
-      base.map((argument) => {
-        if (argument === root) return canonicalRoot
-        if (argument === `--sysroot=${root}`) return `--sysroot=${canonicalRoot}`
-        return argument
-      }),
-    ),
-  })
+    consultedEnvironment: consulted,
+    queries: queries,
+    files: files,
+    libraryRoots: libraryRoots,
+    frameworkRoots: frameworkRoots,
+    compilationArguments: base.map((argument) => {
+      if (argument === root) return canonicalRoot
+      if (argument === `--sysroot=${root}`) return `--sysroot=${canonicalRoot}`
+      return argument
+    }),
+  }
 })

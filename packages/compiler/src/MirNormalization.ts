@@ -37,7 +37,7 @@ const constructorShape = (fn: Mir.MirFunction | undefined): ConstructorShape | u
   if (fn.regions.length === 1) {
     return region.outcome._tag === 'Return' &&
       region.outcome.value.ordinal === construction.destination.ordinal
-      ? Object.freeze({ fn, construction })
+      ? { fn, construction }
       : undefined
   }
   const cleanup = fn.regions.at(1)
@@ -55,7 +55,7 @@ const constructorShape = (fn: Mir.MirFunction | undefined): ConstructorShape | u
     )
   )
     return undefined
-  return Object.freeze({ fn, construction })
+  return { fn, construction }
 }
 
 /** The region guard a fold proved: one region, or one trailing cleanup region of trivial drops. */
@@ -125,7 +125,7 @@ const parametersFor = (
     ordered[ordinal] = argument
   }
   return ordered.every((local) => local !== undefined)
-    ? Object.freeze(ordered.filter((local): local is Mir.LocalId => local !== undefined))
+    ? ordered.filter((local): local is Mir.LocalId => local !== undefined)
     : undefined
 }
 
@@ -139,25 +139,23 @@ const foldConstructor = (
   if (parameters === undefined) return undefined
   const captures = shape.construction.captures.map((capture) => {
     const source = parameters.at(capture.source.ordinal)
-    return source === undefined ? undefined : Object.freeze({ ...capture, source })
+    return source === undefined ? undefined : { ...capture, source }
   })
   if (captures.some((capture) => capture === undefined)) return undefined
-  return Object.freeze({
+  return {
     _tag: 'MakeEffect',
     destination: operation.destination,
     runner: shape.construction.runner,
     runnerTypeArguments: shape.construction.runnerTypeArguments,
-    captures: Object.freeze(
-      captures.filter(
-        (
-          capture,
-        ): capture is Extract<Mir.Operation, { readonly _tag: 'MakeEffect' }>['captures'][number] =>
-          capture !== undefined,
-      ),
+    captures: captures.filter(
+      (
+        capture,
+      ): capture is Extract<Mir.Operation, { readonly _tag: 'MakeEffect' }>['captures'][number] =>
+        capture !== undefined,
     ),
     type: shape.construction.type,
     provenance: operation.provenance,
-  })
+  }
 }
 
 interface LocalUse {
@@ -231,14 +229,13 @@ const indexLocalUses = (fn: Mir.MirFunction): LocalUseIndex => {
           ordinals = new Set([operation.left.ordinal])
           if (operation.right.result !== undefined) ordinals.add(operation.right.result.ordinal)
         } else ordinals = localOrdinals(operation)
-        record(ordinals, Object.freeze({ region, operation }))
+        record(ordinals, { region, operation })
       }
-      record(localOrdinals(region.outcome), Object.freeze({ region }))
+      record(localOrdinals(region.outcome), { region })
     } else if (region._tag === 'CleanupRegion') {
-      record(localOrdinals([region.releases, region.outcome]), Object.freeze({ region }))
-    } else record(localOrdinals(region), Object.freeze({ region }))
+      record(localOrdinals([region.releases, region.outcome]), { region })
+    } else record(localOrdinals(region), { region })
   }
-  for (const uses of index.values()) Object.freeze(uses)
   return index
 }
 
@@ -246,24 +243,21 @@ const usesOf = (
   index: LocalUseIndex,
   definition: Extract<Mir.Operation, { readonly _tag: 'MakeEffect' }>,
 ): ReadonlyArray<LocalUse> =>
-  Object.freeze(
-    (index.get(definition.destination.ordinal) ?? []).filter((use) => use.operation !== definition),
-  )
+  (index.get(definition.destination.ordinal) ?? []).filter((use) => use.operation !== definition)
 
 const rejection = (
   fn: Mir.MirFunction,
   region: Mir.RegionId,
   construction: Extract<Mir.Operation, { readonly _tag: 'MakeEffect' }>,
   reason: Mir.NormalizationRejection,
-): Mir.NormalizationVerdict =>
-  Object.freeze({
-    _tag: 'Rejected',
-    reason,
-    function: fn.id,
-    region,
-    local: construction.destination,
-    provenance: construction.provenance,
-  })
+): Mir.NormalizationVerdict => ({
+  _tag: 'Rejected',
+  reason,
+  function: fn.id,
+  region,
+  local: construction.destination,
+  provenance: construction.provenance,
+})
 
 const suspensionReason = (
   classification: ProvisionalMir.Classification,
@@ -291,49 +285,43 @@ const mapRegions = (
   regions: ReadonlyArray<Mir.Region>,
   transform: (region: Mir.Region) => Mir.Region,
 ): ReadonlyArray<Mir.Region> => {
-  const execution = (value: Mir.Execution): Mir.Execution =>
-    Object.freeze({ ...value, regions: mapRegions(value.regions, transform) })
+  const execution = (value: Mir.Execution): Mir.Execution => ({
+    ...value,
+    regions: mapRegions(value.regions, transform),
+  })
   const operation = (value: Mir.Operation): Mir.Operation => {
     if (value._tag === 'Match')
-      return Object.freeze({
+      return {
         ...value,
-        arms: Object.freeze(
-          value.arms.map((arm) =>
-            Object.freeze({
-              ...arm,
-              ...(arm.guard === undefined
-                ? {}
-                : { guard: Object.freeze({ execution: execution(arm.guard.execution) }) }),
-              selected: Object.freeze({
-                ...arm.selected,
-                execution: execution(arm.selected.execution),
-              }),
-            }),
-          ),
-        ),
-      })
-    if (value._tag === 'DiagnosticScope')
-      return Object.freeze({ ...value, body: execution(value.body) })
+        arms: value.arms.map((arm) => ({
+          ...arm,
+          ...(arm.guard === undefined
+            ? {}
+            : { guard: { execution: execution(arm.guard.execution) } }),
+          selected: {
+            ...arm.selected,
+            execution: execution(arm.selected.execution),
+          },
+        })),
+      }
+    if (value._tag === 'DiagnosticScope') return { ...value, body: execution(value.body) }
     if (value._tag === 'Conditional')
-      return Object.freeze({
+      return {
         ...value,
         taken: execution(value.taken),
         otherwise: execution(value.otherwise),
-      })
-    if (value._tag === 'ShortCircuit')
-      return Object.freeze({ ...value, right: execution(value.right) })
+      }
+    if (value._tag === 'ShortCircuit') return { ...value, right: execution(value.right) }
     return value
   }
-  return Object.freeze(
-    regions.map((region) =>
-      transform(
-        region._tag === 'OperationRegion'
-          ? Object.freeze({
-              ...region,
-              operations: Object.freeze(region.operations.map(operation)),
-            })
-          : region,
-      ),
+  return regions.map((region) =>
+    transform(
+      region._tag === 'OperationRegion'
+        ? {
+            ...region,
+            operations: region.operations.map(operation),
+          }
+        : region,
     ),
   )
 }
@@ -369,20 +357,18 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
             (operation._tag === 'Call' || operation._tag === 'ApplyCallable') &&
             operation.type._tag === 'EffectValue'
           ) {
-            verdicts.push(
-              Object.freeze({
-                _tag: 'Rejected',
-                reason:
-                  targetSuspension ??
-                  (hasConcreteTarget(functionIndex, operation)
-                    ? 'ComplexConstructor'
-                    : 'DynamicTarget'),
-                function: fn.id,
-                region: region.id,
-                local: operation.destination,
-                provenance: operation.provenance,
-              }),
-            )
+            verdicts.push({
+              _tag: 'Rejected',
+              reason:
+                targetSuspension ??
+                (hasConcreteTarget(functionIndex, operation)
+                  ? 'ComplexConstructor'
+                  : 'DynamicTarget'),
+              function: fn.id,
+              region: region.id,
+              local: operation.destination,
+              provenance: operation.provenance,
+            })
           }
           return operation
         }
@@ -390,42 +376,34 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
         changed = true
         const guard = target === undefined ? 'SingleRegion' : constructorGuardOf(target)
         constructorGuards.set(folded.destination.ordinal, guard)
-        verdicts.push(
-          Object.freeze({
-            _tag: 'Normalized',
-            kind: 'FoldedConstructor',
-            function: fn.id,
-            region: region.id,
-            local: folded.destination,
-            guards: Object.freeze(['DirectTarget', guard, 'Synchronous'] as const),
-            provenance: folded.provenance,
-          }),
-        )
+        verdicts.push({
+          _tag: 'Normalized',
+          kind: 'FoldedConstructor',
+          function: fn.id,
+          region: region.id,
+          local: folded.destination,
+          guards: ['DirectTarget', guard, 'Synchronous'] as const,
+          provenance: folded.provenance,
+        })
         return folded
       })
-      return functionChanged
-        ? Object.freeze({ ...region, operations: Object.freeze(operations) })
-        : region
+      return functionChanged ? { ...region, operations: operations } : region
     })
-    const folded = functionChanged
-      ? Object.freeze({ ...fn, regions: Object.freeze(foldedRegions) })
-      : fn
+    const folded = functionChanged ? { ...fn, regions: foldedRegions } : fn
     for (const region of Mir.regionsTree(folded.regions)) {
       if (region._tag !== 'OperationRegion') continue
       for (const operation of region.operations) {
         if (operation._tag !== 'RunEffect' && operation._tag !== 'CatchEffect') continue
         const reason = suspensionReason(operationClassification(provisional, folded, operation))
         if (reason === undefined) continue
-        verdicts.push(
-          Object.freeze({
-            _tag: 'Rejected',
-            reason,
-            function: folded.id,
-            region: region.id,
-            local: operation.destination,
-            provenance: operation.provenance,
-          }),
-        )
+        verdicts.push({
+          _tag: 'Rejected',
+          reason,
+          function: folded.id,
+          region: region.id,
+          local: operation.destination,
+          provenance: operation.provenance,
+        })
       }
     }
     let directChanged = false
@@ -470,74 +448,61 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
         }
         if (run?._tag !== 'RunEffectValue') continue
         removed.add(construction)
-        replacements.set(
-          run,
-          Object.freeze({
-            _tag: 'RunStaticEffect',
-            destination: run.destination,
-            outcome: run.outcome,
-            runner: run.runner,
-            runnerTypeArguments: run.runnerTypeArguments,
-            ...(run.runnerStaticArguments === undefined
-              ? {}
-              : { runnerStaticArguments: run.runnerStaticArguments }),
-            captures: Object.freeze(
-              construction.captures.map((capture) =>
-                Object.freeze({
-                  source: capture.source,
-                  access: capture.access as 'Copy' | 'Shared',
-                }),
-              ),
-            ),
-            arguments: run.arguments,
-            outcomeType: run.outcomeType,
-            ...(run.propagationType === undefined ? {} : { propagationType: run.propagationType }),
-            tagMappings: run.tagMappings,
-            propagationLaneCount: run.propagationLaneCount,
-            ...(run.failureLoanEnds === undefined ? {} : { failureLoanEnds: run.failureLoanEnds }),
-            ...(run.releases === undefined ? {} : { releases: run.releases }),
-            type: run.type,
-            provenance: run.provenance,
-          }),
-        )
-        verdicts.push(
-          Object.freeze({
-            _tag: 'Normalized',
-            kind: 'DirectStaticRun',
-            function: folded.id,
-            region: region.id,
-            local: run.destination,
-            guards: Object.freeze([
-              'DirectTarget',
-              constructorGuards.get(construction.destination.ordinal) ?? 'SingleRegion',
-              'SingleUse',
-              'Synchronous',
-              'CopyOrShared',
-            ] as const),
-            provenance: run.provenance,
-          }),
-        )
+        replacements.set(run, {
+          _tag: 'RunStaticEffect',
+          destination: run.destination,
+          outcome: run.outcome,
+          runner: run.runner,
+          runnerTypeArguments: run.runnerTypeArguments,
+          ...(run.runnerStaticArguments === undefined
+            ? {}
+            : { runnerStaticArguments: run.runnerStaticArguments }),
+          captures: construction.captures.map((capture) => ({
+            source: capture.source,
+            access: capture.access as 'Copy' | 'Shared',
+          })),
+          arguments: run.arguments,
+          outcomeType: run.outcomeType,
+          ...(run.propagationType === undefined ? {} : { propagationType: run.propagationType }),
+          tagMappings: run.tagMappings,
+          propagationLaneCount: run.propagationLaneCount,
+          ...(run.failureLoanEnds === undefined ? {} : { failureLoanEnds: run.failureLoanEnds }),
+          ...(run.releases === undefined ? {} : { releases: run.releases }),
+          type: run.type,
+          provenance: run.provenance,
+        })
+        verdicts.push({
+          _tag: 'Normalized',
+          kind: 'DirectStaticRun',
+          function: folded.id,
+          region: region.id,
+          local: run.destination,
+          guards: [
+            'DirectTarget',
+            constructorGuards.get(construction.destination.ordinal) ?? 'SingleRegion',
+            'SingleUse',
+            'Synchronous',
+            'CopyOrShared',
+          ] as const,
+          provenance: run.provenance,
+        })
         directChanged = true
         changed = true
       }
       if (removed.size === 0 && replacements.size === 0) return region
-      return Object.freeze({
+      return {
         ...region,
-        operations: Object.freeze(
-          region.operations.flatMap((operation) => {
-            if (removed.has(operation)) return []
-            return [replacements.get(operation) ?? operation]
-          }),
-        ),
-      })
+        operations: region.operations.flatMap((operation) => {
+          if (removed.has(operation)) return []
+          return [replacements.get(operation) ?? operation]
+        }),
+      }
     })
-    return directChanged
-      ? Object.freeze({ ...folded, regions: Object.freeze(directRegions) })
-      : folded
+    return directChanged ? { ...folded, regions: directRegions } : folded
   })
-  return Object.freeze({
+  return {
     ...program,
-    functions: changed ? Object.freeze(functions) : program.functions,
-    normalization: Object.freeze(verdicts),
-  })
+    functions: changed ? functions : program.functions,
+    normalization: verdicts,
+  }
 }

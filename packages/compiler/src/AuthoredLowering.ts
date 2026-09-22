@@ -3362,7 +3362,7 @@ export const lower = Effect.fn('AuthoredLowering.lower')(function* (
     draft.entries,
     [...presentationDiagnostics(draft, owner), ...draft.literalDiagnostics],
   )
-  return Object.freeze({ _tag: 'AuthoredLowering', module, presentation })
+  return { _tag: 'AuthoredLowering', module, presentation }
 })
 
 // ---------------------------------------------------------------------------------------------

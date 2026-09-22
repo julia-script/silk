@@ -27,6 +27,7 @@ import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativePayload from './NativePayload.js'
 import * as NativePlace from './NativePlace.js'
+import * as Tir from './Tir.js'
 import * as ValueStorage from './ValueStorage.js'
 import * as ValueType from './ValueType.js'
 import * as NativeType from './NativeType.js'
@@ -64,7 +65,7 @@ export const failurePayload = Effect.fnUntraced(function* (
   const targetShape = Layout.callingShape(context.program.layout, targetType)
   if (targetShape?.tree._tag !== 'OutcomeShape')
     throw new RangeError('LLVM failure propagation lost its target calling shape')
-  if (targetShape.lanes.length === 1) return Object.freeze([])
+  if (targetShape.lanes.length === 1) return []
   // A repacking plan depends on the member mapping, not the destination lane. Parser
   // outcomes have wide success payloads, so rebuilding this plan inside the lane loop
   // repeatedly traversed the same layouts during cold native compilation.
@@ -137,7 +138,7 @@ export const failurePayload = Effect.fnUntraced(function* (
     }
     payload.push(selected)
   }
-  return Object.freeze(payload)
+  return payload
 })
 
 /** Field paths to reclaim contexts, or undefined when guarded structural cleanup is required. */
@@ -186,6 +187,48 @@ const captureType = (
     if (environment === undefined)
       throw new RangeError('Capture cleanup lost its exact Effect environment')
     return { _tag: 'EffectValue', type: environment.effect, site: environment.site, environment }
+  }
+  return undefined
+}
+
+/**
+ * The concrete place type a structural projection must borrow for one nested cleanup obligation.
+ *
+ * An `EffectCleanup` or `CallableCleanup` carries the semantic contract (`once Effect<'static; i32>`)
+ * as its `type`, and no layout entry is ever planned for that contract: storage is planned for the
+ * specialized environment the cleanup names through its `site` or environment identity. Projecting
+ * such a field by its contract alone therefore looks for a place that cannot exist. Resolving the
+ * environment here keeps every structural projection — struct fields, array elements, union members
+ * — borrowing the same exact type the direct executable cleanup paths already borrow.
+ */
+const concreteCleanupType = (
+  layout: Layout.Plan,
+  plan: CleanupPlan.CleanupPlan,
+): Mir.Type | undefined => {
+  if (plan._tag === 'EffectCleanup') {
+    const environment = layout.effectEnvironments.find(
+      (
+        candidate,
+      ): candidate is Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
+        candidate._tag === 'EffectEnvironment' && Tir.sameExecutableSite(candidate.site, plan.site),
+    )
+    if (environment === undefined)
+      throw new RangeError('Stored Effect cleanup lost its exact environment')
+    return { _tag: 'EffectValue', type: environment.effect, site: environment.site, environment }
+  }
+  if (plan._tag === 'CallableCleanup') {
+    if (plan.environment._tag !== 'CallableEnvironmentIdentity') return undefined
+    const environment = Layout.callableEnvironmentByIdentity(layout, plan.environment.identity)
+    if (environment === undefined)
+      throw new RangeError('Stored callable cleanup lost its exact environment')
+    return {
+      _tag: 'CallableValue',
+      type: { ...environment.callable.type, mode: environment.callable.mode },
+      target: environment.callable.target,
+      typeArguments: environment.callable.typeArguments,
+      site: environment.callable.site,
+      environment,
+    }
   }
   return undefined
 }
@@ -741,6 +784,8 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
             storedFieldOffset(program.layout, plan.type, field.field),
             fieldSlots,
             `${tag}_f${fieldOrdinal}_place`,
+            undefined,
+            concreteCleanupType(program.layout, field.cleanup),
           ),
           `${tag}_f${fieldOrdinal}`,
           undefined,

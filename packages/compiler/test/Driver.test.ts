@@ -24,6 +24,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Storage from '../src/Storage.js'
+import * as SemanticPersistence from '../src/SemanticPersistence.js'
 import * as PhaseReport from '../src/PhaseReport.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -113,6 +114,49 @@ const expectedPhases = [
   'runtime',
   'link',
 ]
+
+it.effect(
+  'forwards semantic persistence and bypasses it when compilation caching is disabled',
+  () =>
+    Effect.gen(function* () {
+      const storage = Storage.memoryService()
+      const persistence = () =>
+        SemanticPersistence.make({
+          storage,
+          compilerIdentity: ToolchainIntegrity.installed().digest,
+          maximumRecordBytes: 16 * 1024 * 1024,
+        })
+      // Reject before emission: this tests Driver's preparation wiring without invoking LLVM.
+      const source = 'pub fn main() -> i32 { return missing }'
+      const cold = persistence()
+      const first = yield* compileSource('semantic-cache-cold', source, {
+        cache: true,
+      }).pipe(Effect.provideService(SemanticPersistence.SemanticPersistence, cold))
+      assert.strictEqual(first._tag, 'Rejected')
+      assert.isAbove(SemanticPersistence.counters(cold).published, 0)
+
+      const warm = persistence()
+      const second = yield* compileSource('semantic-cache-warm', source, {
+        cache: true,
+      }).pipe(Effect.provideService(SemanticPersistence.SemanticPersistence, warm))
+      assert.strictEqual(second._tag, 'Rejected')
+      assert.isAbove(SemanticPersistence.counters(warm).loaded, 0)
+
+      const disabled = persistence()
+      const before = SemanticPersistence.counters(disabled)
+      const fresh = yield* compileSource('semantic-cache-disabled', source, {
+        cache: false,
+      }).pipe(Effect.provideService(SemanticPersistence.SemanticPersistence, disabled))
+      assert.strictEqual(fresh._tag, 'Rejected')
+      assert.deepEqual(SemanticPersistence.counters(disabled), before)
+      if (first._tag === 'Rejected' && second._tag === 'Rejected' && fresh._tag === 'Rejected') {
+        const diagnostics = (outcome: Driver.Rejected) =>
+          outcome.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.span])
+        assert.deepEqual(diagnostics(second), diagnostics(first))
+        assert.deepEqual(diagnostics(fresh), diagnostics(first))
+      }
+    }),
+)
 
 it.effect('measures Effect phases with the fiber clock', () =>
   Effect.gen(function* () {
@@ -455,13 +499,11 @@ it.effect(
             entries.set(address.key, Uint8Array.from(bytes))
           }),
       })
-      const cachingToolchain = Object.freeze({ ...toolchain, artifactStorage })
       const source = 'pub fn main() -> i32 { return 42 }'
       for (const name of ['admission-first', 'admission-second']) {
-        const outcome = yield* compileSource(name, source, {
-          toolchain: cachingToolchain,
-          cache: true,
-        })
+        const outcome = yield* compileSource(name, source, { cache: true }).pipe(
+          Effect.provideService(NativeToolchain.ArtifactStorage, artifactStorage),
+        )
         assert.strictEqual(outcome._tag, 'Compiled')
         if (outcome._tag !== 'Compiled') return
         const phases = outcome.report.map((entry) => entry.phase)
@@ -473,10 +515,9 @@ it.effect(
       const nativeReads = reads.filter((key) => key.startsWith('native-')).length
       const failed = yield* Effect.result(
         compileSource('admission-missing-library', source, {
-          toolchain: cachingToolchain,
           cache: true,
           nativeLinkInputs: [NativeLinkInput.library('silk_missing_admission_fixture', 'Dynamic')],
-        }),
+        }).pipe(Effect.provideService(NativeToolchain.ArtifactStorage, artifactStorage)),
       )
       assert.strictEqual(failed._tag, 'Failure')
       if (failed._tag !== 'Failure' || failed.failure._tag !== 'ToolchainError')
@@ -534,9 +575,8 @@ it.effect('translates an artifact Storage read failure at the Driver boundary', 
     })
     const result = yield* Effect.result(
       compileSource('throwing-artifact-cache-read', 'pub fn main() -> i32 { return 42 }', {
-        toolchain: Object.freeze({ ...toolchain, artifactStorage }),
         cache: true,
-      }),
+      }).pipe(Effect.provideService(NativeToolchain.ArtifactStorage, artifactStorage)),
     )
     assert.strictEqual(result._tag, 'Failure')
     if (result._tag !== 'Failure') return
@@ -566,9 +606,8 @@ it.effect('translates an artifact Storage publication failure at the Driver boun
     })
     const result = yield* Effect.result(
       compileSource('throwing-artifact-cache-write', 'pub fn main() -> i32 { return 42 }', {
-        toolchain: Object.freeze({ ...toolchain, artifactStorage }),
         cache: true,
-      }),
+      }).pipe(Effect.provideService(NativeToolchain.ArtifactStorage, artifactStorage)),
     )
     assert.strictEqual(result._tag, 'Failure')
     if (result._tag !== 'Failure') return
@@ -667,10 +706,11 @@ it.effect('rejects a supplied foreign contract before backend-cache or native-to
       compilation: { root: root.id, target: 'aarch64-apple-darwin' },
       foreignInterfaces: [supplied],
       cache: true,
-      toolchain: {
-        ...toolchain,
-        clang: 'must-not-invoke-clang',
-        artifactStorage: Storage.Storage.of({
+      toolchain: { ...toolchain, clang: 'must-not-invoke-clang' },
+    }).pipe(
+      Effect.provideService(
+        NativeToolchain.ArtifactStorage,
+        Storage.Storage.of({
           read: () =>
             Effect.sync(() => {
               cacheReads += 1
@@ -678,8 +718,8 @@ it.effect('rejects a supplied foreign contract before backend-cache or native-to
             }),
           publish: () => Effect.void,
         }),
-      },
-    })
+      ),
+    )
     assert.strictEqual(outcome._tag, 'Rejected')
     if (outcome._tag !== 'Rejected') return
     const mismatch = outcome.diagnostics.find((diagnostic) => diagnostic.code === 'SEM0192')

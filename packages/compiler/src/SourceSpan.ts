@@ -37,7 +37,7 @@ const makeValid = (sourceId: string, start: number, end: number): SourceSpan => 
     start,
     end,
   }
-  return Object.freeze(span)
+  return span
 }
 
 /** Rehydrates a span from validated semantic provenance when source bytes are not retained. */
@@ -72,19 +72,17 @@ export const key = (self: SourceSpan): string =>
 
 /** Deduplicates and orders source spans by canonical identity. */
 export const canonicalize = (spans: Iterable<SourceSpan>): ReadonlyArray<SourceSpan> =>
-  Object.freeze(
-    [...new Map([...spans].map((span) => [key(span), span])).values()].sort((left, right) => {
-      const leftKey = key(left)
-      const rightKey = key(right)
-      if (leftKey < rightKey) {
-        return -1
-      }
-      if (leftKey > rightKey) {
-        return 1
-      }
-      return 0
-    }),
-  )
+  [...new Map([...spans].map((span) => [key(span), span])).values()].sort((left, right) => {
+    const leftKey = key(left)
+    const rightKey = key(right)
+    if (leftKey < rightKey) {
+      return -1
+    }
+    if (leftKey > rightKey) {
+      return 1
+    }
+    return 0
+  })
 
 /** Whether a value is a span made by this module. */
 export const isSourceSpan = (value: unknown): value is SourceSpan =>

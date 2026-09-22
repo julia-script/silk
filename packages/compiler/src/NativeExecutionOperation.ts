@@ -90,7 +90,7 @@ const targetForCallable = (
     ),
   )
   if (target === undefined) throw new RangeError('LLVM execution callback target is unavailable')
-  return Object.freeze({ type, target })
+  return { type, target }
 }
 
 const applyCallable = Effect.fnUntraced(function* (
@@ -107,7 +107,7 @@ const applyCallable = Effect.fnUntraced(function* (
     const lanes = Layout.callableFieldLanes(context.program.layout, field)
     const selected = values.slice(cursor, cursor + lanes.length)
     cursor += lanes.length
-    return Object.freeze({ parameterOrdinal: field.parameterOrdinal, items: selected })
+    return { parameterOrdinal: field.parameterOrdinal, items: selected }
   })
   return NativeResult.sourceValues(
     yield* NativeResult.materialize(
@@ -208,7 +208,7 @@ const exactEffect = (context: Context, package_: ExecutionPackage.Plan) => {
         )
   if (environment === undefined || target === undefined)
     throw new RangeError('LLVM execution drive lost its exact body runner')
-  return Object.freeze({ environment, target })
+  return { environment, target }
 }
 
 const bodyOperands = Effect.fnUntraced(function* (
@@ -235,7 +235,7 @@ const bodyOperands = Effect.fnUntraced(function* (
     context,
     tag,
   )
-  return Object.freeze({ environment, target, values: Object.freeze(values) })
+  return { environment, target, values: values }
 })
 
 const notifyReady = Effect.fnUntraced(function* (
@@ -265,7 +265,7 @@ const notifyReady = Effect.fnUntraced(function* (
       : Layout.callableEnvironmentByIdentity(context.program.layout, identity.environment)
   let targetArguments: ReadonlyArray<SilkType.GenericArgument>
   if (identity === undefined) {
-    targetArguments = Object.freeze([])
+    targetArguments = []
   } else if (environment === undefined) {
     targetArguments = identity.typeArguments
   } else {
@@ -315,12 +315,10 @@ const notifyReady = Effect.fnUntraced(function* (
   let captureOrdinal = 0
   for (const field of environment?.fields ?? []) {
     const count = Layout.callableFieldLanes(context.program.layout, field).length
-    captures.push(
-      Object.freeze({
-        parameterOrdinal: field.parameterOrdinal,
-        items: Object.freeze(callbackValues.slice(captureOrdinal, captureOrdinal + count)),
-      }),
-    )
+    captures.push({
+      parameterOrdinal: field.parameterOrdinal,
+      items: callbackValues.slice(captureOrdinal, captureOrdinal + count),
+    })
     captureOrdinal += count
   }
   const endpoint = yield* NativeLanePointer.lanePointer(
@@ -384,11 +382,11 @@ const releasePackage = Effect.fnUntraced(function* (
     )
   yield* NativeAggregate.dropThroughPlan(
     context.cleanup,
-    Object.freeze({
+    {
       _tag: 'AllocationCleanup' as const,
       type: SilkType.allocation,
       ticket: 'ActiveReclaimTicket' as const,
-    }),
+    },
     yield* packagePayload(
       context,
       base,
@@ -411,11 +409,11 @@ const releaseAllocation = Effect.fnUntraced(function* (
     throw new RangeError('LLVM execution lost allocation authority')
   yield* NativeAggregate.dropThroughPlan(
     context.cleanup,
-    Object.freeze({
+    {
       _tag: 'AllocationCleanup' as const,
       type: SilkType.allocation,
       ticket: 'ActiveReclaimTicket' as const,
-    }),
+    },
     yield* packagePayload(context, base, SilkType.allocation, allocationOffset, `${tag}_load`),
     tag,
   )
@@ -434,7 +432,7 @@ const loadStoredEndpoints = Effect.fnUntraced(function* (
 ): Effect.fn.Return<StoredEndpoints, LlvmError.LlvmError> {
   const callbackOffset = componentOffset(package_, 'EndpointCallback')
   const endpointOffset = componentOffset(package_, 'EndpointState')
-  return Object.freeze({
+  return {
     ...(callbackOffset === undefined ||
     package_.cleanup === undefined ||
     !CleanupPlan.hasEffect(package_.cleanup.callback)
@@ -461,7 +459,7 @@ const loadStoredEndpoints = Effect.fnUntraced(function* (
             `${tag}_endpoint_load`,
           ),
         }),
-  })
+  }
 })
 
 const dropStoredEndpoints = Effect.fnUntraced(function* (
@@ -530,11 +528,11 @@ const dropStoredPackage = Effect.fnUntraced(function* (
       throw new RangeError('LLVM execution drop lost allocation storage')
     yield* NativeAggregate.dropThroughPlan(
       context,
-      Object.freeze({
+      {
         _tag: 'AllocationCleanup' as const,
         type: SilkType.allocation,
         ticket: 'ActiveReclaimTicket' as const,
-      }),
+      },
       yield* packagePayload(
         context,
         base,
@@ -629,10 +627,11 @@ const runCancellationFinalizer = Effect.fnUntraced(function* (
       releaseTarget,
       NativeArgument.fromValues(
         Mir.applyOperands(
-          captures.map((capture) =>
-            Object.freeze({ parameterOrdinal: capture.parameterOrdinal, items: capture.values }),
-          ),
-          [Object.freeze([resourceReference])],
+          captures.map((capture) => ({
+            parameterOrdinal: capture.parameterOrdinal,
+            items: capture.values,
+          })),
+          [[resourceReference]],
         ),
       ),
       `${tag}_build`,
@@ -1407,16 +1406,16 @@ export const declareReleaseHelper = Effect.fn('NativeExecutionOperation.declareR
         ]
       : [pointer]
     const executionType = SilkType.execution(source.operation.plan.specialization.result)
-    const id = Object.freeze({ ...source.fn.id, name: releaseHelperSymbol })
+    const id = { ...source.fn.id, name: releaseHelperSymbol }
     const { suspension: _suspension, ...base } = source.fn
-    const fn: Mir.MirFunction = Object.freeze({
+    const fn: Mir.MirFunction = {
       ...base,
       id,
-      instance: Object.freeze({ ...source.fn.instance, declaration: id }),
+      instance: { ...source.fn.instance, declaration: id },
       parameterCount: 1,
-      localTypes: Object.freeze([Object.freeze({ _tag: 'Nominal' as const, type: executionType })]),
-    })
-    return Object.freeze({
+      localTypes: [{ _tag: 'Nominal' as const, type: executionType }],
+    }
+    return {
       fn,
       symbol: releaseHelperSymbol,
       publicSymbol: releaseHelperSymbol,
@@ -1430,7 +1429,7 @@ export const declareReleaseHelper = Effect.fn('NativeExecutionOperation.declareR
       emittedResultType: voidType,
       resultLaneCount: 0,
       suspendable: false,
-      parameterTypes: Object.freeze(parameters),
+      parameterTypes: parameters,
       argumentParameters: NativeArgument.parameters(program.layout, fn, (type) => {
         const shape = Layout.callingShape(program.layout, Mir.semanticType(type))
         if (shape === undefined)
@@ -1438,8 +1437,8 @@ export const declareReleaseHelper = Effect.fn('NativeExecutionOperation.declareR
         return shape.lanes
       }),
       ...(diagnostics ? { diagnosticParameter: 1 } : {}),
-      linear: Object.freeze([]),
-    })
+      linear: [],
+    }
   },
 )
 
@@ -1502,7 +1501,7 @@ export const emitReleaseHelper = Effect.fn('NativeExecutionOperation.emitRelease
               yield* Value.argument(body, helper.diagnosticParameter),
               yield* Value.argument(body, helper.diagnosticParameter + 1),
             )
-      const storage: NativeStorage.Context = Object.freeze({
+      const storage: NativeStorage.Context = {
         builder,
         body,
         byteType: i8,
@@ -1519,8 +1518,8 @@ export const emitReleaseHelper = Effect.fn('NativeExecutionOperation.emitRelease
         types,
         lanePointers,
         sequences: { materialize: 0, reload: 0 },
-      })
-      const call: NativeCall.Context = Object.freeze({
+      }
+      const call: NativeCall.Context = {
         builder,
         body,
         program,
@@ -1532,14 +1531,14 @@ export const emitReleaseHelper = Effect.fn('NativeExecutionOperation.emitRelease
         lanePointers,
         types,
         storage,
-        synchronous: Object.freeze({
+        synchronous: {
           body,
           storage,
           ...(diagnostic === undefined ? {} : { diagnostic }),
-        }),
-        returns: Object.freeze({ builder, body, i32, pointer, entry: helper, types, lanePointers }),
-      })
-      const cleanup: NativeAggregate.Context = Object.freeze({
+        },
+        returns: { builder, body, i32, pointer, entry: helper, types, lanePointers },
+      }
+      const cleanup: NativeAggregate.Context = {
         builder,
         body,
         program,
@@ -1554,17 +1553,17 @@ export const emitReleaseHelper = Effect.fn('NativeExecutionOperation.emitRelease
         types,
         lanePointers,
         call,
-        arith: Object.freeze({
+        arith: {
           body,
           pointerBits: program.layout.target.pointerSize === 4 ? 32 : 64,
           i32,
           integerTypes: types.integerTypes,
           types,
-        }),
+        },
         storage,
         executionRelease: helper.handle,
-      })
-      yield* dropExecution(cleanup, Object.freeze([base]), 'execution_release')
+      }
+      yield* dropExecution(cleanup, [base], 'execution_release')
       yield* FunctionBody.returnVoid(body)
     }),
   )
@@ -1768,7 +1767,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           callbackOffset,
           `execution${operation.destination.ordinal}_callback`,
         )
-      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, Object.freeze([base]))
+      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, [base])
       return
     }
     case 'ExecutionPark': {
@@ -1955,7 +1954,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       yield* NativeSuspension.returnStep(
         context.call.returns,
         2n,
-        Object.freeze([]),
+        [],
         `park${operation.destination.ordinal}_external`,
       )
       const resumeBlock = context.suspension.resumeBlocks.get(suspensionPointKey(region.point))
@@ -1973,7 +1972,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         NativePayload.local(storage, operation.guard),
         `park${operation.destination.ordinal}_guard`,
       )
-      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, Object.freeze([]))
+      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, [])
       return
     }
     case 'ExecutionDrive': {
@@ -2159,7 +2158,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* LlvmBlock.setInsertionPoint(body, failed)
         yield* FunctionBody.unreachable(body)
         yield* LlvmBlock.setInsertionPoint(body, succeeded)
-        const resultValues = Object.freeze(outcome.slice(1))
+        const resultValues = outcome.slice(1)
         yield* NativeStorage.writeLocal(storage, operation.result.ordinal, resultValues)
         yield* NativeAggregate.dropThroughPlan(
           context.cleanup,
@@ -2726,7 +2725,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* LlvmBlock.setInsertionPoint(body, failed)
         yield* FunctionBody.unreachable(body)
         yield* LlvmBlock.setInsertionPoint(body, succeeded)
-        const resultValues = Object.freeze(outcome.slice(1))
+        const resultValues = outcome.slice(1)
         yield* NativeStorage.writeLocal(storage, operation.result.ordinal, resultValues)
         yield* NativeAggregate.dropThroughPlan(
           context.cleanup,
@@ -3067,7 +3066,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             )
           }),
       )
-      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, Object.freeze([]))
+      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, [])
       return
     }
     case 'ExecutionWake': {
@@ -3280,7 +3279,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           emitPackage,
         )
       }
-      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, Object.freeze([]))
+      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, [])
       return
     }
   }

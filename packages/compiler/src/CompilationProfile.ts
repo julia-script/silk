@@ -144,12 +144,11 @@ const selection = Effect.fnUntraced(function* (
   subject: string,
   origin: ConfigurationOrigin.ConfigurationOrigin,
 ): Effect.fn.Return<Selection, ConfigurationError.ConfigurationError> {
-  if (input === undefined) return Object.freeze({ kind: 'default' })
+  if (input === undefined) return { kind: 'default' }
   if (isRecord(input)) {
     const kind = get(input, 'kind')
     const name = get(input, 'name')
-    if ((kind === 'none' || kind === 'default') && Object.keys(input).length === 1)
-      return Object.freeze({ kind })
+    if ((kind === 'none' || kind === 'default') && Object.keys(input).length === 1) return { kind }
     if (
       kind === 'named' &&
       typeof name === 'string' &&
@@ -158,7 +157,7 @@ const selection = Effect.fnUntraced(function* (
       !name.includes('..') &&
       Object.keys(input).length === 2
     )
-      return Object.freeze({ kind, name })
+      return { kind, name }
   }
   return yield* ConfigurationError.make('CompilationProfile.normalize', 'InvalidInput', subject, [
     origin,
@@ -170,7 +169,7 @@ const stringSet = Effect.fnUntraced(function* (
   subject: string,
   origin: ConfigurationOrigin.ConfigurationOrigin,
 ): Effect.fn.Return<ReadonlyArray<string>, ConfigurationError.ConfigurationError> {
-  if (input === undefined) return Object.freeze([])
+  if (input === undefined) return []
   if (!Array.isArray(input))
     return yield* ConfigurationError.make('CompilationProfile.normalize', 'InvalidInput', subject, [
       origin,
@@ -186,7 +185,7 @@ const stringSet = Effect.fnUntraced(function* (
       )
     values.push(value)
   }
-  return Object.freeze([...new Set(values)].sort())
+  return [...new Set(values)].sort()
 })
 
 /** Canonical encoding of the fully normalized logical domains, excluding provenance. */
@@ -260,7 +259,7 @@ export const decode = Effect.fn('CompilationProfile.decode')(function* (
   }
   if (target.architecture === 'x86_64') features.add('sse2')
   if (features.has('avx2')) features.add('avx')
-  const cpu: Cpu = Object.freeze({ model, features: Object.freeze([...features].sort()) })
+  const cpu: Cpu = { model, features: [...features].sort() }
   const deploymentInput = get(input, 'deployment')
   if (
     deploymentInput !== undefined &&
@@ -337,7 +336,7 @@ export const decode = Effect.fn('CompilationProfile.decode')(function* (
   if (sanitizers.includes('thread') && threading !== 'multi') return yield* unsupported('threading')
   if (target.operatingSystem === 'darwin' && link === 'static' && artifact === 'executable')
     return yield* unsupported('Darwin static executable')
-  const facts: Facts = Object.freeze({
+  const facts: Facts = {
     target,
     cpu,
     deployment,
@@ -351,16 +350,16 @@ export const decode = Effect.fn('CompilationProfile.decode')(function* (
     debug,
     safety,
     threading,
-    sanitizers: Object.freeze(sanitizers),
+    sanitizers: sanitizers,
     unwind,
     runtime,
-  })
-  return Object.freeze<Initial>({
+  }
+  return {
     ...facts,
     _tag: 'InitialCompilationProfile',
     [initialMarker]: true,
     identity: Canonical.record('InitialProfile.v1', [encodeFacts(facts)]),
-  })
+  } as Initial
 })
 
 /** Normalizes typed application-edge input with the same checks used for external transport. */
@@ -399,16 +398,14 @@ export const publish = Effect.fn('CompilationProfile.publish')(function* (
       )
     seen.add(key)
     const value = yield* ConfigurationValue.decode(parameter.value, parameter.origin)
-    retained.push(
-      Object.freeze({
-        ...parameter,
-        value,
-        origin: ConfigurationOrigin.snapshot(parameter.origin),
-      }),
-    )
+    retained.push({
+      ...parameter,
+      value,
+      origin: ConfigurationOrigin.snapshot(parameter.origin),
+    })
   }
-  const values = Object.freeze(retained)
-  return Object.freeze<CompilationProfile>({
+  const values = retained
+  return {
     ...initial,
     _tag: 'CompilationProfile',
     [publishedMarker]: true,
@@ -424,32 +421,31 @@ export const publish = Effect.fn('CompilationProfile.publish')(function* (
         ),
       ),
     ]),
-  })
+  } as CompilationProfile
 })
 
 /** Returns the canonical versioned encoding used as the profile's semantic identity. */
 export const encode = (self: CompilationProfile | Initial): string => self.identity
 
 /** Projects normalized facts back into the portable logical request shape. */
-export const input = (self: CompilationProfile | Initial): Input =>
-  Object.freeze({
-    target: self.target.id,
-    cpu: self.cpu,
-    ...(self.deployment === undefined ? {} : { deployment: self.deployment }),
-    libc: self.libc,
-    artifact: self.artifact,
-    entry: self.entry,
-    link: self.link,
-    codeModel: self.codeModel,
-    relocation: self.relocation,
-    optimization: self.optimization,
-    debug: self.debug,
-    safety: self.safety,
-    threading: self.threading,
-    sanitizers: self.sanitizers,
-    unwind: self.unwind,
-    runtime: self.runtime,
-  })
+export const input = (self: CompilationProfile | Initial): Input => ({
+  target: self.target.id,
+  cpu: self.cpu,
+  ...(self.deployment === undefined ? {} : { deployment: self.deployment }),
+  libc: self.libc,
+  artifact: self.artifact,
+  entry: self.entry,
+  link: self.link,
+  codeModel: self.codeModel,
+  relocation: self.relocation,
+  optimization: self.optimization,
+  debug: self.debug,
+  safety: self.safety,
+  threading: self.threading,
+  sanitizers: self.sanitizers,
+  unwind: self.unwind,
+  runtime: self.runtime,
+})
 
 /** Looks up a final value by stable identity without exposing mutable profile storage. */
 export const parameter = (

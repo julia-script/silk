@@ -75,9 +75,9 @@ const describeFields = Effect.fnUntraced(function* (
       origin,
       active,
     )
-    described.push(Object.freeze({ name: field.name.spelling, id: field.id, schema }))
+    described.push({ name: field.name.spelling, id: field.id, schema })
   }
-  return Object.freeze(described)
+  return described
 })
 
 const describeType = Effect.fnUntraced(function* (
@@ -86,12 +86,11 @@ const describeType = Effect.fnUntraced(function* (
   origin: ConfigurationOrigin.ConfigurationOrigin,
   active: ReadonlySet<string>,
 ): Effect.fn.Return<Schema, ConfigurationError.ConfigurationError> {
-  if (type === 'bool') return Object.freeze({ kind: 'boolean', type })
-  if (Type.isString(type)) return Object.freeze({ kind: 'string', type })
+  if (type === 'bool') return { kind: 'boolean', type }
+  if (Type.isString(type)) return { kind: 'string', type }
   if (typeof type === 'string') {
     const scalar = Scalar.find(type)
-    if (scalar?.category === 'Integer')
-      return Object.freeze({ kind: 'integer', type, scalar: scalar.spelling })
+    if (scalar?.category === 'Integer') return { kind: 'integer', type, scalar: scalar.spelling }
     return yield* invalid(origin)
   }
   const key = Type.encode(type)
@@ -106,7 +105,7 @@ const describeType = Effect.fnUntraced(function* (
   const next = new Set([...active, key])
   if (type._tag === 'FixedArrayType') {
     const element = yield* describeType(context, type.element, origin, next)
-    return Object.freeze({ kind: 'array', type, length: type.length, element })
+    return { kind: 'array', type, length: type.length, element }
   }
   if (!Type.isNominal(type) || type.sealed !== undefined) return yield* invalid(origin)
   const declaration = context.index.modules
@@ -120,12 +119,12 @@ const describeType = Effect.fnUntraced(function* (
   if (declaration._tag === 'EnumDeclaration') {
     if (declaration.validity._tag !== 'Valid' || declaration.representation._tag !== 'Available')
       return yield* invalid(origin)
-    return Object.freeze({
+    return {
       kind: 'enum',
       type,
       declaration,
       name: `${ownership.package}/${ownership.module}/${type.name}`,
-    })
+    }
   }
   if (declaration._tag !== 'StructDeclaration' && declaration._tag !== 'UnionDeclaration')
     return yield* invalid(origin)
@@ -134,22 +133,22 @@ const describeType = Effect.fnUntraced(function* (
     type.arguments,
   )
   if (substitution === undefined) return yield* invalid(origin)
-  const identity: StaticValue.NominalAggregateIdentity = Object.freeze({
+  const identity: StaticValue.NominalAggregateIdentity = {
     _tag: 'NominalAggregateIdentity',
     declaration: declaration.canonical.id,
-    typeArguments: Object.freeze(type.arguments.map(Type.encodeGenericArgument)),
-  })
+    typeArguments: type.arguments.map(Type.encodeGenericArgument),
+  }
   if (declaration._tag === 'StructDeclaration') {
     if (declaration.aggregateKind !== 'Named' && declaration.aggregateKind !== 'AnonymousNamed')
       return yield* invalid(origin)
     const fields = yield* describeFields(context, declaration.fields, substitution, origin, next)
-    return Object.freeze({
+    return {
       kind: 'record',
       name: `${ownership.package}/${ownership.module}/${type.name}`,
       type,
       identity,
       fields,
-    })
+    }
   }
   // The optional transport is structural: no standard-library variant or field name is privileged.
   const absent = declaration.variants.find((variant) => variant.fields.length === 0)
@@ -164,20 +163,20 @@ const describeType = Effect.fnUntraced(function* (
   const fields = yield* describeFields(context, present.fields, substitution, origin, next)
   const field = fields[0]
   if (field === undefined) return yield* invalid(origin)
-  return Object.freeze({
+  return {
     kind: 'optional',
     name: `${ownership.package}/${ownership.module}/${type.name}`,
     type,
     field,
-    absent: Object.freeze({
+    absent: {
       ...identity,
-      variant: Object.freeze({ ordinal: absent.id.ordinal, name: absent.name.spelling }),
-    }),
-    present: Object.freeze({
+      variant: { ordinal: absent.id.ordinal, name: absent.name.spelling },
+    },
+    present: {
       ...identity,
-      variant: Object.freeze({ ordinal: present.id.ordinal, name: present.name.spelling }),
-    }),
-  })
+      variant: { ordinal: present.id.ordinal, name: present.name.spelling },
+    },
+  }
 })
 
 /** Resolves a concrete admitted schema from ordinary source declarations and types. */
@@ -193,13 +192,12 @@ const makeAggregate = (
   identity: StaticValue.AggregateIdentity,
   fields: ReadonlyArray<StaticValue.AggregateField>,
   runtimeFields?: StaticValue.AggregateValue['runtimeFields'],
-): StaticValue.AggregateValue =>
-  Object.freeze({
-    _tag: 'AggregateValue',
-    identity,
-    fields: Object.freeze(fields),
-    ...(runtimeFields === undefined ? {} : { runtimeFields: Object.freeze(runtimeFields) }),
-  })
+): StaticValue.AggregateValue => ({
+  _tag: 'AggregateValue',
+  identity,
+  fields: fields,
+  ...(runtimeFields === undefined ? {} : { runtimeFields: runtimeFields }),
+})
 
 const convert = Effect.fnUntraced(function* (
   schema: Schema,
@@ -212,18 +210,18 @@ const convert = Effect.fnUntraced(function* (
       break
     case 'integer':
       if (value.kind === 'integer')
-        return Object.freeze({
+        return {
           _tag: 'IntegerValue',
           type: schema.scalar,
           value: BigInt(value.value),
-        })
+        }
       break
     case 'string':
       if (value.kind === 'string')
-        return Object.freeze({
+        return {
           _tag: 'TextValue',
-          bytes: Object.freeze([...new TextEncoder().encode(value.value)]),
-        })
+          bytes: [...new TextEncoder().encode(value.value)],
+        }
       break
     case 'enum': {
       if (value.kind !== 'enum' || value.type !== schema.name) break
@@ -237,25 +235,25 @@ const convert = Effect.fnUntraced(function* (
         schema.declaration.representation._tag !== 'Available'
       )
         break
-      return Object.freeze({
+      return {
         _tag: 'EnumValue',
         type: schema.declaration.canonical.id,
         member: value.member,
         discriminant: member.discriminant.value,
         representation: schema.declaration.representation.scalar.spelling,
-      })
+      }
     }
     case 'array': {
       if (value.kind !== 'array' || value.values.length !== schema.length) break
       const fields: Array<StaticValue.AggregateField> = []
       for (const [ordinal, item] of value.values.entries())
-        fields.push(Object.freeze({ ordinal, value: yield* convert(schema.element, item, origin) }))
+        fields.push({ ordinal, value: yield* convert(schema.element, item, origin) })
       return makeAggregate(
-        Object.freeze({
+        {
           _tag: 'ArrayAggregateIdentity',
           element: Type.encode(schema.element.type),
           length: schema.length,
-        }),
+        },
         fields,
       )
     }
@@ -266,17 +264,15 @@ const convert = Effect.fnUntraced(function* (
       for (const field of schema.fields) {
         const input = Object.hasOwn(value.fields, field.name) ? value.fields[field.name] : undefined
         if (input === undefined) return yield* invalid(origin)
-        fields.push(
-          Object.freeze({
-            ordinal: field.id.ordinal,
-            value: yield* convert(field.schema, input, origin),
-          }),
-        )
+        fields.push({
+          ordinal: field.id.ordinal,
+          value: yield* convert(field.schema, input, origin),
+        })
       }
       return makeAggregate(
         schema.identity,
         fields,
-        schema.fields.map((field) => Object.freeze({ id: field.id, type: field.schema.type })),
+        schema.fields.map((field) => ({ id: field.id, type: field.schema.type })),
       )
     }
     case 'optional':
@@ -285,12 +281,12 @@ const convert = Effect.fnUntraced(function* (
         return makeAggregate(
           schema.present,
           [
-            Object.freeze({
+            {
               ordinal: schema.field.id.ordinal,
               value: yield* convert(schema.field.schema, value.value, origin),
-            }),
+            },
           ],
-          [Object.freeze({ id: schema.field.id, type: schema.field.schema.type })],
+          [{ id: schema.field.id, type: schema.field.schema.type }],
         )
       break
   }
@@ -330,19 +326,18 @@ const unbindValue = Effect.fnUntraced(function* (
 ): Effect.fn.Return<ConfigurationValue.ConfigurationValue, ConfigurationError.ConfigurationError> {
   switch (schema.kind) {
     case 'boolean':
-      if (value._tag === 'BooleanValue')
-        return Object.freeze({ kind: 'boolean', value: value.value })
+      if (value._tag === 'BooleanValue') return { kind: 'boolean', value: value.value }
       break
     case 'integer':
       if (value._tag === 'IntegerValue' && value.type === schema.scalar)
-        return Object.freeze({ kind: 'integer', value: value.value.toString() })
+        return { kind: 'integer', value: value.value.toString() }
       break
     case 'string':
       if (value._tag === 'TextValue')
-        return Object.freeze({
+        return {
           kind: 'string',
           value: new TextDecoder().decode(Uint8Array.from(value.bytes)),
-        })
+        }
       break
     case 'enum':
       if (
@@ -360,7 +355,7 @@ const unbindValue = Effect.fnUntraced(function* (
             member.discriminant.value === value.discriminant,
         )
       )
-        return Object.freeze({ kind: 'enum', type: schema.name, member: value.member })
+        return { kind: 'enum', type: schema.name, member: value.member }
       break
     case 'array': {
       if (
@@ -377,7 +372,7 @@ const unbindValue = Effect.fnUntraced(function* (
         if (field === undefined) return yield* invalid(origin)
         values.push(yield* unbindValue(schema.element, field.value, origin))
       }
-      return Object.freeze({ kind: 'array', values: Object.freeze(values) })
+      return { kind: 'array', values: values }
     }
     case 'record': {
       if (
@@ -392,21 +387,21 @@ const unbindValue = Effect.fnUntraced(function* (
         if (item === undefined) return yield* invalid(origin)
         fields.push([field.name, yield* unbindValue(field.schema, item.value, origin)])
       }
-      return Object.freeze({ kind: 'record', fields: Object.freeze(Object.fromEntries(fields)) })
+      return { kind: 'record', fields: Object.fromEntries(fields) }
     }
     case 'optional':
       if (value._tag !== 'AggregateValue') break
       if (sameNominal(value.identity, schema.absent) && value.fields.length === 0)
-        return Object.freeze({ kind: 'none' })
+        return { kind: 'none' }
       if (sameNominal(value.identity, schema.present) && value.fields.length === 1) {
         const field = value.fields.find(
           (candidate) => candidate.ordinal === schema.field.id.ordinal,
         )
         if (field !== undefined)
-          return Object.freeze({
+          return {
             kind: 'some',
             value: yield* unbindValue(schema.field.schema, field.value, origin),
-          })
+          }
       }
       break
   }

@@ -50,22 +50,20 @@ export const select = (
       unavailable.set(key, Diagnostic.intrinsicTargetUnavailable(key, target.id, call.span))
   }
   if (unavailable.size > 0)
-    return Object.freeze({
+    return {
       _tag: 'Unavailable',
-      operations: Object.freeze([...unavailable.keys()].sort()),
+      operations: [...unavailable.keys()].sort(),
       diagnostics: Diagnostic.merge([...unavailable.values()]),
-    })
-  return Object.freeze({
+    }
+  return {
     _tag: 'Available',
-    inventory: Object.freeze({
+    inventory: {
       _tag: 'ValidatedIntrinsicInventory',
       target: target.id,
-      operations: Object.freeze(
-        [...retained.entries()]
-          .sort(([left], [right]) => left.localeCompare(right))
-          .map(([, id]) => id),
-      ),
-      calls: Object.freeze(Array.from(calls)),
-    }),
-  })
+      operations: [...retained.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([, id]) => id),
+      calls: Array.from(calls),
+    },
+  }
 }

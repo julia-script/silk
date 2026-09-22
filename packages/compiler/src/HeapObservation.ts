@@ -8,7 +8,7 @@ export class HeapObservation extends Context.Service<
 >()('@silklang/compiler/HeapObservation') {}
 
 /** Explicit zero-cost browser implementation for hosts without process heap telemetry. */
-export const layerBrowser = Layer.succeed(HeapObservation, Object.freeze({ heapBytes: () => 0 }))
+export const layerBrowser = Layer.succeed(HeapObservation, { heapBytes: () => 0 })
 
 /** Deterministic test implementation; tests provide it instead of relying on an ambient default. */
-export const layerTest = Layer.succeed(HeapObservation, Object.freeze({ heapBytes: () => 0 }))
+export const layerTest = Layer.succeed(HeapObservation, { heapBytes: () => 0 })

@@ -167,12 +167,12 @@ export const make = Effect.fn('Analysis.make')(function* (
   yield* Effect.yieldNow
   const tooling = yield* FrontendTooling.make(frontend)
   return OpaqueRealization.withCatalog(
-    Object.freeze({
+    {
       _tag: 'AnalysisSnapshot',
       realization: 'SingleRoot',
       ...frontend,
       ...tooling,
-    }),
+    },
     OpaqueRealization.catalogOf(frontend),
   )
 })
@@ -197,13 +197,13 @@ export const realize = Effect.fn('Analysis.realize')(function* (
         }
       : yield* FrontendTooling.make(frontend, self.toolingModules)
   return OpaqueRealization.withCatalog(
-    Object.freeze({
+    {
       ...frontend,
       ...tooling,
       ...realization,
       _tag: 'AnalysisSnapshot',
       realization: 'SingleRoot',
-    }),
+    },
     OpaqueRealization.catalogOf(frontend),
   )
 })
@@ -220,13 +220,13 @@ export const makeRealized = Effect.fn('Analysis.makeRealized')(function* (
   const { frontend, ...realization } = Preparation.realization(bundle)
   const tooling = yield* FrontendTooling.make(frontend)
   return OpaqueRealization.withCatalog(
-    Object.freeze({
+    {
       ...frontend,
       ...tooling,
       ...realization,
       _tag: 'AnalysisSnapshot',
       realization: 'SingleRoot',
-    }),
+    },
     OpaqueRealization.catalogOf(frontend),
   )
 })
@@ -255,13 +255,13 @@ export const ofSourceRealized = (
       const { frontend, ...realization } = Preparation.realization(bundle)
       const tooling = yield* FrontendTooling.make(frontend)
       return OpaqueRealization.withCatalog(
-        Object.freeze({
+        {
           ...frontend,
           ...tooling,
           ...realization,
           _tag: 'AnalysisSnapshot' as const,
           realization: 'SingleRoot' as const,
-        }),
+        },
         OpaqueRealization.catalogOf(frontend),
       )
     }),
@@ -341,7 +341,7 @@ export const lookupName = (
 ): NameResolution.Lookup => {
   const scope = moduleScope(self, module)
   return scope === undefined
-    ? Object.freeze({ _tag: 'Missing', spelling })
+    ? { _tag: 'Missing', spelling }
     : Semantic.resolveName(self.session, scope, spelling)
 }
 /** Discovers compiler-owned auto-import actions for one unresolved source occurrence. */
@@ -518,7 +518,7 @@ const unionVariantForIdentity = (
     (candidate) =>
       candidate.canonical._tag === 'Canonical' && candidate.canonical.id.name === identity.id.name,
   )
-  return variant === undefined ? undefined : Object.freeze([union, variant] as const)
+  return variant === undefined ? undefined : ([union, variant] as const)
 }
 
 const anchorForIdentity = (
@@ -653,7 +653,7 @@ const hoverPresentation = (
   if (presentation === undefined) {
     return undefined
   }
-  return Object.freeze({ presentation, ...(type === undefined ? {} : { type }) })
+  return { presentation, ...(type === undefined ? {} : { type }) }
 }
 
 const nominalDeclarationType = (
@@ -870,9 +870,8 @@ const presentationOfIdentity = (
       for (const lexical of result.lexicalScopes)
         for (const binding of lexical.patternBindings)
           if (
-            SemanticOccurrence.identityKey(
-              Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id }),
-            ) === key
+            SemanticOccurrence.identityKey({ _tag: 'PatternBindingIdentity', id: binding.id }) ===
+            key
           )
             return hoverPresentation(
               SemanticDisplay.patternBinding(binding, module, scope),
@@ -952,12 +951,10 @@ const implementedContractPresentations = (
   module: string,
   type: Type.Type | undefined,
 ): ReadonlyArray<SemanticDisplay.Presentation> => {
-  if (type === undefined) return Object.freeze([])
+  if (type === undefined) return []
   const scope = NameResolution.scopeOf(self.resolution, module)
-  return Object.freeze(
-    ConformanceProof.implementedContracts(self.index, module, type).map((contract) =>
-      SemanticDisplay.scopedNominal(contract, module, scope),
-    ),
+  return ConformanceProof.implementedContracts(self.index, module, type).map((contract) =>
+    SemanticDisplay.scopedNominal(contract, module, scope),
   )
 }
 
@@ -992,16 +989,16 @@ export const hoverSubjectAt = (
         : undefined
     return answer === undefined
       ? undefined
-      : Object.freeze({
+      : {
           _tag: 'OccurrenceHoverSubject',
           occurrence,
           presentation: answer.presentation,
           implementedContracts: implementedContractPresentations(self, module, answer.type),
-        })
+        }
   }
   const expression = anonymousExpressionAt(self, module, offset)
   if (expression === undefined) return undefined
-  return Object.freeze({
+  return {
     _tag: 'ExpressionHoverSubject',
     expression,
     presentation:
@@ -1012,7 +1009,7 @@ export const hoverSubjectAt = (
         NameResolution.scopeOf(self.resolution, module),
       ),
     implementedContracts: implementedContractPresentations(self, module, expression.type),
-  })
+  }
 }
 
 /** Returns source-ordered inferred local type hints clipped to one byte range. */
@@ -1024,7 +1021,7 @@ export const typeHints = (
 ): ReadonlyArray<TypeHint.TypeHint> => {
   const scope = NameResolution.scopeOf(self.resolution, module)
   return scope === undefined
-    ? Object.freeze([])
+    ? []
     : TypeHint.make(
         scope.context,
         (self.results.get(module)?.bodies ?? []).flatMap((body) =>
@@ -1064,15 +1061,13 @@ export const expressionsOf = (
   module: string,
 ): ReadonlyArray<Tir.Expression> => {
   const result = self.results.get(module)
-  if (result === undefined) return Object.freeze([])
+  if (result === undefined) return []
   const found = new Set<Tir.Expression>()
   for (const body of result.bodies)
     for (const statement of body.function.statements)
       for (const expression of Tir.statementExpressions(statement))
         for (const nested of Tir.expressionTree(expression)) found.add(nested)
-  return Object.freeze(
-    [...found].sort((left, right) => (left.id?.ordinal ?? 0) - (right.id?.ordinal ?? 0)),
-  )
+  return [...found].sort((left, right) => (left.id?.ordinal ?? 0) - (right.id?.ordinal ?? 0))
 }
 
 /** Returns every canonical or explicitly unavailable field-projection step. */
@@ -1080,11 +1075,9 @@ export const fieldProjectionsOf = (
   self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'Project' }>> =>
-  Object.freeze(
-    expressionsOf(self, module).filter(
-      (expression): expression is Extract<Tir.Expression, { readonly _tag: 'Project' }> =>
-        expression._tag === 'Project',
-    ),
+  expressionsOf(self, module).filter(
+    (expression): expression is Extract<Tir.Expression, { readonly _tag: 'Project' }> =>
+      expression._tag === 'Project',
   )
 
 /** Returns every canonical or explicitly unavailable postfix referent-projection step. */
@@ -1092,11 +1085,9 @@ export const referentProjectionsOf = (
   self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'ReferentPlace' }>> =>
-  Object.freeze(
-    expressionsOf(self, module).filter(
-      (expression): expression is Extract<Tir.Expression, { readonly _tag: 'ReferentPlace' }> =>
-        expression._tag === 'ReferentPlace',
-    ),
+  expressionsOf(self, module).filter(
+    (expression): expression is Extract<Tir.Expression, { readonly _tag: 'ReferentPlace' }> =>
+      expression._tag === 'ReferentPlace',
   )
 
 /** Returns every retained array literal with its ordered elements and completeness state. */
@@ -1104,11 +1095,9 @@ export const arrayLiteralsOf = (
   self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'ArrayConstruct' }>> =>
-  Object.freeze(
-    expressionsOf(self, module).filter(
-      (expression): expression is Extract<Tir.Expression, { readonly _tag: 'ArrayConstruct' }> =>
-        expression._tag === 'ArrayConstruct',
-    ),
+  expressionsOf(self, module).filter(
+    (expression): expression is Extract<Tir.Expression, { readonly _tag: 'ArrayConstruct' }> =>
+      expression._tag === 'ArrayConstruct',
   )
 
 /** Returns every retained indexed-place step with its canonical bounds mode. */
@@ -1116,15 +1105,11 @@ export const indexProjectionsOf = (
   self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'IndexPlace' | 'SliceIndexPlace' }>> =>
-  Object.freeze(
-    expressionsOf(self, module).filter(
-      (
-        expression,
-      ): expression is Extract<
-        Tir.Expression,
-        { readonly _tag: 'IndexPlace' | 'SliceIndexPlace' }
-      > => expression._tag === 'IndexPlace' || expression._tag === 'SliceIndexPlace',
-    ),
+  expressionsOf(self, module).filter(
+    (
+      expression,
+    ): expression is Extract<Tir.Expression, { readonly _tag: 'IndexPlace' | 'SliceIndexPlace' }> =>
+      expression._tag === 'IndexPlace' || expression._tag === 'SliceIndexPlace',
   )
 
 /** Returns canonical fixed-array types used by one module's contracts and expressions. */
@@ -1167,7 +1152,7 @@ export const fixedArrayTypesOf = (
   for (const expression of expressionsOf(self, module)) {
     if (expression._tag !== 'Unavailable') add(expression.type)
   }
-  return Object.freeze([...found.values()])
+  return [...found.values()]
 }
 
 /** Returns one module's ownership facts and cleanup plans, or `undefined` for an unknown identity. */
@@ -1204,38 +1189,32 @@ export const layoutOf = (self: Snapshot): Targeted<Layout.Plan> => self.layout
 /** Returns every reachable repeated layout without asking tooling to reconstruct arrays. */
 export const repeatedLayoutsOf = (self: Snapshot): ReadonlyArray<Layout.Entry> =>
   self.layout._tag === 'Available'
-    ? Object.freeze(
-        self.layout.value.entries.filter((entry) => entry.representation._tag === 'Repeated'),
-      )
-    : Object.freeze([])
+    ? self.layout.value.entries.filter((entry) => entry.representation._tag === 'Repeated')
+    : []
 
 /** Returns every reachable array calling shape and its canonical physical paths. */
 export const arrayCallingShapesOf = (self: Snapshot): ReadonlyArray<Layout.CallingShape> =>
   self.layout._tag === 'Available'
-    ? Object.freeze(
-        self.layout.value.callingShapes.filter((shape) => Type.isFixedArray(shape.type)),
-      )
-    : Object.freeze([])
+    ? self.layout.value.callingShapes.filter((shape) => Type.isFixedArray(shape.type))
+    : []
 
 /** Returns every match-local ownership and cleanup plan in function/source order. */
 export const ownershipMatchesOf = (
   self: FrontendSnapshot,
   module: string,
 ): ReadonlyArray<Ownership.MatchOwnership> =>
-  Object.freeze(self.ownership.get(module)?.functions.flatMap((fn) => fn.matches) ?? [])
+  self.ownership.get(module)?.functions.flatMap((fn) => fn.matches) ?? []
 
 /** Returns every structured MIR match, including nested expression matches, in DAG preorder. */
 export const mirMatchesOf = (
   self: Snapshot,
 ): ReadonlyArray<Extract<Mir.Operation, { readonly _tag: 'Match' }>> => {
   if (self.mir._tag === 'Unavailable') {
-    return Object.freeze([])
+    return []
   }
-  return Object.freeze(
-    self.mir.value.functions.flatMap((fn) =>
-      MirVerification.operations(fn).flatMap((operation) =>
-        operation._tag === 'Match' ? [operation] : [],
-      ),
+  return self.mir.value.functions.flatMap((fn) =>
+    MirVerification.operations(fn).flatMap((operation) =>
+      operation._tag === 'Match' ? [operation] : [],
     ),
   )
 }
@@ -1251,9 +1230,7 @@ export const loweredMir = (self: Snapshot): Mir.Module => {
 
 /** Returns deterministic shared-MIR Effect normalization decisions for tooling and cost gates. */
 export const effectNormalizationOf = (self: Snapshot): ReadonlyArray<Mir.NormalizationVerdict> =>
-  self.mir._tag === 'Available'
-    ? (self.mir.value.normalization ?? Object.freeze([]))
-    : Object.freeze([])
+  self.mir._tag === 'Available' ? (self.mir.value.normalization ?? []) : []
 
 /** Looks up one declaration name within one module. */
 export const declarationByName = (
@@ -1374,7 +1351,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
           ForeignAvailability.callbackAddresses(self.mir.value),
           ForeignAvailability.staticLoads(self.mir.value),
         )
-      : Object.freeze([])
+      : []
   if (foreign.length > 0) {
     return yield* new CodegenUnavailable({
       operation: 'Analysis.codegen',

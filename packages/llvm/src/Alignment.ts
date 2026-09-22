@@ -19,10 +19,10 @@ export interface Alignment {
  * @category alignment
  * @since 0.0.0
  */
-export const defaultAlignment: Alignment = Object.freeze({
+export const defaultAlignment: Alignment = {
   _tag: 'Alignment',
   byteUnits: undefined,
-})
+}
 
 /** @internal */
 const isPowerOfTwo = (value: bigint): boolean => value > 0n && (value & (value - 1n)) === 0n
@@ -68,7 +68,7 @@ export const fromByteUnits = Effect.fnUntraced(function* (
       input: byteUnits,
     })
   }
-  return Object.freeze({ _tag: 'Alignment', byteUnits: value })
+  return { _tag: 'Alignment', byteUnits: value }
 })
 
 /**

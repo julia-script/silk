@@ -23,7 +23,6 @@ export const make = <Tag extends string>(
   index: number,
 ): Handle<Tag> => {
   const handle: Handle<Tag> = { _tag: tag, [HandleTypeId]: HandleTypeId }
-  Object.freeze(handle)
   entries.set(handle, { kind: tag, owner, index })
   return handle
 }

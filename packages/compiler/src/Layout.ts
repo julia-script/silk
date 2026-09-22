@@ -446,30 +446,28 @@ export const computeTypes = Effect.fn('Layout.computeTypes')(function* (
     if (declaration.union.typeParameters.length === 0) yield* layoutNominal(state, declaration.type)
   }
   yield* completeCatalog(state, referenced)
-  return Object.freeze({
+  return {
     _tag: 'LayoutCatalog',
     target,
-    entries: Object.freeze(
-      [...completed.values()].sort((left, right) => compareRuntimeTypes(left.type, right.type)),
+    entries: [...completed.values()].sort((left, right) =>
+      compareRuntimeTypes(left.type, right.type),
     ),
-    wordConstants: Object.freeze(
-      index.modules.flatMap((module) =>
-        module.constants.flatMap((constant) => {
-          if (constant.declaredType._tag !== 'Resolved' || !isWordType(constant.declaredType.type))
-            return []
-          const literal = constant.literal
-          if (literal._tag !== 'IntegerLiteral') return []
-          return [
-            Object.freeze({
-              type: constant.declaredType.type,
-              value: literal.value,
-              span: registry.spanOf(literal.anchor),
-            }),
-          ]
-        }),
-      ),
+    wordConstants: index.modules.flatMap((module) =>
+      module.constants.flatMap((constant) => {
+        if (constant.declaredType._tag !== 'Resolved' || !isWordType(constant.declaredType.type))
+          return []
+        const literal = constant.literal
+        if (literal._tag !== 'IntegerLiteral') return []
+        return [
+          {
+            type: constant.declaredType.type,
+            value: literal.value,
+            span: registry.spanOf(literal.anchor),
+          },
+        ]
+      }),
     ),
-  })
+  }
 })
 
 const completeForInstances = Effect.fnUntraced(function* (
@@ -497,14 +495,12 @@ const completeForInstances = Effect.fnUntraced(function* (
   for (const entry of self.entries) {
     if (entry._tag === 'LayoutEntry') state.completed.set(Type.runtimeKey(entry.type), entry)
   }
-  return Object.freeze({
+  return {
     ...self,
-    entries: Object.freeze(
-      [...state.completed.values()].sort((left, right) =>
-        compareRuntimeTypes(left.type, right.type),
-      ),
+    entries: [...state.completed.values()].sort((left, right) =>
+      compareRuntimeTypes(left.type, right.type),
     ),
-  })
+  }
 })
 
 /** Selects runtime-reachable entries while reusing nominal decisions from the catalog. */
@@ -519,8 +515,8 @@ export const computeRuntime = Effect.fn('Layout.computeRuntime')(function* (
   const entries = new Map<string, Entry>()
   const state: PlanState = { catalog: completed, entries }
   yield* resolveEntries(state, reached)
-  const orderedEntries = Object.freeze(
-    [...entries.values()].sort((left, right) => compareRuntimeTypes(left.type, right.type)),
+  const orderedEntries = [...entries.values()].sort((left, right) =>
+    compareRuntimeTypes(left.type, right.type),
   )
   const literals = yield* planLiteralVerdicts(completed.target, discovery, completed.wordConstants)
   const localSharedAllocationProvenance = yield* planLocalSharedAllocation(discovery, index)
@@ -553,14 +549,14 @@ export const computeRuntime = Effect.fn('Layout.computeRuntime')(function* (
     effectPlans,
     callablePlans,
   )
-  const base: Plan = Object.freeze({
+  const base: Plan = {
     _tag: 'LayoutPlan',
     target: completed.target,
     entries: orderedEntries,
     effectEnvironments: effectPlans,
     callableEnvironments: callablePlans,
     callingShapes: plannedShapes,
-    valueStorage: Object.freeze([]),
+    valueStorage: [],
     staticData,
     literalVerdicts: literals.verdicts,
     localSharedAllocationProvenance,
@@ -571,11 +567,11 @@ export const computeRuntime = Effect.fn('Layout.computeRuntime')(function* (
       ...localSharedAllocationProvenance.diagnostics,
       ...executionDiagnostics,
     ]),
-  })
-  return Object.freeze({
+  }
+  return {
     ...base,
     valueStorage: yield* planValueStorage(base),
-  })
+  }
 })
 
 /** Constructs a scalar plan for hand-built MIR samples and focused tests. */
@@ -584,23 +580,23 @@ export const make = Effect.fn('Layout.make')(function* (
   types: ReadonlyArray<Type.Builtin>,
 ): Effect.fn.Return<Plan> {
   const entries = new Map(types.map((type) => [Type.runtimeKey(type), scalarEntry(target, type)]))
-  const orderedEntries = Object.freeze(
-    [...entries.values()].sort((left, right) => compareRuntimeTypes(left.type, right.type)),
+  const orderedEntries = [...entries.values()].sort((left, right) =>
+    compareRuntimeTypes(left.type, right.type),
   )
-  return Object.freeze({
+  return {
     _tag: 'LayoutPlan',
     target,
     entries: orderedEntries,
-    effectEnvironments: Object.freeze([]),
-    callableEnvironments: Object.freeze([]),
+    effectEnvironments: [],
+    callableEnvironments: [],
     callingShapes: yield* planCallingShapes(target, orderedEntries),
-    valueStorage: Object.freeze([]),
-    staticData: Object.freeze([]),
-    literalVerdicts: Object.freeze([]),
+    valueStorage: [],
+    staticData: [],
+    literalVerdicts: [],
     localSharedAllocationProvenance: LocalSharedAllocationProvenance.empty(),
     executionPackages: ExecutionPackage.empty(),
-    diagnostics: Object.freeze([]),
-  })
+    diagnostics: [],
+  }
 })
 
 // Catalog construction
@@ -630,27 +626,27 @@ const makeCatalogState = (
     .flatMap((module) => module.structs)
     .flatMap((struct) => {
       const type = nominalOf(struct)
-      return type === undefined ? [] : [Object.freeze({ struct, type })]
+      return type === undefined ? [] : [{ struct, type }]
     })
     .sort((left, right) => compareRuntimeTypes(left.type, right.type))
   const generatedDeclarations = [...index.generatedAggregates.values()]
     .flatMap((struct) => {
       const type = nominalOf(struct)
-      return type === undefined ? [] : [Object.freeze({ struct, type })]
+      return type === undefined ? [] : [{ struct, type }]
     })
     .sort((left, right) => compareRuntimeTypes(left.type, right.type))
   const enumDeclarations = index.modules
     .flatMap((module) => module.enums)
     .flatMap((enum_) => {
       const type = nominalOf(enum_)
-      return type === undefined ? [] : [Object.freeze({ enum_, type })]
+      return type === undefined ? [] : [{ enum_, type }]
     })
     .sort((left, right) => compareRuntimeTypes(left.type, right.type))
   const unionDeclarations = index.modules
     .flatMap((module) => module.unions)
     .flatMap((union) => {
       const type = nominalOf(union)
-      return type === undefined ? [] : [Object.freeze({ union, type })]
+      return type === undefined ? [] : [{ union, type }]
     })
     .sort((left, right) => compareRuntimeTypes(left.type, right.type))
   const byType = new Map(
@@ -679,7 +675,7 @@ const makeCatalogState = (
       entry ??
         unavailable(
           declaration.type,
-          Object.freeze([]),
+          [],
           {
             _tag: 'InvalidDeclaration',
             detail: `scalar enum ${Type.encode(declaration.type)} has no valid fixed-width representation plan`,
@@ -821,7 +817,7 @@ const layoutType = Effect.fnUntraced(function* (
     return result
   }
   if (Type.isParameter(type)) {
-    return unavailable(type, Object.freeze([]), {
+    return unavailable(type, [], {
       _tag: 'InvalidDeclaration',
       detail: `open generic parameter ${Type.encode(type)} has no target layout`,
     })
@@ -835,7 +831,7 @@ const layoutType = Effect.fnUntraced(function* (
     if (element._tag === 'UnavailableLayoutEntry') {
       const result = unavailable(
         type,
-        Object.freeze(Type.nominals(type.element)),
+        Type.nominals(type.element),
         { _tag: 'UnavailableDependency', dependency: type.element },
         element.cause,
       )
@@ -871,7 +867,7 @@ const layoutType = Effect.fnUntraced(function* (
       if (memberLayout._tag === 'UnavailableLayoutEntry') {
         const result = unavailable(
           type,
-          Object.freeze(type.members.flatMap(Type.nominals)),
+          type.members.flatMap(Type.nominals),
           { _tag: 'UnavailableDependency', dependency: member },
           memberLayout.cause,
         )
@@ -880,12 +876,12 @@ const layoutType = Effect.fnUntraced(function* (
       }
       members.push(memberLayout)
     }
-    const result = unionEntry(type, Object.freeze(members))
+    const result = unionEntry(type, members)
     completed.set(key, result)
     return result
   }
   if (Type.isEffect(type)) {
-    const result = unavailable(type, Object.freeze(Type.nominals(type)), {
+    const result = unavailable(type, Type.nominals(type), {
       _tag: 'InvalidDeclaration',
       detail: 'compiler-private effect values have no target layout',
     })
@@ -893,7 +889,7 @@ const layoutType = Effect.fnUntraced(function* (
     return result
   }
   if (Type.isCallable(type)) {
-    const result = unavailable(type, Object.freeze(Type.nominals(type)), {
+    const result = unavailable(type, Type.nominals(type), {
       _tag: 'InvalidDeclaration',
       detail: 'callable environment layout is planned from its hidden concrete identity',
     })
@@ -904,7 +900,7 @@ const layoutType = Effect.fnUntraced(function* (
     return yield* layoutDirectRepresented(state, type)
   }
   const element = yield* layoutType(state, type.element)
-  const dependencies = Object.freeze(Type.nominals(type.element))
+  const dependencies = Type.nominals(type.element)
   if (element._tag === 'UnavailableLayoutEntry') {
     const result = unavailable(
       type,
@@ -937,23 +933,23 @@ const layoutNominal = Effect.fn('Layout.layoutNominal')(function* (
   const existing = completed.get(key)
   if (existing !== undefined) return existing
   if (Type.isSharedCore(type) || Type.isExecution(type) || Type.isWake(type)) {
-    const result: Entry = Object.freeze({
+    const result: Entry = {
       _tag: 'LayoutEntry',
       type,
       copy: false,
       size: target.pointerSize,
       alignment: target.pointerAlignment,
-      representation: Object.freeze({
+      representation: {
         _tag: 'Reference',
         target: type,
-        address: Object.freeze({
+        address: {
           bits: target.pointerSize === 4 ? 32 : 64,
           offset: 0,
           size: target.pointerSize,
           alignment: target.pointerAlignment,
-        }),
-      }),
-    })
+        },
+      },
+    }
     completed.set(key, result)
     return result
   }
@@ -966,7 +962,7 @@ const layoutNominal = Effect.fn('Layout.layoutNominal')(function* (
   }
   const declaration = byType.get(`${type.module}\u0000${type.name}`)
   if (declaration === undefined) {
-    return unavailable(type, Object.freeze([]), {
+    return unavailable(type, [], {
       _tag: 'InvalidDeclaration',
       detail: `missing canonical declaration for ${Type.encode(type)}`,
     })
@@ -974,7 +970,7 @@ const layoutNominal = Effect.fn('Layout.layoutNominal')(function* (
   const parameters = declaration.struct.typeParameters.map((parameter) => parameter.type)
   const substitution = TypeInference.substitution(parameters, type.arguments)
   if (substitution === undefined) {
-    return unavailable(type, Object.freeze([]), {
+    return unavailable(type, [], {
       _tag: 'InvalidDeclaration',
       detail: `${Type.encode(type)} has ${type.arguments.length} type arguments; expected ${parameters.length}`,
     })
@@ -1050,18 +1046,16 @@ const layoutNominal = Effect.fn('Layout.layoutNominal')(function* (
     let fieldName = ''
     if (field.name._tag === 'Present') fieldName = field.name.spelling
     else if (field.member._tag === 'OrdinalAggregateMember') fieldName = `${field.member.ordinal}`
-    inputs.push(
-      Object.freeze({
-        value: Object.freeze({
-          _tag: 'LayoutField' as const,
-          id: field.id,
-          name: fieldName,
-          type: fieldType,
-        }),
-        size: fieldLayout.size,
-        alignment: fieldLayout.alignment,
-      }),
-    )
+    inputs.push({
+      value: {
+        _tag: 'LayoutField' as const,
+        id: field.id,
+        name: fieldName,
+        type: fieldType,
+      },
+      size: fieldLayout.size,
+      alignment: fieldLayout.alignment,
+    })
   }
   visiting.delete(key)
   if (failure !== undefined) {
@@ -1069,11 +1063,9 @@ const layoutNominal = Effect.fn('Layout.layoutNominal')(function* (
     return failure
   }
   const packed = Packing.pack(inputs)
-  const fields = packed.fields.map(({ value, ...placement }) =>
-    Object.freeze({ ...value, ...placement }),
-  )
+  const fields = packed.fields.map(({ value, ...placement }) => ({ ...value, ...placement }))
   const cleanup = CleanupPlan.cleanupPlan(index, type)
-  const entry: Entry = Object.freeze({
+  const entry: Entry = {
     _tag: 'LayoutEntry',
     type,
     copy:
@@ -1082,20 +1074,20 @@ const layoutNominal = Effect.fn('Layout.layoutNominal')(function* (
       cleanup._tag !== 'HookCleanup',
     size: packed.size,
     alignment: packed.alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'Aggregate',
-      fields: Object.freeze(fields),
+      fields: fields,
       tailPadding: packed.tailPadding,
       ...(cleanup._tag === 'HookCleanup'
         ? {
-            cleanupHook: Object.freeze({
+            cleanupHook: {
               hook: cleanup.hook,
               typeArguments: cleanup.typeArguments,
-            }),
+            },
           }
         : {}),
-    }),
-  })
+    },
+  }
   completed.set(key, entry)
   return entry
 })
@@ -1109,35 +1101,29 @@ const layoutIntrinsicNominal = Effect.fn('Layout.layoutIntrinsicNominal')(functi
   const ordinal = Type.equals(type, Type.unit)
     ? Type.intrinsicNominals.size
     : Type.intrinsicNominalOrdinal(type)
-  const structId: DeclarationFacts.DeclarationId = Object.freeze({
+  const structId: DeclarationFacts.DeclarationId = {
     _tag: 'DeclarationId',
     sourceId: type.module,
     ordinal,
-  })
-  let fieldTypes: ReadonlyArray<readonly [string, Type.Type]> = Object.freeze([])
+  }
+  let fieldTypes: ReadonlyArray<readonly [string, Type.Type]> = []
   if (Type.equals(type, Type.layout)) {
-    fieldTypes = Object.freeze([
-      Object.freeze(['bytes', 'usize'] as const),
-      Object.freeze(['alignment', 'usize'] as const),
-    ])
+    fieldTypes = [['bytes', 'usize'] as const, ['alignment', 'usize'] as const]
   } else if (Type.equals(type, Type.invalidAlignment)) {
-    fieldTypes = Object.freeze([Object.freeze(['alignment', 'usize'] as const)])
+    fieldTypes = [['alignment', 'usize'] as const]
   } else if (Type.equals(type, Type.allocation)) {
-    fieldTypes = Object.freeze([
-      Object.freeze(['$base', 'usize'] as const),
-      Object.freeze(['$bytes', 'usize'] as const),
-      Object.freeze(['$alignment', 'usize'] as const),
-      Object.freeze(['$reclaim', 'usize'] as const),
-      Object.freeze(['$context', 'usize'] as const),
-      Object.freeze(['$active', 'usize'] as const),
-    ])
+    fieldTypes = [
+      ['$base', 'usize'] as const,
+      ['$bytes', 'usize'] as const,
+      ['$alignment', 'usize'] as const,
+      ['$reclaim', 'usize'] as const,
+      ['$context', 'usize'] as const,
+      ['$active', 'usize'] as const,
+    ]
   } else if (Type.isRawBuffer(type)) {
-    fieldTypes = Object.freeze([
-      Object.freeze(['$allocation', Type.allocation] as const),
-      Object.freeze(['count', 'usize'] as const),
-    ])
+    fieldTypes = [['$allocation', Type.allocation] as const, ['count', 'usize'] as const]
   } else if (Type.isSlot(type)) {
-    fieldTypes = Object.freeze([Object.freeze(['$address', 'usize'] as const)])
+    fieldTypes = [['$address', 'usize'] as const]
   }
   const inputs: Array<Packing.Input<Omit<Field, keyof Packing.PlacedField>>> = []
   for (const [fieldOrdinal, [name, fieldType]] of fieldTypes.entries()) {
@@ -1150,49 +1136,45 @@ const layoutIntrinsicNominal = Effect.fn('Layout.layoutIntrinsicNominal')(functi
     if (fieldLayout === undefined || fieldLayout._tag === 'UnavailableLayoutEntry') {
       const result = unavailable(
         type,
-        Object.freeze(Type.nominals(fieldType)),
+        Type.nominals(fieldType),
         { _tag: 'UnavailableDependency', dependency: fieldType },
         fieldLayout?.cause,
       )
       completed.set(key, result)
       return result
     }
-    inputs.push(
-      Object.freeze({
-        value: Object.freeze({
-          _tag: 'LayoutField' as const,
-          id: Object.freeze({
-            _tag: 'FieldId' as const,
-            owner: Object.freeze({
-              _tag: 'StructFieldOwnerId' as const,
-              declaration: structId,
-            }),
-            ordinal: fieldOrdinal,
-          }),
-          name,
-          type: fieldType,
-        }),
-        size: fieldLayout.size,
-        alignment: fieldLayout.alignment,
-      }),
-    )
+    inputs.push({
+      value: {
+        _tag: 'LayoutField' as const,
+        id: {
+          _tag: 'FieldId' as const,
+          owner: {
+            _tag: 'StructFieldOwnerId' as const,
+            declaration: structId,
+          },
+          ordinal: fieldOrdinal,
+        },
+        name,
+        type: fieldType,
+      },
+      size: fieldLayout.size,
+      alignment: fieldLayout.alignment,
+    })
   }
   const packed = Packing.pack(inputs)
-  const fields = packed.fields.map(({ value, ...placement }) =>
-    Object.freeze({ ...value, ...placement }),
-  )
-  const entry: Entry = Object.freeze({
+  const fields = packed.fields.map(({ value, ...placement }) => ({ ...value, ...placement }))
+  const entry: Entry = {
     _tag: 'LayoutEntry',
     type,
     copy: Type.equals(type, Type.unit),
     size: packed.size,
     alignment: packed.alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'Aggregate',
-      fields: Object.freeze(fields),
+      fields: fields,
       tailPadding: packed.tailPadding,
-    }),
-  })
+    },
+  }
   completed.set(key, entry)
   return entry
 })
@@ -1206,7 +1188,7 @@ const layoutNominalUnion = Effect.fn('Layout.layoutNominalUnion')(function* (
   const key = Type.runtimeKey(type)
   const union = unionDeclaration.union
   if (union.canonical._tag !== 'Canonical') {
-    const result = unavailable(type, Object.freeze([]), {
+    const result = unavailable(type, [], {
       _tag: 'InvalidDeclaration',
       detail: `canonical identity is unavailable for ${Type.encode(type)}`,
     })
@@ -1215,8 +1197,7 @@ const layoutNominalUnion = Effect.fn('Layout.layoutNominalUnion')(function* (
   }
   const parameters = union.typeParameters.map((parameter) => parameter.type)
   const substitution = TypeInference.substitution(parameters, type.arguments)
-  const dependencies =
-    substitution === undefined ? Object.freeze([]) : dependenciesOf(union, substitution)
+  const dependencies = substitution === undefined ? [] : dependenciesOf(union, substitution)
   if (substitution === undefined) {
     return unavailable(type, dependencies, {
       _tag: 'InvalidDeclaration',
@@ -1298,33 +1279,27 @@ const layoutNominalUnion = Effect.fn('Layout.layoutNominalUnion')(function* (
         break
       }
       fieldsCopy = fieldsCopy && fieldLayout.copy
-      inputs.push(
-        Object.freeze({
-          value: Object.freeze({
-            _tag: 'LayoutField' as const,
-            id: field.id,
-            name: field.name.spelling,
-            type: fieldType,
-          }),
-          size: fieldLayout.size,
-          alignment: fieldLayout.alignment,
-        }),
-      )
+      inputs.push({
+        value: {
+          _tag: 'LayoutField' as const,
+          id: field.id,
+          name: field.name.spelling,
+          type: fieldType,
+        },
+        size: fieldLayout.size,
+        alignment: fieldLayout.alignment,
+      })
     }
     if (failure !== undefined) break
     const packed = Packing.pack(inputs)
-    variants.push(
-      Object.freeze({
-        variant: variant.canonical.id,
-        ordinal: variant.id.ordinal,
-        fields: Object.freeze(
-          packed.fields.map(({ value, ...placement }) => Object.freeze({ ...value, ...placement })),
-        ),
-        size: packed.size,
-        alignment: packed.alignment,
-        tailPadding: packed.tailPadding,
-      }),
-    )
+    variants.push({
+      variant: variant.canonical.id,
+      ordinal: variant.id.ordinal,
+      fields: packed.fields.map(({ value, ...placement }) => ({ ...value, ...placement })),
+      size: packed.size,
+      alignment: packed.alignment,
+      tailPadding: packed.tailPadding,
+    })
   }
   visiting.delete(key)
   if (failure !== undefined) {
@@ -1340,7 +1315,7 @@ const layoutNominalUnion = Effect.fn('Layout.layoutNominalUnion')(function* (
   const alignment = Math.max(4, payloadAlignment)
   const size = alignUp(payloadOffset + payloadSize, alignment)
   const cleanup = CleanupPlan.cleanupPlan(index, type)
-  const entry: Entry = Object.freeze({
+  const entry: Entry = {
     _tag: 'LayoutEntry',
     type,
     copy:
@@ -1349,11 +1324,11 @@ const layoutNominalUnion = Effect.fn('Layout.layoutNominalUnion')(function* (
       cleanup._tag !== 'HookCleanup',
     size,
     alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'NominalUnion',
       union: union.canonical.id,
-      tag: Object.freeze({ bits: 32, size: 4 }),
-      variants: Object.freeze(variants),
+      tag: { bits: 32, size: 4 },
+      variants: variants,
       payloadOffset,
       payloadSize,
       payloadAlignment,
@@ -1361,14 +1336,14 @@ const layoutNominalUnion = Effect.fn('Layout.layoutNominalUnion')(function* (
       tailPadding: size - (payloadOffset + payloadSize),
       ...(cleanup._tag === 'HookCleanup'
         ? {
-            cleanupHook: Object.freeze({
+            cleanupHook: {
               hook: cleanup.hook,
               typeArguments: cleanup.typeArguments,
-            }),
+            },
           }
         : {}),
-    }),
-  })
+    },
+  }
   completed.set(key, entry)
   return entry
 })
@@ -1404,7 +1379,7 @@ const visitAggregateField = Effect.fnUntraced(function* (
         ? undefined
         : FieldRealization.realizationOf(callableRealizations, type, plan.id)
     if (realization === undefined) {
-      return unavailable(candidate, Object.freeze(Type.nominals(candidate)), {
+      return unavailable(candidate, Type.nominals(candidate), {
         _tag: 'InvalidDeclaration',
         detail: 'represented executable values remain unavailable to layout',
       })
@@ -1418,7 +1393,7 @@ const visitAggregateField = Effect.fnUntraced(function* (
     if (element._tag === 'UnavailableLayoutEntry') return element
     return (
       repeatedEntry(candidate, element) ??
-      unavailable(candidate, Object.freeze(Type.nominals(candidate.element)), {
+      unavailable(candidate, Type.nominals(candidate.element), {
         _tag: 'InvalidDeclaration',
         detail: `array layout overflows for ${Type.encode(candidate)}`,
       })
@@ -1443,7 +1418,7 @@ const layoutDirectRepresented = Effect.fn('Layout.layoutDirectRepresented')(func
   const existing = completed.get(typeKey)
   if (existing?._tag === 'LayoutEntry') return existing
   if (active.has(typeKey))
-    return unavailable(type, Object.freeze(Type.nominals(type)), {
+    return unavailable(type, Type.nominals(type), {
       _tag: 'InvalidDeclaration',
       detail: 'recursive executable union representation has no finite inline layout',
     })
@@ -1454,7 +1429,7 @@ const layoutDirectRepresented = Effect.fn('Layout.layoutDirectRepresented')(func
   if (Type.isCompositeEffectRepresentationArgument(argument))
     return yield* layoutCompositeRepresentation(state, type, argument, next)
   if (!Type.isExactRepresentationArgument(argument))
-    return unavailable(type, Object.freeze(Type.nominals(type)), {
+    return unavailable(type, Type.nominals(type), {
       _tag: 'InvalidDeclaration',
       detail: 'open executable union member has no finite realization',
     })
@@ -1462,7 +1437,7 @@ const layoutDirectRepresented = Effect.fn('Layout.layoutDirectRepresented')(func
     return yield* layoutCallableRepresentation(state, type, argument.identity)
   if (Type.isEffect(type.contract) && Type.isEffectIdentityArgument(argument.identity))
     return yield* layoutEffectRepresentation(state, type, argument.identity)
-  return unavailable(type, Object.freeze(Type.nominals(type)), {
+  return unavailable(type, Type.nominals(type), {
     _tag: 'InvalidDeclaration',
     detail: 'executable union member representation does not match its contract',
   })
@@ -1483,7 +1458,7 @@ const layoutOpaqueRepresentation = Effect.fn('Layout.layoutOpaqueRepresentation'
       : OpaqueRealization.definitionOf(opaqueRealizations, argument)
   const realization = definition?.realization
   if (realization === undefined)
-    return unavailable(type, Object.freeze(Type.nominals(type)), {
+    return unavailable(type, Type.nominals(type), {
       _tag: 'InvalidDeclaration',
       detail: 'opaque executable union member has no finite realization',
     })
@@ -1493,7 +1468,7 @@ const layoutOpaqueRepresentation = Effect.fn('Layout.layoutOpaqueRepresentation'
     next,
   )
   if (realized._tag === 'UnavailableLayoutEntry') return realized
-  const result: Entry = Object.freeze({ ...realized, type })
+  const result: Entry = { ...realized, type }
   completed.set(typeKey, result)
   return result
 })
@@ -1535,18 +1510,18 @@ const layoutCompositeRepresentation = Effect.fn('Layout.layoutCompositeRepresent
   const payloadOffset = alignUp(4, payloadAlignment)
   const alignment = Math.max(4, payloadAlignment)
   const size = alignUp(payloadOffset + payloadSize, alignment)
-  const result: Entry = Object.freeze({
+  const result: Entry = {
     _tag: 'LayoutEntry',
     type,
     copy: entries.every((entry) => entry.copy),
     size,
     alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'Aggregate',
-      fields: Object.freeze([]),
+      fields: [],
       tailPadding: size,
-    }),
-  })
+    },
+  }
   completed.set(typeKey, result)
   return result
 })
@@ -1566,7 +1541,7 @@ const layoutCallableRepresentation = Effect.fn('Layout.layoutCallableRepresentat
           FieldRealization.matchesIdentity(identity, candidate),
         )
   if (identity.environment !== undefined && callable === undefined)
-    return unavailable(type, Object.freeze(Type.nominals(type)), {
+    return unavailable(type, Type.nominals(type), {
       _tag: 'InvalidDeclaration',
       detail: 'callable union member has no finite environment',
     })
@@ -1584,44 +1559,48 @@ const layoutCallableRepresentation = Effect.fn('Layout.layoutCallableRepresentat
         capture.access !== 'Exclusive' &&
         (capture.access === 'Copy' || capture.access === 'Shared' || valueLayout?.copy === true)
       return [
-        Object.freeze({
-          value: Object.freeze({
+        {
+          value: {
             capture: capture.ordinal,
             type: capture.type,
             access: capture.access,
             representation: borrowed ? ('Borrow' as const) : ('Value' as const),
-          }),
+          },
           size: fieldSize,
           alignment: fieldAlignment,
-        }),
+        },
       ]
     }),
   )).flat()
   if ((callable?.captures.length ?? 0) !== fieldInputs.length)
-    return unavailable(type, Object.freeze(Type.nominals(type)), {
+    return unavailable(type, Type.nominals(type), {
       _tag: 'InvalidDeclaration',
       detail: 'callable union member captures a value without finite layout',
     })
   const packed = Packing.pack(fieldInputs)
-  const fields = packed.fields.map(({ value, offset, size, alignment, padding }) =>
-    Object.freeze({ ...value, offset, size, alignment, padding }),
-  )
-  const result: Entry = Object.freeze({
+  const fields = packed.fields.map(({ value, offset, size, alignment, padding }) => ({
+    ...value,
+    offset,
+    size,
+    alignment,
+    padding,
+  }))
+  const result: Entry = {
     _tag: 'LayoutEntry',
     type,
     copy,
     size: packed.size,
     alignment: packed.alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'Aggregate',
-      fields: Object.freeze([]),
+      fields: [],
       tailPadding: packed.size,
-    }),
-    executable: Object.freeze({
+    },
+    executable: {
       _tag: 'Callable',
-      fields: Object.freeze(fields),
-    }),
-  })
+      fields: fields,
+    },
+  }
   completed.set(typeKey, result)
   return result
 })
@@ -1645,43 +1624,39 @@ const layoutEffectRepresentation = Effect.fn('Layout.layoutEffectRepresentation'
           new Set([effect.identity]),
         )
   if (environment === undefined)
-    return unavailable(type, Object.freeze(Type.nominals(type)), {
+    return unavailable(type, Type.nominals(type), {
       _tag: 'InvalidDeclaration',
       detail: 'Effect union member has no finite environment',
     })
-  const result: Entry = Object.freeze({
+  const result: Entry = {
     _tag: 'LayoutEntry',
     type,
     copy: environment.copy,
     size: environment.size,
     alignment: environment.alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'Aggregate',
-      fields: Object.freeze([]),
+      fields: [],
       tailPadding: environment.size,
-    }),
-    executable: Object.freeze({
+    },
+    executable: {
       _tag: 'Effect',
-      fields: Object.freeze(
-        environment.fields.map((field) =>
-          Object.freeze({
-            capture: field.capture,
-            type: field.type,
-            access: field.access,
-            representation: field.representation,
-            offset: field.offset,
-            size: field.size,
-            alignment: field.alignment,
-            padding: field.padding,
-            ...(field.effectIdentity === undefined ? {} : { effectIdentity: field.effectIdentity }),
-            ...(field.callableIdentity === undefined
-              ? {}
-              : { callableIdentity: field.callableIdentity }),
-          }),
-        ),
-      ),
-    }),
-  })
+      fields: environment.fields.map((field) => ({
+        capture: field.capture,
+        type: field.type,
+        access: field.access,
+        representation: field.representation,
+        offset: field.offset,
+        size: field.size,
+        alignment: field.alignment,
+        padding: field.padding,
+        ...(field.effectIdentity === undefined ? {} : { effectIdentity: field.effectIdentity }),
+        ...(field.callableIdentity === undefined
+          ? {}
+          : { callableIdentity: field.callableIdentity }),
+      })),
+    },
+  }
   completed.set(typeKey, result)
   return result
 })
@@ -1744,11 +1719,11 @@ const layoutEffectSlots = Effect.fnUntraced(function* (
           (capture.access === 'Copy' || capture.access === 'Shared' || captureLayout?.copy === true)
       }
       const packed = Packing.pack(captureInputs)
-      nestedLayout = Object.freeze({
+      nestedLayout = {
         size: packed.size,
         alignment: packed.alignment,
         copy: callableCopy,
-      })
+      }
     } else if (!borrowed) {
       const candidate = yield* layoutType(state, slot.type)
       if (candidate._tag === 'UnavailableLayoutEntry') return undefined
@@ -1766,7 +1741,7 @@ const layoutEffectSlots = Effect.fnUntraced(function* (
     if (borrowed) representation = 'Borrow'
     else if (nestedCallable !== undefined) representation = 'Callable'
     fieldInputs.push({
-      value: Object.freeze({
+      value: {
         capture: slot.ordinal,
         source: slot.source,
         ordinal: slot.sourceOrdinal,
@@ -1778,23 +1753,25 @@ const layoutEffectSlots = Effect.fnUntraced(function* (
         ...(slot.providedRequirement === undefined
           ? {}
           : { providedRequirement: slot.providedRequirement }),
-      }),
+      },
       size,
       alignment,
     })
   }
   const packed = Packing.pack(fieldInputs)
-  return Object.freeze({
-    fields: Object.freeze(
-      packed.fields.map(({ value, offset, size, alignment, padding }) =>
-        Object.freeze({ ...value, offset, size, alignment, padding }),
-      ),
-    ),
+  return {
+    fields: packed.fields.map(({ value, offset, size, alignment, padding }) => ({
+      ...value,
+      offset,
+      size,
+      alignment,
+      padding,
+    })),
     copy,
     size: packed.size,
     alignment: packed.alignment,
     tailPadding: packed.tailPadding,
-  })
+  }
 })
 
 const layoutRepresentedCallable = Effect.fn('Layout.layoutRepresentedCallable')(function* (
@@ -1814,7 +1791,7 @@ const layoutRepresentedCallable = Effect.fn('Layout.layoutRepresentedCallable')(
     if (valueLayout?._tag === 'UnavailableLayoutEntry') {
       const result = unavailable(
         type,
-        Object.freeze(Type.nominals(capture.type)),
+        Type.nominals(capture.type),
         { _tag: 'UnavailableDependency', dependency: capture.type },
         valueLayout?.cause,
       )
@@ -1827,37 +1804,33 @@ const layoutRepresentedCallable = Effect.fn('Layout.layoutRepresentedCallable')(
       copy &&
       capture.access !== 'Exclusive' &&
       (capture.access === 'Copy' || capture.access === 'Shared' || valueLayout?.copy === true)
-    inputs.push(
-      Object.freeze({
-        value: Object.freeze({
-          ordinal: capture.ordinal,
-          parameterOrdinal: capture.parameterOrdinal,
-          access: capture.access,
-          type: capture.type,
-          representation: borrowed ? ('Borrow' as const) : ('Value' as const),
-        }),
-        size,
-        alignment,
-      }),
-    )
+    inputs.push({
+      value: {
+        ordinal: capture.ordinal,
+        parameterOrdinal: capture.parameterOrdinal,
+        access: capture.access,
+        type: capture.type,
+        representation: borrowed ? ('Borrow' as const) : ('Value' as const),
+      },
+      size,
+      alignment,
+    })
   }
   const packed = Packing.pack(inputs)
-  const fields = packed.fields.map(({ value, ...placement }) =>
-    Object.freeze({ ...value, ...placement }),
-  )
-  const result: Entry = Object.freeze({
+  const fields = packed.fields.map(({ value, ...placement }) => ({ ...value, ...placement }))
+  const result: Entry = {
     _tag: 'LayoutEntry',
     type,
     copy,
     size: packed.size,
     alignment: packed.alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'CallableEnvironment',
       realization,
-      fields: Object.freeze(fields),
+      fields: fields,
       tailPadding: packed.tailPadding,
-    }),
-  })
+    },
+  }
   completed.set(key, result)
   return result
 })
@@ -1877,26 +1850,26 @@ const layoutRepresentedEffect = Effect.fn('Layout.layoutRepresentedEffect')(func
     new Set([realization.runnerIdentity]),
   )
   if (environment === undefined) {
-    const result = unavailable(type, Object.freeze(Type.nominals(type)), {
+    const result = unavailable(type, Type.nominals(type), {
       _tag: 'InvalidDeclaration',
       detail: 'stored Effect environment has an unavailable or recursive capture layout',
     })
     completed.set(key, result)
     return result
   }
-  const result: Entry = Object.freeze({
+  const result: Entry = {
     _tag: 'LayoutEntry',
     type,
     copy: environment.copy,
     size: environment.size,
     alignment: environment.alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'StoredEffectEnvironment',
       realization,
       fields: environment.fields,
       tailPadding: environment.tailPadding,
-    }),
-  })
+    },
+  }
   completed.set(key, result)
   return result
 })
@@ -2177,7 +2150,7 @@ const addFunctionTypes = Effect.fnUntraced(function* (
       })
       const requirements = fn.declaration.requirementRow.requirements.flatMap((requirement) => {
         const capability = Type.substitute(requirement.capability, substitution)
-        return Type.isNominal(capability) ? [Object.freeze({ ...requirement, capability })] : []
+        return Type.isNominal(capability) ? [{ ...requirement, capability }] : []
       })
       const outcome = Type.effect(
         type,
@@ -2465,7 +2438,7 @@ const collectShapeTypes = Effect.fn('Layout.collectShapeTypes')(function* (
     )
       shaped.set(Type.runtimeKey(type), type)
   }
-  const shapeTypes = Object.freeze([...shaped.values()].sort(compareRuntimeTypes))
+  const shapeTypes = [...shaped.values()].sort(compareRuntimeTypes)
   return shapeTypes
 })
 
@@ -2529,12 +2502,12 @@ const representedStorageLayout = (
       const environment = effectEnvironmentByIdentity(effectPlans, argument.identity)
       return environment === undefined
         ? undefined
-        : Object.freeze({ size: environment.size, alignment: environment.alignment })
+        : { size: environment.size, alignment: environment.alignment }
     }
     if (!Type.isCallableIdentityArgument(argument.identity)) return undefined
     const callableIdentity = argument.identity
     const callableEnvironment = callableIdentity.environment
-    if (callableEnvironment === undefined) return Object.freeze({ size: 0, alignment: 1 })
+    if (callableEnvironment === undefined) return { size: 0, alignment: 1 }
     const environment = callablePlans.find(
       (
         candidate,
@@ -2551,7 +2524,7 @@ const representedStorageLayout = (
     )
     return environment === undefined
       ? undefined
-      : Object.freeze({ size: environment.size, alignment: environment.alignment })
+      : { size: environment.size, alignment: environment.alignment }
   }
   if (Type.isCompositeEffectRepresentationArgument(argument)) {
     const alternatives = argument.alternatives.map((argument) =>
@@ -2577,7 +2550,7 @@ const representedStorageLayout = (
     const alignment = Math.max(4, payloadAlignment)
     const payloadOffset = alignUp(4, payloadAlignment)
     const size = alignUp(payloadOffset + payloadSize, alignment)
-    return Number.isSafeInteger(size) ? Object.freeze({ size, alignment }) : undefined
+    return Number.isSafeInteger(size) ? { size, alignment } : undefined
   }
   return undefined
 }
@@ -2594,7 +2567,7 @@ const suspensionOf = (
     return SuspensionMode.join(
       argument.alternatives.map((argument) => suspensionOf(discovery, argument)),
     )
-  return SuspensionMode.openExecutable(Object.freeze([]))
+  return SuspensionMode.openExecutable([])
 }
 
 const planExecutionPackages = Effect.fn('Layout.planExecutionPackages')(function* (
@@ -2653,13 +2626,13 @@ const planExecutionPackages = Effect.fn('Layout.planExecutionPackages')(function
       const callbackLayout = representedStorageLayout(effectPlans, callablePlans, callbackArgument)
       if (bodyLayout === undefined || endpointLayout === undefined || callbackLayout === undefined)
         continue
-      const specialization: ExecutionPackage.Specialization = Object.freeze({
+      const specialization: ExecutionPackage.Specialization = {
         result,
         body,
         endpoint,
         callback,
         suspension: suspensionOf(discovery, bodyArgument),
-      })
+      }
       const planned = ExecutionPackage.plan(state.catalog.target, specialization, {
         body: bodyLayout,
         endpoint: endpointLayout,
@@ -2667,14 +2640,14 @@ const planExecutionPackages = Effect.fn('Layout.planExecutionPackages')(function
       })
       const selected =
         planned._tag === 'ExecutionPackagePlan'
-          ? Object.freeze({
+          ? {
               ...planned,
-              cleanup: Object.freeze({
+              cleanup: {
                 body: CleanupPlan.cleanupPlan(index, body),
                 endpoint: CleanupPlan.cleanupPlan(index, endpoint),
                 callback: CleanupPlan.cleanupPlan(index, callback),
-              }),
-            })
+              },
+            }
           : planned
       const key = ExecutionPackage.specializationKey(specialization)
       if (selected._tag === 'ExecutionPackagePlan') executionPlanByKey.set(key, selected)
@@ -2690,21 +2663,17 @@ const planExecutionPackages = Effect.fn('Layout.planExecutionPackages')(function
       }
     }
   }
-  const executionPackages: ExecutionPackage.Module = Object.freeze({
+  const executionPackages: ExecutionPackage.Module = {
     _tag: 'ExecutionPackageModule',
-    plans: Object.freeze(
-      [...executionPlanByKey.values()].sort((left, right) =>
-        left.provenance.localeCompare(right.provenance),
+    plans: [...executionPlanByKey.values()].sort((left, right) =>
+      left.provenance.localeCompare(right.provenance),
+    ),
+    unavailable: [...executionUnavailableByKey.values()].sort((left, right) =>
+      ExecutionPackage.specializationKey(left.specialization).localeCompare(
+        ExecutionPackage.specializationKey(right.specialization),
       ),
     ),
-    unavailable: Object.freeze(
-      [...executionUnavailableByKey.values()].sort((left, right) =>
-        ExecutionPackage.specializationKey(left.specialization).localeCompare(
-          ExecutionPackage.specializationKey(right.specialization),
-        ),
-      ),
-    ),
-  })
+  }
   return { executionPackages, executionDiagnostics }
 })
 
@@ -2725,19 +2694,15 @@ const planStaticData = Effect.fn('Layout.planStaticData')(function* (
     }
   }
   const addressBits: 32 | 64 = target.pointerSize === 4 ? 32 : 64
-  const staticData = Object.freeze(
-    [...staticDataById.values()]
-      .sort((left, right) => left.id.localeCompare(right.id))
-      .map((data) =>
-        Object.freeze({
-          _tag: 'StaticDataPlacement' as const,
-          data,
-          alignment: 1 as const,
-          addressBits,
-          lengthBits: addressBits,
-        }),
-      ),
-  )
+  const staticData = [...staticDataById.values()]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((data) => ({
+      _tag: 'StaticDataPlacement' as const,
+      data,
+      alignment: 1 as const,
+      addressBits,
+      lengthBits: addressBits,
+    }))
   return staticData
 })
 
@@ -2799,10 +2764,10 @@ const planLiteralVerdicts = Effect.fn('Layout.planLiteralVerdicts')(function* (
       addWordLiteral(state, type, BigInt(expression.value), expression.span)
     }
   }
-  return Object.freeze({
-    verdicts: Object.freeze(verdicts),
-    diagnostics: Object.freeze(diagnostics),
-  })
+  return {
+    verdicts: verdicts,
+    diagnostics: diagnostics,
+  }
 })
 
 const addWordLiteral = (
@@ -2818,15 +2783,13 @@ const addWordLiteral = (
   seen.add(key)
   const range = wordRange(type, bits)
   if (value >= range.minimum && value <= range.maximum) {
-    verdicts.push(
-      Object.freeze({
-        _tag: 'AvailableWordLiteral',
-        type,
-        value,
-        bits,
-        span,
-      }),
-    )
+    verdicts.push({
+      _tag: 'AvailableWordLiteral',
+      type,
+      value,
+      bits,
+      span,
+    })
     return
   }
   const diagnostic = Diagnostic.wordLiteralTargetOutOfRange(
@@ -2837,16 +2800,14 @@ const addWordLiteral = (
     span,
   )
   diagnostics.push(diagnostic)
-  verdicts.push(
-    Object.freeze({
-      _tag: 'UnavailableWordLiteral',
-      type,
-      value,
-      bits,
-      span,
-      cause: Diagnostic.identity(diagnostic),
-    }),
-  )
+  verdicts.push({
+    _tag: 'UnavailableWordLiteral',
+    type,
+    value,
+    bits,
+    span,
+    cause: Diagnostic.identity(diagnostic),
+  })
 }
 
 // Executable environment planning
@@ -2919,14 +2880,12 @@ const planEffectEnvironments = Effect.fn('Layout.planEffectEnvironments')(functi
     if (previous === undefined || environment._tag === 'EffectEnvironment')
       resolved.set(key, environment)
   }
-  return Object.freeze(
-    [...resolved.values()].sort(
-      (left, right) =>
-        left.instance.declaration.module.localeCompare(right.instance.declaration.module) ||
-        left.instance.declaration.name.localeCompare(right.instance.declaration.name) ||
-        Tir.compareExecutableSites(left.site, right.site) ||
-        Type.key(left.effect).localeCompare(Type.key(right.effect)),
-    ),
+  return [...resolved.values()].sort(
+    (left, right) =>
+      left.instance.declaration.module.localeCompare(right.instance.declaration.module) ||
+      left.instance.declaration.name.localeCompare(right.instance.declaration.name) ||
+      Tir.compareExecutableSites(left.site, right.site) ||
+      Type.key(left.effect).localeCompare(Type.key(right.effect)),
   )
 })
 
@@ -3024,28 +2983,28 @@ const collectEffectSites = (instance: Instances.Instance) => {
       expression._tag !== 'EffectCatch'
         ? []
         : [
-            Object.freeze({
+            {
               site: Tir.effectCatchSite(
                 Tir.nodeReference(instance.view.artifact, expression),
                 instance.key.declaration,
                 instance.function.declaration.id.ordinal,
               ),
               type: expression.type,
-              captures: Object.freeze([
-                Object.freeze({
+              captures: [
+                {
                   access: 'Take' as const,
                   pattern: undefined,
                   binding: undefined,
                   parameter: undefined,
-                }),
-                Object.freeze({
+                },
+                {
                   access: 'Take' as const,
                   pattern: undefined,
                   binding: undefined,
                   parameter: undefined,
-                }),
-              ]),
-            }),
+                },
+              ],
+            },
           ],
     )
   const builtinSites = instance.function.statements
@@ -3060,50 +3019,46 @@ const collectEffectSites = (instance: Instances.Instance) => {
       )
       if (!Type.isEffect(type)) return []
       return [
-        Object.freeze({
+        {
           site: Tir.builtinEffectSite(
             Tir.nodeReference(instance.view.artifact, expression),
             instance.key.declaration,
             instance.function.declaration.id.ordinal,
           ),
           type: expression.type,
-          captures: Object.freeze(
-            expression.arguments.map((argument) => {
-              const specialized =
-                argument._tag === 'Unavailable'
-                  ? undefined
-                  : Type.substitute(
-                      argument.type,
-                      instance.substitution,
-                      instance.specialization.compatibility,
-                    )
-              let access: 'Copy' | 'Shared' | 'Exclusive' | 'Take' = 'Take'
-              if (
-                specialized !== undefined &&
-                (Type.isReference(specialized) || Type.isSlice(specialized))
-              ) {
-                access = specialized.access
-              } else if (specialized !== undefined && Type.isCallable(specialized)) {
-                access = specialized.mode
-              }
-              return Object.freeze({
-                access,
-                pattern: undefined,
-                binding: undefined,
-                parameter: undefined,
-              })
-            }),
-          ),
-        }),
+          captures: expression.arguments.map((argument) => {
+            const specialized =
+              argument._tag === 'Unavailable'
+                ? undefined
+                : Type.substitute(
+                    argument.type,
+                    instance.substitution,
+                    instance.specialization.compatibility,
+                  )
+            let access: 'Copy' | 'Shared' | 'Exclusive' | 'Take' = 'Take'
+            if (
+              specialized !== undefined &&
+              (Type.isReference(specialized) || Type.isSlice(specialized))
+            ) {
+              access = specialized.access
+            } else if (specialized !== undefined && Type.isCallable(specialized)) {
+              access = specialized.mode
+            }
+            return {
+              access,
+              pattern: undefined,
+              binding: undefined,
+              parameter: undefined,
+            }
+          }),
+        },
       ]
     })
-  const effectSites = Object.freeze([
-    ...blocks.map((block) =>
-      Object.freeze({ site: block.site, type: block.type, captures: block.captures }),
-    ),
+  const effectSites = [
+    ...blocks.map((block) => ({ site: block.site, type: block.type, captures: block.captures })),
     ...catchSites,
     ...builtinSites,
-  ])
+  ]
 
   return effectSites
 }
@@ -3124,7 +3079,7 @@ const collectWitnessEffects = (instance: Instances.Instance) => {
       }
       return contract === undefined
         ? []
-        : [Object.freeze({ expression, contract, site: expression.witnessEffectSite })]
+        : [{ expression, contract, site: expression.witnessEffectSite }]
     })
 
   return witnessEffects
@@ -3148,9 +3103,7 @@ const planEffectSite = Effect.fn('Layout.planEffectSite')(function* (
     (candidate) => candidate.identity === Instances.effectIdentity(instance.key, block.site),
   )
   const realizedSlots =
-    effectInstance === undefined
-      ? Object.freeze([])
-      : FieldRealization.effectEnvironmentOf(effectInstance)
+    effectInstance === undefined ? [] : FieldRealization.effectEnvironmentOf(effectInstance)
   let effect = structuralEffect
   let unavailable: string | undefined
   const fieldInputs: Array<Packing.Input<EffectFieldDraft>> = []
@@ -3185,34 +3138,30 @@ const planEffectSite = Effect.fn('Layout.planEffectSite')(function* (
     )
   }
   if (unavailable !== undefined) {
-    environments.push(
-      Object.freeze({
-        _tag: 'UnavailableEffectEnvironment',
-        instance: instance.key,
-        site: block.site,
-        effect,
-        reason: unavailable,
-      }),
-    )
+    environments.push({
+      _tag: 'UnavailableEffectEnvironment',
+      instance: instance.key,
+      site: block.site,
+      effect,
+      reason: unavailable,
+    })
     return
   }
   const packed = placeEffectFields(fieldInputs)
   const successEffectIdentity = (instance.effectSuccesses ?? []).find((success) =>
     Tir.sameExecutableSite(success.site, block.site),
   )?.identity
-  environments.push(
-    Object.freeze({
-      _tag: 'EffectEnvironment',
-      instance: instance.key,
-      site: block.site,
-      effect,
-      ...(successEffectIdentity === undefined ? {} : { successEffectIdentity }),
-      fields: packed.fields,
-      size: packed.size,
-      alignment: packed.alignment,
-      tailPadding: packed.tailPadding,
-    }),
-  )
+  environments.push({
+    _tag: 'EffectEnvironment',
+    instance: instance.key,
+    site: block.site,
+    effect,
+    ...(successEffectIdentity === undefined ? {} : { successEffectIdentity }),
+    fields: packed.fields,
+    size: packed.size,
+    alignment: packed.alignment,
+    tailPadding: packed.tailPadding,
+  })
 })
 
 const planEffectCapture = Effect.fn('Layout.planEffectCapture')(function* (
@@ -3292,12 +3241,12 @@ const planEffectCapture = Effect.fn('Layout.planEffectCapture')(function* (
         )) ??
     (capturedCallableEnvironment === undefined
       ? undefined
-      : Object.freeze({
+      : {
           ...capturedCallableEnvironment.callable.type,
           mode: capturedCallableEnvironment.callable.mode,
-        })) ??
+        }) ??
     (capturedCallableIdentity !== undefined && Type.isCallable(specialized)
-      ? Object.freeze({ ...specialized, mode: 'Shared' as const })
+      ? { ...specialized, mode: 'Shared' as const }
       : specialized)
   const access =
     capturedEffectEnvironment?.effect.access ??
@@ -3333,7 +3282,7 @@ const planEffectCapture = Effect.fn('Layout.planEffectCapture')(function* (
   return {
     _tag: 'Available',
     input: {
-      value: Object.freeze({
+      value: {
         source,
         ordinal,
         access,
@@ -3354,7 +3303,7 @@ const planEffectCapture = Effect.fn('Layout.planEffectCapture')(function* (
         ...(realized?.providedRequirement === undefined
           ? {}
           : { providedRequirement: realized.providedRequirement }),
-      }),
+      },
       size,
       alignment,
     },
@@ -3477,13 +3426,13 @@ const planWitnessEffect = Effect.fn('Layout.planWitnessEffect')(function* (
     const access =
       Type.isReference(fieldType) || Type.isSlice(fieldType) ? fieldType.access : 'Take'
     fieldInputs.push({
-      value: Object.freeze({
+      value: {
         source: 'Parameter',
         ordinal,
         access,
         type: fieldType,
         representation: 'Value',
-      }),
+      },
       size: valueLayout.size,
       alignment: valueLayout.alignment,
     })
@@ -3502,42 +3451,40 @@ const planWitnessEffect = Effect.fn('Layout.planWitnessEffect')(function* (
     structuralEffect.requirementRow,
   )
   if (unavailable !== undefined) {
-    environments.push(
-      Object.freeze({
-        _tag: 'UnavailableEffectEnvironment',
-        instance: instance.key,
-        site: witness.site,
-        effect,
-        reason: unavailable,
-      }),
-    )
-    return
-  }
-  const packed = placeEffectFields(fieldInputs)
-  environments.push(
-    Object.freeze({
-      _tag: 'EffectEnvironment',
+    environments.push({
+      _tag: 'UnavailableEffectEnvironment',
       instance: instance.key,
       site: witness.site,
       effect,
-      fields: packed.fields,
-      size: packed.size,
-      alignment: packed.alignment,
-      tailPadding: packed.tailPadding,
-    }),
-  )
+      reason: unavailable,
+    })
+    return
+  }
+  const packed = placeEffectFields(fieldInputs)
+  environments.push({
+    _tag: 'EffectEnvironment',
+    instance: instance.key,
+    site: witness.site,
+    effect,
+    fields: packed.fields,
+    size: packed.size,
+    alignment: packed.alignment,
+    tailPadding: packed.tailPadding,
+  })
 })
 
 const placeEffectFields = (inputs: ReadonlyArray<Packing.Input<EffectFieldDraft>>) => {
   const packed = Packing.pack(inputs)
-  return Object.freeze({
+  return {
     ...packed,
-    fields: Object.freeze(
-      packed.fields.map(({ value, offset, size, alignment, padding }) =>
-        Object.freeze({ ...value, offset, size, alignment, padding }),
-      ),
-    ),
-  })
+    fields: packed.fields.map(({ value, offset, size, alignment, padding }) => ({
+      ...value,
+      offset,
+      size,
+      alignment,
+      padding,
+    })),
+  }
 }
 
 const compositeEnvironmentLayout = (
@@ -3553,10 +3500,10 @@ const compositeEnvironmentLayout = (
   )
   const alignment = Math.max(4, payloadAlignment)
   const payloadOffset = alignUp(4, payloadAlignment)
-  return Object.freeze({
+  return {
     size: alignUp(payloadOffset + payloadSize, alignment),
     alignment,
-  })
+  }
 }
 
 const environmentKey = (environment: EffectEnvironment): string =>
@@ -3572,13 +3519,11 @@ const planCallableEnvironments = Effect.fn('Layout.planCallableEnvironments')(fu
   const planned = new Map<Instances.CallableInstance, CallableEnvironment>()
   const planning = new Set<Instances.CallableInstance>()
   const state: CallableEnvironmentState = { target, discovery, layouts, view, planned, planning }
-  return Object.freeze(
-    yield* Effect.forEach(
-      discovery.callables,
-      Effect.fnUntraced(function* (callable) {
-        return yield* planCallableEnvironment(state, callable)
-      }),
-    ),
+  return yield* Effect.forEach(
+    discovery.callables,
+    Effect.fnUntraced(function* (callable) {
+      return yield* planCallableEnvironment(state, callable)
+    }),
   )
 })
 
@@ -3590,12 +3535,12 @@ const planCallableEnvironment = Effect.fn('Layout.planCallableEnvironment')(func
   const cached = planned.get(callable)
   if (cached !== undefined) return cached
   if (planning.has(callable)) {
-    return Object.freeze({
+    return {
       _tag: 'UnavailableCallableEnvironment',
       callable,
       reason: 'recursive callable capture environment has no finite value layout',
       view,
-    })
+    }
   }
   planning.add(callable)
   const inputs: Array<
@@ -3647,26 +3592,25 @@ const planCallableEnvironment = Effect.fn('Layout.planCallableEnvironment')(func
     let representation: 'Borrow' | 'Callable' | 'Value' = 'Value'
     if (borrowed) representation = 'Borrow'
     else if (callableCapture) representation = 'Callable'
-    inputs.push(
-      Object.freeze({
-        value: Object.freeze({
-          ordinal: capture.ordinal,
-          parameterOrdinal: capture.parameterOrdinal,
-          access: capture.access,
-          type: capture.type,
-          representation,
-          ...(callableIdentity === undefined ? {} : { callableIdentity }),
-        }),
-        size,
-        alignment,
-      }),
-    )
+    inputs.push({
+      value: {
+        ordinal: capture.ordinal,
+        parameterOrdinal: capture.parameterOrdinal,
+        access: capture.access,
+        type: capture.type,
+        representation,
+        ...(callableIdentity === undefined ? {} : { callableIdentity }),
+      },
+      size,
+      alignment,
+    })
   }
   const packed = Packing.pack(inputs)
-  const fields: ReadonlyArray<CallableEnvironmentField> = Object.freeze(
-    packed.fields.map((field) => Object.freeze({ ...field.value, ...field })),
-  )
-  const result: CallableEnvironment = Object.freeze({
+  const fields: ReadonlyArray<CallableEnvironmentField> = packed.fields.map((field) => ({
+    ...field.value,
+    ...field,
+  }))
+  const result: CallableEnvironment = {
     _tag: 'CallableEnvironment',
     callable,
     fields,
@@ -3674,7 +3618,7 @@ const planCallableEnvironment = Effect.fn('Layout.planCallableEnvironment')(func
     alignment: packed.alignment,
     tailPadding: packed.tailPadding,
     view,
-  })
+  }
   planning.delete(callable)
   planned.set(callable, result)
   return result
@@ -3686,25 +3630,24 @@ const unavailableCallableEnvironment = (
   reason: string,
 ): CallableEnvironment => {
   const { view, planning, planned } = state
-  const result = Object.freeze({
+  const result = {
     _tag: 'UnavailableCallableEnvironment' as const,
     callable,
     reason,
     view,
-  })
+  }
   planning.delete(callable)
   planned.set(callable, result)
   return result
 }
 
-const callableView = (target: Target.Target): CallableView =>
-  Object.freeze({
-    codeOffset: 0,
-    environmentOffset: target.pointerSize,
-    size: target.pointerSize * 2,
-    alignment: target.pointerAlignment,
-    pointerBits: target.pointerSize === 4 ? 32 : 64,
-  })
+const callableView = (target: Target.Target): CallableView => ({
+  codeOffset: 0,
+  environmentOffset: target.pointerSize,
+  size: target.pointerSize * 2,
+  alignment: target.pointerAlignment,
+  pointerBits: target.pointerSize === 4 ? 32 : 64,
+})
 
 /**
  * Whether one shared or exclusive capture stores a pointer to its source slot. Slice and
@@ -3838,25 +3781,17 @@ export const planCallingShapes = Effect.fn('Layout.planCallingShapes')(function*
   target: Target.Target,
   entries: ReadonlyArray<Entry>,
   types: ReadonlyArray<DeclarationFacts.SemanticType> = entries.map((entry) => entry.type),
-  effectEnvironments: ReadonlyArray<EffectEnvironment> = Object.freeze([]),
-  callableEnvironments: ReadonlyArray<CallableEnvironment> = Object.freeze([]),
+  effectEnvironments: ReadonlyArray<EffectEnvironment> = [],
+  callableEnvironments: ReadonlyArray<CallableEnvironment> = [],
 ): Effect.fn.Return<ReadonlyArray<CallingShape>> {
   yield* Effect.annotateCurrentSpan({ 'types.count': types.length })
 
   const byType = new Map(entries.map((candidate) => [Type.runtimeKey(candidate.type), candidate]))
-  return Object.freeze(
-    yield* Effect.forEach(
-      types,
-      Effect.fnUntraced(function* (type) {
-        return yield* planCallingShape(
-          target,
-          type,
-          byType,
-          effectEnvironments,
-          callableEnvironments,
-        )
-      }),
-    ),
+  return yield* Effect.forEach(
+    types,
+    Effect.fnUntraced(function* (type) {
+      return yield* planCallingShape(target, type, byType, effectEnvironments, callableEnvironments)
+    }),
   )
 })
 
@@ -3871,18 +3806,15 @@ const planCallingShape = Effect.fn('Layout.planCallingShape')(function* (
     type: Type.encode(type),
     'type.kind': typeof type === 'string' ? 'Builtin' : type._tag,
   })
-  const tree = yield* shapeNode(
-    type,
-    Object.freeze({
-      target,
-      entries,
-      effectEnvironments,
-      callableEnvironments,
-      active: new Set<string>(),
-    }),
-  )
+  const tree = yield* shapeNode(type, {
+    target,
+    entries,
+    effectEnvironments,
+    callableEnvironments,
+    active: new Set<string>(),
+  })
   let materialized: ReadonlyArray<CallingLane> | undefined
-  return Object.freeze({
+  return {
     _tag: 'CallingShape' as const,
     type,
     tree,
@@ -3891,7 +3823,7 @@ const planCallingShape = Effect.fn('Layout.planCallingShape')(function* (
       materialized ??= materializeLanes(tree)
       return materialized
     },
-  })
+  }
 })
 
 const shapeNode = Effect.fnUntraced(function* (
@@ -3900,99 +3832,99 @@ const shapeNode = Effect.fnUntraced(function* (
 ): Effect.fn.Return<CallingShapeNode> {
   const { target, entries } = context
   if (Type.isBuiltin(type)) {
-    return Object.freeze({ _tag: 'ScalarShape', type, laneCount: 1 })
+    return { _tag: 'ScalarShape', type, laneCount: 1 }
   }
   const enumRepresentation = entries.get(Type.runtimeKey(type))?.representation
   if (Type.isNominal(type) && enumRepresentation?._tag === 'ScalarEnum') {
-    return Object.freeze({
+    return {
       _tag: 'ScalarEnumShape',
       type,
       lane: enumRepresentation.scalar,
       laneCount: 1,
-    })
+    }
   }
   if (Type.isString(type)) {
-    return Object.freeze({
+    return {
       _tag: 'StringShape',
       type,
-      storage: Object.freeze({
-        type: Object.freeze({
+      storage: {
+        type: {
           _tag: 'Address',
           element: type,
           bits: target.pointerSize === 4 ? 32 : 64,
-        }),
+        },
         lane: 0,
-      }),
-      byteLength: Object.freeze({ type: 'usize', lane: 1 }),
+      },
+      byteLength: { type: 'usize', lane: 1 },
       laneCount: 2,
-    })
+    }
   }
   if (Type.isNever(type)) {
-    return Object.freeze({ _tag: 'EmptyShape', type, laneCount: 0 })
+    return { _tag: 'EmptyShape', type, laneCount: 0 }
   }
   if (Type.isParameter(type)) {
     throw new RangeError(`open generic parameter ${Type.encode(type)} has no calling shape`)
   }
   if (Type.isSlice(type)) {
-    return Object.freeze({
+    return {
       _tag: 'SliceShape',
       type,
-      address: Object.freeze({
-        type: Object.freeze({
+      address: {
+        type: {
           _tag: 'Address',
           element: type.element,
           bits: target.pointerSize === 4 ? 32 : 64,
-        }),
+        },
         lane: 0,
-      }),
-      length: Object.freeze({ type: 'usize', lane: 1 }),
+      },
+      length: { type: 'usize', lane: 1 },
       laneCount: 2,
-    })
+    }
   }
   if (Type.isReference(type)) {
-    return Object.freeze({
+    return {
       _tag: 'ReferenceShape',
       type,
-      address: Object.freeze({
-        type: Object.freeze({
+      address: {
+        type: {
           _tag: 'Address',
           element: type.target,
           bits: target.pointerSize === 4 ? 32 : 64,
-        }),
+        },
         lane: 0,
-      }),
+      },
       laneCount: 1,
-    })
+    }
   }
   if (Type.isSharedCore(type) || Type.isExecution(type) || Type.isWake(type)) {
-    return Object.freeze({
+    return {
       _tag: 'AddressShape',
       type,
-      address: Object.freeze({
-        type: Object.freeze({
+      address: {
+        type: {
           _tag: 'Address',
           element: type,
           bits: target.pointerSize === 4 ? 32 : 64,
-        }),
+        },
         lane: 0,
-      }),
+      },
       laneCount: 1,
-    })
+    }
   }
   if (Type.isPointer(type)) {
-    return Object.freeze({
+    return {
       _tag: 'AddressShape',
       type,
-      address: Object.freeze({
-        type: Object.freeze({
+      address: {
+        type: {
           _tag: 'Address',
           element: type.pointee,
           bits: target.pointerSize === 4 ? 32 : 64,
-        }),
+        },
         lane: 0,
-      }),
+      },
       laneCount: 1,
-    })
+    }
   }
   if (Type.isForeignFunction(type)) return borrowedShape(context, type)
   if (Type.isCallable(type)) {
@@ -4013,13 +3945,13 @@ const shapeNode = Effect.fnUntraced(function* (
     if (!Number.isSafeInteger(laneCount)) {
       throw new RangeError(`Calling shape lane count overflows for ${Type.encode(type)}`)
     }
-    return Object.freeze({
+    return {
       _tag: 'RepeatedShape',
       type,
       length: type.length,
       element,
       laneCount,
-    })
+    }
   }
   if (Type.isUnion(type)) {
     return yield* unionShape(type, context)
@@ -4032,16 +3964,16 @@ const shapeNode = Effect.fnUntraced(function* (
       ? yield* Effect.forEach(
           candidate.representation.fields,
           Effect.fnUntraced(function* (field) {
-            return Object.freeze({ field: field.id, shape: yield* shapeNode(field.type, context) })
+            return { field: field.id, shape: yield* shapeNode(field.type, context) }
           }),
         )
       : []
-  return Object.freeze({
+  return {
     _tag: 'ProductShape',
     type,
-    fields: Object.freeze(fields),
-    laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
-  })
+    fields: fields,
+    laneCount: fields.reduce<number>((total, field) => total + field.shape.laneCount, 0),
+  }
 })
 
 const representedShape = Effect.fn('Layout.representedShape')(function* (
@@ -4063,29 +3995,29 @@ const representedShape = Effect.fn('Layout.representedShape')(function* (
         const fields = yield* Effect.forEach(
           environment.fields,
           Effect.fnUntraced(function* (field) {
-            return Object.freeze({
+            return {
               capture: field.ordinal,
               shape: yield* executableEnvironmentFieldShape(context, field),
-            })
+            }
           }),
         )
-        return Object.freeze({
+        return {
           _tag: 'EffectEnvironmentShape' as const,
           type: environment.effect,
-          fields: Object.freeze(fields),
-          laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
-        })
+          fields: fields,
+          laneCount: fields.reduce<number>((total, field) => total + field.shape.laneCount, 0),
+        }
       }),
     )
     const alternativeLanes = alternatives.map((alternative) => materializeLanes(alternative))
     const payloadTypes = yield* unifyPayloadTypes(alternatives, target)
-    return Object.freeze({
+    return {
       _tag: 'EffectCompositeShape',
       type,
-      alternativeLaneCounts: Object.freeze(alternativeLanes.map((lanes) => lanes.length)),
+      alternativeLaneCounts: alternativeLanes.map((lanes) => lanes.length),
       payloadTypes,
       laneCount: payloadTypes.length + 1,
-    })
+    }
   }
   const entry = entries.get(Type.runtimeKey(type))
   const executable = entry?.executable
@@ -4110,39 +4042,39 @@ const representedShape = Effect.fn('Layout.representedShape')(function* (
           executable._tag === 'Callable' && field.representation !== 'Borrow'
             ? yield* shapeNode(field.type, context)
             : yield* executableEnvironmentFieldShape(context, field)
-        return Object.freeze({ capture: field.capture, shape })
+        return { capture: field.capture, shape }
       }),
     )
   } else if (storedCallable !== undefined) {
     fields = yield* Effect.forEach(
       storedCallable.fields,
       Effect.fnUntraced(function* (field) {
-        return Object.freeze({
+        return {
           capture: field.ordinal,
           shape: yield* executableEnvironmentFieldShape(context, field),
-        })
+        }
       }),
     )
   } else {
     fields = yield* Effect.forEach(
       storedEffect?.fields ?? [],
       Effect.fnUntraced(function* (field) {
-        return Object.freeze({
+        return {
           capture: field.capture,
           shape: yield* executableEnvironmentFieldShape(context, field),
-        })
+        }
       }),
     )
   }
-  return Object.freeze({
+  return {
     _tag:
       kind === 'Callable'
         ? ('CallableEnvironmentShape' as const)
         : ('EffectEnvironmentShape' as const),
     type,
-    fields: Object.freeze(fields),
-    laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
-  })
+    fields: fields,
+    laneCount: fields.reduce<number>((total, field) => total + field.shape.laneCount, 0),
+  }
 })
 
 const nominalUnionShape = Effect.fn('Layout.nominalUnionShape')(function* (
@@ -4156,44 +4088,40 @@ const nominalUnionShape = Effect.fn('Layout.nominalUnionShape')(function* (
   >,
 ): Effect.fn.Return<CallingShapeNode> {
   const { target } = context
-  const variants = Object.freeze(
-    yield* Effect.forEach(
-      representation.variants,
-      Effect.fnUntraced(function* (variant) {
-        const fields = Object.freeze(
-          yield* Effect.forEach(
-            variant.fields,
-            Effect.fnUntraced(function* (field) {
-              return Object.freeze({
-                field: field.id,
-                shape: yield* shapeNode(field.type, context),
-              })
-            }),
-          ),
-        )
-        const shape: CallingShapeNode = Object.freeze({
-          _tag: 'ProductShape',
-          type,
-          fields,
-          laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
-        })
-        return Object.freeze({
-          variant: variant.variant,
-          ordinal: variant.ordinal,
-          shape,
-          payloadSlots: Object.freeze(Array.from({ length: shape.laneCount }, (_, slot) => slot)),
-        })
-      }),
-    ),
+  const variants = yield* Effect.forEach(
+    representation.variants,
+    Effect.fnUntraced(function* (variant) {
+      const fields = yield* Effect.forEach(
+        variant.fields,
+        Effect.fnUntraced(function* (field) {
+          return {
+            field: field.id,
+            shape: yield* shapeNode(field.type, context),
+          }
+        }),
+      )
+      const shape: CallingShapeNode = {
+        _tag: 'ProductShape',
+        type,
+        fields,
+        laneCount: fields.reduce<number>((total, field) => total + field.shape.laneCount, 0),
+      }
+      return {
+        variant: variant.variant,
+        ordinal: variant.ordinal,
+        shape,
+        payloadSlots: Array.from({ length: shape.laneCount }, (_, slot) => slot),
+      }
+    }),
   )
   const payloadLaneCount = variants.reduce(
     (maximum, variant) => Math.max(maximum, variant.shape.laneCount),
     0,
   )
-  return Object.freeze({
+  return {
     _tag: 'NominalUnionShape',
     type,
-    tag: Object.freeze({ type: 'i32', lane: 0 }),
+    tag: { type: 'i32', lane: 0 },
     payloadLaneCount,
     payloadTypes: yield* unifyPayloadTypes(
       variants.map((variant) => variant.shape),
@@ -4202,7 +4130,7 @@ const nominalUnionShape = Effect.fn('Layout.nominalUnionShape')(function* (
     zeroFill: true,
     variants,
     laneCount: 1 + payloadLaneCount,
-  })
+  }
 })
 
 const unionShape = Effect.fn('Layout.unionShape')(function* (
@@ -4210,19 +4138,17 @@ const unionShape = Effect.fn('Layout.unionShape')(function* (
   context: ShapeContext,
 ): Effect.fn.Return<CallingShapeNode> {
   const { target } = context
-  const members = Object.freeze(
-    yield* Effect.forEach(
-      type.members,
-      Effect.fnUntraced(function* (member, ordinal) {
-        const shape = yield* shapeNode(member, context)
-        return Object.freeze({
-          member,
-          ordinal,
-          shape,
-          payloadSlots: Object.freeze(Array.from({ length: shape.laneCount }, (_, slot) => slot)),
-        })
-      }),
-    ),
+  const members = yield* Effect.forEach(
+    type.members,
+    Effect.fnUntraced(function* (member, ordinal) {
+      const shape = yield* shapeNode(member, context)
+      return {
+        member,
+        ordinal,
+        shape,
+        payloadSlots: Array.from({ length: shape.laneCount }, (_, slot) => slot),
+      }
+    }),
   )
   const payloadLaneCount = members.reduce(
     (maximum, member) => Math.max(maximum, member.shape.laneCount),
@@ -4232,16 +4158,16 @@ const unionShape = Effect.fn('Layout.unionShape')(function* (
     members.map((member) => member.shape),
     target,
   )
-  return Object.freeze({
+  return {
     _tag: 'SumShape',
     type,
-    tag: Object.freeze({ type: 'i32', lane: 0 }),
+    tag: { type: 'i32', lane: 0 },
     payloadLaneCount,
     payloadTypes,
     zeroFill: true,
     members,
     laneCount: 1 + payloadLaneCount,
-  })
+  }
 })
 
 const outcomeShape = Effect.fn('Layout.outcomeShape')(function* (
@@ -4253,11 +4179,11 @@ const outcomeShape = Effect.fn('Layout.outcomeShape')(function* (
   const failures = yield* Effect.forEach(
     Type.failureMembers(type),
     Effect.fnUntraced(function* (failure, index) {
-      return Object.freeze({
+      return {
         type: failure,
         tag: index + 1,
         shape: yield* shapeNode(failure, context),
-      })
+      }
     }),
   )
   const variants = [success, ...failures.map((failure) => failure.shape)]
@@ -4266,15 +4192,15 @@ const outcomeShape = Effect.fn('Layout.outcomeShape')(function* (
     0,
   )
   const payloadTypes = yield* unifyPayloadTypes(variants, target)
-  return Object.freeze({
+  return {
     _tag: 'OutcomeShape',
     type,
     success,
-    failures: Object.freeze(failures),
+    failures: failures,
     payloadLaneCount,
     payloadTypes,
     laneCount: 1 + payloadLaneCount,
-  })
+  }
 })
 
 const executableEnvironmentFieldShape = Effect.fnUntraced(function* (
@@ -4288,12 +4214,12 @@ const executableEnvironmentFieldShape = Effect.fnUntraced(function* (
   if (field.callableIdentity !== undefined) {
     const identity = field.callableIdentity
     if (identity.environment === undefined) {
-      return Object.freeze({
+      return {
         _tag: 'CallableEnvironmentShape',
         type: field.type,
-        fields: Object.freeze([]),
+        fields: [],
         laneCount: 0,
-      })
+      }
     }
     const environment = context.callableEnvironments.find(
       (
@@ -4315,18 +4241,18 @@ const executableEnvironmentFieldShape = Effect.fnUntraced(function* (
     const fields = yield* Effect.forEach(
       environment.fields,
       Effect.fnUntraced(function* (capture) {
-        return Object.freeze({
+        return {
           capture: capture.ordinal,
           shape: yield* executableEnvironmentFieldShape(nested, capture),
-        })
+        }
       }),
     )
-    return Object.freeze({
+    return {
       _tag: 'CallableEnvironmentShape',
       type: field.type,
-      fields: Object.freeze(fields),
+      fields: fields,
       laneCount: fields.reduce((total, capture) => total + capture.shape.laneCount, 0),
-    })
+    }
   }
   if (field.effectIdentity !== undefined) {
     const environment = context.effectEnvironments.find(
@@ -4350,18 +4276,18 @@ const executableEnvironmentFieldShape = Effect.fnUntraced(function* (
     const fields = yield* Effect.forEach(
       environment.fields,
       Effect.fnUntraced(function* (capture) {
-        return Object.freeze({
+        return {
           capture: capture.ordinal,
           shape: yield* executableEnvironmentFieldShape(nested, capture),
-        })
+        }
       }),
     )
-    return Object.freeze({
+    return {
       _tag: 'EffectEnvironmentShape',
       type: field.type,
-      fields: Object.freeze(fields),
+      fields: fields,
       laneCount: fields.reduce((total, capture) => total + capture.shape.laneCount, 0),
-    })
+    }
   }
   return yield* shapeNode(field.type, context)
 })
@@ -4369,7 +4295,7 @@ const executableEnvironmentFieldShape = Effect.fnUntraced(function* (
 const withActiveShape = (context: ShapeContext, identity: string): ShapeContext => {
   if (context.active.has(identity))
     throw new RangeError(`recursive executable environment ${identity} has no calling shape`)
-  return Object.freeze({ ...context, active: new Set([...context.active, identity]) })
+  return { ...context, active: new Set([...context.active, identity]) }
 }
 
 const borrowedShape = (
@@ -4380,20 +4306,19 @@ const borrowedShape = (
   {
     readonly _tag: 'AddressShape'
   }
-> =>
-  Object.freeze({
-    _tag: 'AddressShape',
-    type,
-    address: Object.freeze({
-      type: Object.freeze({
-        _tag: 'Address',
-        element: type,
-        bits: context.target.pointerSize === 4 ? 32 : 64,
-      }),
-      lane: 0,
-    }),
-    laneCount: 1,
-  })
+> => ({
+  _tag: 'AddressShape',
+  type,
+  address: {
+    type: {
+      _tag: 'Address',
+      element: type,
+      bits: context.target.pointerSize === 4 ? 32 : 64,
+    },
+    lane: 0,
+  },
+  laneCount: 1,
+})
 
 /** Chooses one deterministic scalar carrier for each payload lane across tagged variants. */
 export const unifyPayloadTypes = Effect.fn('Layout.unifyPayloadTypes')(function* (
@@ -4409,26 +4334,24 @@ export const unifyPayloadTypes = Effect.fn('Layout.unifyPayloadTypes')(function*
     'payload.lanes': payloadLaneCount,
   })
   const typesByVariant = variants.map(payloadScalarTypes)
-  return Object.freeze(
-    Array.from({ length: payloadLaneCount }, (_, slot): Type.Builtin => {
-      const candidates = typesByVariant.flatMap((types) => {
-        const type = types.at(slot)
-        return type === undefined ? [] : [type]
-      })
-      return (
-        candidates
-          .sort((left, right) => {
-            const leftScalar = Scalar.find(left)
-            const rightScalar = Scalar.find(right)
-            const pointerBits = target.pointerSize === 4 ? 32 : 64
-            const leftBits = leftScalar === undefined ? 32 : Scalar.bits(leftScalar, pointerBits)
-            const rightBits = rightScalar === undefined ? 32 : Scalar.bits(rightScalar, pointerBits)
-            return rightBits - leftBits || compareRuntimeTypes(left, right)
-          })
-          .at(0) ?? 'i32'
-      )
-    }),
-  )
+  return Array.from({ length: payloadLaneCount }, (_, slot): Type.Builtin => {
+    const candidates = typesByVariant.flatMap((types) => {
+      const type = types.at(slot)
+      return type === undefined ? [] : [type]
+    })
+    return (
+      candidates
+        .sort((left, right) => {
+          const leftScalar = Scalar.find(left)
+          const rightScalar = Scalar.find(right)
+          const pointerBits = target.pointerSize === 4 ? 32 : 64
+          const leftBits = leftScalar === undefined ? 32 : Scalar.bits(leftScalar, pointerBits)
+          const rightBits = rightScalar === undefined ? 32 : Scalar.bits(rightScalar, pointerBits)
+          return rightBits - leftBits || compareRuntimeTypes(left, right)
+        })
+        .at(0) ?? 'i32'
+    )
+  })
 })
 
 /**
@@ -4481,155 +4404,126 @@ const payloadScalarTypes = (node: CallingShapeNode): ReadonlyArray<Type.Builtin>
 // per-lane loop pure; its planning callers provide the Effect tracing boundary.
 const materializeLanes = (
   node: CallingShapeNode,
-  path: ReadonlyArray<Selector> = Object.freeze([]),
+  path: ReadonlyArray<Selector> = [],
 ): ReadonlyArray<CallingLane> => {
-  if (node._tag === 'EmptyShape') return Object.freeze([])
+  if (node._tag === 'EmptyShape') return []
   if (node._tag === 'ScalarShape') {
-    return Object.freeze([Object.freeze({ _tag: 'CallingLane', path, type: node.type })])
+    return [{ _tag: 'CallingLane', path, type: node.type }]
   }
   if (node._tag === 'ScalarEnumShape') {
-    return Object.freeze([Object.freeze({ _tag: 'CallingLane', path, type: node.lane })])
+    return [{ _tag: 'CallingLane', path, type: node.lane }]
   }
   if (node._tag === 'SliceShape') {
-    return Object.freeze([
-      Object.freeze({
+    return [
+      {
         _tag: 'CallingLane',
-        path: Object.freeze([...path, Object.freeze({ _tag: 'SliceAddressSelector' })]),
+        path: [...path, { _tag: 'SliceAddressSelector' }],
         type: node.address.type,
-      }),
-      Object.freeze({
+      },
+      {
         _tag: 'CallingLane',
-        path: Object.freeze([...path, Object.freeze({ _tag: 'SliceLengthSelector' })]),
+        path: [...path, { _tag: 'SliceLengthSelector' }],
         type: 'usize',
-      }),
-    ])
+      },
+    ]
   }
   if (node._tag === 'StringShape') {
-    return Object.freeze([
-      Object.freeze({
+    return [
+      {
         _tag: 'CallingLane',
-        path: Object.freeze([...path, Object.freeze({ _tag: 'StringStorageSelector' })]),
+        path: [...path, { _tag: 'StringStorageSelector' }],
         type: node.storage.type,
-      }),
-      Object.freeze({
+      },
+      {
         _tag: 'CallingLane',
-        path: Object.freeze([...path, Object.freeze({ _tag: 'StringByteLengthSelector' })]),
+        path: [...path, { _tag: 'StringByteLengthSelector' }],
         type: 'usize',
-      }),
-    ])
+      },
+    ]
   }
   if (node._tag === 'ReferenceShape' || node._tag === 'AddressShape') {
-    return Object.freeze([
-      Object.freeze({
+    return [
+      {
         _tag: 'CallingLane',
-        path: Object.freeze([...path, Object.freeze({ _tag: 'ReferenceAddressSelector' })]),
+        path: [...path, { _tag: 'ReferenceAddressSelector' }],
         type: node.address.type,
-      }),
-    ])
+      },
+    ]
   }
   if (node._tag === 'ProductShape') {
-    return Object.freeze(
-      node.fields.flatMap((field) =>
-        materializeLanes(field.shape, Object.freeze([...path, field.field])),
-      ),
-    )
+    return node.fields.flatMap((field) => materializeLanes(field.shape, [...path, field.field]))
   }
   if (node._tag === 'CallableEnvironmentShape' || node._tag === 'EffectEnvironmentShape') {
     const selectorTag =
       node._tag === 'CallableEnvironmentShape'
         ? ('CallableCaptureSelector' as const)
         : ('EffectCaptureSelector' as const)
-    return Object.freeze(
-      node.fields.flatMap((field) =>
-        materializeLanes(
-          field.shape,
-          Object.freeze([...path, Object.freeze({ _tag: selectorTag, ordinal: field.capture })]),
-        ),
-      ),
+    return node.fields.flatMap((field) =>
+      materializeLanes(field.shape, [...path, { _tag: selectorTag, ordinal: field.capture }]),
     )
   }
   if (node._tag === 'SumShape') {
-    return Object.freeze([
-      Object.freeze({
+    return [
+      {
         _tag: 'CallingLane' as const,
-        path: Object.freeze([...path, Object.freeze({ _tag: 'UnionTagSelector' as const })]),
+        path: [...path, { _tag: 'UnionTagSelector' as const }],
         type: 'i32' as const,
-      }),
-      ...Array.from({ length: node.payloadLaneCount }, (_, slot) =>
-        Object.freeze({
-          _tag: 'CallingLane' as const,
-          path: Object.freeze([
-            ...path,
-            Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
-          ]),
-          type: node.payloadTypes.at(slot) ?? ('i32' as const),
-        }),
-      ),
-    ])
+      },
+      ...Array.from({ length: node.payloadLaneCount }, (_, slot) => ({
+        _tag: 'CallingLane' as const,
+        path: [...path, { _tag: 'UnionPayloadSelector' as const, slot }],
+        type: node.payloadTypes.at(slot) ?? ('i32' as const),
+      })),
+    ]
   }
   if (node._tag === 'NominalUnionShape') {
-    return Object.freeze([
-      Object.freeze({
+    return [
+      {
         _tag: 'CallingLane' as const,
-        path: Object.freeze([...path, Object.freeze({ _tag: 'NominalUnionTagSelector' as const })]),
+        path: [...path, { _tag: 'NominalUnionTagSelector' as const }],
         type: 'i32' as const,
-      }),
-      ...Array.from({ length: node.payloadLaneCount }, (_, slot) =>
-        Object.freeze({
-          _tag: 'CallingLane' as const,
-          path: Object.freeze([
-            ...path,
-            Object.freeze({ _tag: 'NominalUnionPayloadSelector' as const, slot }),
-          ]),
-          type: node.payloadTypes.at(slot) ?? ('i32' as const),
-        }),
-      ),
-    ])
+      },
+      ...Array.from({ length: node.payloadLaneCount }, (_, slot) => ({
+        _tag: 'CallingLane' as const,
+        path: [...path, { _tag: 'NominalUnionPayloadSelector' as const, slot }],
+        type: node.payloadTypes.at(slot) ?? ('i32' as const),
+      })),
+    ]
   }
   if (node._tag === 'OutcomeShape') {
-    return Object.freeze([
-      Object.freeze({
+    return [
+      {
         _tag: 'CallingLane' as const,
-        path: Object.freeze([...path, Object.freeze({ _tag: 'UnionTagSelector' as const })]),
+        path: [...path, { _tag: 'UnionTagSelector' as const }],
         type: 'i32' as const,
-      }),
-      ...Array.from({ length: node.payloadLaneCount }, (_, slot) =>
-        Object.freeze({
-          _tag: 'CallingLane' as const,
-          path: Object.freeze([
-            ...path,
-            Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
-          ]),
-          type: node.payloadTypes.at(slot) ?? ('i32' as const),
-        }),
-      ),
-    ])
+      },
+      ...Array.from({ length: node.payloadLaneCount }, (_, slot) => ({
+        _tag: 'CallingLane' as const,
+        path: [...path, { _tag: 'UnionPayloadSelector' as const, slot }],
+        type: node.payloadTypes.at(slot) ?? ('i32' as const),
+      })),
+    ]
   }
   if (node._tag === 'EffectCompositeShape') {
-    return Object.freeze([
-      Object.freeze({
+    return [
+      {
         _tag: 'CallingLane' as const,
-        path: Object.freeze([...path, Object.freeze({ _tag: 'UnionTagSelector' as const })]),
+        path: [...path, { _tag: 'UnionTagSelector' as const }],
         type: 'i32' as const,
-      }),
-      ...node.payloadTypes.map((type, slot) =>
-        Object.freeze({
-          _tag: 'CallingLane' as const,
-          path: Object.freeze([
-            ...path,
-            Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot }),
-          ]),
-          type,
-        }),
-      ),
-    ])
+      },
+      ...node.payloadTypes.map((type, slot) => ({
+        _tag: 'CallingLane' as const,
+        path: [...path, { _tag: 'UnionPayloadSelector' as const, slot }],
+        type,
+      })),
+    ]
   }
   const lanes: Array<CallingLane> = []
   for (let index = 0; index < node.length; index += 1) {
-    const selector: Selector = Object.freeze({ _tag: 'ElementSelector', index })
-    lanes.push(...materializeLanes(node.element, Object.freeze([...path, selector])))
+    const selector: Selector = { _tag: 'ElementSelector', index }
+    lanes.push(...materializeLanes(node.element, [...path, selector]))
   }
-  return Object.freeze(lanes)
+  return lanes
 }
 
 // Layout queries and lane projections
@@ -4675,7 +4569,7 @@ export const callingShape = (
     Type.runtimeKey(type),
   )
   if (physical === undefined || Type.equals(physical.type, type)) return physical
-  return Object.freeze({
+  return {
     _tag: 'CallingShape',
     type,
     tree: physical.tree,
@@ -4683,7 +4577,7 @@ export const callingShape = (
     get lanes(): ReadonlyArray<CallingLane> {
       return physical.lanes
     },
-  })
+  }
 }
 
 /** Looks up one available or unavailable nominal catalog entry. */
@@ -4722,27 +4616,25 @@ export const failurePayloadRepacking = (
   const memberShape = callingShape(self, sourceMember)
   if (memberShape === undefined) return undefined
   const sourceOffset = Type.isNominal(sourceType) ? 0 : 1
-  const targetPayloadLanes = Object.freeze(targetShape.lanes.slice(1))
+  const targetPayloadLanes = targetShape.lanes.slice(1)
   const lanes: Array<FailurePayloadLane> = []
   for (const [ordinal, member] of memberShape.lanes.entries()) {
     const source = sourceShape.lanes.at(sourceOffset + ordinal)
     const target = targetPayloadLanes.at(ordinal)
     if (source === undefined || target === undefined) return undefined
-    lanes.push(
-      Object.freeze({
-        sourceOrdinal: sourceOffset + ordinal,
-        source,
-        member,
-        targetOrdinal: ordinal,
-        target,
-      }),
-    )
+    lanes.push({
+      sourceOrdinal: sourceOffset + ordinal,
+      source,
+      member,
+      targetOrdinal: ordinal,
+      target,
+    })
   }
-  return Object.freeze({
+  return {
     member: sourceMember,
     targetPayloadLanes,
-    lanes: Object.freeze(lanes),
-  })
+    lanes: lanes,
+  }
 }
 
 /** Resolves one canonical callable-environment identity in this target's runtime plan. */
@@ -4806,32 +4698,30 @@ export const effectFieldLanes = (
   field: EffectEnvironmentField,
 ): ReadonlyArray<CallingLane> => {
   if (field.representation === 'Borrow') {
-    return Object.freeze([
-      Object.freeze({
+    return [
+      {
         _tag: 'CallingLane' as const,
-        path: Object.freeze([]),
-        type: Object.freeze({
+        path: [],
+        type: {
           _tag: 'Address' as const,
           element: field.type,
           bits: self.target.pointerSize === 4 ? 32 : 64,
-        }),
-      }),
-    ])
+        },
+      },
+    ]
   }
   if (field.callableIdentity !== undefined) {
     const captured =
       field.callableIdentity.environment === undefined
         ? undefined
         : callableEnvironmentByIdentity(self, field.callableIdentity.environment)
-    return captured?._tag === 'CallableEnvironment'
-      ? callableEnvironmentLanes(self, captured)
-      : Object.freeze([])
+    return captured?._tag === 'CallableEnvironment' ? callableEnvironmentLanes(self, captured) : []
   }
   if (field.effectIdentity !== undefined) {
     const captured = effectEnvironmentByFieldIdentity(self, field.effectIdentity)
-    return captured !== undefined ? effectEnvironmentLanes(self, captured) : Object.freeze([])
+    return captured !== undefined ? effectEnvironmentLanes(self, captured) : []
   }
-  return callingShape(self, field.type)?.lanes ?? Object.freeze([])
+  return callingShape(self, field.type)?.lanes ?? []
 }
 
 /** One scalar lane's storage root and byte base within an executable environment. */
@@ -4847,11 +4737,7 @@ const ordinaryLanePlacements = (
   type: DeclarationFacts.SemanticType,
   byteOffset: number,
 ): ReadonlyArray<EnvironmentLanePlacement> =>
-  Object.freeze(
-    (callingShape(self, type)?.lanes ?? []).map((lane) =>
-      Object.freeze({ lane, byteOffset, root: type }),
-    ),
-  )
+  (callingShape(self, type)?.lanes ?? []).map((lane) => ({ lane, byteOffset, root: type }))
 
 /** Places every scalar lane stored by one hidden Effect environment. */
 export const effectEnvironmentLanePlacements = (
@@ -4864,9 +4750,7 @@ export const effectEnvironmentLanePlacements = (
   >,
   byteOffset = 0,
 ): ReadonlyArray<EnvironmentLanePlacement> =>
-  Object.freeze(
-    environment.fields.flatMap((field) => effectFieldLanePlacements(self, field, byteOffset)),
-  )
+  environment.fields.flatMap((field) => effectFieldLanePlacements(self, field, byteOffset))
 
 /** Places every scalar lane stored by one Effect capture field. */
 export const effectFieldLanePlacements = (
@@ -4877,9 +4761,7 @@ export const effectFieldLanePlacements = (
   const fieldOffset = byteOffset + field.offset
   if (field.representation === 'Borrow') {
     const [lane] = effectFieldLanes(self, field)
-    return lane === undefined
-      ? Object.freeze([])
-      : Object.freeze([Object.freeze({ lane, byteOffset: fieldOffset })])
+    return lane === undefined ? [] : [{ lane, byteOffset: fieldOffset }]
   }
   if (field.callableIdentity !== undefined) {
     const captured =
@@ -4887,13 +4769,13 @@ export const effectFieldLanePlacements = (
         ? undefined
         : callableEnvironmentByIdentity(self, field.callableIdentity.environment)
     return captured === undefined
-      ? Object.freeze([])
+      ? []
       : callableEnvironmentLanePlacements(self, captured, fieldOffset)
   }
   if (field.effectIdentity !== undefined) {
     const captured = effectEnvironmentByFieldIdentity(self, field.effectIdentity)
     return captured === undefined
-      ? Object.freeze([])
+      ? []
       : effectEnvironmentLanePlacements(self, captured, fieldOffset)
   }
   return ordinaryLanePlacements(self, field.type, fieldOffset)
@@ -4909,7 +4791,7 @@ export const effectEnvironmentLanes = (
     }
   >,
 ): ReadonlyArray<CallingLane> =>
-  Object.freeze(environment.fields.flatMap((field) => effectFieldLanes(self, field)))
+  environment.fields.flatMap((field) => effectFieldLanes(self, field))
 
 /** Materializes the ABI lanes of one hidden callable capture environment. */
 export const callableEnvironmentLanes = (
@@ -4921,7 +4803,7 @@ export const callableEnvironmentLanes = (
     }
   >,
 ): ReadonlyArray<CallingLane> =>
-  Object.freeze(environment.fields.flatMap((field) => callableFieldLanes(self, field)))
+  environment.fields.flatMap((field) => callableFieldLanes(self, field))
 
 /** Reconstructs the complete specialized target key of one callable environment. */
 export const callableTargetArguments = (
@@ -4931,20 +4813,19 @@ export const callableTargetArguments = (
       readonly _tag: 'CallableEnvironment'
     }
   >,
-): ReadonlyArray<Type.GenericArgument> =>
-  Object.freeze([
-    ...environment.callable.typeArguments,
-    ...environment.callable.captures
-      .filter(
-        (
-          capture,
-        ): capture is typeof capture & {
-          readonly callableIdentity: Type.CallableIdentityArgument
-        } => capture.callableIdentity !== undefined,
-      )
-      .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
-      .map((capture) => capture.callableIdentity),
-  ])
+): ReadonlyArray<Type.GenericArgument> => [
+  ...environment.callable.typeArguments,
+  ...environment.callable.captures
+    .filter(
+      (
+        capture,
+      ): capture is typeof capture & {
+        readonly callableIdentity: Type.CallableIdentityArgument
+      } => capture.callableIdentity !== undefined,
+    )
+    .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
+    .map((capture) => capture.callableIdentity),
+]
 
 /** Materializes the ABI lanes stored for one hidden callable capture field. */
 export const callableFieldLanes = (
@@ -4952,28 +4833,26 @@ export const callableFieldLanes = (
   field: CallableEnvironmentField,
 ): ReadonlyArray<CallingLane> => {
   if (field.representation === 'Borrow') {
-    return Object.freeze([
-      Object.freeze({
+    return [
+      {
         _tag: 'CallingLane' as const,
-        path: Object.freeze([]),
-        type: Object.freeze({
+        path: [],
+        type: {
           _tag: 'Address' as const,
           element: field.type,
           bits: self.target.pointerSize === 4 ? 32 : 64,
-        }),
-      }),
-    ])
+        },
+      },
+    ]
   }
   if (field.callableIdentity !== undefined) {
     const environment =
       field.callableIdentity.environment === undefined
         ? undefined
         : callableEnvironmentByIdentity(self, field.callableIdentity.environment)
-    return environment === undefined
-      ? Object.freeze([])
-      : callableEnvironmentLanes(self, environment)
+    return environment === undefined ? [] : callableEnvironmentLanes(self, environment)
   }
-  return callingShape(self, field.type)?.lanes ?? Object.freeze([])
+  return callingShape(self, field.type)?.lanes ?? []
 }
 
 /** Places every scalar lane stored by one hidden callable environment. */
@@ -4987,9 +4866,7 @@ export const callableEnvironmentLanePlacements = (
   >,
   byteOffset = 0,
 ): ReadonlyArray<EnvironmentLanePlacement> =>
-  Object.freeze(
-    environment.fields.flatMap((field) => callableFieldLanePlacements(self, field, byteOffset)),
-  )
+  environment.fields.flatMap((field) => callableFieldLanePlacements(self, field, byteOffset))
 
 /** Places every scalar lane stored by one callable capture field. */
 export const callableFieldLanePlacements = (
@@ -5000,14 +4877,12 @@ export const callableFieldLanePlacements = (
   const fieldOffset = byteOffset + field.offset
   if (field.representation === 'Borrow') {
     const [lane] = callableFieldLanes(self, field)
-    return lane === undefined
-      ? Object.freeze([])
-      : Object.freeze([Object.freeze({ lane, byteOffset: fieldOffset })])
+    return lane === undefined ? [] : [{ lane, byteOffset: fieldOffset }]
   }
   if (field.callableIdentity?.environment !== undefined) {
     const captured = callableEnvironmentByIdentity(self, field.callableIdentity.environment)
     return captured === undefined
-      ? Object.freeze([])
+      ? []
       : callableEnvironmentLanePlacements(self, captured, fieldOffset)
   }
   return ordinaryLanePlacements(self, field.type, fieldOffset)
@@ -5031,8 +4906,7 @@ export const callableCaptureRange = (
   let laneOffset = 0
   for (const field of environment.fields) {
     const laneCount = callableFieldLanes(self, field).length
-    if (field.ordinal === capture)
-      return Object.freeze({ laneOffset, laneCount, byteOffset: field.offset })
+    if (field.ordinal === capture) return { laneOffset, laneCount, byteOffset: field.offset }
     laneOffset += laneCount
   }
   return undefined
@@ -5049,7 +4923,7 @@ const fieldSlice = (
     }
   | undefined => {
   const [field, ...rest] = path
-  if (field === undefined) return Object.freeze({ offset, length: node.laneCount })
+  if (field === undefined) return { offset, length: node.laneCount }
   if (node._tag === 'NominalUnionShape') {
     const variant = node.variants.find(
       (variant) =>
@@ -5078,7 +4952,7 @@ export const memberFieldSlots = (
   path: ReadonlyArray<DeclarationFacts.FieldId>,
 ): ReadonlyArray<number> | undefined => {
   if (path.length === 0 && Type.runtimeKey(shape.type) === Type.runtimeKey(member))
-    return Object.freeze(Array.from({ length: shape.laneCount }, (_, ordinal) => ordinal))
+    return Array.from({ length: shape.laneCount }, (_, ordinal) => ordinal)
   let selected:
     | {
         readonly shape: CallingShapeNode
@@ -5089,38 +4963,33 @@ export const memberFieldSlots = (
     shape.tree._tag === 'ProductShape' &&
     Type.runtimeKey(shape.tree.type) === Type.runtimeKey(member)
   ) {
-    selected = Object.freeze({ shape: shape.tree, physicalOffset: 0 })
+    selected = { shape: shape.tree, physicalOffset: 0 }
   } else if (shape.tree._tag === 'SumShape') {
     const candidate = shape.tree.members.find(
       (entry) => Type.runtimeKey(entry.member) === Type.runtimeKey(member),
     )
     if (candidate !== undefined) {
-      selected = Object.freeze({ shape: candidate.shape, physicalOffset: 1 })
+      selected = { shape: candidate.shape, physicalOffset: 1 }
     }
   }
   if (selected === undefined) return undefined
   const slice = fieldSlice(selected.shape, path)
   return slice === undefined
     ? undefined
-    : Object.freeze(
-        Array.from(
-          { length: slice.length },
-          (_, ordinal) => selected.physicalOffset + slice.offset + ordinal,
-        ),
+    : Array.from(
+        { length: slice.length },
+        (_, ordinal) => selected.physicalOffset + slice.offset + ordinal,
       )
 }
 
 /** Canonical match leaves described by a realized calling shape. */
 export const coverageMembers = (shape: CallingShape): ReadonlyArray<Match.CoverageIdentity> => {
-  if (shape.tree._tag === 'NominalUnionShape')
-    return Object.freeze(coverageVariants(shape.type, shape.tree))
+  if (shape.tree._tag === 'NominalUnionShape') return coverageVariants(shape.type, shape.tree)
   if (shape.tree._tag !== 'SumShape') return Match.membersOf(shape.type)
-  return Object.freeze(
-    shape.tree.members.flatMap((member) =>
-      member.shape._tag === 'NominalUnionShape'
-        ? coverageVariants(member.member, member.shape)
-        : [Match.structuralMember(member.member)],
-    ),
+  return shape.tree.members.flatMap((member) =>
+    member.shape._tag === 'NominalUnionShape'
+      ? coverageVariants(member.member, member.shape)
+      : [Match.structuralMember(member.member)],
   )
 }
 
@@ -5212,7 +5081,7 @@ export const coverageFieldSlots = (
     Type.runtimeKey(shape.tree.type) === Type.runtimeKey(member.type)
   ) {
     if (path.length === 0)
-      return Object.freeze(Array.from({ length: shape.tree.laneCount }, (_, ordinal) => ordinal))
+      return Array.from({ length: shape.tree.laneCount }, (_, ordinal) => ordinal)
     const variant = shape.tree.variants.find(
       (candidate) =>
         candidate.ordinal === member.variantOrdinal &&
@@ -5227,9 +5096,7 @@ export const coverageFieldSlots = (
     )
     if (outer?.shape._tag === 'NominalUnionShape') {
       if (path.length === 0)
-        return Object.freeze(
-          Array.from({ length: outer.shape.laneCount }, (_, ordinal) => 1 + ordinal),
-        )
+        return Array.from({ length: outer.shape.laneCount }, (_, ordinal) => 1 + ordinal)
       const variant = outer.shape.variants.find(
         (candidate) =>
           candidate.ordinal === member.variantOrdinal &&
@@ -5244,11 +5111,9 @@ export const coverageFieldSlots = (
   const slice = fieldSlice(selected.shape, path)
   return slice === undefined
     ? undefined
-    : Object.freeze(
-        Array.from(
-          { length: slice.length },
-          (_, ordinal) => selected.physicalOffset + slice.offset + ordinal,
-        ),
+    : Array.from(
+        { length: slice.length },
+        (_, ordinal) => selected.physicalOffset + slice.offset + ordinal,
       )
 }
 
@@ -5260,7 +5125,7 @@ export const coverageBindingSlots = (
   type: DeclarationFacts.SemanticType,
 ): ReadonlyArray<number> | undefined =>
   path.length === 0 && Type.runtimeKey(type) === Type.runtimeKey(shape.type)
-    ? Object.freeze(Array.from({ length: shape.laneCount }, (_, ordinal) => ordinal))
+    ? Array.from({ length: shape.laneCount }, (_, ordinal) => ordinal)
     : coverageFieldSlots(shape, member, path)
 
 const coverageVariants = (
@@ -5293,41 +5158,41 @@ export const scalarEntry = (target: Target.Target, type: Type.Builtin): Entry =>
   const bits = Scalar.bits(scalar, target.pointerSize === 4 ? 32 : 64)
   let representation: Representation
   if (scalar.category === 'Boolean') {
-    representation = Object.freeze({ _tag: 'Boolean', bits: 32, falseValue: 0, trueValue: 1 })
+    representation = { _tag: 'Boolean', bits: 32, falseValue: 0, trueValue: 1 }
   } else if (scalar.category === 'Floating') {
-    representation = Object.freeze({ _tag: 'Floating', bits: bits as 32 | 64, ieee: true })
+    representation = { _tag: 'Floating', bits: bits as 32 | 64, ieee: true }
   } else if (scalar.signedness === 'Signed') {
-    representation = Object.freeze({ _tag: 'SignedInteger', bits })
+    representation = { _tag: 'SignedInteger', bits }
   } else {
-    representation = Object.freeze({ _tag: 'UnsignedInteger', bits })
+    representation = { _tag: 'UnsignedInteger', bits }
   }
-  return Object.freeze({
+  return {
     _tag: 'LayoutEntry',
     type,
     copy: true,
     size: layout.size,
     alignment: layout.alignment,
     representation,
-  })
+  }
 }
 
 const repeatedEntry = (type: Type.FixedArray, element: Entry): Entry | undefined => {
   const stride = alignUp(element.size, element.alignment)
   const size = stride * type.length
   if (!Number.isSafeInteger(stride) || !Number.isSafeInteger(size)) return undefined
-  return Object.freeze({
+  return {
     _tag: 'LayoutEntry',
     type,
     copy: element.copy,
     size,
     alignment: element.alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'Repeated',
       element: type.element,
       length: type.length,
       stride,
-    }),
-  })
+    },
+  }
 }
 
 export const sliceEntry = (target: Target.Target, type: Type.Slice, element: Entry): Entry => {
@@ -5336,27 +5201,27 @@ export const sliceEntry = (target: Target.Target, type: Type.Slice, element: Ent
   const alignment = target.pointerAlignment
   const contentSize = lengthOffset + target.pointerSize
   const size = alignUp(contentSize, alignment)
-  return Object.freeze({
+  return {
     _tag: 'LayoutEntry',
     type,
     copy: type.access === 'Shared',
     size,
     alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'Slice',
       element: type.element,
-      address: Object.freeze({
+      address: {
         bits: addressBits,
         offset: 0,
         size: target.pointerSize,
         alignment: target.pointerAlignment,
-      }),
-      length: Object.freeze({ type: 'usize', offset: lengthOffset, size: target.pointerSize }),
+      },
+      length: { type: 'usize', offset: lengthOffset, size: target.pointerSize },
       addressPadding: lengthOffset - target.pointerSize,
       tailPadding: size - contentSize,
       stride: alignUp(element.size, element.alignment),
-    }),
-  })
+    },
+  }
 }
 
 export const stringEntry = (target: Target.Target, type: Type.String): Entry => {
@@ -5365,90 +5230,87 @@ export const stringEntry = (target: Target.Target, type: Type.String): Entry => 
   const alignment = target.pointerAlignment
   const contentSize = byteLengthOffset + target.pointerSize
   const size = alignUp(contentSize, alignment)
-  return Object.freeze({
+  return {
     _tag: 'LayoutEntry',
     type,
     copy: true,
     size,
     alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'String',
-      storage: Object.freeze({
+      storage: {
         provenance: 'Utf8',
         bits: addressBits,
         offset: 0,
         size: target.pointerSize,
         alignment: target.pointerAlignment,
-      }),
-      byteLength: Object.freeze({
+      },
+      byteLength: {
         type: 'usize',
         offset: byteLengthOffset,
         size: target.pointerSize,
-      }),
+      },
       storagePadding: byteLengthOffset - target.pointerSize,
       tailPadding: size - contentSize,
-    }),
-  })
+    },
+  }
 }
 
-export const referenceEntry = (target: Target.Target, type: Type.Reference): Entry =>
-  Object.freeze({
-    _tag: 'LayoutEntry',
-    type,
-    copy: type.access === 'Shared',
-    size: target.pointerSize,
-    alignment: target.pointerAlignment,
-    representation: Object.freeze({
-      _tag: 'Reference',
-      target: type.target,
-      address: Object.freeze({
-        bits: target.pointerSize === 4 ? 32 : 64,
-        offset: 0,
-        size: target.pointerSize,
-        alignment: target.pointerAlignment,
-      }),
-    }),
-  })
+export const referenceEntry = (target: Target.Target, type: Type.Reference): Entry => ({
+  _tag: 'LayoutEntry',
+  type,
+  copy: type.access === 'Shared',
+  size: target.pointerSize,
+  alignment: target.pointerAlignment,
+  representation: {
+    _tag: 'Reference',
+    target: type.target,
+    address: {
+      bits: target.pointerSize === 4 ? 32 : 64,
+      offset: 0,
+      size: target.pointerSize,
+      alignment: target.pointerAlignment,
+    },
+  },
+})
 
 /** A raw pointer is one Copy address lane; the pointee's layout is never embedded. */
-export const pointerEntry = (target: Target.Target, type: Type.Pointer): Entry =>
-  Object.freeze({
-    _tag: 'LayoutEntry',
-    type,
-    copy: true,
-    size: target.pointerSize,
-    alignment: target.pointerAlignment,
-    representation: Object.freeze({
-      _tag: 'Reference',
-      target: type.pointee,
-      address: Object.freeze({
-        bits: target.pointerSize === 4 ? 32 : 64,
-        offset: 0,
-        size: target.pointerSize,
-        alignment: target.pointerAlignment,
-      }),
-    }),
-  })
+export const pointerEntry = (target: Target.Target, type: Type.Pointer): Entry => ({
+  _tag: 'LayoutEntry',
+  type,
+  copy: true,
+  size: target.pointerSize,
+  alignment: target.pointerAlignment,
+  representation: {
+    _tag: 'Reference',
+    target: type.pointee,
+    address: {
+      bits: target.pointerSize === 4 ? 32 : 64,
+      offset: 0,
+      size: target.pointerSize,
+      alignment: target.pointerAlignment,
+    },
+  },
+})
 
 /** A C function pointer is one Copy address lane with no embedded pointee layout. */
-export const foreignFunctionEntry = (target: Target.Target, type: Type.ForeignFunction): Entry =>
-  Object.freeze({
-    _tag: 'LayoutEntry',
-    type,
-    copy: true,
-    size: target.pointerSize,
-    alignment: target.pointerAlignment,
-    representation: Object.freeze({
-      _tag: 'Reference',
-      target: type,
-      address: Object.freeze({
-        bits: target.pointerSize === 4 ? 32 : 64,
-        offset: 0,
-        size: target.pointerSize,
-        alignment: target.pointerAlignment,
-      }),
-    }),
-  })
+export const foreignFunctionEntry = (target: Target.Target, type: Type.ForeignFunction): Entry => ({
+  _tag: 'LayoutEntry',
+  type,
+  copy: true,
+  size: target.pointerSize,
+  alignment: target.pointerAlignment,
+  representation: {
+    _tag: 'Reference',
+    target: type,
+    address: {
+      bits: target.pointerSize === 4 ? 32 : 64,
+      offset: 0,
+      size: target.pointerSize,
+      alignment: target.pointerAlignment,
+    },
+  },
+})
 
 export const unionEntry = (type: Type.StructuralUnion, members: ReadonlyArray<Entry>): Entry => {
   const payloadAlignment = members.reduce(
@@ -5460,51 +5322,48 @@ export const unionEntry = (type: Type.StructuralUnion, members: ReadonlyArray<En
   const alignment = Math.max(4, payloadAlignment)
   const contentSize = payloadOffset + payloadSize
   const size = alignUp(contentSize, alignment)
-  return Object.freeze({
+  return {
     _tag: 'LayoutEntry',
     type,
     copy: members.every((member) => member.copy),
     size,
     alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'Union',
-      tag: Object.freeze({ bits: 32, size: 4 }),
-      members: Object.freeze(
-        type.members.map((member, ordinal) => {
-          const layout = members.at(ordinal)
-          return Object.freeze({
-            type: member,
-            ordinal,
-            size: layout?.size ?? 0,
-            alignment: layout?.alignment ?? 1,
-          })
-        }),
-      ),
+      tag: { bits: 32, size: 4 },
+      members: type.members.map((member, ordinal) => {
+        const layout = members.at(ordinal)
+        return {
+          type: member,
+          ordinal,
+          size: layout?.size ?? 0,
+          alignment: layout?.alignment ?? 1,
+        }
+      }),
       payloadOffset,
       payloadSize,
       payloadAlignment,
       tagPadding: payloadOffset - 4,
       tailPadding: size - contentSize,
-    }),
-  })
+    },
+  }
 }
 
 // `never` has no values or calling lanes, but generic aggregates still need a compositional
 // physical fact for impossible fields such as `Failure<never>`. This entry is never materialized
 // as a value; it only lets the enclosing representation remain well-defined.
-export const neverEntry = (): Entry =>
-  Object.freeze({
-    _tag: 'LayoutEntry',
-    type: 'never',
-    copy: true,
-    size: 0,
-    alignment: 1,
-    representation: Object.freeze({
-      _tag: 'Aggregate',
-      fields: Object.freeze([]),
-      tailPadding: 0,
-    }),
-  })
+export const neverEntry = (): Entry => ({
+  _tag: 'LayoutEntry',
+  type: 'never',
+  copy: true,
+  size: 0,
+  alignment: 1,
+  representation: {
+    _tag: 'Aggregate',
+    fields: [],
+    tailPadding: 0,
+  },
+})
 
 const nominalOf = (
   declaration: DeclarationFacts.StructFact | DeclarationFacts.UnionFact | DeclarationFacts.EnumFact,
@@ -5528,29 +5387,29 @@ export const scalarEnumEntry = (
   const members = declaration.members.flatMap((member) =>
     member.canonical._tag === 'Canonical' && member.discriminant._tag === 'Available'
       ? [
-          Object.freeze({
+          {
             member: member.canonical.id,
             discriminant: member.discriminant.value,
-          }),
+          },
         ]
       : [],
   )
   if (members.length !== declaration.members.length) return undefined
-  return Object.freeze({
+  return {
     _tag: 'LayoutEntry',
     type: Type.nominal(declaration.canonical.id.module, declaration.canonical.id.name),
     copy: true,
     size: layout.size,
     alignment: layout.alignment,
-    representation: Object.freeze({
+    representation: {
       _tag: 'ScalarEnum',
       enum: declaration.canonical.id,
       scalar: scalar.spelling,
       bits: Scalar.bits(scalar, target.pointerSize === 4 ? 32 : 64),
       signedness: scalar.signedness,
-      members: Object.freeze(members),
-    }),
-  })
+      members: members,
+    },
+  }
 }
 
 const dependenciesOf = (
@@ -5574,7 +5433,7 @@ const dependenciesOf = (
     }
     for (const type of types) dependencies.set(Type.runtimeKey(type), type)
   }
-  return Object.freeze([...dependencies.values()].sort(compareRuntimeTypes))
+  return [...dependencies.values()].sort(compareRuntimeTypes)
 }
 
 const unavailable = (
@@ -5582,11 +5441,10 @@ const unavailable = (
   dependencies: ReadonlyArray<Type.Nominal>,
   reason: UnavailableReason,
   cause?: Diagnostic.CauseIdentity,
-): UnavailableEntry =>
-  Object.freeze({
-    _tag: 'UnavailableLayoutEntry',
-    type,
-    dependencies,
-    reason: Object.freeze(reason),
-    ...(cause === undefined ? {} : { cause }),
-  })
+): UnavailableEntry => ({
+  _tag: 'UnavailableLayoutEntry',
+  type,
+  dependencies,
+  reason: reason,
+  ...(cause === undefined ? {} : { cause }),
+})

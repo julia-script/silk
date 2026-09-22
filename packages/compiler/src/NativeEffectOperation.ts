@@ -150,11 +150,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         diagnostic === undefined
           ? yield* Constant.integerUnsigned(builder, NativeType.laneType(types, lane), 0n)
           : yield* NativeDiagnosticContext.unhandled(diagnostic)
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([result]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [result])
       break
     }
     case 'Drop': {
@@ -193,7 +189,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const fields =
         operation._tag === 'MakeEffect'
           ? operation.type.environment.fields
-          : (operation.type.environment?.fields ?? Object.freeze([]))
+          : (operation.type.environment?.fields ?? [])
       if (operation._tag === 'MakeCallable' && operation.base !== undefined) {
         yield* NativeStorage.constructField(nativeStorage, operation.destination, operation.base, 0)
       }
@@ -250,30 +246,22 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           throw new RangeError('LLVM Effect choice projection lost a capture lane')
         values.push(input)
       }
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze(values),
-      )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.matched.ordinal,
-        Object.freeze([
-          yield* FunctionBody.cast(
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
+      yield* NativeStorage.writeLocal(nativeStorage, operation.matched.ordinal, [
+        yield* FunctionBody.cast(
+          body,
+          'zext',
+          yield* FunctionBody.integerCompare(
             body,
-            'zext',
-            yield* FunctionBody.integerCompare(
-              body,
-              'eq',
-              tag,
-              yield* Constant.integerSigned(builder, i32, BigInt(operation.alternative)),
-              `effect_choice${operation.destination.ordinal}_matched`,
-            ),
-            i32,
-            `effect_choice${operation.destination.ordinal}_flag`,
+            'eq',
+            tag,
+            yield* Constant.integerSigned(builder, i32, BigInt(operation.alternative)),
+            `effect_choice${operation.destination.ordinal}_matched`,
           ),
-        ]),
-      )
+          i32,
+          `effect_choice${operation.destination.ordinal}_flag`,
+        ),
+      ])
       break
     }
     case 'PackEffectComposite': {
@@ -301,11 +289,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               ),
         )
       }
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze(values),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
       break
     }
     case 'PackEffectOutcome': {
@@ -476,11 +460,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           `effect_failure_union${operation.destination.ordinal}_payload`,
         )),
       ]
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze(values),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
       break
     }
     case 'UnpackEffectSuccess': {
@@ -716,8 +696,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           received,
           `composite${operation.destination.ordinal}_received`,
         )
-        const sourceOutcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> =
-          Object.freeze({ _tag: 'EffectOutcome', type: alternative.type.type })
+        const sourceOutcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = {
+          _tag: 'EffectOutcome',
+          type: alternative.type.type,
+        }
         const sourceOutcomeLanes = NativeType.lanesFor(types, sourceOutcomeType)
         const sourceTag = called.values.at(0)
         if (sourceTag === undefined)
@@ -760,7 +742,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.outcome,
           yield* NativeDiagnosticOutcome.accept(call.synchronous.diagnostic, operation.outcome, {
             ...called,
-            values: Object.freeze(joined),
+            values: joined,
           }),
         )
         yield* NativeStorage.commitLocal(nativeStorage, operation.outcome)
@@ -907,7 +889,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               EffectExecutionContract.matches(
                 candidate.fn.result.type,
                 operation.outcomeType.type,
-                candidate.fn.effectRunner?.providers ?? Object.freeze([]),
+                candidate.fn.effectRunner?.providers ?? [],
               ) &&
               candidate.fn.parameterCount === logicalInputs.length &&
               logicalInputs.every((input, ordinal) => {
@@ -1130,19 +1112,15 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         zero,
         `effect_result_success${operation.destination.ordinal}`,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([
-          yield* FunctionBody.cast(
-            body,
-            'zext',
-            succeeded,
-            i32,
-            `effect_result_success_flag${operation.destination.ordinal}`,
-          ),
-        ]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+        yield* FunctionBody.cast(
+          body,
+          'zext',
+          succeeded,
+          i32,
+          `effect_result_success_flag${operation.destination.ordinal}`,
+        ),
+      ])
       const outcomeLanesValues = yield* NativeStorage.materialize(nativeStorage, operation.outcome)
       const outcomeLanes = operation.outcomeShape.lanes
       const successLaneCount =
@@ -1171,11 +1149,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
                 ),
           )
         }
-        return Object.freeze(coerced)
+        return coerced
       })
       const successValues = yield* coerce(
-        Object.freeze(outcomeLanesValues.slice(1, 1 + successLaneCount)),
-        Object.freeze(outcomeLanes.slice(1, 1 + successLaneCount)),
+        outcomeLanesValues.slice(1, 1 + successLaneCount),
+        outcomeLanes.slice(1, 1 + successLaneCount),
         operation.successShape.lanes,
         `effect_result${operation.destination.ordinal}_success`,
       )
@@ -1201,8 +1179,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       failureValues.push(...outcomeLanesValues.slice(1))
       failureLanes.push(...outcomeLanes.slice(1))
       const coercedFailureValues = yield* coerce(
-        Object.freeze(failureValues),
-        Object.freeze(failureLanes),
+        failureValues,
+        failureLanes,
         operation.failureValueShape.lanes,
         `effect_result${operation.destination.ordinal}_failure`,
       )

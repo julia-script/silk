@@ -443,12 +443,12 @@ export const analyze = (
     }
     partialBefore.set(operation, partial)
   }
-  return Object.freeze({
-    violations: Object.freeze([...violations.values()]),
+  return {
+    violations: [...violations.values()],
     before,
     flagsBefore,
     partialBefore,
-  })
+  }
 }
 
 /** One shared immutable dataflow result for verification and suspension planning. */

@@ -25,17 +25,19 @@ export type Location =
       readonly fallback: AuthoredIdentity.Anchor
     }
 
-export const at = (anchor: AuthoredIdentity.Anchor): Location =>
-  Object.freeze({ _tag: 'At', anchor })
+export const at = (anchor: AuthoredIdentity.Anchor): Location => ({ _tag: 'At', anchor })
 
 /** The last byte of a node. */
-export const endOf = (anchor: AuthoredIdentity.Anchor): Location =>
-  Object.freeze({ _tag: 'At', anchor, edge: 'End' })
+export const endOf = (anchor: AuthoredIdentity.Anchor): Location => ({
+  _tag: 'At',
+  anchor,
+  edge: 'End',
+})
 
 export const within = (
   parts: ReadonlyArray<Provenance.Source>,
   fallback: AuthoredIdentity.Anchor,
-): Location => Object.freeze({ _tag: 'In', parts: Object.freeze([...parts]), fallback })
+): Location => ({ _tag: 'In', parts: [...parts], fallback })
 
 /** A stable text key: equal locations have equal keys in every revision. */
 export const key = (self: Location): string =>
@@ -124,15 +126,15 @@ export const resolve = (self: Location, registry: SemanticContext.Registry): Res
       self.edge === undefined || whole.end <= whole.start
         ? whole
         : (SourceSpan.fromOffsets(whole.sourceId, whole.end - 1, whole.end) ?? whole)
-    return Object.freeze({ span, related: Object.freeze([]) })
+    return { span, related: [] }
   }
   const spans = self.parts.flatMap((part) => {
     const span = part._tag === 'Literal' ? literalSpan(registry, part) : undefined
     return span === undefined ? [] : [span]
   })
   const [span, ...related] = spans
-  return Object.freeze({
+  return {
     span: span ?? registry.spanOf(self.fallback),
-    related: Object.freeze(related),
-  })
+    related: related,
+  }
 }

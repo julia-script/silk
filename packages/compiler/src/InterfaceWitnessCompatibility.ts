@@ -77,15 +77,12 @@ type OperandShape =
   | { readonly _tag: 'Slice'; readonly access: Type.Slice['access']; readonly type: Type.Type }
 
 const operandShape = (type: Type.Type): OperandShape => {
-  if (Type.isReference(type))
-    return Object.freeze({ _tag: 'Reference', access: type.access, type: type.target })
-  if (Type.isSlice(type))
-    return Object.freeze({ _tag: 'Slice', access: type.access, type: type.element })
-  return Object.freeze({ _tag: 'Value', access: 'Take', type })
+  if (Type.isReference(type)) return { _tag: 'Reference', access: type.access, type: type.target }
+  if (Type.isSlice(type)) return { _tag: 'Slice', access: type.access, type: type.element }
+  return { _tag: 'Value', access: 'Take', type }
 }
 
-const incompatible = (problem: Problem): Compatibility =>
-  Object.freeze({ _tag: 'Incompatible', problem })
+const incompatible = (problem: Problem): Compatibility => ({ _tag: 'Incompatible', problem })
 
 const operandProblem = (
   contract: Operand,
@@ -95,30 +92,30 @@ const operandProblem = (
   const promised = operandShape(contract.type)
   const required = operandShape(witness.type)
   if (!Type.compareAccess(promised.access, required.access))
-    return Object.freeze({
+    return {
       _tag: 'StrongerOperandAccess',
       ordinal,
       name: contract.name,
       receiver: contract.receiver,
       promised: promised.access,
       required: required.access,
-    })
+    }
   if (!Type.equals(promised.type, required.type))
-    return Object.freeze({
+    return {
       _tag: 'OperandType',
       ordinal,
       name: contract.name,
       promised: contract.type,
       required: witness.type,
-    })
+    }
   if (promised._tag !== required._tag && promised._tag !== 'Value' && required._tag !== 'Value')
-    return Object.freeze({
+    return {
       _tag: 'OperandOwnership',
       ordinal,
       name: contract.name,
       promised: promised.access,
       required: required.access,
-    })
+    }
   return undefined
 }
 
@@ -139,14 +136,14 @@ export const lifetimeContract = (
   // The applied operation already promises its own free predicates, including ordinary
   // generic bounds such as T: 'static. Only the witness may add an unpromised demand.
   const promisedFormation = Type.executableFormationRequirements(expected)
-  const promisedContext: TypeCompatibility.Context = Object.freeze({
+  const promisedContext: TypeCompatibility.Context = {
     ...context,
     assumptions: Lifetime.assumptions([
       ...context.assumptions.bounds,
       ...promisedFormation.lifetimeBounds,
     ]),
     typeBounds: [...context.typeBounds, ...promisedFormation.typeOutlives],
-  })
+  }
   if (
     !formation.lifetimeBounds.every((bound) =>
       TypeCompatibility.isCompatible(
@@ -159,52 +156,43 @@ export const lifetimeContract = (
     ) ||
     !formation.typeOutlives.every((bound) => TypeCompatibility.typeOutlives(promisedContext, bound))
   )
-    return incompatible(Object.freeze({ _tag: 'LifetimeContract' }))
+    return incompatible({ _tag: 'LifetimeContract' })
   return TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected, promisedContext))
-    ? Object.freeze({ _tag: 'Compatible' })
-    : incompatible(Object.freeze({ _tag: 'LifetimeContract' }))
+    ? { _tag: 'Compatible' }
+    : incompatible({ _tag: 'LifetimeContract' })
 }
 
 /** Checks one substituted interface contract without narrowing or rewriting that caller contract. */
 export const check = (contract: Contract, witness: Witness): Compatibility => {
-  if (!contract.unsafe && witness.unsafe)
-    return incompatible(Object.freeze({ _tag: 'StrongerSafety' }))
+  if (!contract.unsafe && witness.unsafe) return incompatible({ _tag: 'StrongerSafety' })
   if (contract.functionKind === 'Ordinary' && witness.functionKind === 'Effect')
-    return incompatible(
-      Object.freeze({
-        _tag: 'StrongerFlow',
-        promised: contract.functionKind,
-        required: witness.functionKind,
-      }),
-    )
+    return incompatible({
+      _tag: 'StrongerFlow',
+      promised: contract.functionKind,
+      required: witness.functionKind,
+    })
   if (contract.operands.length !== witness.operands.length)
-    return incompatible(
-      Object.freeze({
-        _tag: 'OperandArity',
-        promised: contract.operands.length,
-        required: witness.operands.length,
-      }),
-    )
+    return incompatible({
+      _tag: 'OperandArity',
+      promised: contract.operands.length,
+      required: witness.operands.length,
+    })
   for (const [ordinal, operand] of contract.operands.entries()) {
     const implementation = witness.operands.at(ordinal)
     if (implementation === undefined)
-      return incompatible(
-        Object.freeze({
-          _tag: 'OperandArity',
-          promised: contract.operands.length,
-          required: witness.operands.length,
-        }),
-      )
+      return incompatible({
+        _tag: 'OperandArity',
+        promised: contract.operands.length,
+        required: witness.operands.length,
+      })
     const problem = operandProblem(operand, implementation, ordinal)
     if (problem !== undefined) return incompatible(problem)
   }
   if (!Type.equals(witness.success, contract.success))
-    return incompatible(
-      Object.freeze({ _tag: 'Success', promised: contract.success, actual: witness.success }),
-    )
+    return incompatible({ _tag: 'Success', promised: contract.success, actual: witness.success })
   for (const failure of witness.failures)
     if (!contract.failures.some((allowed) => Type.equals(failure, allowed)))
-      return incompatible(Object.freeze({ _tag: 'Failure', failure }))
+      return incompatible({ _tag: 'Failure', failure })
   for (const requirement of witness.requirements) {
     const matching = contract.requirements.filter(
       (allowed) =>
@@ -213,19 +201,17 @@ export const check = (contract: Contract, witness: Witness): Compatibility => {
     )
     if (matching.some((allowed) => Type.requirementSatisfies(allowed, requirement))) continue
     if (matching.length > 0)
-      return incompatible(
-        Object.freeze({
-          _tag: 'StrongerRequirementAccess',
-          requirement,
-          promised: Object.freeze(matching.map((allowed) => allowed.access)),
-        }),
-      )
-    return incompatible(Object.freeze({ _tag: 'Requirement', requirement }))
+      return incompatible({
+        _tag: 'StrongerRequirementAccess',
+        requirement,
+        promised: matching.map((allowed) => allowed.access),
+      })
+    return incompatible({ _tag: 'Requirement', requirement })
   }
   for (const parameter of witness.requirementParameters)
     if (!contract.requirementParameters.some((allowed) => Type.equals(parameter, allowed)))
-      return incompatible(Object.freeze({ _tag: 'RequirementParameter', parameter }))
-  return Object.freeze({ _tag: 'Compatible' })
+      return incompatible({ _tag: 'RequirementParameter', parameter })
+  return { _tag: 'Compatible' }
 }
 
 const accessText = (access: Access): string => access.toLowerCase()

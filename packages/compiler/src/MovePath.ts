@@ -64,8 +64,10 @@ export interface TransitionFailure {
 }
 
 /** Starts one complete, missing, or conditionally present ownership root. */
-export const make = (initialization: Initialization = 'Initialized'): State =>
-  Object.freeze({ initialization, children: Object.freeze([]) })
+export const make = (initialization: Initialization = 'Initialized'): State => ({
+  initialization,
+  children: [],
+})
 
 const selectorKey = (self: Selector): string => {
   switch (self._tag) {
@@ -114,8 +116,10 @@ const childOf = (self: State, selector: Selector): State =>
   self.children.find((child) => selectorKey(child.selector) === selectorKey(selector))?.state ??
   make(self.initialization)
 
-const failure = (tag: TransitionFailure['_tag'], path: Path): TransitionFailure =>
-  Object.freeze({ _tag: tag, path: Object.freeze([...path]) })
+const failure = (tag: TransitionFailure['_tag'], path: Path): TransitionFailure => ({
+  _tag: tag,
+  path: [...path],
+})
 
 const validSelector = (shape: Shape, selector: Selector): boolean => {
   if (selector._tag === 'Field')
@@ -179,7 +183,7 @@ const summarize = (self: State, path: Path, shapeOf: ShapeOf): Inspection => {
   const inherited = cardinality === 0 || children.length < cardinality
   const discriminant =
     shape?._tag === 'Variants' ? (self.discriminant ?? self.initialization) : undefined
-  return Object.freeze({
+  return {
     state: self,
     complete:
       self.initialization === 'Initialized' &&
@@ -192,7 +196,7 @@ const summarize = (self: State, path: Path, shapeOf: ShapeOf): Inspection => {
       discriminant === 'Maybe' ||
       nested.some((child) => child.conditional),
     ...(discriminant === undefined ? {} : { discriminant }),
-  })
+  }
 }
 
 /** Inspects a selected subtree without requiring its payload to be complete. */
@@ -212,10 +216,10 @@ const update = (self: State, path: Path, replacement: State): State => {
   )
   if (!equivalent(next, make(self.initialization))) children.push({ selector, state: next })
   children.sort((left, right) => compareSelectors(left.selector, right.selector))
-  return Object.freeze({
+  return {
     ...self,
-    children: Object.freeze(children.map((child) => Object.freeze(child))),
-  })
+    children: children.map((child) => child),
+  }
 }
 
 /** Consumes a complete owned subtree, including explicitly moved Copy values. */
@@ -265,9 +269,7 @@ export const refine = (
       return Result.fail(failure('NotInitialized', path))
     if (selected.activeVariant !== undefined && selected.activeVariant !== variant)
       return Result.fail(failure('UnrefinedVariant', path))
-    return Result.succeed(
-      update(self, path, Object.freeze({ ...selected, activeVariant: variant })),
-    )
+    return Result.succeed(update(self, path, { ...selected, activeVariant: variant }))
   })
 
 const joinInitialization = (states: ReadonlyArray<Initialization>): Initialization => {
@@ -322,12 +324,12 @@ const joinAt = (states: ReadonlyArray<State>, path: Path, shapeOf: ShapeOf): Sta
     shape?._tag === 'Variants'
       ? joinInitialization(states.map((state) => state.discriminant ?? state.initialization))
       : undefined
-  return Object.freeze({
+  return {
     initialization,
-    children: Object.freeze(children.map((child) => Object.freeze(child))),
+    children: children.map((child) => child),
     ...(activeVariant === undefined ? {} : { activeVariant }),
     ...(discriminant === undefined || discriminant === initialization ? {} : { discriminant }),
-  })
+  }
 }
 
 /** Joins continuing predecessors in a finite per-path lattice, without enumerating array slots. */

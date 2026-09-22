@@ -138,13 +138,13 @@ const publicHeader = (
   }
   const nameSpelling = spelling(source, name)
   if (nameSpelling === undefined) return undefined
-  return Object.freeze({
+  return {
     spelling: nameSpelling,
     declarationKind: kind.declarationKind,
     namespace: kind.namespace,
     ordinal,
     selectionSpan: name.span,
-  })
+  }
 }
 
 const headerSpelling = (
@@ -177,16 +177,14 @@ export const make = (syntax: SyntaxFile.SyntaxFile): ModuleSummary => {
   }
   const publicDeclarations = pending
     .filter((exported) => counts.get(exported.spelling) === 1)
-    .map((exported): PublicDeclaration =>
-      Object.freeze({ _tag: 'ModuleSummaryPublicDeclaration', ...exported }),
-    )
-  return Object.freeze({
+    .map((exported): PublicDeclaration => ({ _tag: 'ModuleSummaryPublicDeclaration', ...exported }))
+  return {
     _tag: 'ModuleSummary',
     module: syntax.source.id,
     source: syntax.source,
-    imports: Object.freeze(imports),
-    publicDeclarations: Object.freeze(publicDeclarations),
-  })
+    imports: imports,
+    publicDeclarations: publicDeclarations,
+  }
 }
 
 /** Tests whether a summary describes the exact same immutable source bytes and provenance. */
@@ -215,25 +213,21 @@ export const selected = (
     if (member._tag === 'FunctionDeclaration' && member.associatedMember !== undefined) continue
     const kind = memberKind(member)
     if (kind === undefined) continue
-    publicDeclarations.push(
-      Object.freeze({
-        _tag: 'ModuleSummaryPublicDeclaration',
-        spelling: name,
-        ...kind,
-        ordinal: member.id.ordinal,
-        selectionSpan: context.spanOf(member.name.anchor),
-      }),
-    )
+    publicDeclarations.push({
+      _tag: 'ModuleSummaryPublicDeclaration',
+      spelling: name,
+      ...kind,
+      ordinal: member.id.ordinal,
+      selectionSpan: context.spanOf(member.name.anchor),
+    })
   }
-  return Object.freeze({
+  return {
     _tag: 'ModuleSummary',
     module: module.name,
     source: module.syntax.source,
-    imports: Object.freeze(
-      module.imports.flatMap((imported) =>
-        imported.canonicalTarget === undefined ? [] : [imported.canonicalTarget],
-      ),
+    imports: module.imports.flatMap((imported) =>
+      imported.canonicalTarget === undefined ? [] : [imported.canonicalTarget],
     ),
-    publicDeclarations: Object.freeze(publicDeclarations),
-  })
+    publicDeclarations: publicDeclarations,
+  }
 }

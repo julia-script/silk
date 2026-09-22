@@ -78,10 +78,10 @@ export const make = (
   const testPurpose = options.purpose === 'test'
   const configuration =
     testPurpose && options.configuration !== undefined
-      ? Object.freeze({
+      ? {
           ...options.configuration,
-          input: Object.freeze({ ...options.configuration.input, artifact: 'executable' as const }),
-        })
+          input: { ...options.configuration.input, artifact: 'executable' as const },
+        }
       : options.configuration
   let artifactKind = Target.isNative(options.target)
     ? project.build.artifact
@@ -178,18 +178,18 @@ export const make = (
       supplyOptions = { projectSupply: platformSupply }
     else supplyOptions = { platform: platformSupply }
   }
-  const toolchain = Object.freeze({
+  const toolchain = {
     _tag: 'Toolchain' as const,
     clang: options.clang ?? 'clang',
     llvmAr: options.llvmAr ?? 'llvm-ar',
     ...supplyOptions,
-  })
+  }
   if (Target.isNative(options.target) && artifactKind !== 'WebAssemblyModule') {
     const nativePlan = ToolchainPlan.nativeCommand(
       toolchain,
       artifactKind,
       options.target,
-      Object.freeze([]),
+      [],
       project.build.nativeLinkInputs,
       destination,
     )
@@ -203,45 +203,38 @@ export const make = (
       )
     }
   }
-  return Result.succeed(
-    Object.freeze({
-      _tag: 'BuildPlan' as const,
-      project,
-      target: options.target,
-      artifactKind,
-      stage,
-      optimization: options.optimization,
-      ...(configuration === undefined ? {} : { configuration }),
-      destination,
-      toolchain,
-      nativeLinkInputs: Target.isNative(options.target)
-        ? project.build.nativeLinkInputs
-        : Object.freeze([]),
-    }),
-  )
+  return Result.succeed({
+    _tag: 'BuildPlan' as const,
+    project,
+    target: options.target,
+    artifactKind,
+    stage,
+    optimization: options.optimization,
+    ...(configuration === undefined ? {} : { configuration }),
+    destination,
+    toolchain,
+    nativeLinkInputs: Target.isNative(options.target) ? project.build.nativeLinkInputs : [],
+  })
 }
 
 /** Builds the complete logical request shared by project checking, building and running. */
 export const compilationConfiguration = (
   self: BuildPlan,
-): NonNullable<ModuleClosure.CompilationRequest['configuration']> =>
-  Object.freeze({
-    package: `${self.project.name}@${self.project.version}`,
-    profile:
-      self.configuration?.input ??
-      Object.freeze({
-        target: self.target.id,
-        artifact: ArtifactKind.profileArtifact(self.artifactKind),
-        optimization: self.optimization === 'debug' ? 'none' : 'speed',
-        debug: self.optimization !== 'release',
+): NonNullable<ModuleClosure.CompilationRequest['configuration']> => ({
+  package: `${self.project.name}@${self.project.version}`,
+  profile: self.configuration?.input ?? {
+    target: self.target.id,
+    artifact: ArtifactKind.profileArtifact(self.artifactKind),
+    optimization: self.optimization === 'debug' ? 'none' : 'speed',
+    debug: self.optimization !== 'release',
+  },
+  bindings: self.configuration?.bindings ?? [],
+  ...(self.project.build.composition === undefined
+    ? {}
+    : {
+        composition: self.project.build.composition,
+        compositionOrigin: ConfigurationOrigin.literal(
+          `${self.project.manifestPath}:build.composition`,
+        ),
       }),
-    bindings: self.configuration?.bindings ?? Object.freeze([]),
-    ...(self.project.build.composition === undefined
-      ? {}
-      : {
-          composition: self.project.build.composition,
-          compositionOrigin: ConfigurationOrigin.literal(
-            `${self.project.manifestPath}:build.composition`,
-          ),
-        }),
-  })
+})

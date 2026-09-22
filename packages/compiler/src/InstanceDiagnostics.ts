@@ -30,11 +30,11 @@ export const storedRepresentation = (
       (kind === 'Effect' && !Type.isEffect(type.contract))
     )
       return undefined
-    return Object.freeze({
-      path: Object.freeze([]),
+    return {
+      path: [],
       contract: type.contract,
       open: Type.isRepresentationParameterArgument(type.representation.argument),
-    })
+    }
   }
   if (Type.isFixedArray(type) || Type.isSlice(type))
     return storedRepresentation(index, type.element, kind, seen)
@@ -65,14 +65,12 @@ export const storedRepresentation = (
   const next = new Set(seen).add(typeKey)
   const fields =
     declaration._tag === 'StructDeclaration'
-      ? declaration.fields.map((field) => Object.freeze({ field, prefix: Object.freeze([]) }))
+      ? declaration.fields.map((field) => ({ field, prefix: [] }))
       : declaration.variants.flatMap((variant) =>
-          variant.fields.map((field) =>
-            Object.freeze({
-              field,
-              prefix: Object.freeze(variant.name._tag === 'Present' ? [variant.name.spelling] : []),
-            }),
-          ),
+          variant.fields.map((field) => ({
+            field,
+            prefix: variant.name._tag === 'Present' ? [variant.name.spelling] : [],
+          })),
         )
   for (const { field, prefix } of fields) {
     if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
@@ -90,11 +88,11 @@ export const storedRepresentation = (
           (kind === 'Callable' && Type.isCallable(contract)) ||
           (kind === 'Effect' && Type.isEffect(contract))
         )
-          return Object.freeze({
-            path: Object.freeze([...prefix, field.name.spelling]),
+          return {
+            path: [...prefix, field.name.spelling],
             contract,
             open: resolution._tag === 'UnavailableRepresentationField',
-          })
+          }
       }
     }
     const nested = storedRepresentation(
@@ -104,11 +102,11 @@ export const storedRepresentation = (
       next,
     )
     if (nested !== undefined)
-      return Object.freeze({
-        path: Object.freeze([...prefix, field.name.spelling, ...nested.path]),
+      return {
+        path: [...prefix, field.name.spelling, ...nested.path],
         contract: nested.contract,
         open: nested.open,
-      })
+      }
   }
   return undefined
 }
@@ -179,15 +177,13 @@ export const representedNominals = (
       )
     }
   }
-  return Object.freeze(
-    [...found.entries()]
-      .sort(([left], [right]) => {
-        if (left < right) return -1
-        if (left > right) return 1
-        return 0
-      })
-      .map(([, nominal]) => nominal),
-  )
+  return [...found.entries()]
+    .sort(([left], [right]) => {
+      if (left < right) return -1
+      if (left > right) return 1
+      return 0
+    })
+    .map(([, nominal]) => nominal)
 }
 
 /** Realizes every reachable represented executable field. */
@@ -223,19 +219,19 @@ const storedExecutable = (
 ): StoredExecutable | undefined => {
   const bare = DeclarationFacts.storedExecutable(index, type, kind)
   if (bare !== undefined)
-    return Object.freeze({
+    return {
       path: bare.path,
       contract: bare.contract,
       represented: false,
       open: false,
-    })
+    }
   const represented = storedRepresentation(index, type, kind)
   return represented === undefined
     ? undefined
-    : Object.freeze({
+    : {
         ...represented,
         represented: true,
-      })
+      }
 }
 
 interface StoredExecutableViolationKey {
@@ -274,77 +270,75 @@ const storedExecutableViolations = (
       specializingCalls.set(target, call)
   }
   const reported: Array<StoredExecutableViolationKey> = []
-  return Object.freeze(
-    self.instances.flatMap((instance) =>
-      instance.function.statements
-        .flatMap(Tir.statementExpressions)
-        .flatMap(Tir.expressionTree)
-        .flatMap((expression) => {
-          if (
-            expression._tag !== 'Construct' &&
-            expression._tag !== 'ConstructUnionVariant' &&
-            expression._tag !== 'ArrayConstruct'
-          )
-            return []
-          const aggregate = Specialization.specializeType(instance.key, expression.type, [
-            instance.substitution,
-          ])
-          const found = storedExecutable(index, aggregate, kind)
-          if (found === undefined) return []
-          if (
-            found.represented &&
-            Type.isNominal(aggregate) &&
-            FieldRealization.supportsInstance(fieldRealizations, aggregate)
-          )
-            return []
-          const declared = storedExecutable(index, expression.type, kind)
-          const specializing =
-            declared === undefined || declared.open
-              ? specializingCalls.get(Instances.keyText(instance.key))
-              : undefined
-          const span = specializing?.span ?? expression.span
-          const constructionSpan = expression.span
-          const key: StoredExecutableViolationKey = {
-            aggregate,
-            path: found.path,
-            contract: found.contract,
-            represented: found.represented,
-            span,
-            constructionSpan,
-          }
-          if (reported.some((candidate) => sameStoredExecutableViolationKey(candidate, key)))
-            return []
-          reported.push(key)
-          const path = found.path.length === 0 ? undefined : found.path.join('.')
-          const related = specializing === undefined ? undefined : expression.span
-          if (
-            (kind === 'Callable' && Type.isCallable(found.contract)) ||
-            (kind === 'Effect' && !found.represented && Type.isEffect(found.contract))
-          )
-            return [
-              Diagnostic.storedCallableConstruction(
-                Type.encode(aggregate),
-                path,
-                Type.encode(found.contract),
-                span,
-                related,
-                found.represented,
-                kind === 'Callable' ? 'callable' : 'Effect',
-              ),
-            ]
-          if (kind === 'Effect' && Type.isEffect(found.contract))
-            return [
-              Diagnostic.storedRepresentedEffectConstruction(
-                Type.encode(aggregate),
-                path,
-                Type.encode(found.contract),
-                span,
-                related,
-              ),
-            ]
+  return self.instances.flatMap((instance) =>
+    instance.function.statements
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
+      .flatMap((expression) => {
+        if (
+          expression._tag !== 'Construct' &&
+          expression._tag !== 'ConstructUnionVariant' &&
+          expression._tag !== 'ArrayConstruct'
+        )
           return []
-        }),
-    ),
+        const aggregate = Specialization.specializeType(instance.key, expression.type, [
+          instance.substitution,
+        ])
+        const found = storedExecutable(index, aggregate, kind)
+        if (found === undefined) return []
+        if (
+          found.represented &&
+          Type.isNominal(aggregate) &&
+          FieldRealization.supportsInstance(fieldRealizations, aggregate)
+        )
+          return []
+        const declared = storedExecutable(index, expression.type, kind)
+        const specializing =
+          declared === undefined || declared.open
+            ? specializingCalls.get(Instances.keyText(instance.key))
+            : undefined
+        const span = specializing?.span ?? expression.span
+        const constructionSpan = expression.span
+        const key: StoredExecutableViolationKey = {
+          aggregate,
+          path: found.path,
+          contract: found.contract,
+          represented: found.represented,
+          span,
+          constructionSpan,
+        }
+        if (reported.some((candidate) => sameStoredExecutableViolationKey(candidate, key)))
+          return []
+        reported.push(key)
+        const path = found.path.length === 0 ? undefined : found.path.join('.')
+        const related = specializing === undefined ? undefined : expression.span
+        if (
+          (kind === 'Callable' && Type.isCallable(found.contract)) ||
+          (kind === 'Effect' && !found.represented && Type.isEffect(found.contract))
+        )
+          return [
+            Diagnostic.storedCallableConstruction(
+              Type.encode(aggregate),
+              path,
+              Type.encode(found.contract),
+              span,
+              related,
+              found.represented,
+              kind === 'Callable' ? 'callable' : 'Effect',
+            ),
+          ]
+        if (kind === 'Effect' && Type.isEffect(found.contract))
+          return [
+            Diagnostic.storedRepresentedEffectConstruction(
+              Type.encode(aggregate),
+              path,
+              Type.encode(found.contract),
+              span,
+              related,
+            ),
+          ]
+        return []
+      }),
   )
 }
 
@@ -354,60 +348,56 @@ export const copyDropViolations = (
   index: DeclarationIndex.Index,
   registry: SemanticContext.Registry,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
-  Object.freeze(
-    self.instances.flatMap((instance) => {
-      if (!instance.key.declaration.name.startsWith('drop@impl#')) return []
-      if (instance.key.typeArguments.length === 0) return []
-      const parameter = instance.function.declaration.parameters.at(0)
-      if (parameter?.declaredType._tag !== 'Resolved') return []
-      const selfType = Type.substitute(
-        parameter.declaredType.type,
-        instance.substitution,
-        instance.specialization.compatibility,
-      )
-      if (!Type.isReference(selfType)) return []
-      return ConformanceProof.copyType(index, selfType.target)
-        ? [
-            Diagnostic.invalidDropHook(
-              `Copy type ${Type.encode(selfType.target)} cannot implement Drop`,
-              registry.spanOf(instance.function.declaration.anchor),
-            ),
-          ]
-        : []
-    }),
-  )
+  self.instances.flatMap((instance) => {
+    if (!instance.key.declaration.name.startsWith('drop@impl#')) return []
+    if (instance.key.typeArguments.length === 0) return []
+    const parameter = instance.function.declaration.parameters.at(0)
+    if (parameter?.declaredType._tag !== 'Resolved') return []
+    const selfType = Type.substitute(
+      parameter.declaredType.type,
+      instance.substitution,
+      instance.specialization.compatibility,
+    )
+    if (!Type.isReference(selfType)) return []
+    return ConformanceProof.copyType(index, selfType.target)
+      ? [
+          Diagnostic.invalidDropHook(
+            `Copy type ${Type.encode(selfType.target)} cannot implement Drop`,
+            registry.spanOf(instance.function.declaration.anchor),
+          ),
+        ]
+      : []
+  })
 
 /** Rejects concrete requirement bindings whose provider does not implement the capability. */
 export const requirementBindingViolations = (
   self: Instances.Discovery,
   index: DeclarationIndex.Index,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
-  Object.freeze(
-    self.instances.flatMap((instance) =>
-      Instances.requirementBindings(instance.function).flatMap((binding) => {
-        const proof = Instances.requirementSelection(instance, binding.provider)
-        const capability = proof?.selected.capability
-        const provider =
-          proof?.provider ??
-          Type.substitute(
-            binding.provider.providerType,
-            instance.substitution,
-            instance.specialization.compatibility,
-          )
-        if (
-          capability !== undefined &&
-          Type.isNominal(capability) &&
-          ConformanceProof.witness(index, provider, capability) !== undefined
+  self.instances.flatMap((instance) =>
+    Instances.requirementBindings(instance.function).flatMap((binding) => {
+      const proof = Instances.requirementSelection(instance, binding.provider)
+      const capability = proof?.selected.capability
+      const provider =
+        proof?.provider ??
+        Type.substitute(
+          binding.provider.providerType,
+          instance.substitution,
+          instance.specialization.compatibility,
         )
-          return []
-        return [
-          Diagnostic.invalidEffectProvision(
-            `provider type ${Type.encode(provider)} does not match ${capability === undefined ? 'one concrete selected requirement' : Type.encode(capability)}`,
-            binding.provider.span,
-          ),
-        ]
-      }),
-    ),
+      if (
+        capability !== undefined &&
+        Type.isNominal(capability) &&
+        ConformanceProof.witness(index, provider, capability) !== undefined
+      )
+        return []
+      return [
+        Diagnostic.invalidEffectProvision(
+          `provider type ${Type.encode(provider)} does not match ${capability === undefined ? 'one concrete selected requirement' : Type.encode(capability)}`,
+          binding.provider.span,
+        ),
+      ]
+    }),
   )
 
 /** Rejects reachable bound calls whose selected witness has no lowerable implementation. */
@@ -415,46 +405,44 @@ export const unlowerableWitnessViolations = (
   self: Instances.Discovery,
   index: DeclarationIndex.Index,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
-  Object.freeze(
-    self.instances.flatMap((instance) =>
-      instance.function.statements
-        .flatMap(Tir.statementExpressions)
-        .flatMap(Tir.expressionTree)
-        .flatMap((expression) => {
-          if (expression._tag !== 'InterfaceOperationCall') return []
-          const capability = Type.substitute(
-            expression.capability,
-            instance.substitution,
-            instance.specialization.compatibility,
-          )
-          const provider = Type.substitute(
-            expression.provider,
-            instance.substitution,
-            instance.specialization.compatibility,
-          )
-          if (!Type.isNominal(capability)) return []
-          const intrinsic = ConformanceProof.interfaceOperationIntrinsic(
-            index,
-            provider,
-            capability,
-            expression.operation,
-          )
-          const witness = ConformanceProof.interfaceWitnessImplementation(
-            index,
-            provider,
-            capability,
-            expression.operation,
-          )
-          if (intrinsic?.rule._tag === 'BuiltinRule' || witness !== undefined) return []
-          return [
-            Diagnostic.unlowerableBoundWitness(
-              `${capability.name}.${expression.operation}`,
-              Type.encode(provider),
-              expression.span,
-            ),
-          ]
-        }),
-    ),
+  self.instances.flatMap((instance) =>
+    instance.function.statements
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
+      .flatMap((expression) => {
+        if (expression._tag !== 'InterfaceOperationCall') return []
+        const capability = Type.substitute(
+          expression.capability,
+          instance.substitution,
+          instance.specialization.compatibility,
+        )
+        const provider = Type.substitute(
+          expression.provider,
+          instance.substitution,
+          instance.specialization.compatibility,
+        )
+        if (!Type.isNominal(capability)) return []
+        const intrinsic = ConformanceProof.interfaceOperationIntrinsic(
+          index,
+          provider,
+          capability,
+          expression.operation,
+        )
+        const witness = ConformanceProof.interfaceWitnessImplementation(
+          index,
+          provider,
+          capability,
+          expression.operation,
+        )
+        if (intrinsic?.rule._tag === 'BuiltinRule' || witness !== undefined) return []
+        return [
+          Diagnostic.unlowerableBoundWitness(
+            `${capability.name}.${expression.operation}`,
+            Type.encode(provider),
+            expression.span,
+          ),
+        ]
+      }),
   )
 
 /** Rejects reachable constructions that retain bare or represented callable values. */
@@ -473,32 +461,31 @@ export const storedEffectViolations = (
 export const violationDiagnostics = (
   self: Instances.Discovery,
   registry: SemanticContext.Registry,
-): ReadonlyArray<Diagnostic.Diagnostic> =>
-  Object.freeze([
-    ...self.specializationFailures.map((failure) =>
-      Diagnostic.nonConcreteSpecialization(
-        `${failure.key.declaration.module}.${failure.key.declaration.name}`,
-        failure.span,
-      ),
+): ReadonlyArray<Diagnostic.Diagnostic> => [
+  ...self.specializationFailures.map((failure) =>
+    Diagnostic.nonConcreteSpecialization(
+      `${failure.key.declaration.module}.${failure.key.declaration.name}`,
+      failure.span,
     ),
-    ...self.violations.flatMap((violation) => {
-      const caller = self.instances.find(
-        (instance) => Instances.keyText(instance.key) === Instances.keyText(violation.caller),
-      )
-      if (caller === undefined) return []
-      const callerText = `${violation.caller.declaration.name}<${violation.caller.typeArguments
-        .map(Type.encodeGenericArgument)
-        .join(', ')}>`
-      const targetText = `${violation.target.declaration.name}<${violation.target.typeArguments
-        .map(Type.encodeGenericArgument)
-        .join(', ')}>`
-      return [
-        Diagnostic.polymorphicRecursion(
-          callerText,
-          targetText,
-          registry.spanOf(caller.function.declaration.anchor),
-        ),
-      ]
-    }),
-  ])
+  ),
+  ...self.violations.flatMap((violation) => {
+    const caller = self.instances.find(
+      (instance) => Instances.keyText(instance.key) === Instances.keyText(violation.caller),
+    )
+    if (caller === undefined) return []
+    const callerText = `${violation.caller.declaration.name}<${violation.caller.typeArguments
+      .map(Type.encodeGenericArgument)
+      .join(', ')}>`
+    const targetText = `${violation.target.declaration.name}<${violation.target.typeArguments
+      .map(Type.encodeGenericArgument)
+      .join(', ')}>`
+    return [
+      Diagnostic.polymorphicRecursion(
+        callerText,
+        targetText,
+        registry.spanOf(caller.function.declaration.anchor),
+      ),
+    ]
+  }),
+]
 import type * as SemanticContext from './SemanticContext.js'

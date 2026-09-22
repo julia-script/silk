@@ -22,7 +22,7 @@ export const make = (
   type: DeclarationFacts.TypeResolver,
   item: DeclarationFacts.ItemResolver,
   alias?: AliasResolver,
-): ResolutionSeams => Object.freeze({ type, item, ...(alias === undefined ? {} : { alias }) })
+): ResolutionSeams => ({ type, item, ...(alias === undefined ? {} : { alias }) })
 
 /** Adds one resolved opaque binder without reconstructing the underlying resolution boundaries. */
 export const withRepresentationBinding = (
@@ -32,5 +32,5 @@ export const withRepresentationBinding = (
 ): ResolutionSeams => {
   const representationBindings = new Map(self.representationBindings)
   representationBindings.set(Type.key(unresolved), resolved)
-  return Object.freeze({ ...self, representationBindings })
+  return { ...self, representationBindings }
 }

@@ -207,21 +207,19 @@ export const declare = Effect.fnUntraced(function* (
         'Function.declare',
       )
       const handle = Handle.make('Function', owner, index)
-      state.globals.functions.descriptions.push(
-        Object.freeze({
-          _tag: 'Function',
-          global: allocated.index,
-          type: typeIndex,
-          callingConvention,
-          attributes,
-          garbageCollector: ByteString.coerceOrEmpty(options.garbageCollector),
-          prefix,
-          prologue,
-          personality,
-          addressSpace: options.addressSpace ?? AddrSpace.defaultAddrSpace,
-          body: undefined,
-        }),
-      )
+      state.globals.functions.descriptions.push({
+        _tag: 'Function',
+        global: allocated.index,
+        type: typeIndex,
+        callingConvention,
+        attributes,
+        garbageCollector: ByteString.coerceOrEmpty(options.garbageCollector),
+        prefix,
+        prologue,
+        personality,
+        addressSpace: options.addressSpace ?? AddrSpace.defaultAddrSpace,
+        body: undefined,
+      })
       state.globals.functions.handles.push(handle)
       return handle
     }),
@@ -264,36 +262,34 @@ export const fromGlobal = Effect.fnUntraced(function* (
       }
       const index = state.globals.functions.descriptions.length
       const handle = Handle.make('Function', owner, index)
-      state.globals.functions.descriptions.push(
-        Object.freeze({
-          _tag: 'Function',
-          global: resolved.index,
-          type: typeIndex,
-          callingConvention: options.callingConvention ?? 0,
-          attributes:
-            options.attributes === undefined
-              ? undefined
-              : yield* Handle.resolve(
-                  builder,
-                  owner,
-                  options.attributes,
-                  'FunctionAttributeSet',
-                  'Function.fromGlobal',
-                ),
-          garbageCollector: ByteString.empty,
-          prefix: undefined,
-          prologue: undefined,
-          personality: undefined,
-          addressSpace: resolved.description.addressSpace,
-          body: undefined,
-        }),
-      )
+      state.globals.functions.descriptions.push({
+        _tag: 'Function',
+        global: resolved.index,
+        type: typeIndex,
+        callingConvention: options.callingConvention ?? 0,
+        attributes:
+          options.attributes === undefined
+            ? undefined
+            : yield* Handle.resolve(
+                builder,
+                owner,
+                options.attributes,
+                'FunctionAttributeSet',
+                'Function.fromGlobal',
+              ),
+        garbageCollector: ByteString.empty,
+        prefix: undefined,
+        prologue: undefined,
+        personality: undefined,
+        addressSpace: resolved.description.addressSpace,
+        body: undefined,
+      })
       state.globals.functions.handles.push(handle)
-      state.globals.entries.descriptions[resolved.index] = Object.freeze({
+      state.globals.entries.descriptions[resolved.index] = {
         ...resolved.description,
         kind: 'Function',
         actorIndex: index,
-      })
+      }
       return handle
     }),
   )
@@ -354,7 +350,7 @@ export const setAttributes = Effect.fnUntraced(function* (
           }),
         )
       }
-      state.globals.functions.descriptions[index] = Object.freeze({
+      state.globals.functions.descriptions[index] = {
         ...description,
         attributes:
           attributes === undefined
@@ -366,7 +362,7 @@ export const setAttributes = Effect.fnUntraced(function* (
                 'FunctionAttributeSet',
                 'Function.setAttributes',
               ),
-      })
+      }
     }),
   )
 })
@@ -411,10 +407,10 @@ export const setSubprogram = Effect.fnUntraced(function* (
       )
       if (metadataIndex === undefined) return
       const attachments = state.globals.attachments[description.global] ?? []
-      state.globals.attachments[description.global] = Object.freeze([
+      state.globals.attachments[description.global] = [
         ...attachments.filter((attachment) => attachment.kind !== 'dbg'),
-        Object.freeze({ kind: 'dbg', metadata: metadataIndex }),
-      ])
+        { kind: 'dbg', metadata: metadataIndex },
+      ]
     }),
   )
 })
@@ -456,12 +452,12 @@ export const properties = Effect.fnUntraced(function* (
           }),
         )
       }
-      return Object.freeze({
+      return {
         type,
         callingConvention: description.callingConvention,
         attributes,
         garbageCollector: description.garbageCollector,
-      })
+      }
     }),
   )
 })
@@ -592,10 +588,10 @@ export const buildBody = Effect.fn('Function.buildBody')(function* <A, E, R>(
                   }),
                 )
               }
-              state.globals.functions.descriptions[acquired.functionIndex] = Object.freeze({
+              state.globals.functions.descriptions[acquired.functionIndex] = {
                 ...description,
                 body: snapshot,
-              })
+              }
             }),
           )
           return value

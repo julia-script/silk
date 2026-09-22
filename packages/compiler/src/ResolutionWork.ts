@@ -113,12 +113,10 @@ export const accept = (self: Observation): void => {
 
 /** Freezes current counters without executing any resolver or candidate discovery. */
 export const snapshot = (self: ResolutionWork): ReadonlyArray<Entry> =>
-  Object.freeze(
-    [...self.entries.entries()]
-      .sort(([left], [right]) => {
-        if (left < right) return -1
-        if (left > right) return 1
-        return 0
-      })
-      .map(([, entry]) => Object.freeze({ ...entry })),
-  )
+  [...self.entries.entries()]
+    .sort(([left], [right]) => {
+      if (left < right) return -1
+      if (left > right) return 1
+      return 0
+    })
+    .map(([, entry]) => ({ ...entry }))

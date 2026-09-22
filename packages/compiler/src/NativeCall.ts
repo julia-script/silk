@@ -48,7 +48,7 @@ export const argumentsFor = Effect.fnUntraced(function* (
     throw new RangeError('Native call lost its invocation diagnostic context')
   if (arguments_.length !== target.diagnosticParameter)
     throw new RangeError('Native call diagnostic argument is not after its source parameters')
-  return Object.freeze([
+  return [
     ...arguments_,
     observation === 'Independent'
       ? yield* Constant.nullValue(context.diagnostic.builder, context.diagnostic.pointer)
@@ -56,7 +56,7 @@ export const argumentsFor = Effect.fnUntraced(function* (
     observation === 'Independent'
       ? yield* Constant.nullValue(context.diagnostic.builder, context.diagnostic.causeType)
       : yield* NativeDiagnosticContext.currentCause(context.diagnostic),
-  ])
+  ]
 })
 
 /** Resolves logical arguments before appending the separately borrowed diagnostic context. */
@@ -112,12 +112,12 @@ export const operationInputs = (
   >,
 ): ReadonlyArray<Mir.LocalId> => {
   if (operation._tag === 'ExecutionPark') {
-    return Object.freeze([operation.register])
+    return [operation.register]
   }
   if (operation._tag === 'RunEffect') {
-    return Object.freeze(operation.arguments)
+    return operation.arguments
   }
-  return Object.freeze([operation.effect, ...operation.arguments])
+  return [operation.effect, ...operation.arguments]
 }
 
 export interface Context {
@@ -323,9 +323,9 @@ export const callValues = Effect.fnUntraced(function* (
     nested,
   )
   yield* LlvmBlock.setInsertionPoint(body, external)
-  yield* NativeSuspension.returnStep(context.returns, 2n, Object.freeze([]), `${name}_external`)
+  yield* NativeSuspension.returnStep(context.returns, 2n, [], `${name}_external`)
   yield* LlvmBlock.setInsertionPoint(body, nested)
-  yield* NativeSuspension.returnStep(context.returns, 1n, Object.freeze([]), `${name}_relayed`)
+  yield* NativeSuspension.returnStep(context.returns, 1n, [], `${name}_relayed`)
   yield* LlvmBlock.setInsertionPoint(body, completed)
   const unpacked = yield* NativeResult.readValue(
     body,

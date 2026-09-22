@@ -15,7 +15,7 @@ export const make = (
   packageName: string,
   functions: ReadonlyArray<Backend.ForeignExport>,
   data: ReadonlyArray<Backend.ForeignStatic>,
-): CHeader => Object.freeze({ packageName, functions, data })
+): CHeader => ({ packageName, functions, data })
 
 const scalar = (type: string): string | undefined => {
   switch (type) {

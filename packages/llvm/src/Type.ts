@@ -120,7 +120,7 @@ const intern = Effect.fnUntraced(function* (
 
 /** @internal */
 const simple = (builder: Builder.Builder, tag: TypeDescription.SimpleTag) =>
-  intern(builder, Object.freeze({ _tag: 'Simple', tag }))
+  intern(builder, { _tag: 'Simple', tag })
 
 /**
  * Returns the builder's canonical LLVM `void` type.
@@ -282,7 +282,7 @@ export const integer = Effect.fnUntraced(function* (
       input: bitWidth,
     })
   }
-  return yield* intern(builder, Object.freeze({ _tag: 'Integer', bitWidth }))
+  return yield* intern(builder, { _tag: 'Integer', bitWidth })
 })
 
 /**
@@ -295,7 +295,7 @@ export const pointer = Effect.fnUntraced(function* (
   builder: Builder.Builder,
   addressSpace: AddrSpace.AddrSpace = AddrSpace.defaultAddrSpace,
 ) {
-  return yield* intern(builder, Object.freeze({ _tag: 'Pointer', addressSpace }))
+  return yield* intern(builder, { _tag: 'Pointer', addressSpace })
 })
 
 /** @internal */
@@ -310,7 +310,7 @@ const indices = (
     for (const type of types) {
       values.push(yield* Handle.resolve(builder, owner, type, 'Type', operation))
     }
-    return Object.freeze(values)
+    return values
   })
 
 /**
@@ -327,12 +327,12 @@ export const functionType = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Type, LlvmError> {
   const description = yield* BuilderState.mutate(builder, 'Type.functionType', (_state, owner) =>
     Result.gen(function* () {
-      return Object.freeze({
+      return {
         _tag: 'Function' as const,
         returnType: yield* Handle.resolve(builder, owner, returnType, 'Type', 'Type.functionType'),
         parameters: yield* indices(builder, owner, parameters, 'Type.functionType'),
         variadic: options.variadic ?? false,
-      })
+      }
     }),
   )
   return yield* intern(builder, description)
@@ -355,10 +355,7 @@ const vectorOf = Effect.fnUntraced(function* (
   const childIndex = yield* BuilderState.mutate(builder, 'Type.vector', (_state, owner) =>
     Handle.resolve(builder, owner, child, 'Type', 'Type.vector'),
   )
-  return yield* intern(
-    builder,
-    Object.freeze({ _tag: 'Vector', child: childIndex, length, scalable }),
-  )
+  return yield* intern(builder, { _tag: 'Vector', child: childIndex, length, scalable })
 })
 
 /**
@@ -411,10 +408,7 @@ export const array = Effect.fnUntraced(function* (
   const childIndex = yield* BuilderState.mutate(builder, 'Type.array', (_state, owner) =>
     Handle.resolve(builder, owner, child, 'Type', 'Type.array'),
   )
-  return yield* intern(
-    builder,
-    Object.freeze({ _tag: 'Array', child: childIndex, length: exactLength }),
-  )
+  return yield* intern(builder, { _tag: 'Array', child: childIndex, length: exactLength })
 })
 
 /**
@@ -430,11 +424,11 @@ export const structure = Effect.fnUntraced(function* (
 ) {
   const description = yield* BuilderState.mutate(builder, 'Type.structure', (_state, owner) =>
     Result.gen(function* () {
-      return Object.freeze({
+      return {
         _tag: 'Structure' as const,
         fields: yield* indices(builder, owner, fields, 'Type.structure'),
         packed: options.packed ?? false,
-      })
+      }
     }),
   )
   return yield* intern(builder, description)
@@ -472,11 +466,11 @@ export const namedStructure = Effect.fnUntraced(function* (
       }
       const index = state.types.descriptions.length
       const handle = Handle.make('Type', owner, index)
-      const description: TypeDescription.Description = Object.freeze({
+      const description: TypeDescription.Description = {
         _tag: 'NamedStructure',
         name: value,
         body: undefined,
-      })
+      }
       state.types.descriptions.push(description)
       state.types.handles.push(handle)
       state.types.keys.set(keyForDescription(description), index)
@@ -520,13 +514,13 @@ export const setNamedBody = Effect.fnUntraced(function* (
           }),
         )
       }
-      state.types.descriptions[index] = Object.freeze({
+      state.types.descriptions[index] = {
         ...description,
-        body: Object.freeze({
+        body: {
           fields: yield* indices(builder, owner, fields, 'Type.setNamedBody'),
           packed: options.packed ?? false,
-        }),
-      })
+        },
+      }
     }),
   )
 })
@@ -559,12 +553,12 @@ export const targetExtension = Effect.fnUntraced(function* (
   )
   const description = yield* BuilderState.mutate(builder, 'Type.targetExtension', (_state, owner) =>
     Result.gen(function* () {
-      return Object.freeze({
+      return {
         _tag: 'TargetExtension' as const,
         name: value,
         types: yield* indices(builder, owner, types, 'Type.targetExtension'),
         integers,
-      })
+      }
     }),
   )
   return yield* intern(builder, description)
@@ -684,16 +678,16 @@ export const functionSignature = Effect.fnUntraced(function* (
       for (const index of description.parameters) {
         parameters.push(yield* Table.handleAt(state.types, index, 'Type.functionSignature', 'Type'))
       }
-      return Object.freeze({
+      return {
         returnType: yield* Table.handleAt(
           state.types,
           description.returnType,
           'Type.functionSignature',
           'Type',
         ),
-        parameters: Object.freeze(parameters),
+        parameters: parameters,
         variadic: description.variadic,
-      })
+      }
     }),
   )
 })
@@ -720,14 +714,14 @@ export const aggregateShape = Effect.fnUntraced(function* (
   return yield* inspect(builder, self, 'Type.aggregateShape', (description, state) =>
     Result.gen(function* () {
       if (description._tag === 'Array' || description._tag === 'Vector') {
-        return Object.freeze({
-          fields: Object.freeze([
+        return {
+          fields: [
             yield* Table.handleAt(state.types, description.child, 'Type.aggregateShape', 'Type'),
-          ]),
+          ],
           packed: false,
           scalable: description._tag === 'Vector' && description.scalable,
           length: description._tag === 'Array' ? description.length : BigInt(description.length),
-        })
+        }
       }
       let body: { readonly fields: ReadonlyArray<number>; readonly packed: boolean } | undefined
       if (description._tag === 'Structure') body = description
@@ -745,12 +739,12 @@ export const aggregateShape = Effect.fnUntraced(function* (
       for (const index of body.fields) {
         fields.push(yield* Table.handleAt(state.types, index, 'Type.aggregateShape', 'Type'))
       }
-      return Object.freeze({
-        fields: Object.freeze(fields),
+      return {
+        fields: fields,
         packed: body.packed,
         scalable: false,
         length: undefined,
-      })
+      }
     }),
   )
 })
@@ -847,9 +841,10 @@ const layoutOf = (
       const bitWidth = bitSize <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(bitSize) : undefined
       const vectorSpec =
         bitWidth === undefined ? undefined : DataLayout.vectorSpec(state.layout, bitWidth)
-      const vectorAlignment: Alignment.Alignment =
-        vectorSpec?.abiAlignment ??
-        Object.freeze({ _tag: 'Alignment', byteUnits: powerOfTwoCeiling(storeSize) })
+      const vectorAlignment: Alignment.Alignment = vectorSpec?.abiAlignment ?? {
+        _tag: 'Alignment',
+        byteUnits: powerOfTwoCeiling(storeSize),
+      }
       const alignment = vectorAlignment.byteUnits ?? 1n
       const remainder = storeSize % alignment
       return {

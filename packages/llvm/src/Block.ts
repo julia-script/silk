@@ -148,12 +148,10 @@ export const predecessors = Effect.fnUntraced(function* (
           }),
         )
       }
-      return Object.freeze(
-        [...block.predecessors].flatMap((index) => {
-          const handle = draft.blockHandles[index]
-          return handle === undefined ? [] : [handle]
-        }),
-      )
+      return [...block.predecessors].flatMap((index) => {
+        const handle = draft.blockHandles[index]
+        return handle === undefined ? [] : [handle]
+      })
     }),
   )
 })

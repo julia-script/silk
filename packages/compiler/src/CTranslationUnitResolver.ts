@@ -75,11 +75,11 @@ export const resolve = Effect.fn('CTranslationUnitResolver.resolve')(function* (
       ),
     ]).pipe(Effect.orDie),
   )
-  return Object.freeze({
+  return {
     _tag: 'CTranslationUnit',
     source: query.stdout,
-    headers: Object.freeze(headers),
+    headers: headers,
     identity,
     query,
-  })
+  }
 })

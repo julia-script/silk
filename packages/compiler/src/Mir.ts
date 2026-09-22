@@ -1736,9 +1736,9 @@ export const applyOperands = <T>(
     slots.set(ordinal, argument)
     ordinal += 1
   }
-  return Object.freeze(
-    [...slots.entries()].sort(([left], [right]) => left - right).flatMap(([, items]) => [...items]),
-  )
+  return [...slots.entries()]
+    .sort(([left], [right]) => left - right)
+    .flatMap(([, items]) => [...items])
 }
 
 /**
@@ -1796,7 +1796,7 @@ export const matchesInstance = (
   fn: MirFunction,
   declaration: DeclarationFacts.CanonicalId,
   typeArguments: ReadonlyArray<SilkType.GenericArgument>,
-  staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
+  staticArguments: ReadonlyArray<StaticValue.Value> = [],
 ): boolean =>
   fn.id.module === declaration.module &&
   fn.id.name === declaration.name &&
@@ -1837,7 +1837,7 @@ export const matchesEffectInstance = (
   EffectExecutionContract.matches(
     fn.result.type,
     effect,
-    providers ?? fn.effectRunner?.providers ?? Object.freeze([]),
+    providers ?? fn.effectRunner?.providers ?? [],
   )
 
 /** Tests exact concrete instance identity, including the resolved contract row. */
@@ -1886,30 +1886,28 @@ export interface ControlEdge {
 
 /** Every local retained or referenced by finalized suspension control. */
 export const suspensionLocals = (self: MirFunction): ReadonlyArray<LocalId> =>
-  Object.freeze(
-    (self.suspension?.regions ?? []).flatMap((region) => {
-      if (region._tag === 'SuspendEffectRegion')
-        return [
-          ...operationLocals(region.operation),
-          ...region.deferred.providers.flatMap((provider) =>
-            provider.argument === undefined ? [] : [provider.argument],
-          ),
-        ]
-      const descriptor = region.relay.state
+  (self.suspension?.regions ?? []).flatMap((region) => {
+    if (region._tag === 'SuspendEffectRegion')
       return [
         ...operationLocals(region.operation),
-        ...region.liveLocals,
-        ...(descriptor?.slots.flatMap((slot) => [
-          slot.local,
-          ...(slot.access._tag === 'BorrowedDependency' ? [slot.access.root] : []),
-        ]) ?? []),
-        ...(descriptor?.failure.releases.map((release) => release.local) ?? []),
-        ...region.runner.providers.flatMap((provider) =>
+        ...region.deferred.providers.flatMap((provider) =>
           provider.argument === undefined ? [] : [provider.argument],
         ),
       ]
-    }),
-  )
+    const descriptor = region.relay.state
+    return [
+      ...operationLocals(region.operation),
+      ...region.liveLocals,
+      ...(descriptor?.slots.flatMap((slot) => [
+        slot.local,
+        ...(slot.access._tag === 'BorrowedDependency' ? [slot.access.root] : []),
+      ]) ?? []),
+      ...(descriptor?.failure.releases.map((release) => release.local) ?? []),
+      ...region.runner.providers.flatMap((provider) =>
+        provider.argument === undefined ? [] : [provider.argument],
+      ),
+    ]
+  })
 
 const outcomeTarget = (
   outcome: Outcome,
@@ -1939,12 +1937,13 @@ export const regionTargets = (
 }
 
 export const controlEdges = (self: MirFunction): ReadonlyArray<ControlEdge> =>
-  Object.freeze(
-    self.regions.flatMap((region) =>
-      regionTargets(region).map(([to, kind]) =>
-        Object.freeze({ _tag: 'ControlEdge' as const, from: region.id, to, kind }),
-      ),
-    ),
+  self.regions.flatMap((region) =>
+    regionTargets(region).map(([to, kind]) => ({
+      _tag: 'ControlEdge' as const,
+      from: region.id,
+      to,
+      kind,
+    })),
   )
 
 /** Canonical parent-before-child traversal over structural edges only. */
@@ -1979,7 +1978,7 @@ export const topologicalRegions = (
   )) {
     visit(region.id)
   }
-  return Object.freeze(ordered)
+  return ordered
 }
 
 export interface Violation {
@@ -2055,25 +2054,22 @@ export const executionOperations = (execution: Execution): ReadonlyArray<Operati
 export const mapExecutionOperations = (
   execution: Execution,
   transform: (operations: ReadonlyArray<Operation>) => ReadonlyArray<Operation>,
-): Execution =>
-  Object.freeze({
-    ...execution,
-    regions: Object.freeze(
-      execution.regions.map((region): Region => {
-        if (region._tag === 'OperationRegion')
-          return Object.freeze({ ...region, operations: transform(region.operations) })
-        if (region._tag !== 'CleanupRegion') return region
-        const releases = transform(region.releases)
-        const cleanup = releases.filter(
-          (operation): operation is Extract<Operation, { readonly _tag: 'Drop' | 'EndLoan' }> =>
-            operation._tag === 'Drop' || operation._tag === 'EndLoan',
-        )
-        if (cleanup.length !== releases.length)
-          throw new RangeError('Cleanup region transformation introduced a non-cleanup operation')
-        return Object.freeze({ ...region, releases: Object.freeze(cleanup) })
-      }),
-    ),
-  })
+): Execution => ({
+  ...execution,
+  regions: execution.regions.map((region): Region => {
+    if (region._tag === 'OperationRegion')
+      return { ...region, operations: transform(region.operations) }
+    if (region._tag !== 'CleanupRegion') return region
+    const releases = transform(region.releases)
+    const cleanup = releases.filter(
+      (operation): operation is Extract<Operation, { readonly _tag: 'Drop' | 'EndLoan' }> =>
+        operation._tag === 'Drop' || operation._tag === 'EndLoan',
+    )
+    if (cleanup.length !== releases.length)
+      throw new RangeError('Cleanup region transformation introduced a non-cleanup operation')
+    return { ...region, releases: cleanup }
+  }),
+})
 
 /** All nested region identities, without flattening the authored execution boundaries. */
 export const regionsTree = (regions: ReadonlyArray<Region>): ReadonlyArray<Region> => {
@@ -2101,7 +2097,7 @@ export const regionsTree = (regions: ReadonlyArray<Region>): ReadonlyArray<Regio
     }
   }
   visit(regions)
-  return Object.freeze(found)
+  return found
 }
 
 export const operationChildren = (operation: Operation): ReadonlyArray<Operation> => {
@@ -2133,7 +2129,7 @@ export const operationTree = (operation: Operation): ReadonlyArray<Operation> =>
     seen.add(current)
     return [current, ...operationChildren(current).flatMap(walk)]
   }
-  return Object.freeze(walk(operation))
+  return walk(operation)
 }
 
 const diagnosticObservationByModule = new WeakMap<Module, boolean>()
@@ -2169,14 +2165,12 @@ export const diagnosticOutcomeWords = 6
 /** Internal failure outcomes that require independent metadata ownership. */
 export const diagnosticOutcomeLocals = (module: Module, fn: MirFunction): ReadonlyArray<LocalId> =>
   hasDiagnosticObservation(module)
-    ? Object.freeze(
-        fn.localTypes.flatMap((type, ordinal) =>
-          type._tag === 'EffectOutcome' && SilkType.failureMembers(type.type).length > 0
-            ? [Object.freeze({ _tag: 'Local' as const, ordinal })]
-            : [],
-        ),
+    ? fn.localTypes.flatMap((type, ordinal) =>
+        type._tag === 'EffectOutcome' && SilkType.failureMembers(type.type).length > 0
+          ? [{ _tag: 'Local' as const, ordinal }]
+          : [],
       )
-    : Object.freeze([])
+    : []
 
 /** Shared physical header roles for layout construction and verification. */
 export const coroutineFrameHeaderRoles = (
@@ -2204,19 +2198,17 @@ export const coroutineFrameHeaderRoles = (
 
 /** Lexical descriptor identities in deterministic local order. */
 export const diagnosticScopeLocals = (fn: MirFunction): ReadonlyArray<LocalId> =>
-  Object.freeze(
-    [
-      ...new Map(
-        regionsTree(fn.regions).flatMap((region) =>
-          operationsOf(region).flatMap((operation) =>
-            operation._tag === 'DiagnosticScope'
-              ? [[operation.destination.ordinal, operation.destination] as const]
-              : [],
-          ),
+  [
+    ...new Map(
+      regionsTree(fn.regions).flatMap((region) =>
+        operationsOf(region).flatMap((operation) =>
+          operation._tag === 'DiagnosticScope'
+            ? [[operation.destination.ordinal, operation.destination] as const]
+            : [],
         ),
-      ).values(),
-    ].sort((left, right) => left.ordinal - right.ordinal),
-  )
+      ),
+    ).values(),
+  ].sort((left, right) => left.ordinal - right.ordinal)
 
 export const callArgumentCompatible = (actual: Type, expected: Type): boolean => {
   const actualSemantic = semanticType(actual)

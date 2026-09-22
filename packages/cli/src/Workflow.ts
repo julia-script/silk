@@ -248,7 +248,7 @@ const checkTarget = Effect.fnUntraced(function* (
   let status: ExitStatus = 0
   if (failures.length > 0) status = 2
   else if (Diagnostic.hasErrors(Analysis.diagnostics(analysis))) status = 1
-  return Object.freeze({ target, status })
+  return { target, status }
 })
 
 const aggregateStatus = (statuses: ReadonlyArray<number>): ExitStatus => {
@@ -686,10 +686,10 @@ export const test = Effect.fn('Workflow.test')(function* (
     verifyMir: options.verifyMir ?? false,
     entry: discoveryEntry.success,
     root: 'silk/test_runner',
-    discovery: Object.freeze({
+    discovery: {
       root: discoveryEntry.success.module,
       ...(logicalRoot === undefined ? {} : { logicalRoot }),
-    }),
+    },
     target: plan.target.id,
     configuration: BuildPlan.compilationConfiguration(plan),
     artifactKind: plan.artifactKind,

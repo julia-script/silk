@@ -90,15 +90,14 @@ interface Projection {
   readonly complete: boolean
 }
 
-const emptyModel = (): FlowModel =>
-  Object.freeze({
-    _tag: 'FlowModel',
-    status: 'Empty',
-    summary: 'No call expression is available for data-flow projection.',
-    groups: Object.freeze([]),
-    nodes: Object.freeze([]),
-    edges: Object.freeze([]),
-  })
+const emptyModel = (): FlowModel => ({
+  _tag: 'FlowModel',
+  status: 'Empty',
+  summary: 'No call expression is available for data-flow projection.',
+  groups: [],
+  nodes: [],
+  edges: [],
+})
 
 const canonicalEqual = (
   left: DeclarationFacts.CanonicalId,
@@ -159,12 +158,12 @@ const expressionLabel = (expression: Tir.Expression): string => {
 }
 
 const addNode = (draft: ProjectionDraft, group: GroupDraft, value: FlowNode): void => {
-  draft.nodes.push(Object.freeze(value))
+  draft.nodes.push(value)
   group.nodeIds.push(value.id)
 }
 
 const addEdge = (draft: ProjectionDraft, group: GroupDraft, value: FlowEdge): void => {
-  draft.edges.push(Object.freeze(value))
+  draft.edges.push(value)
   group.edgeIds.push(value.id)
 }
 
@@ -177,19 +176,18 @@ const semanticNode = (
   ordinal: number | undefined,
   state: FlowItemState,
   span: SourceSpan.SourceSpan,
-): FlowNode =>
-  Object.freeze({
-    _tag: 'FlowNode',
-    id,
-    groupId: group.id,
-    kind,
-    label,
-    detail,
-    depth: group.depth,
-    ordinal,
-    state,
-    span,
-  })
+): FlowNode => ({
+  _tag: 'FlowNode',
+  id,
+  groupId: group.id,
+  kind,
+  label,
+  detail,
+  depth: group.depth,
+  ordinal,
+  state,
+  span,
+})
 
 const semanticEdge = (
   group: GroupDraft,
@@ -199,18 +197,17 @@ const semanticEdge = (
   label: string,
   state: FlowItemState,
   span: SourceSpan.SourceSpan,
-): FlowEdge =>
-  Object.freeze({
-    _tag: 'FlowEdge',
-    id,
-    groupId: group.id,
-    from,
-    to,
-    label,
-    depth: group.depth,
-    state,
-    span,
-  })
+): FlowEdge => ({
+  _tag: 'FlowEdge',
+  id,
+  groupId: group.id,
+  from,
+  to,
+  label,
+  depth: group.depth,
+  state,
+  span,
+})
 
 const occurrenceTarget = (
   body: Elaboration.CheckedBody,
@@ -340,7 +337,7 @@ const projectCall = (
             context.spanOf(parameter.anchor),
           ),
         )
-    return Object.freeze({ groupId: id, complete: false })
+    return { groupId: id, complete: false }
   }
 
   const parameters =
@@ -443,7 +440,7 @@ const projectCall = (
         expression.span,
       ),
     )
-    return Object.freeze({ groupId: id, complete: false })
+    return { groupId: id, complete: false }
   }
 
   const result = returned(callee)
@@ -527,7 +524,7 @@ const projectCall = (
       expression.span,
     ),
   )
-  return Object.freeze({ groupId: id, resultId, complete: true })
+  return { groupId: id, resultId, complete: true }
 }
 
 /** Projects semantic relationships directly from checked TIR and its supplementary tables. */
@@ -583,30 +580,26 @@ export const projectDataFlow = (analysis: Elaboration.Result): FlowModel => {
       )
     }
   }
-  return Object.freeze({
+  return {
     _tag: 'FlowModel',
     status: root.complete ? 'Complete' : 'Incomplete',
     summary: root.complete
       ? 'Typed TIR connects every projected call argument to its returned result.'
       : 'Typed TIR preserves a stopped or unmatched call boundary.',
-    groups: Object.freeze(
-      draft.groups.map((group) =>
-        Object.freeze({
-          _tag: 'FlowGroup' as const,
-          id: group.id,
-          label: group.label,
-          detail: group.detail,
-          depth: group.depth,
-          ordinal: group.ordinal,
-          parentId: group.parentId,
-          state: group.state,
-          span: group.span,
-          nodeIds: Object.freeze([...group.nodeIds]),
-          edgeIds: Object.freeze([...group.edgeIds]),
-        }),
-      ),
-    ),
-    nodes: Object.freeze([...draft.nodes]),
-    edges: Object.freeze([...draft.edges]),
-  })
+    groups: draft.groups.map((group) => ({
+      _tag: 'FlowGroup' as const,
+      id: group.id,
+      label: group.label,
+      detail: group.detail,
+      depth: group.depth,
+      ordinal: group.ordinal,
+      parentId: group.parentId,
+      state: group.state,
+      span: group.span,
+      nodeIds: [...group.nodeIds],
+      edgeIds: [...group.edgeIds],
+    })),
+    nodes: [...draft.nodes],
+    edges: [...draft.edges],
+  }
 }

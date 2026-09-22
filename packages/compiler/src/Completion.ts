@@ -90,11 +90,10 @@ const replacementSpan = (
 
 const declarationIdentity = (
   declaration: DeclarationFacts.MemberFact,
-): SemanticOccurrence.Identity =>
-  Object.freeze({
-    _tag: 'DeclarationIdentity',
-    id: declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : declaration.id,
-  })
+): SemanticOccurrence.Identity => ({
+  _tag: 'DeclarationIdentity',
+  id: declaration.canonical._tag === 'Canonical' ? declaration.canonical.id : declaration.id,
+})
 
 const declarationKind = (
   declaration: DeclarationFacts.MemberFact,
@@ -152,11 +151,12 @@ const compareText = (left: string, right: string): number => {
   return 0
 }
 
-const semantic = (identity: SemanticOccurrence.Identity): CandidateIdentity =>
-  Object.freeze({ _tag: 'SemanticCandidate', identity })
+const semantic = (identity: SemanticOccurrence.Identity): CandidateIdentity => ({
+  _tag: 'SemanticCandidate',
+  identity,
+})
 
-const syntax = (spelling: string): CandidateIdentity =>
-  Object.freeze({ _tag: 'SyntaxCandidate', spelling })
+const syntax = (spelling: string): CandidateIdentity => ({ _tag: 'SyntaxCandidate', spelling })
 
 const candidate = (options: {
   readonly identity: CandidateIdentity
@@ -164,16 +164,15 @@ const candidate = (options: {
   readonly label: string
   readonly detail?: SemanticDisplay.Presentation
   readonly sortGroup: number
-}): Candidate =>
-  Object.freeze({
-    _tag: 'CompletionCandidate',
-    identity: options.identity,
-    kind: options.kind,
-    label: options.label,
-    insertText: options.label,
-    ...(options.detail === undefined ? {} : { detail: options.detail }),
-    sortGroup: options.sortGroup,
-  })
+}): Candidate => ({
+  _tag: 'CompletionCandidate',
+  identity: options.identity,
+  kind: options.kind,
+  label: options.label,
+  insertText: options.label,
+  ...(options.detail === undefined ? {} : { detail: options.detail }),
+  sortGroup: options.sortGroup,
+})
 
 const enclosingFunction = (
   context: SemanticContext.SemanticContext,
@@ -204,7 +203,7 @@ const scopeChain = (
   fn: Elaboration.CheckedBody | undefined,
   offset: number,
 ): ReadonlyArray<Elaboration.LexicalScopeFact> => {
-  if (fn === undefined) return Object.freeze([])
+  if (fn === undefined) return []
   const candidates = result.lexicalScopes
     .filter((scope) => sameDeclaration(scope.id.function, fn.declaration.id))
     .map((scope) => ({
@@ -230,7 +229,7 @@ const scopeChain = (
     chain.push(current)
     current = current.parent === undefined ? undefined : byOrdinal.get(current.parent.ordinal)
   }
-  return Object.freeze(chain)
+  return chain
 }
 
 const visibleBindings = (
@@ -248,10 +247,8 @@ const visibleBindings = (
         !selected.has(binding.name.spelling)
       )
         selected.set(binding.name.spelling, binding)
-  return Object.freeze(
-    [...selected.values()].sort(
-      (left, right) => context.spanOf(left.anchor).start - context.spanOf(right.anchor).start,
-    ),
+  return [...selected.values()].sort(
+    (left, right) => context.spanOf(left.anchor).start - context.spanOf(right.anchor).start,
   )
 }
 
@@ -270,13 +267,13 @@ const visiblePatternBindings = (
         !selected.has(binding.name.spelling)
       )
         selected.set(binding.name.spelling, binding)
-  return Object.freeze([...selected.values()])
+  return [...selected.values()]
 }
 
 const actorCandidates = (actor: Intrinsic.Actor): ReadonlyArray<Candidate> =>
   actor.operations.map((operation) =>
     candidate({
-      identity: semantic(Object.freeze({ _tag: 'IntrinsicOperationIdentity', id: operation.id })),
+      identity: semantic({ _tag: 'IntrinsicOperationIdentity', id: operation.id }),
       kind: 'Operation',
       label: operation.spelling,
       detail: SemanticDisplay.intrinsicOperation(operation),
@@ -284,72 +281,59 @@ const actorCandidates = (actor: Intrinsic.Actor): ReadonlyArray<Candidate> =>
     }),
   )
 
-const enumCandidates = (enum_: DeclarationFacts.EnumFact): ReadonlyArray<Candidate> =>
-  Object.freeze([
-    ...enum_.members.flatMap((member): ReadonlyArray<Candidate> =>
-      member.name._tag !== 'Present' || member.canonical._tag !== 'Canonical'
-        ? []
-        : [
-            candidate({
-              identity: semantic(
-                Object.freeze({ _tag: 'EnumMemberIdentity', id: member.canonical.id }),
-              ),
-              kind: 'Constant',
-              label: member.name.spelling,
-              detail: SemanticDisplay.enumMember(enum_, member),
-              sortGroup: 0,
-            }),
-          ],
-    ),
-    ...enum_.associatedOperations.map((operation) =>
-      candidate({
-        identity: semantic(
-          Object.freeze({ _tag: 'EnumAssociatedOperationIdentity', id: operation.id }),
-        ),
-        kind: 'Operation',
-        label: operation.name,
-        detail: SemanticDisplay.enumAssociatedOperation(operation),
-        sortGroup: 1,
-      }),
-    ),
-  ])
+const enumCandidates = (enum_: DeclarationFacts.EnumFact): ReadonlyArray<Candidate> => [
+  ...enum_.members.flatMap((member): ReadonlyArray<Candidate> =>
+    member.name._tag !== 'Present' || member.canonical._tag !== 'Canonical'
+      ? []
+      : [
+          candidate({
+            identity: semantic({ _tag: 'EnumMemberIdentity', id: member.canonical.id }),
+            kind: 'Constant',
+            label: member.name.spelling,
+            detail: SemanticDisplay.enumMember(enum_, member),
+            sortGroup: 0,
+          }),
+        ],
+  ),
+  ...enum_.associatedOperations.map((operation) =>
+    candidate({
+      identity: semantic({ _tag: 'EnumAssociatedOperationIdentity', id: operation.id }),
+      kind: 'Operation',
+      label: operation.name,
+      detail: SemanticDisplay.enumAssociatedOperation(operation),
+      sortGroup: 1,
+    }),
+  ),
+]
 
 const unionCandidates = (union: DeclarationFacts.UnionFact): ReadonlyArray<Candidate> =>
-  Object.freeze(
-    union.variants.flatMap((variant): ReadonlyArray<Candidate> =>
-      variant.name._tag !== 'Present' || variant.canonical._tag !== 'Canonical'
-        ? []
-        : [
-            candidate({
-              identity: semantic(
-                Object.freeze({ _tag: 'UnionVariantIdentity', id: variant.canonical.id }),
-              ),
-              kind: 'Constructor',
-              label: variant.name.spelling,
-              detail: SemanticDisplay.unionVariant(union, variant),
-              sortGroup: 0,
-            }),
-          ],
-    ),
+  union.variants.flatMap((variant): ReadonlyArray<Candidate> =>
+    variant.name._tag !== 'Present' || variant.canonical._tag !== 'Canonical'
+      ? []
+      : [
+          candidate({
+            identity: semantic({ _tag: 'UnionVariantIdentity', id: variant.canonical.id }),
+            kind: 'Constructor',
+            label: variant.name.spelling,
+            detail: SemanticDisplay.unionVariant(union, variant),
+            sortGroup: 0,
+          }),
+        ],
   )
 
 const serviceCandidates = (service: DeclarationFacts.ServiceFact): ReadonlyArray<Candidate> =>
-  Object.freeze(
-    service.operations.flatMap((operation): ReadonlyArray<Candidate> =>
-      operation.name._tag !== 'Present' || operation.state._tag !== 'Unique'
-        ? []
-        : [
-            candidate({
-              identity: semantic(
-                Object.freeze({ _tag: 'ServiceOperationIdentity', id: operation.state.id }),
-              ),
-              kind: 'Operation',
-              label: operation.name.spelling,
-              detail: SemanticDisplay.serviceOperation(operation),
-              sortGroup: 0,
-            }),
-          ],
-    ),
+  service.operations.flatMap((operation): ReadonlyArray<Candidate> =>
+    operation.name._tag !== 'Present' || operation.state._tag !== 'Unique'
+      ? []
+      : [
+          candidate({
+            identity: semantic({ _tag: 'ServiceOperationIdentity', id: operation.state.id }),
+            kind: 'Operation',
+            label: operation.name.spelling,
+            detail: SemanticDisplay.serviceOperation(operation),
+            sortGroup: 0,
+          }),
+        ],
   )
 
 /**
@@ -362,7 +346,7 @@ const inherentCandidates = (
   owner: DeclarationFacts.MemberFact,
   module: string,
 ): ReadonlyArray<Candidate> => {
-  if (owner.canonical._tag !== 'Canonical') return Object.freeze([])
+  if (owner.canonical._tag !== 'Canonical') return []
   const ownerId = owner.canonical.id
   const names = new Set<string>()
   for (const member of index.modules.find((headers) => headers.module === ownerId.module)
@@ -372,21 +356,19 @@ const inherentCandidates = (
     if ((associated.owner?.name ?? associated.ownerSpelling) === ownerId.name)
       names.add(associated.name)
   }
-  return Object.freeze(
-    [...names].flatMap((name): ReadonlyArray<Candidate> => {
-      const lookup = Semantic.resolveAssociatedName(session, owner, name, module)
-      if (lookup._tag !== 'Inherent' || lookup.declaration._tag !== 'FunctionDeclaration') return []
-      return [
-        candidate({
-          identity: semantic(declarationIdentity(lookup.declaration)),
-          kind: lookup.declaration.associatedMember?.receiver ? 'Method' : 'AssociatedFunction',
-          label: name,
-          detail: SemanticDisplay.functionDeclaration(lookup.declaration),
-          sortGroup: 1,
-        }),
-      ]
-    }),
-  )
+  return [...names].flatMap((name): ReadonlyArray<Candidate> => {
+    const lookup = Semantic.resolveAssociatedName(session, owner, name, module)
+    if (lookup._tag !== 'Inherent' || lookup.declaration._tag !== 'FunctionDeclaration') return []
+    return [
+      candidate({
+        identity: semantic(declarationIdentity(lookup.declaration)),
+        kind: lookup.declaration.associatedMember?.receiver ? 'Method' : 'AssociatedFunction',
+        label: name,
+        detail: SemanticDisplay.functionDeclaration(lookup.declaration),
+        sortGroup: 1,
+      }),
+    ]
+  })
 }
 
 const namespaceCandidates = (
@@ -443,27 +425,27 @@ const valueLookup = (
     (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spelling,
   )
   if (binding !== undefined)
-    return Object.freeze({
+    return {
       found: true,
       ...(binding.inferredType._tag === 'Available' ? { type: binding.inferredType.type } : {}),
-    })
+    }
   const patternBinding = visiblePatternBindings(context, result, fn, offset).find(
     (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spelling,
   )
   if (patternBinding !== undefined)
-    return Object.freeze({
+    return {
       found: true,
       ...(patternBinding.type._tag === 'Available' ? { type: patternBinding.type.type } : {}),
-    })
+    }
   const parameter = fn?.declaration.parameters.find(
     (candidate) => candidate.name._tag === 'Present' && candidate.name.spelling === spelling,
   )
   if (parameter !== undefined)
-    return Object.freeze({
+    return {
       found: true,
       ...(parameter.declaredType._tag === 'Resolved' ? { type: parameter.declaredType.type } : {}),
-    })
-  return Object.freeze({ found: false })
+    }
+  return { found: false }
 }
 
 const nominalSubject = (type: Type.Type | undefined): Type.Nominal | undefined => {
@@ -492,38 +474,37 @@ const receiverMethodCandidates = (
   scope: NameResolution.ModuleScope | undefined,
 ): ReadonlyArray<Candidate> => {
   // The subject's own arguments fix the owner binders each method presents.
-  if (type === undefined) return Object.freeze([])
-  const owner = DeclarationFacts.byCanonical(
-    index,
-    Object.freeze({ _tag: 'CanonicalDeclarationId', module: type.module, name: type.name }),
-  )
-  if (owner === undefined) return Object.freeze([])
-  return Object.freeze(
-    inherentCandidates(session, index, owner, module).flatMap((member) => {
-      if (member.kind !== 'Method' || member.identity._tag !== 'SemanticCandidate') return []
-      const identity = member.identity.identity
-      const declaration =
-        identity._tag === 'DeclarationIdentity' && identity.id._tag === 'CanonicalDeclarationId'
-          ? DeclarationFacts.byCanonical(index, identity.id)
-          : undefined
-      return declaration?._tag === 'FunctionDeclaration'
-        ? [
-            candidate({
-              identity: member.identity,
-              kind: 'Method',
-              label: member.label,
-              detail: SemanticDisplay.receiverMethod(
-                declaration,
-                SemanticDisplay.receiverSubstitution(declaration, type),
-                module,
-                scope,
-              ),
-              sortGroup: 1,
-            }),
-          ]
-        : []
-    }),
-  )
+  if (type === undefined) return []
+  const owner = DeclarationFacts.byCanonical(index, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
+  if (owner === undefined) return []
+  return inherentCandidates(session, index, owner, module).flatMap((member) => {
+    if (member.kind !== 'Method' || member.identity._tag !== 'SemanticCandidate') return []
+    const identity = member.identity.identity
+    const declaration =
+      identity._tag === 'DeclarationIdentity' && identity.id._tag === 'CanonicalDeclarationId'
+        ? DeclarationFacts.byCanonical(index, identity.id)
+        : undefined
+    return declaration?._tag === 'FunctionDeclaration'
+      ? [
+          candidate({
+            identity: member.identity,
+            kind: 'Method',
+            label: member.label,
+            detail: SemanticDisplay.receiverMethod(
+              declaration,
+              SemanticDisplay.receiverSubstitution(declaration, type),
+              module,
+              scope,
+            ),
+            sortGroup: 1,
+          }),
+        ]
+      : []
+  })
 }
 
 /**
@@ -540,7 +521,7 @@ const suppliedOperationCandidates = (
   module: string,
   inherent: ReadonlyArray<Candidate>,
 ): ReadonlyArray<Candidate> => {
-  if (type === undefined) return Object.freeze([])
+  if (type === undefined) return []
   const claimed = new Set(inherent.map((member) => member.label))
   const supplied = ConformanceProof.implementedContracts(index, module, type).flatMap(
     (capability) => {
@@ -554,30 +535,26 @@ const suppliedOperationCandidates = (
         operation.declaration.state._tag !== 'Unique' ||
         claimed.has(operation.declaration.name.spelling)
           ? []
-          : [Object.freeze({ label: operation.declaration.name.spelling, operation })],
+          : [{ label: operation.declaration.name.spelling, operation }],
       )
     },
   )
-  return Object.freeze(
-    supplied.flatMap(({ label, operation }) =>
-      supplied.filter((other) => other.label === label).length > 1 ||
-      operation.declaration.state._tag !== 'Unique'
-        ? []
-        : [
-            candidate({
-              identity: semantic(
-                Object.freeze({
-                  _tag: 'ServiceOperationIdentity',
-                  id: operation.declaration.state.id,
-                }),
-              ),
-              kind: 'Method',
-              label,
-              detail: SemanticDisplay.receiverOperation(operation),
-              sortGroup: 1,
+  return supplied.flatMap(({ label, operation }) =>
+    supplied.filter((other) => other.label === label).length > 1 ||
+    operation.declaration.state._tag !== 'Unique'
+      ? []
+      : [
+          candidate({
+            identity: semantic({
+              _tag: 'ServiceOperationIdentity',
+              id: operation.declaration.state.id,
             }),
-          ],
-    ),
+            kind: 'Method',
+            label,
+            detail: SemanticDisplay.receiverOperation(operation),
+            sortGroup: 1,
+          }),
+        ],
   )
 }
 
@@ -586,36 +563,32 @@ const boundOperationCandidates = (
   fn: Elaboration.CheckedBody | undefined,
   type: Type.Parameter | undefined,
 ): ReadonlyArray<Candidate> => {
-  if (fn === undefined || type === undefined) return Object.freeze([])
+  if (fn === undefined || type === undefined) return []
   const parameter = fn.declaration.typeParameters.find((candidate) =>
     Type.equals(candidate.type, type),
   )
-  if (parameter === undefined) return Object.freeze([])
-  return Object.freeze(
-    parameter.bounds.flatMap((bound) =>
-      bound._tag !== 'ResolvedBound'
-        ? []
-        : bound.application.operations.flatMap((operation) =>
-            operation.receiverAccess === 'Unavailable' ||
-            operation.declaration.name._tag !== 'Present' ||
-            operation.declaration.state._tag !== 'Unique'
-              ? []
-              : [
-                  candidate({
-                    identity: semantic(
-                      Object.freeze({
-                        _tag: 'ServiceOperationIdentity',
-                        id: operation.declaration.state.id,
-                      }),
-                    ),
-                    kind: 'Method',
-                    label: operation.declaration.name.spelling,
-                    detail: SemanticDisplay.receiverOperation(operation),
-                    sortGroup: 1,
+  if (parameter === undefined) return []
+  return parameter.bounds.flatMap((bound) =>
+    bound._tag !== 'ResolvedBound'
+      ? []
+      : bound.application.operations.flatMap((operation) =>
+          operation.receiverAccess === 'Unavailable' ||
+          operation.declaration.name._tag !== 'Present' ||
+          operation.declaration.state._tag !== 'Unique'
+            ? []
+            : [
+                candidate({
+                  identity: semantic({
+                    _tag: 'ServiceOperationIdentity',
+                    id: operation.declaration.state.id,
                   }),
-                ],
-          ),
-    ),
+                  kind: 'Method',
+                  label: operation.declaration.name.spelling,
+                  detail: SemanticDisplay.receiverOperation(operation),
+                  sortGroup: 1,
+                }),
+              ],
+        ),
   )
 }
 
@@ -624,30 +597,25 @@ const fieldCandidates = (
   type: Type.Nominal | undefined,
   module: string,
 ): ReadonlyArray<Candidate> => {
-  if (type === undefined) return Object.freeze([])
-  const resolved = DeclarationFacts.byCanonical(
-    index,
-    Object.freeze({
-      _tag: 'CanonicalDeclarationId',
-      module: type.module,
-      name: type.name,
-    }),
-  )
+  if (type === undefined) return []
+  const resolved = DeclarationFacts.byCanonical(index, {
+    _tag: 'CanonicalDeclarationId',
+    module: type.module,
+    name: type.name,
+  })
   const declaration = resolved?._tag === 'StructDeclaration' ? resolved : undefined
-  return Object.freeze(
-    (declaration?.fields ?? []).flatMap((field) =>
-      field.name._tag !== 'Present' || (field.visibility === 'Private' && type.module !== module)
-        ? []
-        : [
-            candidate({
-              identity: semantic(Object.freeze({ _tag: 'FieldIdentity', id: field.id })),
-              kind: 'Field',
-              label: field.name.spelling,
-              detail: SemanticDisplay.field(field),
-              sortGroup: 0,
-            }),
-          ],
-    ),
+  return (declaration?.fields ?? []).flatMap((field) =>
+    field.name._tag !== 'Present' || (field.visibility === 'Private' && type.module !== module)
+      ? []
+      : [
+          candidate({
+            identity: semantic({ _tag: 'FieldIdentity', id: field.id }),
+            kind: 'Field',
+            label: field.name.spelling,
+            detail: SemanticDisplay.field(field),
+            sortGroup: 0,
+          }),
+        ],
   )
 }
 
@@ -662,11 +630,11 @@ const typeCandidates = (
       identity: syntax('Effect'),
       kind: 'Type',
       label: 'Effect',
-      detail: Object.freeze({
+      detail: {
         _tag: 'IntrinsicActorPresentation',
         name: 'Effect',
         text: 'builtin type Effect<A ! E ? R>',
-      }),
+      },
       sortGroup: 1,
     }),
   ]
@@ -676,11 +644,11 @@ const typeCandidates = (
         identity: syntax(scalar.spelling),
         kind: 'Type',
         label: scalar.spelling,
-        detail: Object.freeze({
+        detail: {
           _tag: 'IntrinsicActorPresentation',
           name: scalar.spelling,
           text: `builtin type ${scalar.spelling}`,
-        }),
+        },
         sortGroup: 1,
       }),
     )
@@ -688,7 +656,7 @@ const typeCandidates = (
     if (actor.kind === 'Type')
       candidates.push(
         candidate({
-          identity: semantic(Object.freeze({ _tag: 'IntrinsicActorIdentity', id: actor.id })),
+          identity: semantic({ _tag: 'IntrinsicActorIdentity', id: actor.id }),
           kind: 'Type',
           label: actor.spelling,
           detail: SemanticDisplay.intrinsicActor(actor),
@@ -721,7 +689,7 @@ const typeCandidates = (
     if (parameter.name._tag === 'Present')
       candidates.push(
         candidate({
-          identity: semantic(Object.freeze({ _tag: 'TypeParameterIdentity', id: parameter.type })),
+          identity: semantic({ _tag: 'TypeParameterIdentity', id: parameter.type }),
           kind: 'Type',
           label: parameter.name.spelling,
           detail: SemanticDisplay.typeParameter(parameter),
@@ -750,7 +718,7 @@ const typeCandidates = (
       }),
     )
   }
-  return Object.freeze(candidates)
+  return candidates
 }
 
 const expressionCandidates = (
@@ -770,7 +738,7 @@ const expressionCandidates = (
           (() => {
             const detail = SemanticDisplay.binding(binding, module, scope)
             return {
-              identity: semantic(Object.freeze({ _tag: 'BindingIdentity', id: binding.id })),
+              identity: semantic({ _tag: 'BindingIdentity', id: binding.id }),
               kind: 'Binding',
               label: binding.name.spelling,
               ...(detail === undefined ? {} : { detail }),
@@ -784,7 +752,7 @@ const expressionCandidates = (
       const detail = SemanticDisplay.patternBinding(binding, module, scope)
       candidates.push(
         candidate({
-          identity: semantic(Object.freeze({ _tag: 'PatternBindingIdentity', id: binding.id })),
+          identity: semantic({ _tag: 'PatternBindingIdentity', id: binding.id }),
           kind: 'Binding',
           label: binding.name.spelling,
           ...(detail === undefined ? {} : { detail }),
@@ -796,7 +764,7 @@ const expressionCandidates = (
     if (parameter.name._tag === 'Present')
       candidates.push(
         candidate({
-          identity: semantic(Object.freeze({ _tag: 'ParameterIdentity', id: parameter.id })),
+          identity: semantic({ _tag: 'ParameterIdentity', id: parameter.id }),
           kind: 'Parameter',
           label: parameter.name.spelling,
           detail: SemanticDisplay.parameter(parameter),
@@ -831,13 +799,11 @@ const expressionCandidates = (
     } else if (binding._tag === 'ModuleNamespace')
       candidates.push(
         candidate({
-          identity: semantic(
-            Object.freeze({
-              _tag: 'ImportNamespaceIdentity',
-              module: binding.module,
-              spelling: binding.spelling,
-            }),
-          ),
+          identity: semantic({
+            _tag: 'ImportNamespaceIdentity',
+            module: binding.module,
+            spelling: binding.spelling,
+          }),
           kind: 'Actor',
           label: binding.spelling,
           detail: SemanticDisplay.importBinding(binding.spelling, binding.module),
@@ -848,7 +814,7 @@ const expressionCandidates = (
   for (const actor of Intrinsic.all())
     candidates.push(
       candidate({
-        identity: semantic(Object.freeze({ _tag: 'IntrinsicActorIdentity', id: actor.id })),
+        identity: semantic({ _tag: 'IntrinsicActorIdentity', id: actor.id }),
         kind: actor.kind === 'Type' ? 'Constructor' : 'Actor',
         label: actor.spelling,
         detail: SemanticDisplay.intrinsicActor(actor),
@@ -859,7 +825,7 @@ const expressionCandidates = (
     candidates.push(
       candidate({ identity: syntax(keyword), kind: 'Keyword', label: keyword, sortGroup: 5 }),
     )
-  return Object.freeze(candidates)
+  return candidates
 }
 
 const candidateKey = (self: Candidate): string =>
@@ -881,13 +847,11 @@ const stable = (inputs: ReadonlyArray<Candidate>): ReadonlyArray<Candidate> => {
   const unique = new Map<string, Candidate>()
   for (const input of inputs)
     if (!unique.has(candidateKey(input))) unique.set(candidateKey(input), input)
-  return Object.freeze(
-    [...unique.values()].sort(
-      (left, right) =>
-        left.sortGroup - right.sortGroup ||
-        compareText(left.kind, right.kind) ||
-        compareText(left.label, right.label),
-    ),
+  return [...unique.values()].sort(
+    (left, right) =>
+      left.sortGroup - right.sortGroup ||
+      compareText(left.kind, right.kind) ||
+      compareText(left.label, right.label),
   )
 }
 
@@ -912,7 +876,7 @@ export const complete = (options: {
     const qualifier = memberMatch[1]
     const value =
       qualifier === undefined
-        ? Object.freeze({ found: false })
+        ? { found: false }
         : valueLookup(context, qualifier, options.result, fn, options.offset)
     if (value.found) {
       const subject = nominalSubject(value.type)
@@ -924,13 +888,13 @@ export const complete = (options: {
         options.module,
         scope,
       )
-      return Object.freeze({
+      return {
         _tag: 'CompletionResult',
-        context: Object.freeze({
+        context: {
           _tag: 'ValueMemberContext',
           state:
             subject === undefined && parameterSubject === undefined ? 'Unavailable' : 'Available',
-        }),
+        },
         replacement: replacement.span,
         candidates: stable([
           ...fieldCandidates(options.index, subject, options.module),
@@ -938,7 +902,7 @@ export const complete = (options: {
           ...suppliedOperationCandidates(options.index, subject, options.module, inherent),
           ...boundOperationCandidates(fn, parameterSubject),
         ]),
-      })
+      }
     }
     const lookup =
       qualifier === undefined || scope === undefined
@@ -947,20 +911,20 @@ export const complete = (options: {
     if (lookup?._tag === 'Intrinsic') {
       const intrinsic = Intrinsic.findActor(lookup.actor)
       if (intrinsic !== undefined)
-        return Object.freeze({
+        return {
           _tag: 'CompletionResult',
-          context: Object.freeze({ _tag: 'ActorMemberContext', actor: intrinsic.spelling }),
+          context: { _tag: 'ActorMemberContext', actor: intrinsic.spelling },
           replacement: replacement.span,
           candidates: stable([...actorCandidates(intrinsic)]),
-        })
+        }
     }
     if (lookup?._tag === 'Namespace')
-      return Object.freeze({
+      return {
         _tag: 'CompletionResult',
-        context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.module }),
+        context: { _tag: 'ActorMemberContext', actor: lookup.module },
         replacement: replacement.span,
         candidates: stable(namespaceCandidates(options.index, lookup.module)),
-      })
+      }
     // Declared inherent members are the only associated candidates of a nominal qualifier.
     const inherent =
       lookup?._tag === 'Resolved'
@@ -970,45 +934,45 @@ export const complete = (options: {
             NameResolution.erasedOwner(options.index, lookup.declaration),
             options.module,
           )
-        : Object.freeze([])
+        : []
     // A transparent alias qualifier offers the aliased owner's members and nothing of its own.
     if (
       lookup?._tag === 'Resolved' &&
       lookup.declaration._tag === 'AliasDeclaration' &&
       inherent.length > 0
     )
-      return Object.freeze({
+      return {
         _tag: 'CompletionResult',
-        context: Object.freeze({ _tag: 'ActorMemberContext', actor: lookup.spelling }),
+        context: { _tag: 'ActorMemberContext', actor: lookup.spelling },
         replacement: replacement.span,
         candidates: stable(inherent),
-      })
+      }
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'EnumDeclaration')
-      return Object.freeze({
+      return {
         _tag: 'CompletionResult',
-        context: Object.freeze({
+        context: {
           _tag: 'ActorMemberContext',
           actor:
             lookup.declaration.name._tag === 'Present'
               ? lookup.declaration.name.spelling
               : (qualifier ?? 'enum'),
-        }),
+        },
         replacement: replacement.span,
         candidates: stable([...enumCandidates(lookup.declaration), ...inherent]),
-      })
+      }
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'UnionDeclaration') {
-      return Object.freeze({
+      return {
         _tag: 'CompletionResult',
-        context: Object.freeze({
+        context: {
           _tag: 'ActorMemberContext',
           actor:
             lookup.declaration.name._tag === 'Present'
               ? lookup.declaration.name.spelling
               : (qualifier ?? 'union'),
-        }),
+        },
         replacement: replacement.span,
         candidates: stable([...unionCandidates(lookup.declaration), ...inherent]),
-      })
+      }
     }
     if (
       lookup?._tag === 'Resolved' &&
@@ -1016,59 +980,59 @@ export const complete = (options: {
         lookup.declaration._tag === 'InterfaceDeclaration') &&
       lookup.declaration.canonical._tag === 'Canonical'
     ) {
-      return Object.freeze({
+      return {
         _tag: 'CompletionResult',
-        context: Object.freeze({
+        context: {
           _tag: 'ActorMemberContext',
           actor: lookup.declaration.canonical.id.name,
-        }),
+        },
         replacement: replacement.span,
         candidates: stable(inherent),
-      })
+      }
     }
     if (lookup?._tag === 'Resolved' && lookup.declaration._tag === 'ServiceDeclaration') {
-      return Object.freeze({
+      return {
         _tag: 'CompletionResult',
-        context: Object.freeze({
+        context: {
           _tag: 'ActorMemberContext',
           actor:
             lookup.declaration.name._tag === 'Present'
               ? lookup.declaration.name.spelling
               : (qualifier ?? 'service'),
-        }),
+        },
         replacement: replacement.span,
         candidates: stable([...serviceCandidates(lookup.declaration), ...inherent]),
-      })
+      }
     }
     let state: 'Ambiguous' | 'Missing' | 'Unavailable'
     if (lookup?._tag === 'Conflict') state = 'Ambiguous'
     else if (lookup?._tag === 'Missing' || lookup === undefined) state = 'Missing'
     else state = 'Unavailable'
-    return Object.freeze({
+    return {
       _tag: 'CompletionResult',
-      context: Object.freeze({
+      context: {
         _tag: 'ValueMemberContext',
         state,
-      }),
+      },
       replacement: replacement.span,
-      candidates: Object.freeze([]),
-    })
+      candidates: [],
+    }
   }
   const tail = before.slice(Math.max(0, before.lastIndexOf('\n')))
   const typeArgument = /<[^>]*$/.test(tail)
   const declaredType = /(?::|->)\s*[A-Za-z0-9_.]*$/.test(tail)
   if (typeArgument || declaredType)
-    return Object.freeze({
+    return {
       _tag: 'CompletionResult',
-      context: Object.freeze({
+      context: {
         _tag: typeArgument ? 'TypeArgumentContext' : 'DeclaredTypeContext',
-      }),
+      },
       replacement: replacement.span,
       candidates: stable(typeCandidates(options.module, options.index, scope, fn)),
-    })
-  return Object.freeze({
+    }
+  return {
     _tag: 'CompletionResult',
-    context: Object.freeze({ _tag: 'ExpressionContext' }),
+    context: { _tag: 'ExpressionContext' },
     replacement: replacement.span,
     candidates: stable([
       ...expressionCandidates(
@@ -1084,5 +1048,5 @@ export const complete = (options: {
         ? [candidate({ identity: syntax('{'), kind: 'Keyword', label: '{', sortGroup: 5 })]
         : []),
     ]),
-  })
+  }
 }

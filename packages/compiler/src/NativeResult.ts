@@ -55,10 +55,9 @@ export const unpack = Effect.fnUntraced(function* (
 ): Effect.fn.Return<NativeResult, LlvmError.LlvmError> {
   const offset = status === 'SuspensionStep' ? 1 : 0
   const count = shape.resultLaneCount + (shape.diagnosticResult ? 1 : 0)
-  if (count === 0) return Object.freeze({ values: Object.freeze([]) })
+  if (count === 0) return { values: [] }
   if (value === undefined) throw new RangeError('Native result lost its declared value')
-  if (count === 1 && offset === 0 && !shape.diagnosticResult)
-    return Object.freeze({ values: Object.freeze([value]) })
+  if (count === 1 && offset === 0 && !shape.diagnosticResult) return { values: [value] }
   const values: Array<Value.Input> = []
   for (let ordinal = 0; ordinal < shape.resultLaneCount; ordinal += 1)
     values.push(
@@ -72,10 +71,10 @@ export const unpack = Effect.fnUntraced(function* (
         `${name}_diagnostic`,
       )
     : undefined
-  return Object.freeze({
-    values: Object.freeze(values),
+  return {
+    values: values,
     ...(diagnostic === undefined ? {} : { diagnostic }),
-  })
+  }
 })
 
 /** Validates the complete result instead of silently dropping private metadata. */
@@ -84,10 +83,7 @@ export const fields = (self: NativeResult, shape: Shape): ReadonlyArray<Value.In
     throw new RangeError('Native result does not match its source lane count')
   if ((self.diagnostic !== undefined) !== shape.diagnosticResult)
     throw new RangeError('Native result does not match its diagnostic ownership shape')
-  return Object.freeze([
-    ...self.values,
-    ...(self.diagnostic === undefined ? [] : [self.diagnostic]),
-  ])
+  return [...self.values, ...(self.diagnostic === undefined ? [] : [self.diagnostic])]
 }
 
 /** Packs a synchronous private result; an empty result denotes a void return. */

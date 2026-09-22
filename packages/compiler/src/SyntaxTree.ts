@@ -173,13 +173,11 @@ export const missingToken = (
   expected: Token.TokenKind,
   offset: number,
 ): Option.Option<MissingToken> =>
-  Option.map(SourceSpan.make(source, offset, offset), (span) =>
-    Object.freeze({
-      _tag: 'MissingToken' as const,
-      expected,
-      span,
-    }),
-  )
+  Option.map(SourceSpan.make(source, offset, offset), (span) => ({
+    _tag: 'MissingToken' as const,
+    expected,
+    span,
+  }))
 
 const orderedChildren = (
   source: SourceFile.SourceFile,
@@ -212,14 +210,12 @@ export const make = (
     first?.span.start ?? emptyOffset,
     last?.span.end ?? emptyOffset,
   )
-  return Option.map(nodeSpan, (span) =>
-    Object.freeze({
-      _tag: 'SyntaxNode' as const,
-      kind,
-      span,
-      children: Object.freeze(Array.from(children)),
-    }),
-  )
+  return Option.map(nodeSpan, (span) => ({
+    _tag: 'SyntaxNode' as const,
+    kind,
+    span,
+    children: Array.from(children),
+  }))
 }
 
 /** Returns the direct child nodes of one kind in concrete order. */
@@ -253,10 +249,8 @@ export const unavailableElement = (elements: ReadonlyArray<Element>, fallback: N
 
 /** Returns every original lexer token below a node in concrete source order. */
 export const tokens = (self: Node): ReadonlyArray<Token.Token> =>
-  Object.freeze(
-    self.children.flatMap((child): ReadonlyArray<Token.Token> => {
-      if (isToken(child)) return [child]
-      if (isNode(child)) return tokens(child)
-      return []
-    }),
-  )
+  self.children.flatMap((child): ReadonlyArray<Token.Token> => {
+    if (isToken(child)) return [child]
+    if (isNode(child)) return tokens(child)
+    return []
+  })

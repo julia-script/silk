@@ -151,15 +151,15 @@ export const derive = (index: DeclarationIndex.Index): NominalVariance => {
         join(previous.at(ordinal) ?? 'Bivariant', variance),
       )
       if (next.some((variance, ordinal) => variance !== previous.at(ordinal))) {
-        summaries.set(name, Object.freeze(next))
+        summaries.set(name, next)
         changed = true
       }
     }
   }
-  const result = Object.freeze({
+  const result = {
     summaries,
-    work: Object.freeze({ declarations: declarations.length, iterations, typeVisits }),
-  })
+    work: { declarations: declarations.length, iterations, typeVisits },
+  }
   cache.set(index.modules, result)
   return result
 }

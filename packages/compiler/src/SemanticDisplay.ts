@@ -147,12 +147,12 @@ export const anonymousCallable = (
     return `${name} (${captureAccess(capture.access)})`
   })
   const contract = `${anonymous.functionKind === 'Effect' ? 'effect ' : ''}fn(${parameters.join(', ')}) -> ${result}`
-  return Object.freeze({
+  return {
     _tag: 'AnonymousCallablePresentation',
     lifetimeRequirements:
       self.type._tag === 'Available' ? lifetimeRequirements(self.type.type, '') : [],
     text: `${contract}\nmode: ${callableMode(self.mode)}\ncaptures: ${captures.length === 0 ? 'none' : captures.join(', ')}`,
-  })
+  }
 }
 
 const typeParameterName = (parameter: DeclarationFacts.TypeParameterFact): string => {
@@ -230,12 +230,12 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
     })
     .join(', ')
   const parameters = self.foreign?.variadic === true ? `${fixedParameters}, ...` : fixedParameters
-  return Object.freeze({
+  return {
     _tag: 'FunctionPresentation',
     name,
     functionKind: self.functionKind,
     text: `${visibility}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}${symbol}${behavior}`,
-  })
+  }
 }
 
 /**
@@ -269,12 +269,12 @@ export const receiverMethod = (
       return `${mutability}${parameterName}: ${rendered(parameter.declaredType)}`
     })
     .join(', ')
-  return Object.freeze({
+  return {
     _tag: 'FunctionPresentation',
     name,
     functionKind: self.functionKind,
     text: `${kind}${typeParameters}(${parameters}) -> ${rendered(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}`,
-  })
+  }
 }
 
 /**
@@ -312,11 +312,11 @@ export const receiverOperation = (
       return `${parameterName}: ${declaredType(operand.type)}`
     })
     .join(', ')
-  return Object.freeze({
+  return {
     _tag: 'ServiceOperationPresentation',
     name,
     text: `${kind}(${parameters}) -> ${declaredType(self.success)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}`,
-  })
+  }
 }
 
 /** Renders a scalar enum declaration without expanding its members. */
@@ -329,11 +329,11 @@ export const enumDeclaration = (self: DeclarationFacts.EnumFact): Presentation =
   } else {
     representation = ''
   }
-  return Object.freeze({
+  return {
     _tag: 'EnumPresentation',
     name,
     text: `${visibility}enum${representation} ${name}`,
-  })
+  }
 }
 
 export const enumMember = (
@@ -342,21 +342,20 @@ export const enumMember = (
 ): Presentation => {
   const enumName = enum_.name._tag === 'Present' ? enum_.name.spelling : '_'
   const name = member.name._tag === 'Present' ? member.name.spelling : '_'
-  return Object.freeze({
+  return {
     _tag: 'EnumMemberPresentation',
     name,
     text: `${enumName}.${name}: ${enumName}`,
-  })
+  }
 }
 
 export const enumAssociatedOperation = (
   self: DeclarationFacts.EnumAssociatedOperationFact,
-): Presentation =>
-  Object.freeze({
-    _tag: 'EnumOperationPresentation',
-    name: self.name,
-    text: `fn ${self.name}(value: ${self.parameter.name}) -> ${self.result.spelling}`,
-  })
+): Presentation => ({
+  _tag: 'EnumOperationPresentation',
+  name: self.name,
+  text: `fn ${self.name}(value: ${self.parameter.name}) -> ${self.result.spelling}`,
+})
 
 /** Renders a nominal type declaration without expanding its body. */
 export const structDeclaration = (self: DeclarationFacts.StructFact): Presentation => {
@@ -370,11 +369,11 @@ export const structDeclaration = (self: DeclarationFacts.StructFact): Presentati
     self.layout._tag === 'Silk'
       ? ''
       : `extern ${self.layout.abi === undefined ? '_' : JSON.stringify(self.layout.abi)} `
-  return Object.freeze({
+  return {
     _tag: 'StructPresentation',
     name,
     text: `${visibility}${layout}${self.aggregateKind === 'Positional' ? 'tuple' : 'struct'} ${name}${typeParameters}`,
-  })
+  }
 }
 
 /** Renders a nominal tagged-union declaration without expanding its variants. */
@@ -385,11 +384,11 @@ export const unionDeclaration = (self: DeclarationFacts.UnionFact): Presentation
     self.typeParameters.length === 0
       ? ''
       : `<${self.typeParameters.map(typeParameterName).join(', ')}>`
-  return Object.freeze({
+  return {
     _tag: 'UnionPresentation',
     name,
     text: `${visibility}union ${name}${typeParameters}`,
-  })
+  }
 }
 
 /** Renders one variant as a constructor of its complete nominal union parent. */
@@ -413,11 +412,11 @@ export const unionVariant = (
               : `_: ${declaredType(field.declaredType)}`,
           )
           .join(', ')} }`
-  return Object.freeze({
+  return {
     _tag: 'UnionVariantPresentation',
     name: variantName,
     text: `${unionName}${typeParameters}.${variantName}${fields}: ${unionName}${typeParameters}`,
-  })
+  }
 }
 
 /** Renders one nominal service contract without expanding its operation list. */
@@ -430,22 +429,22 @@ export const serviceDeclaration = (
     self.typeParameters.length === 0
       ? ''
       : `<${self.typeParameters.map(typeParameterName).join(', ')}>`
-  return Object.freeze({
+  return {
     _tag: 'ServicePresentation',
     name,
     text: `${visibility}${self._tag === 'ServiceDeclaration' ? 'service' : 'interface'} ${name}${typeParameters}`,
-  })
+  }
 }
 
 /** Renders one nominal dependency role declaration. */
 export const roleDeclaration = (self: DeclarationFacts.RoleFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
-  return Object.freeze({
+  return {
     _tag: 'RolePresentation',
     name,
     text: `${visibility}role ${name}`,
-  })
+  }
 }
 
 /** Renders a complete operation contract nested beneath a service. */
@@ -469,22 +468,22 @@ export const serviceOperation = (self: DeclarationFacts.ServiceOperationFact): P
         : ' with Intrinsic.detached()',
     )
     .join('')
-  return Object.freeze({
+  return {
     _tag: 'ServiceOperationPresentation',
     name,
     text: `${operator}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}${properties}`,
-  })
+  }
 }
 
 /** Renders one typed compile-time scalar declaration. */
 export const constantDeclaration = (self: DeclarationFacts.ConstantFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
-  return Object.freeze({
+  return {
     _tag: 'ConstantPresentation',
     name,
     text: `${visibility}${self._tag === 'PackageParameterDeclaration' ? 'param' : 'const'} ${name}: ${declaredType(self.declaredType)}`,
-  })
+  }
 }
 
 /** Renders one imported or exported native data binding. */
@@ -492,33 +491,33 @@ export const foreignStaticDeclaration = (
   self: DeclarationFacts.ForeignStaticFact,
 ): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
-  return Object.freeze({
+  return {
     _tag: 'ConstantPresentation',
     name,
     text: `${self.direction === 'Import' ? 'unsafe extern' : 'export'} "C" static ${name}: ${declaredType(self.declaredType)}`,
-  })
+  }
 }
 
 /** Renders an alias by its erased target: the alias name never survives resolution. */
 export const aliasDeclaration = (self: DeclarationFacts.AliasFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
-  return Object.freeze({
+  return {
     _tag: 'AliasPresentation',
     name,
     text: `${visibility}type ${name} = ${declaredType(self.target)}`,
-  })
+  }
 }
 
 export const parameter = (self: DeclarationFacts.ParameterFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
   const phase = self.phase === 'Static' ? 'static ' : ''
   const mutability = self.bindingMutability === 'Mutable' ? 'mut ' : ''
-  return Object.freeze({
+  return {
     _tag: 'ParameterPresentation',
     name,
     text: `${phase}${mutability}${name}: ${declaredType(self.declaredType)}`,
-  })
+  }
 }
 
 export const typeParameter = (self: DeclarationFacts.TypeParameterFact): Presentation => {
@@ -526,16 +525,16 @@ export const typeParameter = (self: DeclarationFacts.TypeParameterFact): Present
   let kind = 'type'
   if (self.type.kind === 'Lifetime') kind = 'lifetime'
   else if (self.type.kind === 'RequirementRow') kind = 'requirement row'
-  return Object.freeze({ _tag: 'TypeParameterPresentation', name, text: `${kind} ${name}` })
+  return { _tag: 'TypeParameterPresentation', name, text: `${kind} ${name}` }
 }
 
 export const field = (self: DeclarationFacts.FieldFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
-  return Object.freeze({
+  return {
     _tag: 'FieldPresentation',
     name,
     text: `${self.visibility === 'Public' ? 'pub ' : ''}${name}: ${declaredType(self.declaredType)}`,
-  })
+  }
 }
 
 const importedMemberSpelling = (
@@ -750,21 +749,22 @@ export const scopedNominal = (
   self: Type.Nominal,
   module: string,
   scope?: NameResolution.ModuleScope,
-): Presentation =>
-  Object.freeze({ _tag: 'ExpressionTypePresentation', text: scopedTypeText(self, module, scope) })
+): Presentation => ({
+  _tag: 'ExpressionTypePresentation',
+  text: scopedTypeText(self, module, scope),
+})
 
 /** Renders the selector syntax for one successfully inferred service requirement. */
 export const providerSelector = (
   self: Pick<Type.Requirement, 'role'> & { readonly capability: Type.Nominal },
   module: string,
   scope?: NameResolution.ModuleScope,
-): Presentation =>
-  Object.freeze({
-    _tag: 'ExpressionTypePresentation',
-    text: `${scopedTypeText(self.capability, module, scope)}${
-      self.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(self.role)}`
-    }`,
-  })
+): Presentation => ({
+  _tag: 'ExpressionTypePresentation',
+  text: `${scopedTypeText(self.capability, module, scope)}${
+    self.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(self.role)}`
+  }`,
+})
 
 const lifetimeRequirements = (
   self: Type.Type,
@@ -776,14 +776,14 @@ const lifetimeRequirements = (
   const nested = Type.isCallable(contract)
     ? lifetimeRequirements(contract.result, module, scope)
     : []
-  return Object.freeze([
+  return [
     ...new Set([
       ...contract.typeOutlives.map(
         (bound) => `${type(bound.type, module, scope)}: ${Lifetime.display(bound.lifetime)}`,
       ),
       ...nested,
     ]),
-  ])
+  ]
 }
 
 export const binding = (
@@ -792,13 +792,13 @@ export const binding = (
   scope?: NameResolution.ModuleScope,
 ): Presentation | undefined => {
   if (self.name._tag !== 'Present' || self.inferredType._tag !== 'Available') return undefined
-  return Object.freeze({
+  return {
     _tag: 'BindingPresentation',
     name: self.name.spelling,
     mutability: self.mutability,
     lifetimeRequirements: lifetimeRequirements(self.inferredType.type, module, scope),
     text: `let ${self.mutability === 'Mutable' ? 'mut ' : ''}${self.name.spelling}: ${type(self.inferredType.type, module, scope)}`,
-  })
+  }
 }
 
 export const patternBinding = (
@@ -807,40 +807,40 @@ export const patternBinding = (
   scope?: NameResolution.ModuleScope,
 ): Presentation | undefined => {
   if (self.name._tag !== 'Present' || self.type._tag !== 'Available') return undefined
-  return Object.freeze({
+  return {
     _tag: 'BindingPresentation',
     name: self.name.spelling,
     mutability: 'Immutable',
     lifetimeRequirements: lifetimeRequirements(self.type.type, module, scope),
     text: `let ${self.name.spelling}: ${type(self.type.type, module, scope)}`,
-  })
+  }
 }
 
-export const importBinding = (name: string, target: string): Presentation =>
-  Object.freeze({ _tag: 'ImportPresentation', name, text: `import ${target} as ${name}` })
+export const importBinding = (name: string, target: string): Presentation => ({
+  _tag: 'ImportPresentation',
+  name,
+  text: `import ${target} as ${name}`,
+})
 
-export const intrinsicActor = (self: Intrinsic.Actor): Presentation =>
-  Object.freeze({
-    _tag: 'IntrinsicActorPresentation',
-    name: self.spelling,
-    text: `${self.kind === 'Type' ? 'intrinsic type' : 'intrinsic namespace'} ${self.spelling}`,
-  })
+export const intrinsicActor = (self: Intrinsic.Actor): Presentation => ({
+  _tag: 'IntrinsicActorPresentation',
+  name: self.spelling,
+  text: `${self.kind === 'Type' ? 'intrinsic type' : 'intrinsic namespace'} ${self.spelling}`,
+})
 
-export const intrinsicOperation = (self: Intrinsic.Operation): Presentation =>
-  Object.freeze({
-    _tag: 'IntrinsicOperationPresentation',
-    actor: self.id.actor,
-    name: self.spelling,
-    text: IntrinsicCatalog.signature(self),
-  })
+export const intrinsicOperation = (self: Intrinsic.Operation): Presentation => ({
+  _tag: 'IntrinsicOperationPresentation',
+  actor: self.id.actor,
+  name: self.spelling,
+  text: IntrinsicCatalog.signature(self),
+})
 
 export const expressionType = (
   self: Type.Type,
   module: string,
   scope?: NameResolution.ModuleScope,
-): Presentation =>
-  Object.freeze({
-    _tag: 'ExpressionTypePresentation',
-    text: type(self, module, scope),
-    lifetimeRequirements: lifetimeRequirements(self, module, scope),
-  })
+): Presentation => ({
+  _tag: 'ExpressionTypePresentation',
+  text: type(self, module, scope),
+  lifetimeRequirements: lifetimeRequirements(self, module, scope),
+})

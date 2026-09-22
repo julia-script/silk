@@ -76,7 +76,7 @@ export const emit = Effect.fnUntraced(function* (
   }
   yield* NativeReturn.completeResult(
     context.suspension,
-    { values: Object.freeze(values), ...(metadata === undefined ? {} : { diagnostic: metadata }) },
+    { values: values, ...(metadata === undefined ? {} : { diagnostic: metadata }) },
     `host_failure${operation.destination.ordinal}`,
   )
 })

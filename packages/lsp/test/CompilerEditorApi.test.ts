@@ -25,13 +25,12 @@ const hintQuery: (
   end: number,
 ) => ReadonlyArray<TypeHint.TypeHint> = Analysis.typeHints
 
-it('exports the immutable compiler editor API through public subpaths', () => {
+it('exports the compiler editor API through public subpaths', () => {
   assert.strictEqual(typeof occurrenceQuery, 'function')
   assert.strictEqual(typeof completionQuery, 'function')
   assert.strictEqual(typeof hintQuery, 'function')
   assert.strictEqual(typeof SemanticDisplay.type, 'function')
   assert.strictEqual(typeof SemanticOccurrence.at, 'function')
   assert.strictEqual(typeof TypeHint.make, 'function')
-  assert.isTrue(Object.isFrozen(Intrinsic.all()))
-  assert.isTrue(Intrinsic.all().every((actor) => Object.isFrozen(actor.operations)))
+  assert.isTrue(Intrinsic.all().some((actor) => actor.operations.length > 0))
 })

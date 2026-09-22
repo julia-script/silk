@@ -88,10 +88,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       let unsignedOverflowSignature = unsignedOverflowSignatures.get(usizeBits)
       if (unsignedOverflowSignature === undefined) {
         const i1 = yield* LlvmType.integer(builder, 1)
-        unsignedOverflowSignature = Object.freeze({
+        unsignedOverflowSignature = {
           returnType: yield* LlvmType.structure(builder, [usizeType, i1]),
-          parameters: Object.freeze([usizeType, usizeType]),
-        })
+          parameters: [usizeType, usizeType],
+        }
         unsignedOverflowSignatures.set(usizeBits, unsignedOverflowSignature)
       }
       const requestPair = yield* Intrinsic.call(
@@ -194,11 +194,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         mask,
         `allocation${operation.destination.ordinal}_base`,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([base, bytes, alignment, one, rawAddress, one]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+        base,
+        bytes,
+        alignment,
+        one,
+        rawAddress,
+        one,
+      ])
       break
     }
     case 'RawBufferFrom': {
@@ -253,11 +256,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
       yield* LlvmBlock.setInsertionPoint(body, accepted)
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([...allocation, count]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+        ...allocation,
+        count,
+      ])
       break
     }
     case 'SharedFromAllocation': {
@@ -357,11 +359,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         ),
         operation.value,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([baseAddress]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [baseAddress])
       break
     }
     case 'SharedClone': {
@@ -420,11 +418,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         `shared${operation.destination.ordinal}_incremented`,
       )
       yield* FunctionBody.store(body, incremented, countPointer)
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([baseAddress]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [baseAddress])
       break
     }
     case 'RawBufferCount': {
@@ -450,11 +444,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         ),
         `raw_buffer_count${operation.destination.ordinal}`,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([value]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [value])
       break
     }
     case 'RawBufferSlot': {
@@ -533,11 +523,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         offset,
         `raw_slot${operation.destination.ordinal}_address`,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([selected]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [selected])
       break
     }
     case 'RawBufferRead': {
@@ -712,11 +698,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         pointer,
         `slice_view${operation.destination.ordinal}_ptr`,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([base, length]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [base, length])
       break
     }
     case 'RawBufferView': {
@@ -822,11 +804,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         pointer,
         `raw_view${operation.destination.ordinal}_ptr`,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([base, length]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [base, length])
       break
     }
     case 'RawBufferCopy': {
@@ -966,11 +944,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         destinationAlignment: yield* Alignment.fromByteUnits(element.alignment),
         sourceAlignment: yield* Alignment.fromByteUnits(element.alignment),
       })
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [])
       break
     }
     case 'RawBufferFill': {
@@ -1072,11 +1046,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         `raw_fill${operation.destination.ordinal}_ptr`,
       )
       yield* Intrinsic.memset(body, target, value, length)
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [])
       break
     }
     case 'SlotWrite': {
@@ -1096,11 +1066,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         NativePlace.stored(program.layout, operation.element, base),
         operation.value,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [])
       break
     }
     case 'ValidateLayout': {
@@ -1160,11 +1126,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         if (lane === undefined) break
         values.push(yield* Constant.nullValue(builder, NativeType.laneType(types, lane)))
       }
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze(values),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
       break
     }
     case 'RepeatLayout': {
@@ -1306,11 +1268,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         if (lane === undefined) break
         values.push(yield* Constant.nullValue(builder, NativeType.laneType(types, lane)))
       }
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze(values),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
       break
     }
     case 'SlotTake':
@@ -1351,11 +1309,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         NativePayload.place(types, NativePlace.stored(program.layout, operation.element, base)),
         `slot_drop${operation.destination.ordinal}`,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [])
       break
     }
   }

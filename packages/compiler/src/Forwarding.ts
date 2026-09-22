@@ -7,12 +7,11 @@ import type { DelayedEffectState, ProvidedRequirement } from './Lower.js'
 import type {} from './LowerExpression.js'
 import * as Type from './Type.js'
 
-export const delayedEffectState = (fn: FunctionLowering): DelayedEffectState =>
-  Object.freeze({
-    recipes: new Map(fn.effectRecipes),
-    loanEnds: new Map(fn.effectLoanEnds),
-    loanLocals: new Map(fn.loanLocals),
-  })
+export const delayedEffectState = (fn: FunctionLowering): DelayedEffectState => ({
+  recipes: new Map(fn.effectRecipes),
+  loanEnds: new Map(fn.effectLoanEnds),
+  loanLocals: new Map(fn.loanLocals),
+})
 
 export const restoreDelayedEffectState = (
   fn: FunctionLowering,
@@ -63,7 +62,7 @@ export const forwardedRequirementBinding = (
     }
   | undefined => {
   const direct = directForwardedRequirementBinding(instance)
-  if (direct !== undefined) return Object.freeze({ instance, binding: direct })
+  if (direct !== undefined) return { instance, binding: direct }
   const key_ = Instances.keyText(instance.key)
   if (resolving.has(key_)) return undefined
   const returned = instance.function.statements.at(-1)
@@ -179,17 +178,17 @@ const forwardedReferenceProvider = (
   const type = fn.semantic(source.type)
   if (!Type.isReference(type) || type.access !== access || !Type.equals(type.target, providerType))
     return undefined
-  return Object.freeze({
+  return {
     parameter: source.parameter,
     captureAccess: provider._tag === 'Move' ? 'Take' : 'Copy',
-  })
+  }
 }
 
 export const staticallyForwardedCallableRecipe = (
   fn: FunctionLowering,
   current: Tir.Expression,
   owner: Tir.TirFunction,
-  arguments_: ReadonlyArray<Tir.Expression> = Object.freeze([]),
+  arguments_: ReadonlyArray<Tir.Expression> = [],
   resolving: ReadonlySet<string> = new Set(),
 ): Extract<Tir.Expression, { readonly _tag: 'CallableSection' }> | undefined => {
   if (current._tag === 'CallableSection') return current
@@ -321,11 +320,11 @@ export const movedEffectRecipe = (
   const recipe = fn.effectRecipes.get(source)
   return recipe === undefined
     ? undefined
-    : Object.freeze({
+    : {
         source,
         recipe,
-        loanEnds: fn.effectLoanEnds.get(source) ?? Object.freeze([]),
-      })
+        loanEnds: fn.effectLoanEnds.get(source) ?? [],
+      }
 }
 
 export const callableApplicationArgument = (
@@ -517,11 +516,11 @@ export const inlineForwardedRequirement = (
     return undefined
   const witness = ConformanceProof.witness(fn.index, providerType, capability)
   if (witness === undefined) return undefined
-  return Object.freeze({
-    binding: Object.freeze({
+  return {
+    binding: {
       _tag: 'EffectBindRequirement',
       protected: protected_,
-      provider: Object.freeze({
+      provider: {
         ...(borrowedProvider?.root._tag === 'BindingSliceRoot'
           ? { binding: borrowedProvider.root.binding }
           : {}),
@@ -541,19 +540,19 @@ export const inlineForwardedRequirement = (
         captureAccess:
           borrowedProvider?.access ?? referenceProvider?.captureAccess ?? ('Take' as const),
         span: provider.span,
-      }),
+      },
       type,
       span: expression.span,
       origin: expression.origin,
-    }),
+    },
     provider,
-    selection: Object.freeze({
+    selection: {
       capability,
       providerType,
       witness,
       role: selected.role,
       requirementAccess: selected.access,
       access: forwarded.provider.selectionAccess,
-    }),
-  })
+    },
+  }
 }

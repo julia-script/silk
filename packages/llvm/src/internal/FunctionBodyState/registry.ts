@@ -12,7 +12,7 @@ import * as FunctionBodyDescription from '../FunctionBodyDescription.js'
 import * as Handle from '../Handle.js'
 import type * as OwnedHandle from '../OwnedHandle.js'
 import type * as TypeDescription from '../TypeDescription.js'
-import { freezeInstruction, validateInstructions } from './InstructionEncoder.js'
+import { validateInstructions } from './InstructionEncoder.js'
 import {
   assertActive,
   blockEntries,
@@ -38,7 +38,7 @@ export const create = (
   signature: Extract<TypeDescription.Description, { readonly _tag: 'Function' }>,
   creatorFiber: number,
 ): FunctionBodyActor.FunctionBody => {
-  const owner: OwnedHandle.Owner = Object.freeze({ token: Symbol('llvm-function-body-owner') })
+  const owner: OwnedHandle.Owner = { token: Symbol('llvm-function-body-owner') }
   const self = Handle.make('FunctionBody', owner, 0)
   const draft: Draft = {
     builder,
@@ -324,19 +324,15 @@ export const comparisonType = (
   operandType: number,
 ): Result.Result<number, LlvmError> =>
   Result.gen(function* () {
-    const i1 = yield* internType(draft, module, Object.freeze({ _tag: 'Integer', bitWidth: 1 }))
+    const i1 = yield* internType(draft, module, { _tag: 'Integer', bitWidth: 1 })
     const description = yield* typeAt(module, operandType, 'FunctionBody.compare')
     return description._tag === 'Vector'
-      ? yield* internType(
-          draft,
-          module,
-          Object.freeze({
-            _tag: 'Vector',
-            child: i1,
-            length: description.length,
-            scalable: description.scalable,
-          }),
-        )
+      ? yield* internType(draft, module, {
+          _tag: 'Vector',
+          child: i1,
+          length: description.length,
+          scalable: description.scalable,
+        })
       : i1
   })
 
@@ -523,10 +519,10 @@ export const setValueName = (
     if (description.source._tag === 'Instruction') {
       const instruction = draft.instructions[description.source.instruction]
       if (instruction !== undefined) {
-        draft.instructions[description.source.instruction] = Object.freeze({
+        draft.instructions[description.source.instruction] = {
           ...instruction,
           name: description.name,
-        })
+        }
       }
     }
   })
@@ -664,42 +660,28 @@ export const validate = Effect.fn('FunctionBody.validate')(function* (
     }
     const validated = validateInstructions(draft)
     if (Result.isFailure(validated)) return Result.fail(validated.failure)
-    return Result.succeed(
-      Object.freeze({
-        arguments: Object.freeze([...draft.arguments]),
-        blocks: Object.freeze(
-          draft.blocks.map((block) =>
-            Object.freeze({
-              name: block.name,
-              instructions: Object.freeze([...block.instructions]),
-              predecessors: Object.freeze(
-                [...block.predecessors].sort((left, right) => left - right),
-              ),
-            }),
-          ),
-        ),
-        instructions: Object.freeze(draft.instructions.map(freezeInstruction)),
-        values: Object.freeze(
-          draft.values.map((value) =>
-            Object.freeze({
-              type: value.type,
-              name: value.name,
-              source:
-                value.source._tag === 'Forward'
-                  ? Object.freeze({
-                      _tag: 'Forward' as const,
-                      resolved: value.source.resolved,
-                    })
-                  : value.source,
-            }),
-          ),
-        ),
-        metadata: Object.freeze(
-          draft.metadata.map((attachments) => Object.freeze([...attachments])),
-        ),
-        debugLocations: Object.freeze([...draft.debugLocations]),
-      }),
-    )
+    return Result.succeed({
+      arguments: [...draft.arguments],
+      blocks: draft.blocks.map((block) => ({
+        name: block.name,
+        instructions: [...block.instructions],
+        predecessors: [...block.predecessors].sort((left, right) => left - right),
+      })),
+      instructions: [...draft.instructions],
+      values: draft.values.map((value) => ({
+        type: value.type,
+        name: value.name,
+        source:
+          value.source._tag === 'Forward'
+            ? {
+                _tag: 'Forward' as const,
+                resolved: value.source.resolved,
+              }
+            : value.source,
+      })),
+      metadata: draft.metadata.map((attachments) => [...attachments]),
+      debugLocations: [...draft.debugLocations],
+    })
   })
 })
 

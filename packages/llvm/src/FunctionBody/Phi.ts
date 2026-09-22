@@ -60,16 +60,15 @@ export const phi = Effect.fnUntraced(function* (
         draft,
         typeIndex,
         name,
-        (result, finalName) =>
-          Object.freeze({
-            _tag: 'Phi',
-            type: typeIndex,
-            incoming: Object.freeze([]),
-            fastMath: fastMath(options.fastMath),
-            sealed: false,
-            result,
-            name: finalName,
-          }),
+        (result, finalName) => ({
+          _tag: 'Phi',
+          type: typeIndex,
+          incoming: [],
+          fastMath: fastMath(options.fastMath),
+          sealed: false,
+          result,
+          name: finalName,
+        }),
       )
       return yield* FunctionBodyState.makePhiHandle(draft, appended.instruction)
     }),
@@ -177,7 +176,7 @@ export const addPhiIncoming = Effect.fnUntraced(function* (
       }
       // Copying and freezing the growing list made 2,048 inputs take 378ms in the
       // construction probe. Keep draft-owned inputs mutable until the phi is sealed.
-      pending.incoming.push(Object.freeze({ value: resolved.operand, block: blockIndex }))
+      pending.incoming.push({ value: resolved.operand, block: blockIndex })
       pending.blocks.add(blockIndex)
     }),
   )
@@ -207,11 +206,11 @@ export const sealPhi = Effect.fnUntraced(function* (
           }),
         )
       }
-      draft.instructions[index] = Object.freeze({
+      draft.instructions[index] = {
         ...instruction,
-        incoming: Object.freeze(pending.incoming),
+        incoming: pending.incoming,
         sealed: true,
-      })
+      }
       draft.openPhis.delete(index)
       const value = draft.valueHandles[instruction.result]
       if (value === undefined) {

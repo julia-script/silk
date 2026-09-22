@@ -184,7 +184,7 @@ const importInsertionPoint = (
     }
     break
   }
-  return Object.freeze({
+  return {
     offset:
       last?.span.end ??
       (sawModuleDocumentation
@@ -192,7 +192,7 @@ const importInsertionPoint = (
         : (syntax.root.children.at(0)?.span.start ?? 0)),
     prefix: last === undefined ? '' : newline,
     suffix: last === undefined ? newline : '',
-  })
+  }
 }
 
 const newNamespaceImport = (
@@ -263,7 +263,7 @@ export const namespace = (request: NamespaceRequest): Option.Option<NamespacePla
     if (!SyntaxTree.isAvailableSyntax(declaration)) return Option.none()
     const existing = namespaceBinding(request.syntax.source, declaration)
     if (existing !== undefined)
-      return Option.some(Object.freeze({ _tag: 'NamespaceImportPlan', localSpelling: existing }))
+      return Option.some({ _tag: 'NamespaceImportPlan', localSpelling: existing })
     const path = SyntaxTree.directNode(declaration, 'ImportPath')
     const list = SyntaxTree.directNode(declaration, 'ImportMemberList')
     if (path === undefined || list === undefined) return Option.none()
@@ -276,13 +276,11 @@ export const namespace = (request: NamespaceRequest): Option.Option<NamespacePla
       }),
     )
     if (change === undefined) return Option.none()
-    return Option.some(
-      Object.freeze({
-        _tag: 'NamespaceImportPlan',
-        localSpelling,
-        change,
-      }),
-    )
+    return Option.some({
+      _tag: 'NamespaceImportPlan',
+      localSpelling,
+      change,
+    })
   }
   const edit = newNamespaceImport(request.syntax, request.module, localSpelling)
   if (edit === undefined) return Option.none()
@@ -293,11 +291,9 @@ export const namespace = (request: NamespaceRequest): Option.Option<NamespacePla
     }),
   )
   if (change === undefined) return Option.none()
-  return Option.some(
-    Object.freeze({
-      _tag: 'NamespaceImportPlan',
-      localSpelling,
-      change,
-    }),
-  )
+  return Option.some({
+    _tag: 'NamespaceImportPlan',
+    localSpelling,
+    change,
+  })
 }

@@ -64,7 +64,7 @@ export const make = Effect.fnUntraced(function* (
   const incomingCause = initialCause ?? (yield* Constant.nullValue(builder, causeType))
   const cause = yield* FunctionBody.alloca(body, causeType, 'diagnostic_cause_slot')
   yield* FunctionBody.store(body, incomingCause, cause)
-  return Object.freeze({
+  return {
     builder,
     body,
     pointer,
@@ -79,7 +79,7 @@ export const make = Effect.fnUntraced(function* (
     outcomes: new Map<number, NativeDiagnosticOutcome.NativeDiagnosticOutcome>(),
     literals: new Map<string, readonly [Value.Input, Value.Input]>(),
     sourceState: { dirty: false },
-  })
+  }
 })
 
 /** Borrows the selected cause for a nested call without creating an owned reference. */

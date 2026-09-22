@@ -12,12 +12,10 @@ export interface ConfigurationOrigin {
 }
 
 /** Copies provenance so a caller cannot mutate a published diagnostic's origin. */
-export const snapshot = (self: ConfigurationOrigin): ConfigurationOrigin =>
-  Object.freeze({ ...self })
+export const snapshot = (self: ConfigurationOrigin): ConfigurationOrigin => ({ ...self })
 
 /** An explicit logical request without a source span. */
-export const literal = (source: string): ConfigurationOrigin =>
-  Object.freeze({ source, provenance: 'literal' })
+export const literal = (source: string): ConfigurationOrigin => ({ source, provenance: 'literal' })
 
 /** Whether a value is permitted to enter static configuration at all. */
 export const isPublic = (self: ConfigurationOrigin): boolean =>

@@ -97,7 +97,7 @@ const headerTypes = (header: AuthoredHir.DeclarationHeader): ReadonlyArray<Autho
     found.push(header.subject)
     if (header.target !== undefined) found.push(header.target)
   }
-  return Object.freeze(found)
+  return found
 }
 
 const children = (type: AuthoredHir.Type): ReadonlyArray<AuthoredHir.Type> => {
@@ -324,15 +324,13 @@ export const makeExplicit = (
     preconditions: [SourceAction.precondition(source)],
     changes: [[source.id, edits]],
   })
-  return Option.map(plan, (plan) =>
-    Object.freeze({
-      descriptor: SourceAction.descriptor({
-        key: 'make-lifetimes-explicit',
-        title: 'Make lifetimes explicit',
-        kind: 'RefactorRewrite',
-        target: declarationSpan,
-      }),
-      plan,
+  return Option.map(plan, (plan) => ({
+    descriptor: SourceAction.descriptor({
+      key: 'make-lifetimes-explicit',
+      title: 'Make lifetimes explicit',
+      kind: 'RefactorRewrite',
+      target: declarationSpan,
     }),
-  )
+    plan,
+  }))
 }

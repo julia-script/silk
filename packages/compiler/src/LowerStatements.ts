@@ -100,20 +100,17 @@ export const lowerPatternSelection = (
         )
       : candidate
   }
-  const members = Object.freeze(selection.members.map(specializeMember))
+  const members = selection.members.map(specializeMember)
   const member = selection.member === undefined ? undefined : specializeMember(selection.member)
   const literal = (value: boolean): LoweredExpression | undefined =>
-    lowerExpression(
-      fn,
-      Object.freeze({
-        _tag: 'BooleanLiteral' as const,
-        value,
-        type: 'bool' as const,
-        span: selection.span,
-        origin: selection.origin,
-      }),
-    )
-  const bindingIds = Object.freeze(selection.bindings.map((binding) => binding.id))
+    lowerExpression(fn, {
+      _tag: 'BooleanLiteral' as const,
+      value,
+      type: 'bool' as const,
+      span: selection.span,
+      origin: selection.origin,
+    })
+  const bindingIds = selection.bindings.map((binding) => binding.id)
 
   if (result === 'Unit' && !selection.irrefutable) return undefined
   const subjectShape = Layout.callingShape(fn.layout, semanticSubject)
@@ -135,16 +132,14 @@ export const lowerPatternSelection = (
     if (type === undefined) return undefined
     const destination = fn.alloc(type)
     fn.patternLocals.set(patternKey(binding.id), destination)
-    selectedBindings.push(
-      Object.freeze({
-        id: binding.id,
-        destination,
-        path: binding.path,
-        type,
-        access: binding.access,
-        provenance: authored(binding.span),
-      }),
-    )
+    selectedBindings.push({
+      id: binding.id,
+      destination,
+      path: binding.path,
+      type,
+      access: binding.access,
+      provenance: authored(binding.span),
+    })
   }
   const [selectedResult, selectedOperations] = fn.capture(() => literal(true))
   if (selectedResult === undefined || selectedResult === 'Transferred') return selectedResult
@@ -178,25 +173,21 @@ export const lowerPatternSelection = (
     const plan = specializedCleanup(fn, release.cleanup)
     if (plan._tag === 'NoCleanup') continue
     if (release.path.length === 0 && Type.equals(plan.type, semanticSubject)) {
-      finalizedSelectedOperations.push(
-        Object.freeze({
-          _tag: 'Drop',
-          local: subject.result,
-          cleanup: plan,
-          provenance: authored(selection.span),
-        }),
-      )
+      finalizedSelectedOperations.push({
+        _tag: 'Drop',
+        local: subject.result,
+        cleanup: plan,
+        provenance: authored(selection.span),
+      })
       continue
     }
     const type = fn.type(plan.type)
     if (type === undefined) return undefined
-    cleanup.push(
-      Object.freeze({
-        destination: fn.alloc(type),
-        path: release.path,
-        cleanup: plan,
-      }),
-    )
+    cleanup.push({
+      destination: fn.alloc(type),
+      path: release.path,
+      cleanup: plan,
+    })
   }
   const selectedExecution = lowerExecution(fn, selection.span, () => {
     for (const binding of selection.bindings)
@@ -205,82 +196,76 @@ export const lowerPatternSelection = (
     return selectedResult
   })
   if (selectedExecution === undefined) return undefined
-  const selectedArm: Mir.MatchArm = Object.freeze({
+  const selectedArm: Mir.MatchArm = {
     id: selection.arm,
     tests,
     ...(member === undefined ? {} : { member }),
     universal: selection.universal,
     before: members,
     after: selectedAfter,
-    bindings: Object.freeze(selectedBindings),
-    cleanupBindings: Object.freeze([]),
-    selected: Object.freeze({
+    bindings: selectedBindings,
+    cleanupBindings: [],
+    selected: {
       access: selection.access,
       execution: selectedExecution,
-      cleanup: Object.freeze(cleanup),
+      cleanup: cleanup,
       endBorrow: false,
-    }),
+    },
     provenance: authored(selection.span),
-  })
-  const fallbackId: Match.ArmId = Object.freeze({
+  }
+  const fallbackId: Match.ArmId = {
     _tag: 'MatchArmId',
     match: selection.id,
     ordinal: 1,
-  })
+  }
   const fallbackExecution = lowerExecution(fn, selection.span, () => literal(false))
   if (fallbackExecution === undefined) return undefined
-  const fallbackArm: Mir.MatchArm = Object.freeze({
+  const fallbackArm: Mir.MatchArm = {
     id: fallbackId,
     universal: true,
     before: selectedAfter,
-    after: Object.freeze([]),
-    bindings: Object.freeze([]),
-    cleanupBindings: Object.freeze([]),
-    selected: Object.freeze({
+    after: [],
+    bindings: [],
+    cleanupBindings: [],
+    selected: {
       access: selection.access,
       execution: fallbackExecution,
-      cleanup: Object.freeze([]),
+      cleanup: [],
       endBorrow: false,
+    },
+    provenance: authored(selection.span),
+  }
+  const needsFallback = result !== 'Unit' && !selection.universal && !selection.irrefutable
+  const arms = needsFallback ? [selectedArm, fallbackArm] : [selectedArm]
+  const destination = fn.alloc(resultType)
+  fn.emit({
+    _tag: 'Match' as const,
+    id: selection.id,
+    destination,
+    scrutinee: subject.result,
+    ...(place === undefined ? {} : { selectors: place.selectors }),
+    scrutineeType: subjectType,
+    scrutineeShape: subjectShape,
+    access: selection.access,
+    retainsBindings: true,
+    members,
+    decisions: members.map((candidate) => {
+      let candidates: ReadonlyArray<Match.ArmId>
+      if (selection.universal) {
+        candidates = [selection.arm]
+      } else if (member === undefined || !Match.selects(member, candidate, 'Runtime')) {
+        candidates = [fallbackId]
+      } else {
+        candidates = needsFallback ? [selection.arm, fallbackId] : [selection.arm]
+      }
+      return { member: candidate, candidates: candidates }
     }),
+    arms,
+    type: resultType,
+    resultShape,
     provenance: authored(selection.span),
   })
-  const needsFallback = result !== 'Unit' && !selection.universal && !selection.irrefutable
-  const arms = needsFallback
-    ? Object.freeze([selectedArm, fallbackArm])
-    : Object.freeze([selectedArm])
-  const destination = fn.alloc(resultType)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Match' as const,
-      id: selection.id,
-      destination,
-      scrutinee: subject.result,
-      ...(place === undefined ? {} : { selectors: place.selectors }),
-      scrutineeType: subjectType,
-      scrutineeShape: subjectShape,
-      access: selection.access,
-      retainsBindings: true,
-      members,
-      decisions: Object.freeze(
-        members.map((candidate) => {
-          let candidates: ReadonlyArray<Match.ArmId>
-          if (selection.universal) {
-            candidates = [selection.arm]
-          } else if (member === undefined || !Match.selects(member, candidate, 'Runtime')) {
-            candidates = [fallbackId]
-          } else {
-            candidates = needsFallback ? [selection.arm, fallbackId] : [selection.arm]
-          }
-          return Object.freeze({ member: candidate, candidates: Object.freeze(candidates) })
-        }),
-      ),
-      arms,
-      type: resultType,
-      resultShape,
-      provenance: authored(selection.span),
-    }),
-  )
-  return Object.freeze({ result: destination, bindings: bindingIds })
+  return { result: destination, bindings: bindingIds }
 }
 
 export const lowerSequence = (
@@ -324,29 +309,23 @@ export const lowerSequence = (
   }
   const [, releases] = fn.capture(() => emitReleases(fn, armExit))
   if (releases.length > 0) {
-    fn.publish(
-      Object.freeze({
-        _tag: 'CleanupRegion',
-        id: region,
-        ...ownerFields(ownerLoop),
-        releases: Object.freeze(
-          releases.flatMap((operation) =>
-            operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
-          ),
-        ),
-        outcome: terminal,
-      }),
-    )
+    fn.publish({
+      _tag: 'CleanupRegion',
+      id: region,
+      ...ownerFields(ownerLoop),
+      releases: releases.flatMap((operation) =>
+        operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
+      ),
+      outcome: terminal,
+    })
   } else {
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id: region,
-        ...ownerFields(ownerLoop),
-        operations: Object.freeze([]),
-        outcome: terminal,
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id: region,
+      ...ownerFields(ownerLoop),
+      operations: [],
+      outcome: terminal,
+    })
   }
   return id
 }
@@ -365,35 +344,56 @@ const lowerStatement = (
   id: Mir.RegionId,
 ): Mir.RegionId | 'Terminated' | undefined => {
   const transferred = (operations: ReadonlyArray<Mir.Operation>): 'Terminated' => {
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        operations,
-        outcome: Object.freeze({
-          _tag: 'Trap',
-          reason: 'unreachable expression continuation',
-          provenance: generated(statement.span),
-        }),
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations,
+      outcome: {
+        _tag: 'Trap',
+        reason: 'unreachable expression continuation',
+        provenance: generated(statement.span),
+      },
+    })
     return 'Terminated'
   }
   if (statement._tag === 'UnavailableStatement') {
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        operations: Object.freeze([]),
-        outcome: Object.freeze({
-          _tag: 'Trap',
-          reason: 'unavailable statement',
-          provenance: generated(statement.span),
-        }),
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations: [],
+      outcome: {
+        _tag: 'Trap',
+        reason: 'unavailable statement',
+        provenance: generated(statement.span),
+      },
+    })
+    return 'Terminated'
+  }
+
+  // A body whose every path already returned still receives a synthesized trailing return, and
+  // that implicit statement has no value to elaborate: its expression is `Unavailable`. Lowering
+  // it as an ordinary return fails the whole body, and EntryAssembly then replaces the function
+  // with a trap stub whose parameters are all fabricated as `i32` — so callers already lowered
+  // against the real signature disagree with the declaration. The statement is unreachable by
+  // construction, so it lowers exactly like any other unavailable statement: a trap.
+  if (
+    statement._tag === 'Return' &&
+    statement.implicit === true &&
+    statement.expression._tag === 'Unavailable'
+  ) {
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations: [],
+      outcome: {
+        _tag: 'Trap',
+        reason: 'implicit return is unreachable',
+        provenance: generated(statement.span),
+      },
+    })
     return 'Terminated'
   }
 
@@ -412,19 +412,17 @@ const lowerStatement = (
       if (transferredEffect.loanEnds.length > 0)
         fn.effectLoanEnds.set(statement.binding.ordinal, transferredEffect.loanEnds)
       const following = fn.reserve()
-      fn.publish(
-        Object.freeze({
-          _tag: 'OperationRegion',
-          id,
-          ...ownerFields(ownerLoop),
-          operations: Object.freeze([]),
-          outcome: Object.freeze({
-            _tag: 'Forward',
-            target: following,
-            provenance: generated(statement.span),
-          }),
-        }),
-      )
+      fn.publish({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations: [],
+        outcome: {
+          _tag: 'Forward',
+          target: following,
+          provenance: generated(statement.span),
+        },
+      })
       return following
     }
     const staticCallable = callableRecipe(fn, statement.initializer)
@@ -443,19 +441,17 @@ const lowerStatement = (
     ) {
       fn.callableRecipes.set(statement.binding.ordinal, statement.initializer)
       const following = fn.reserve()
-      fn.publish(
-        Object.freeze({
-          _tag: 'OperationRegion',
-          id,
-          ...ownerFields(ownerLoop),
-          operations: Object.freeze([]),
-          outcome: Object.freeze({
-            _tag: 'Forward',
-            target: following,
-            provenance: generated(statement.span),
-          }),
-        }),
-      )
+      fn.publish({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations: [],
+        outcome: {
+          _tag: 'Forward',
+          target: following,
+          provenance: generated(statement.span),
+        },
+      })
       return following
     }
     const forwardedRequirement = inlineForwardedRequirement(fn, statement.initializer)
@@ -527,19 +523,17 @@ const lowerStatement = (
     ) {
       fn.effectRecipes.set(statement.binding.ordinal, statement.initializer)
       const following = fn.reserve()
-      fn.publish(
-        Object.freeze({
-          _tag: 'OperationRegion',
-          id,
-          ...ownerFields(ownerLoop),
-          operations: Object.freeze([]),
-          outcome: Object.freeze({
-            _tag: 'Forward',
-            target: following,
-            provenance: generated(statement.span),
-          }),
-        }),
-      )
+      fn.publish({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations: [],
+        outcome: {
+          _tag: 'Forward',
+          target: following,
+          provenance: generated(statement.span),
+        },
+      })
       return following
     }
     const [initializer, operations] = fn.capture(() => {
@@ -547,14 +541,12 @@ const lowerStatement = (
       if (lowered === 'Transferred') return lowered
       if (lowered === undefined) return undefined
       const destination = fn.alloc(fn.localTypes.at(lowered.result.ordinal) ?? i32)
-      fn.emit(
-        Object.freeze({
-          _tag: 'Move',
-          destination,
-          source: lowered.result,
-          provenance: authored(statement.span),
-        }),
-      )
+      fn.emit({
+        _tag: 'Move',
+        destination,
+        source: lowered.result,
+        provenance: authored(statement.span),
+      })
       const heldLoans = fn.slotLoans.get(lowered.result.ordinal)
       if (heldLoans !== undefined) {
         fn.slotLoans.delete(lowered.result.ordinal)
@@ -572,19 +564,17 @@ const lowerStatement = (
     if (initializer === 'Transferred') return transferred(operations)
     if (initializer === undefined) return undefined
     const following = fn.reserve()
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        operations,
-        outcome: Object.freeze({
-          _tag: 'Forward',
-          target: following,
-          provenance: generated(statement.span),
-        }),
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations,
+      outcome: {
+        _tag: 'Forward',
+        target: following,
+        provenance: generated(statement.span),
+      },
+    })
     return following
   }
 
@@ -595,19 +585,17 @@ const lowerStatement = (
     if (selection === 'Transferred') return transferred(operations)
     if (selection === undefined) return undefined
     const following = fn.reserve()
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        operations,
-        outcome: Object.freeze({
-          _tag: 'Forward',
-          target: following,
-          provenance: generated(statement.span),
-        }),
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations,
+      outcome: {
+        _tag: 'Forward',
+        target: following,
+        provenance: generated(statement.span),
+      },
+    })
     return following
   }
 
@@ -616,19 +604,17 @@ const lowerStatement = (
     if (evaluated === 'Transferred') return transferred(operations)
     if (evaluated === undefined) return undefined
     const following = fn.reserve()
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        operations,
-        outcome: Object.freeze({
-          _tag: 'Forward',
-          target: following,
-          provenance: generated(statement.span),
-        }),
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations,
+      outcome: {
+        _tag: 'Forward',
+        target: following,
+        provenance: generated(statement.span),
+      },
+    })
     return following
   }
 
@@ -637,10 +623,10 @@ const lowerStatement = (
     let transitionRoot: Ownership.BindingSite | undefined
     if (place._tag === 'WritePlace') {
       if (place.root._tag === 'ParameterWriteRoot')
-        transitionRoot = Object.freeze({ _tag: 'Parameter', parameter: place.root.parameter })
+        transitionRoot = { _tag: 'Parameter', parameter: place.root.parameter }
       else if (place.root._tag === 'PatternWriteRoot')
-        transitionRoot = Object.freeze({ _tag: 'Pattern', binding: place.root.binding })
-      else transitionRoot = Object.freeze({ _tag: 'Let', binding: place.root.binding })
+        transitionRoot = { _tag: 'Pattern', binding: place.root.binding }
+      else transitionRoot = { _tag: 'Let', binding: place.root.binding }
     }
     const transition = transitionAt(fn, statement.span, 'Write', transitionRoot)
     let root: Mir.LocalId | undefined
@@ -669,15 +655,13 @@ const lowerStatement = (
       if (selectors === undefined) return false
       rootType = fn.localTypes.at(root.ordinal)
       if (rootType === undefined) return false
-      fn.emit(
-        Object.freeze({
-          _tag: 'CheckPlace',
-          root,
-          selectors,
-          type,
-          provenance: authored(place.span),
-        }),
-      )
+      fn.emit({
+        _tag: 'CheckPlace',
+        root,
+        selectors,
+        type,
+        provenance: authored(place.span),
+      })
       const value = lowerExpression(fn, statement.value)
       if (value === 'Transferred') return value
       if (value === undefined) return false
@@ -711,41 +695,35 @@ const lowerStatement = (
           ? fn.alloc(type)
           : undefined
       if (displaced !== undefined) {
-        fn.emit(
-          Object.freeze({
-            _tag: 'ReadPlace',
-            destination: displaced,
-            root,
-            selectors,
-            type,
-            consume: true,
-            provenance: authored(statement.span),
-          }),
-        )
-      }
-      fn.emit(
-        Object.freeze({
-          _tag: 'WritePlace',
+        fn.emit({
+          _tag: 'ReadPlace',
+          destination: displaced,
           root,
           selectors,
-          source: value.result,
-          rootType,
           type,
-          mutable: true,
-          replacement: Mir.isCopy(fn.layout, fn.semantic(statement.place.type)) ? 'Copy' : 'Owned',
-          commit: 'AfterCleanup',
+          consume: true,
           provenance: authored(statement.span),
-        }),
-      )
+        })
+      }
+      fn.emit({
+        _tag: 'WritePlace',
+        root,
+        selectors,
+        source: value.result,
+        rootType,
+        type,
+        mutable: true,
+        replacement: Mir.isCopy(fn.layout, fn.semantic(statement.place.type)) ? 'Copy' : 'Owned',
+        commit: 'AfterCleanup',
+        provenance: authored(statement.span),
+      })
       if (displaced !== undefined && displacedCleanup !== undefined) {
-        fn.emit(
-          Object.freeze({
-            _tag: 'Drop',
-            local: displaced,
-            cleanup: displacedCleanup,
-            provenance: authored(statement.span),
-          }),
-        )
+        fn.emit({
+          _tag: 'Drop',
+          local: displaced,
+          cleanup: displacedCleanup,
+          provenance: authored(statement.span),
+        })
       }
       if (transition !== undefined) emitInitializationTransition(fn, transition)
       endReturnedViewLoans(fn, statement.span)
@@ -754,19 +732,17 @@ const lowerStatement = (
     if (written === 'Transferred') return transferred(operations)
     if (!written) return undefined
     const following = fn.reserve()
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        operations,
-        outcome: Object.freeze({
-          _tag: 'Forward',
-          target: following,
-          provenance: generated(statement.span),
-        }),
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations,
+      outcome: {
+        _tag: 'Forward',
+        target: following,
+        provenance: generated(statement.span),
+      },
+    })
     return following
   }
 
@@ -839,19 +815,17 @@ const lowerStatement = (
       if (droppedExpression._tag === 'BindingReference')
         fn.callableRecipes.delete(droppedExpression.binding.ordinal)
       const following = fn.reserve()
-      fn.publish(
-        Object.freeze({
-          _tag: 'OperationRegion',
-          id,
-          ...ownerFields(ownerLoop),
-          operations: Object.freeze([]),
-          outcome: Object.freeze({
-            _tag: 'Forward',
-            target: following,
-            provenance: generated(statement.span),
-          }),
-        }),
-      )
+      fn.publish({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations: [],
+        outcome: {
+          _tag: 'Forward',
+          target: following,
+          provenance: generated(statement.span),
+        },
+      })
       return following
     }
     const [lowered, operations] = fn.capture(() => lowerExpression(fn, statement.expression))
@@ -876,12 +850,12 @@ const lowerStatement = (
       if (slice === undefined) return []
       fn.loanLocals.delete(borrowKey(loan.id))
       return [
-        Object.freeze({
+        {
           _tag: 'EndLoan' as const,
           borrow: loan.id,
           slice,
           provenance: generated(statement.span),
-        }),
+        },
       ]
     })
     const retainedLoanReleases = (
@@ -891,12 +865,12 @@ const lowerStatement = (
       if (slice === undefined) return []
       fn.loanLocals.delete(borrowKey(borrow))
       return [
-        Object.freeze({
+        {
           _tag: 'EndLoan' as const,
           borrow,
           slice,
           provenance: generated(statement.span),
-        }),
+        },
       ]
     })
     if (droppedBinding !== undefined) fn.effectLoanEnds.delete(droppedBinding)
@@ -908,70 +882,64 @@ const lowerStatement = (
     )
     const cleanup = fn.reserve()
     const following = fn.reserve()
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        operations,
-        outcome: Object.freeze({
-          _tag: 'Forward',
-          target: cleanup,
-          provenance: generated(statement.span),
-        }),
-      }),
-    )
-    fn.publish(
-      Object.freeze({
-        _tag: 'CleanupRegion',
-        id: cleanup,
-        ...ownerFields(ownerLoop),
-        releases: Object.freeze([
-          ...loanReleases,
-          Object.freeze({
-            _tag: 'Drop',
-            local: lowered.result,
-            cleanup: cleanupForLocal(
-              fn,
-              bindingFact === undefined
-                ? ConcreteCleanup.forType(fn, Mir.semanticType(localType))
-                : bindingFact.cleanup,
-              localType,
-            ),
-            provenance: authored(statement.span),
-          }),
-        ]),
-        outcome: Object.freeze({
-          _tag: 'Forward',
-          target: following,
-          provenance: generated(statement.span),
-        }),
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations,
+      outcome: {
+        _tag: 'Forward',
+        target: cleanup,
+        provenance: generated(statement.span),
+      },
+    })
+    fn.publish({
+      _tag: 'CleanupRegion',
+      id: cleanup,
+      ...ownerFields(ownerLoop),
+      releases: [
+        ...loanReleases,
+        {
+          _tag: 'Drop',
+          local: lowered.result,
+          cleanup: cleanupForLocal(
+            fn,
+            bindingFact === undefined
+              ? ConcreteCleanup.forType(fn, Mir.semanticType(localType))
+              : bindingFact.cleanup,
+            localType,
+          ),
+          provenance: authored(statement.span),
+        },
+      ],
+      outcome: {
+        _tag: 'Forward',
+        target: following,
+        provenance: generated(statement.span),
+      },
+    })
     return following
   }
 
   if (statement._tag === 'Unsafe') {
     const body = fn.reserve()
     const following = fn.reserve()
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        operations: Object.freeze([]),
-        outcome: Object.freeze({
-          _tag: 'Forward',
-          target: body,
-          provenance: authored(statement.span),
-        }),
-      }),
-    )
-    const forward = Object.freeze({
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations: [],
+      outcome: {
+        _tag: 'Forward',
+        target: body,
+        provenance: authored(statement.span),
+      },
+    })
+    const forward = {
       _tag: 'Forward' as const,
       target: following,
       provenance: generated(statement.span),
-    })
+    }
     if (
       lowerSequence(
         fn,
@@ -999,31 +967,27 @@ const lowerStatement = (
     const taken = fn.reserve()
     const otherwise = fn.reserve()
     const following = fn.reserve()
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        operations,
-        outcome: Object.freeze({
-          _tag: 'Forward',
-          target: conditional,
-          provenance: generated(statement.span),
-        }),
-      }),
-    )
-    fn.publish(
-      Object.freeze({
-        _tag: 'ConditionalRegion',
-        id: conditional,
-        ...ownerFields(ownerLoop),
-        condition: condition.result,
-        taken,
-        otherwise,
-        following,
-        provenance: authored(statement.span),
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations,
+      outcome: {
+        _tag: 'Forward',
+        target: conditional,
+        provenance: generated(statement.span),
+      },
+    })
+    fn.publish({
+      _tag: 'ConditionalRegion',
+      id: conditional,
+      ...ownerFields(ownerLoop),
+      condition: condition.result,
+      taken,
+      otherwise,
+      following,
+      provenance: authored(statement.span),
+    })
     const branchState = delayedEffectState(fn)
     const beforeTaken = new Set(
       fn.regions.flatMap((region) => (region === undefined ? [] : [region.id.ordinal])),
@@ -1033,11 +997,11 @@ const lowerStatement = (
       statement.taken,
       exits,
       ownerLoop,
-      Object.freeze({
+      {
         _tag: 'Forward',
         target: following,
         provenance: generated(statement.span),
-      }),
+      },
       taken,
       exits.armEnds.get(`${spanKey(statement.span)}:Taken`),
     )
@@ -1058,11 +1022,11 @@ const lowerStatement = (
       statement.otherwise,
       exits,
       ownerLoop,
-      Object.freeze({
+      {
         _tag: 'Forward',
         target: following,
         provenance: generated(statement.span),
-      }),
+      },
       otherwise,
       exits.armEnds.get(`${spanKey(statement.span)}:Otherwise`),
     )
@@ -1076,22 +1040,20 @@ const lowerStatement = (
       state: DelayedEffectState,
       other: DelayedEffectState,
     ): ReadonlyArray<Extract<Mir.Operation, { readonly _tag: 'EndLoan' }>> =>
-      Object.freeze(
-        (fn.ownership?.loans ?? []).flatMap((loan) => {
-          const key = borrowKey(loan.id)
-          const held = state.loanLocals.get(key)
-          return held !== undefined && !other.loanLocals.has(key)
-            ? [
-                Object.freeze({
-                  _tag: 'EndLoan' as const,
-                  borrow: loan.id,
-                  slice: held,
-                  provenance: generated(statement.span),
-                }),
-              ]
-            : []
-        }),
-      )
+      (fn.ownership?.loans ?? []).flatMap((loan) => {
+        const key = borrowKey(loan.id)
+        const held = state.loanLocals.get(key)
+        return held !== undefined && !other.loanLocals.has(key)
+          ? [
+              {
+                _tag: 'EndLoan' as const,
+                borrow: loan.id,
+                slice: held,
+                provenance: generated(statement.span),
+              },
+            ]
+          : []
+      })
     const takenEndings = branchEndings(takenState, otherwiseState).flatMap((ending) =>
       loanEndOperations(fn, ending),
     )
@@ -1117,30 +1079,28 @@ const lowerStatement = (
             region.outcome.target.ordinal !== following.ordinal
           )
             continue
-          fn.regions[ordinal] = Object.freeze({
+          fn.regions[ordinal] = {
             ...region,
-            outcome: Object.freeze({ ...region.outcome, target: branchEnd }),
-          })
+            outcome: { ...region.outcome, target: branchEnd },
+          }
         }
-        fn.publish(
-          Object.freeze({
-            _tag: 'CleanupRegion',
-            id: branchEnd,
-            ...ownerFields(ownerLoop),
-            releases,
-            outcome: Object.freeze({
-              _tag: 'Forward',
-              target: following,
-              provenance: generated(statement.span),
-            }),
-          }),
-        )
+        fn.publish({
+          _tag: 'CleanupRegion',
+          id: branchEnd,
+          ...ownerFields(ownerLoop),
+          releases,
+          outcome: {
+            _tag: 'Forward',
+            target: following,
+            provenance: generated(statement.span),
+          },
+        })
       }
     return following
   }
 
   if (statement._tag === 'While') {
-    const loop: Mir.LoopId = Object.freeze({ _tag: 'Loop', ordinal: statement.loop.ordinal })
+    const loop: Mir.LoopId = { _tag: 'Loop', ordinal: statement.loop.ordinal }
     const entryState = delayedEffectState(fn)
     const [condition, conditionOperations] = fn.capture(() =>
       lowerExpression(fn, statement.condition),
@@ -1150,34 +1110,30 @@ const lowerStatement = (
     const conditionId = fn.reserve()
     const bodyId = fn.reserve()
     const following = fn.reserve()
-    fn.publish(
-      Object.freeze({
-        _tag: 'LoopRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        loop,
-        ...(ownerLoop === undefined ? {} : { parent: ownerLoop }),
-        condition: conditionId,
-        conditionValue: condition.result,
-        body: bodyId,
-        following,
-        provenance: authored(statement.span),
-      }),
-    )
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id: conditionId,
-        ownerLoop: loop,
-        operations: conditionOperations,
-        outcome: Object.freeze({ _tag: 'Yield', provenance: generated(statement.span) }),
-      }),
-    )
-    const repeat = Object.freeze({
+    fn.publish({
+      _tag: 'LoopRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      loop,
+      ...(ownerLoop === undefined ? {} : { parent: ownerLoop }),
+      condition: conditionId,
+      conditionValue: condition.result,
+      body: bodyId,
+      following,
+      provenance: authored(statement.span),
+    })
+    fn.publish({
+      _tag: 'OperationRegion',
+      id: conditionId,
+      ownerLoop: loop,
+      operations: conditionOperations,
+      outcome: { _tag: 'Yield', provenance: generated(statement.span) },
+    })
+    const repeat = {
       _tag: 'Repeat' as const,
       loop,
       provenance: generated(statement.span),
-    })
+    }
     const loopState = delayedEffectState(fn)
     const loweredBody = lowerSequence(
       fn,
@@ -1234,10 +1190,10 @@ const lowerStatement = (
             region.outcome._tag === 'Return' || region.outcome._tag === 'Trap'
               ? terminalLoopLoanEndings(fn, delayedLoans, region.outcome)
               : []
-          fn.regions[region.id.ordinal] = Object.freeze({
+          fn.regions[region.id.ordinal] = {
             ...region,
-            operations: Object.freeze([...operations, ...terminalEndings]),
-          })
+            operations: [...operations, ...terminalEndings],
+          }
         } else if (region._tag === 'CleanupRegion') {
           const releases = withoutLoanEndings(
             region.releases,
@@ -1250,10 +1206,10 @@ const lowerStatement = (
             region.outcome._tag === 'Return' || region.outcome._tag === 'Trap'
               ? terminalLoopLoanEndings(fn, delayedLoans, region.outcome)
               : []
-          fn.regions[region.id.ordinal] = Object.freeze({
+          fn.regions[region.id.ordinal] = {
             ...region,
-            releases: Object.freeze(orderedCleanup(fn, [...terminalEndings, ...releases])),
-          })
+            releases: orderedCleanup(fn, [...terminalEndings, ...releases]),
+          }
         }
       }
     }
@@ -1268,86 +1224,72 @@ const lowerStatement = (
         for (const loan of delayedLoans) {
           const slice = fn.loanLocals.get(loan.key)
           if (slice === undefined) continue
-          fn.emit(
-            Object.freeze({
-              _tag: 'EndLoan',
-              borrow: loan.borrow,
-              slice,
-              provenance: generated(statement.span),
-            }),
-          )
+          fn.emit({
+            _tag: 'EndLoan',
+            borrow: loan.borrow,
+            slice,
+            provenance: generated(statement.span),
+          })
           fn.loanLocals.delete(loan.key)
         }
       })
-      fn.publish(
-        Object.freeze({
-          _tag: 'CleanupRegion',
-          id: following,
-          ...ownerFields(ownerLoop),
-          releases: Object.freeze(
-            releases.flatMap((operation) =>
-              operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
-            ),
-          ),
-          outcome: Object.freeze({
-            _tag: 'Forward',
-            target: continuation,
-            provenance: generated(statement.span),
-          }),
-        }),
-      )
+      fn.publish({
+        _tag: 'CleanupRegion',
+        id: following,
+        ...ownerFields(ownerLoop),
+        releases: releases.flatMap((operation) =>
+          operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
+        ),
+        outcome: {
+          _tag: 'Forward',
+          target: continuation,
+          provenance: generated(statement.span),
+        },
+      })
     }
     return continuation
   }
 
   if (statement._tag === 'Break' || statement._tag === 'Continue') {
-    const target: Mir.LoopId = Object.freeze({ _tag: 'Loop', ordinal: statement.target.ordinal })
-    const outcome: Mir.Outcome = Object.freeze({
+    const target: Mir.LoopId = { _tag: 'Loop', ordinal: statement.target.ordinal }
+    const outcome: Mir.Outcome = {
       _tag: statement._tag === 'Break' ? ('Exit' as const) : ('Repeat' as const),
       loop: target,
       provenance: authored(statement.span),
-    })
+    }
     const [, releases] = fn.capture(() =>
       emitReleases(fn, exits.transfers.get(spanKey(statement.span))),
     )
     if (releases.length === 0) {
-      fn.publish(
-        Object.freeze({
-          _tag: 'OperationRegion',
-          id,
-          ...ownerFields(ownerLoop),
-          operations: Object.freeze([]),
-          outcome,
-        }),
-      )
+      fn.publish({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations: [],
+        outcome,
+      })
     } else {
       const cleanup = fn.reserve()
-      fn.publish(
-        Object.freeze({
-          _tag: 'OperationRegion',
-          id,
-          ...ownerFields(ownerLoop),
-          operations: Object.freeze([]),
-          outcome: Object.freeze({
-            _tag: 'Forward',
-            target: cleanup,
-            provenance: generated(statement.span),
-          }),
-        }),
-      )
-      fn.publish(
-        Object.freeze({
-          _tag: 'CleanupRegion',
-          id: cleanup,
-          ...ownerFields(ownerLoop),
-          releases: Object.freeze(
-            releases.flatMap((operation) =>
-              operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
-            ),
-          ),
-          outcome,
-        }),
-      )
+      fn.publish({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations: [],
+        outcome: {
+          _tag: 'Forward',
+          target: cleanup,
+          provenance: generated(statement.span),
+        },
+      })
+      fn.publish({
+        _tag: 'CleanupRegion',
+        id: cleanup,
+        ...ownerFields(ownerLoop),
+        releases: releases.flatMap((operation) =>
+          operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
+        ),
+        outcome,
+      })
     }
     return 'Terminated'
   }
@@ -1366,16 +1308,14 @@ const lowerStatement = (
           (failure) => Type.runtimeKey(failure) === Type.runtimeKey(specializedFailure),
         )
         if (tag < 0) return undefined
-        fn.emit(
-          Object.freeze({
-            _tag: 'PackEffectOutcome' as const,
-            destination,
-            source: failed.result,
-            tag: tag + 1,
-            type: outcomeType,
-            provenance: authored(statement.span),
-          }),
-        )
+        fn.emit({
+          _tag: 'PackEffectOutcome' as const,
+          destination,
+          source: failed.result,
+          tag: tag + 1,
+          type: outcomeType,
+          provenance: authored(statement.span),
+        })
       } else {
         const sourceType = fn.type(specializedFailure)
         if (sourceType?._tag !== 'Union') return undefined
@@ -1383,71 +1323,61 @@ const lowerStatement = (
           const target = Type.failureMembers(outcomeType.type).findIndex(
             (failure) => Type.runtimeKey(failure) === Type.runtimeKey(member),
           )
-          return target < 0 ? [] : [Object.freeze({ source, target: target + 1 })]
+          return target < 0 ? [] : [{ source, target: target + 1 }]
         })
         if (mappings.length !== specializedFailure.members.length) return undefined
-        fn.emit(
-          Object.freeze({
-            _tag: 'PackEffectFailureUnion' as const,
-            destination,
-            source: failed.result,
-            sourceType,
-            mappings: Object.freeze(mappings),
-            type: outcomeType,
-            provenance: authored(statement.span),
-          }),
-        )
+        fn.emit({
+          _tag: 'PackEffectFailureUnion' as const,
+          destination,
+          source: failed.result,
+          sourceType,
+          mappings: mappings,
+          type: outcomeType,
+          provenance: authored(statement.span),
+        })
       }
       return destination
     })
     if (failedValue === 'Transferred') return transferred(operations)
     if (failedValue === undefined) return undefined
-    const failureOutcome: Mir.Outcome = Object.freeze({
+    const failureOutcome: Mir.Outcome = {
       _tag: 'Return',
       value: failedValue,
       provenance: authored(statement.span),
-    })
+    }
     const [, releases] = fn.capture(() =>
       emitReleases(fn, exits.returns.get(spanKey(statement.span))),
     )
     if (releases.length === 0) {
-      fn.publish(
-        Object.freeze({
-          _tag: 'OperationRegion',
-          id,
-          ...ownerFields(ownerLoop),
-          operations,
-          outcome: failureOutcome,
-        }),
-      )
+      fn.publish({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: failureOutcome,
+      })
     } else {
       const cleanup = fn.reserve()
-      fn.publish(
-        Object.freeze({
-          _tag: 'OperationRegion',
-          id,
-          ...ownerFields(ownerLoop),
-          operations,
-          outcome: Object.freeze({
-            _tag: 'Forward',
-            target: cleanup,
-            provenance: generated(statement.span),
-          }),
-        }),
-      )
-      fn.publish(
-        Object.freeze({
-          _tag: 'CleanupRegion',
-          id: cleanup,
-          ...ownerFields(ownerLoop),
-          releases: Object.freeze(
-            releases.flatMap((operation) =>
-              operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
-            ),
-          ),
-          outcome: failureOutcome,
-        }),
-      )
+      fn.publish({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: {
+          _tag: 'Forward',
+          target: cleanup,
+          provenance: generated(statement.span),
+        },
+      })
+      fn.publish({
+        _tag: 'CleanupRegion',
+        id: cleanup,
+        ...ownerFields(ownerLoop),
+        releases: releases.flatMap((operation) =>
+          operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
+        ),
+        outcome: failureOutcome,
+      })
     }
     return 'Terminated'
   }
@@ -1460,16 +1390,14 @@ const lowerStatement = (
     const outcomeType = fn.type(fn.effectOutcome)
     if (outcomeType?._tag !== 'EffectOutcome') return undefined
     const destination = fn.alloc(outcomeType)
-    fn.emit(
-      Object.freeze({
-        _tag: 'PackEffectOutcome',
-        destination,
-        source: returned.result,
-        tag: 0,
-        type: outcomeType,
-        provenance: authored(statement.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'PackEffectOutcome',
+      destination,
+      source: returned.result,
+      tag: 0,
+      type: outcomeType,
+      provenance: authored(statement.span),
+    })
     return destination
   })
   if (returnedValue === 'Transferred') return transferred(operations)
@@ -1487,59 +1415,51 @@ const lowerStatement = (
     )
   const result = copyBeforeCleanup ? fn.alloc(returnedType) : returnedValue
   const returnOperations = copyBeforeCleanup
-    ? Object.freeze([
+    ? [
         ...operations,
-        Object.freeze({
+        {
           _tag: 'Move' as const,
           destination: result,
           source: returnedValue,
           provenance: authored(statement.span),
-        }),
-      ])
+        },
+      ]
     : operations
-  const returnOutcome: Mir.Outcome = Object.freeze({
+  const returnOutcome: Mir.Outcome = {
     _tag: 'Return',
     value: result,
     provenance: authored(statement.span),
-  })
+  }
   if (releases.length === 0) {
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        operations: returnOperations,
-        outcome: returnOutcome,
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations: returnOperations,
+      outcome: returnOutcome,
+    })
   } else {
     const cleanup = fn.reserve()
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        ...ownerFields(ownerLoop),
-        operations: returnOperations,
-        outcome: Object.freeze({
-          _tag: 'Forward',
-          target: cleanup,
-          provenance: generated(statement.span),
-        }),
-      }),
-    )
-    fn.publish(
-      Object.freeze({
-        _tag: 'CleanupRegion',
-        id: cleanup,
-        ...ownerFields(ownerLoop),
-        releases: Object.freeze(
-          releases.flatMap((operation) =>
-            operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
-          ),
-        ),
-        outcome: returnOutcome,
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations: returnOperations,
+      outcome: {
+        _tag: 'Forward',
+        target: cleanup,
+        provenance: generated(statement.span),
+      },
+    })
+    fn.publish({
+      _tag: 'CleanupRegion',
+      id: cleanup,
+      ...ownerFields(ownerLoop),
+      releases: releases.flatMap((operation) =>
+        operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
+      ),
+      outcome: returnOutcome,
+    })
   }
   return 'Terminated'
 }

@@ -105,7 +105,7 @@ const inactiveRanges = (
     if (active !== undefined) visit(active)
   }
   module.authored.module.declarations.forEach(visit)
-  return Object.freeze(found)
+  return found
 }
 
 /** True when a loaded authored module contains a module-level condition. */
@@ -420,18 +420,16 @@ export const select = Effect.fn('ModuleSelection.select')(function* (
       break
     }
   }
-  return Object.freeze({
-    closure: Object.freeze({
+  return {
+    closure: {
       ...closure,
       diagnostics: Diagnostic.merge(closure.diagnostics, diagnostics),
-    }),
-    selection: Object.freeze({
+    },
+    selection: {
       conditions: new Map(
         [...expressions].map(([module, values]) => [
           module,
-          Object.freeze(
-            [...values.entries()].sort(([a], [b]) => a - b).map(([, expression]) => expression),
-          ),
+          [...values.entries()].sort(([a], [b]) => a - b).map(([, expression]) => expression),
         ]),
       ),
       profile: completion.profile,
@@ -443,6 +441,6 @@ export const select = Effect.fn('ModuleSelection.select')(function* (
         ]),
       ),
       dependencies: Canonical.array(dependencies),
-    }),
-  })
+    },
+  }
 })

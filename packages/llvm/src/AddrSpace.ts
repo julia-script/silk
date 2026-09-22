@@ -18,7 +18,7 @@ export interface AddrSpace {
  * @category address spaces
  * @since 0.0.0
  */
-export const defaultAddrSpace: AddrSpace = Object.freeze({ _tag: 'AddrSpace', value: 0 })
+export const defaultAddrSpace: AddrSpace = { _tag: 'AddrSpace', value: 0 }
 
 /**
  * Validates and constructs an LLVM address-space identifier.
@@ -61,7 +61,7 @@ export const make = Effect.fnUntraced(function* (
       input: value,
     })
   }
-  return Object.freeze({ _tag: 'AddrSpace', value })
+  return { _tag: 'AddrSpace', value }
 })
 
 /**

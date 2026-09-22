@@ -7,14 +7,11 @@ import * as NativeProgram from './NativeProgram.js'
 import * as Target from './Target.js'
 
 /** The bootstrap LLVM backend over the Silk LLVM builder. */
-export const LlvmBackend: Backend.Backend<Backend.LlvmBitcodeArtifact> = Object.freeze({
+export const LlvmBackend: Backend.Backend<Backend.LlvmBitcodeArtifact> = {
   _tag: 'Backend',
   id: 'llvm',
   name: 'LLVM',
-  targets: Object.freeze([
-    ...Target.native.map((target) => target.id),
-    Target.wasm32UnknownUnknown.id,
-  ]),
+  targets: [...Target.native.map((target) => target.id), Target.wasm32UnknownUnknown.id],
   emit: Effect.fn('Backend.LLVM.emit')(function* (
     program: Mir.Module,
     request: Backend.CodegenRequest,
@@ -37,7 +34,7 @@ export const LlvmBackend: Backend.Backend<Backend.LlvmBitcodeArtifact> = Object.
       backend: 'llvm',
       module: program.module,
       target: program.layout.target,
-      symbols: Object.freeze(output.symbols),
+      symbols: output.symbols,
       nativeRuntimeSymbols: output.nativeRuntimeSymbols,
       runtimeFeatures: output.runtimeFeatures,
       foreignImports: output.foreignImports,
@@ -56,6 +53,6 @@ export const LlvmBackend: Backend.Backend<Backend.LlvmBitcodeArtifact> = Object.
         return renderedIr
       },
     })
-    return Object.freeze(artifact) as Backend.LlvmBitcodeArtifact
+    return artifact as Backend.LlvmBitcodeArtifact
   }),
-})
+}

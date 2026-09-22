@@ -348,7 +348,7 @@ const verifyFunction = (
 ): ReadonlyArray<Violation> => {
   const violations: Array<Violation> = []
   const report = (message: string, detail: ReadonlyArray<string>): void => {
-    violations.push(Object.freeze({ function: name, message, detail: Object.freeze([...detail]) }))
+    violations.push({ function: name, message, detail: [...detail] })
   }
 
   const definitions = new Map<number, Definition>()
@@ -536,7 +536,7 @@ const verifyFunction = (
     }
   }
 
-  return Object.freeze(violations)
+  return violations
 }
 
 /**
@@ -586,7 +586,7 @@ export const verify = Effect.fnUntraced(function* (
       ...verifyFunction(identifier('@', global.name), description.body, description.personality),
     )
   }
-  return Object.freeze(violations)
+  return violations
 })
 
 /**

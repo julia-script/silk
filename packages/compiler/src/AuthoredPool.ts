@@ -63,13 +63,11 @@ export const make = Effect.fn('AuthoredPool.make')(function* (
         reason: { _tag: 'InvalidText', index },
       })
     }
-    textEntries.push(
-      Object.freeze({
-        _tag: 'PoolText',
-        value,
-        byteLength: new TextEncoder().encode(value).length,
-      }),
-    )
+    textEntries.push({
+      _tag: 'PoolText',
+      value,
+      byteLength: new TextEncoder().encode(value).length,
+    })
   }
   for (const [index, value] of bytes.entries()) {
     for (const [offset, byte] of value.entries()) {
@@ -80,19 +78,17 @@ export const make = Effect.fn('AuthoredPool.make')(function* (
         })
       }
     }
-    byteEntries.push(
-      Object.freeze({
-        _tag: 'PoolBytes',
-        value: Object.freeze([...value]),
-        byteLength: value.length,
-      }),
-    )
+    byteEntries.push({
+      _tag: 'PoolBytes',
+      value: [...value],
+      byteLength: value.length,
+    })
   }
-  return Object.freeze({
+  return {
     _tag: 'AuthoredPool',
-    texts: Object.freeze(textEntries),
-    bytes: Object.freeze(byteEntries),
-  })
+    texts: textEntries,
+    bytes: byteEntries,
+  }
 })
 
 /** Resolve a text reference, preserving its explicit UTF-8 length. */

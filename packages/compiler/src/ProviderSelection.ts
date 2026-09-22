@@ -101,8 +101,7 @@ export interface SelectionDiagnostic<L = SourceSpan.SourceSpan> {
 const diagnostic = <L>(
   problem: SelectionProblem,
   sourceLocations: DiagnosticLocations<L>,
-): SelectionDiagnostic<L> =>
-  Object.freeze({ problem: Object.freeze(problem), locations: sourceLocations })
+): SelectionDiagnostic<L> => ({ problem: problem, locations: sourceLocations })
 
 export type SelectionDiagnostics<L = SourceSpan.SourceSpan> = readonly [
   SelectionDiagnostic<L>,
@@ -126,10 +125,10 @@ const rejected = <L>(
   if (first === undefined)
     throw new RangeError('Provider selection rejection requires at least one diagnostic')
   const nonEmptyDiagnostics: SelectionDiagnostics<L> = [first, ...diagnostics.slice(1)]
-  return Object.freeze({
+  return {
     _tag: 'Rejected',
-    diagnostics: Object.freeze(nonEmptyDiagnostics),
-  })
+    diagnostics: nonEmptyDiagnostics,
+  }
 }
 
 export interface ConformanceOracle {
@@ -161,7 +160,7 @@ const canonicalOrigins = <L>(
     .sort(([left], [right]) => compareText(left, right))
     .map(([, origin]) => origin)
   const first = canonical.at(0)
-  return first === undefined ? origins : Object.freeze([first, ...canonical.slice(1)])
+  return first === undefined ? origins : [first, ...canonical.slice(1)]
 }
 
 const policy = RequirementRow.policy<NonNullable<Type.Requirement['capability']>>(Type.key)
@@ -178,8 +177,8 @@ const candidateStatus = (
   const access = providerAccess(wanted.mode)
   if (Type.equals(wanted.provider, member.capability))
     return RequirementRow.providerCanSelect(access, member.access)
-      ? Object.freeze({ _tag: 'Unique', match: Object.freeze({ _tag: 'Identity' }) })
-      : Object.freeze({ _tag: 'AccessMismatch', provider: access, required: member.access })
+      ? { _tag: 'Unique', match: { _tag: 'Identity' } }
+      : { _tag: 'AccessMismatch', provider: access, required: member.access }
   if (!Type.isNominal(member.capability)) return undefined
   const outcome = oracle.match(wanted.provider, member.capability)
   switch (outcome._tag) {
@@ -187,19 +186,17 @@ const candidateStatus = (
       return undefined
     case 'Unique':
       return RequirementRow.providerCanSelect(access, member.access)
-        ? Object.freeze({ _tag: 'Unique', match: outcome.match })
-        : Object.freeze({ _tag: 'AccessMismatch', provider: access, required: member.access })
+        ? { _tag: 'Unique', match: outcome.match }
+        : { _tag: 'AccessMismatch', provider: access, required: member.access }
     case 'Ambiguous':
-      return Object.freeze({
+      return {
         _tag: 'Ambiguous',
-        witnesses: Object.freeze(
-          [...outcome.witnesses].sort((left, right) =>
-            compareText(Constraint.witnessKey(left), Constraint.witnessKey(right)),
-          ),
+        witnesses: [...outcome.witnesses].sort((left, right) =>
+          compareText(Constraint.witnessKey(left), Constraint.witnessKey(right)),
         ),
-      })
+      }
     case 'Invalid':
-      return Object.freeze({ _tag: 'Invalid', reason: outcome.reason })
+      return { _tag: 'Invalid', reason: outcome.reason }
   }
 }
 
@@ -252,17 +249,17 @@ const relationCandidates = <L>(
     const status = candidateStatus(relation.wanted, member, oracle)
     if (status !== undefined) {
       if (work !== undefined) ResolutionWork.accept(work)
-      candidates.set(memberKey(member), Object.freeze({ member, status }))
+      candidates.set(memberKey(member), { member, status })
     }
   }
-  return Object.freeze({
+  return {
     constraintKey: Constraint.key(relation.wanted),
     wanted: relation.wanted,
     origins: canonicalOrigins(relation.origins, key),
     candidates: new Map(
       [...candidates.entries()].sort(([left], [right]) => compareText(left, right)),
     ),
-  })
+  }
 }
 
 /** Groups both textual duplicates and post-substitution semantic-key collisions. */
@@ -278,19 +275,14 @@ export const groupRelations = <L>(
       existing === undefined
         ? relation.origins
         : [existing.origins[0], ...existing.origins.slice(1), ...relation.origins]
-    grouped.set(
-      key,
-      Object.freeze({
-        wanted: existing?.wanted ?? relation.wanted,
-        origins: canonicalOrigins(origins, originKey),
-      }),
-    )
+    grouped.set(key, {
+      wanted: existing?.wanted ?? relation.wanted,
+      origins: canonicalOrigins(origins, originKey),
+    })
   }
-  return Object.freeze(
-    [...grouped.entries()]
-      .sort(([left], [right]) => compareText(left, right))
-      .map(([, relation]) => relation),
-  )
+  return [...grouped.entries()]
+    .sort(([left], [right]) => compareText(left, right))
+    .map(([, relation]) => relation)
 }
 
 /** Builds every relation's complete candidate map without emitting diagnostics. */
@@ -299,39 +291,29 @@ export const candidates = <L>(
   oracle: ConformanceOracle,
   originKey: OriginKey<L>,
 ): ReadonlyArray<RelationCandidates<L>> =>
-  Object.freeze(
-    groupRelations(relations, originKey).map((relation) =>
-      relationCandidates(relation, oracle, originKey),
-    ),
+  groupRelations(relations, originKey).map((relation) =>
+    relationCandidates(relation, oracle, originKey),
   )
 
 const payload = <L>(
   relations: ReadonlyArray<RelationCandidates<L>>,
 ): ReadonlyArray<RelationPayload> =>
-  Object.freeze(
-    relations.map((relation) =>
-      Object.freeze({
-        constraintKey: relation.constraintKey,
-        fullCandidateKeySet: Object.freeze([...relation.candidates.keys()]),
-      }),
-    ),
-  )
+  relations.map((relation) => ({
+    constraintKey: relation.constraintKey,
+    fullCandidateKeySet: [...relation.candidates.keys()],
+  }))
 
 const locations = <L>(
   relations: ReadonlyArray<RelationCandidates<L>>,
   responsible: L,
 ): DiagnosticLocations<L> => {
-  return Object.freeze({
+  return {
     primary: responsible,
-    relations: Object.freeze(
-      relations.map((relation) =>
-        Object.freeze({
-          constraintKey: relation.constraintKey,
-          origins: relation.origins,
-        }),
-      ),
-    ),
-  })
+    relations: relations.map((relation) => ({
+      constraintKey: relation.constraintKey,
+      origins: relation.origins,
+    })),
+  }
 }
 
 const selectedFinite = (
@@ -379,10 +361,10 @@ export const solve = <L>(options: {
     considered = maps.map((relation) => {
       const key = memberKey(selectedMember)
       const candidate = relation.candidates.get(key)
-      return Object.freeze({
+      return {
         ...relation,
         candidates: new Map(candidate === undefined ? [] : [[key, candidate]]),
-      })
+      }
     })
   }
   const empty = considered.filter((relation) => relation.candidates.size === 0)
@@ -408,7 +390,7 @@ export const solve = <L>(options: {
       diagnostic(
         {
           _tag: 'JointSelectionConflict',
-          payload: Object.freeze({ relations: payload(considered) }),
+          payload: { relations: payload(considered) },
         },
         locations(considered, options.responsible),
       ),
@@ -462,10 +444,10 @@ export const solve = <L>(options: {
       diagnostic(
         {
           _tag: 'ProviderAmbiguity',
-          payload: Object.freeze({
-            survivingCandidates: Object.freeze(surviving),
+          payload: {
+            survivingCandidates: surviving,
             relations: payload(considered),
-          }),
+          },
         },
         locations(considered, options.responsible),
       ),
@@ -487,9 +469,9 @@ export const solve = <L>(options: {
       ),
     ]
   })
-  return Object.freeze({
+  return {
     _tag: 'Selected',
     member: first.member,
-    evidence: Object.freeze(evidence),
-  })
+    evidence: evidence,
+  }
 }

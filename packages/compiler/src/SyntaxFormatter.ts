@@ -56,7 +56,7 @@ const makeContext = (syntax: SyntaxFile.SyntaxFile): Context => {
       trivia.push(token)
       continue
     }
-    gaps.set(token, { previous, trivia: Object.freeze(trivia) })
+    gaps.set(token, { previous, trivia: trivia })
     previous = token
     trivia = []
   }
@@ -79,7 +79,7 @@ const makeContext = (syntax: SyntaxFile.SyntaxFile): Context => {
           : 2,
     })
   }
-  return Object.freeze({ syntax, gaps })
+  return { syntax, gaps }
 }
 
 const bytes = (context: Context, token: Token.Token): Uint8Array =>
@@ -107,7 +107,7 @@ const lineBreaks = (context: Context, tokens: ReadonlyArray<Token.Token>): numbe
 }
 
 const gapOf = (context: Context, token: Token.Token): Gap =>
-  context.gaps.get(token) ?? { previous: undefined, trivia: Object.freeze([]) }
+  context.gaps.get(token) ?? { previous: undefined, trivia: [] }
 
 const commentCount = (gap: Gap): number =>
   gap.trivia.filter(
@@ -2170,7 +2170,7 @@ const validateFor = Effect.fnUntraced(function* (
     SyntaxTree.isAvailableSyntax(syntax.root)
   )
     return
-  const diagnostics = Object.freeze([...syntax.lexicalDiagnostics, ...syntax.parserDiagnostics])
+  const diagnostics = [...syntax.lexicalDiagnostics, ...syntax.parserDiagnostics]
   return yield* new SyntaxFormatterError({
     operation,
     sourceId: syntax.source.id,

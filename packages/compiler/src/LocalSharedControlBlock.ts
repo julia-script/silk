@@ -61,8 +61,12 @@ const unavailable = (
   target: Target.Target,
   element: Type.Type,
   reason: Unavailable['reason'],
-): Unavailable =>
-  Object.freeze({ _tag: 'LocalSharedControlBlockUnavailable', target: target.id, element, reason })
+): Unavailable => ({
+  _tag: 'LocalSharedControlBlockUnavailable',
+  target: target.id,
+  element,
+  reason,
+})
 
 /** Plans strong/access state, private Allocation reclaim lanes, padding, and one initialized T. */
 export const planWithin = (
@@ -87,7 +91,7 @@ export const planWithin = (
   if (afterValue === undefined) return unavailable(target, element, 'PayloadPlacement')
   const size = checkedAlign(afterValue, alignment, limit)
   if (size === undefined || size === 0) return unavailable(target, element, 'AlignmentRounding')
-  return Object.freeze({
+  return {
     _tag: 'LocalSharedControlBlockPlan',
     target: target.id,
     element,
@@ -99,7 +103,7 @@ export const planWithin = (
     allocationOffset,
     valueOffset,
     provenance: `${target.id}:${Type.key(element)}:${size}:${alignment}`,
-  })
+  }
 }
 
 /** Plans against the selected target's representable byte range. */

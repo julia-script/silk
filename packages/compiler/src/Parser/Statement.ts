@@ -30,24 +30,24 @@ export const parseReturnStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'ReturnKeyword', [...expressionStarts, 'RightBrace'])
   if (nextSignificantKind(keyword.state) === 'RightBrace') {
     const expression = syntaxNode(keyword.state, 'UnitExpression', [])
-    return Object.freeze({
+    return {
       state: keyword.state,
       node: syntaxNode(keyword.state, 'ReturnStatement', [...keyword.elements, expression]),
-    })
+    }
   }
   const expression = parseExpression(keyword.state, 0, 'Integer', true, ExpressionNesting.root)
-  return Object.freeze({
+  return {
     state: expression.state,
     node: syntaxNode(expression.state, 'ReturnStatement', [...keyword.elements, expression.node]),
-  })
+  }
 }
 
 export const parseImplicitUnitReturnStatement = (initial: State): NodeResult => {
   const expression = syntaxNode(initial, 'UnitExpression', [])
-  return Object.freeze({
+  return {
     state: initial,
     node: syntaxNode(initial, 'ReturnStatement', [expression]),
-  })
+  }
 }
 
 export const parseFailStatement = (initial: State): NodeResult => {
@@ -55,42 +55,42 @@ export const parseFailStatement = (initial: State): NodeResult => {
   const move =
     nextSignificantKind(keyword.state) === 'MoveKeyword'
       ? expect(keyword.state, 'MoveKeyword', [...expressionStarts, ...expressionFollowing])
-      : Object.freeze({ state: keyword.state, elements: Object.freeze([]) })
+      : { state: keyword.state, elements: [] }
   const expression = parseExpression(move.state, 0, 'Identifier', true, ExpressionNesting.root)
-  return Object.freeze({
+  return {
     state: expression.state,
     node: syntaxNode(expression.state, 'FailStatement', [
       ...keyword.elements,
       ...move.elements,
       expression.node,
     ]),
-  })
+  }
 }
 
 export const parseDropStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'DropKeyword', expressionStarts)
   const expression = parseExpression(keyword.state, 0, 'Identifier', true, ExpressionNesting.root)
-  return Object.freeze({
+  return {
     state: expression.state,
     node: syntaxNode(expression.state, 'DropStatement', [...keyword.elements, expression.node]),
-  })
+  }
 }
 
 export const parseExpressionStatement = (initial: State): NodeResult => {
   const expression = parseExpression(initial, 0, 'Identifier', true, ExpressionNesting.root)
-  return Object.freeze({
+  return {
     state: expression.state,
     node: syntaxNode(expression.state, 'ExpressionStatement', [expression.node]),
-  })
+  }
 }
 
 export const parseUnsafeStatement = (initial: State): NodeResult => {
   const keyword = expect(initial, 'UnsafeKeyword', ['LeftBrace', 'RightBrace'])
   const block = parseBlock(keyword.state, false)
-  return Object.freeze({
+  return {
     state: block.state,
     node: syntaxNode(block.state, 'UnsafeStatement', [...keyword.elements, block.node]),
-  })
+  }
 }
 
 export const parseBindingStatement = (initial: State): NodeResult => {
@@ -103,10 +103,10 @@ export const parseBindingStatement = (initial: State): NodeResult => {
     'UnsafeKeyword',
     'RightBrace',
   ])
-  let modifier: ElementsResult = Object.freeze({
+  let modifier: ElementsResult = {
     state: keyword.state,
-    elements: Object.freeze([]),
-  })
+    elements: [],
+  }
   if (nextSignificantKind(keyword.state) === 'StaticKeyword')
     modifier = expect(keyword.state, 'StaticKeyword', ['Identifier', 'Equals', 'RightBrace'])
   else if (nextSignificantKind(keyword.state) === 'MutKeyword')
@@ -123,9 +123,9 @@ export const parseBindingStatement = (initial: State): NodeResult => {
       ? (() => {
           const colon = expect(name.state, 'Colon', [...typeStarts, 'Equals'])
           const type = parseType(colon.state, ['Equals'])
-          return Object.freeze({ state: type.state, elements: [...colon.elements, type.node] })
+          return { state: type.state, elements: [...colon.elements, type.node] }
         })()
-      : Object.freeze({ state: name.state, elements: Object.freeze<SyntaxTree.Element[]>([]) })
+      : { state: name.state, elements: [] as SyntaxTree.Element[] }
   const equals = expect(annotation.state, 'Equals', [
     ...expressionStarts,
     'LetKeyword',
@@ -133,7 +133,7 @@ export const parseBindingStatement = (initial: State): NodeResult => {
     'RightBrace',
   ])
   const expression = parseExpression(equals.state, 0, 'Integer', true, ExpressionNesting.root)
-  return Object.freeze({
+  return {
     state: expression.state,
     node: syntaxNode(expression.state, 'BindingStatement', [
       ...keyword.elements,
@@ -143,7 +143,7 @@ export const parseBindingStatement = (initial: State): NodeResult => {
       ...equals.elements,
       expression.node,
     ]),
-  })
+  }
 }
 
 export const startsPatternBindingStatement = (initial: State): boolean => {
@@ -160,7 +160,7 @@ export const parsePatternBindingStatement = (initial: State): NodeResult => {
   const pattern = parsePattern(keyword.state, ['Equals', 'RightBrace'])
   const equals = expect(pattern.state, 'Equals', [...expressionStarts, 'RightBrace'])
   const expression = parseExpression(equals.state, 0, 'Identifier', true, ExpressionNesting.root)
-  return Object.freeze({
+  return {
     state: expression.state,
     node: syntaxNode(expression.state, 'PatternBindingStatement', [
       ...keyword.elements,
@@ -168,7 +168,7 @@ export const parsePatternBindingStatement = (initial: State): NodeResult => {
       ...equals.elements,
       expression.node,
     ]),
-  })
+  }
 }
 
 export const parseAssignmentStatement = (initial: State): NodeResult => {
@@ -185,14 +185,14 @@ export const parseAssignmentStatement = (initial: State): NodeResult => {
     'RightBrace',
   ])
   const expression = parseExpression(equals.state, 0, 'Identifier', true, ExpressionNesting.root)
-  return Object.freeze({
+  return {
     state: expression.state,
     node: syntaxNode(expression.state, 'AssignmentStatement', [
       place.node,
       ...equals.elements,
       expression.node,
     ]),
-  })
+  }
 }
 
 export const startsAssignmentStatement = (state: State): boolean => {
@@ -209,14 +209,14 @@ export function parseConditionalStatement(initial: State): NodeResult {
     const subject = parseExpression(equals.state, 0, 'Identifier', false, ExpressionNesting.root)
     const taken = parseBlock(subject.state, false)
     let state = taken.state
-    let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    let children: ReadonlyArray<SyntaxTree.Element> = [
       ...keyword.elements,
       ...letKeyword.elements,
       pattern.node,
       ...equals.elements,
       subject.node,
       taken.node,
-    ])
+    ]
     if (nextSignificantKind(state) === 'ElseKeyword') {
       const elseKeyword = expect(state, 'ElseKeyword', ['LeftBrace', 'IfKeyword'])
       const otherwise =
@@ -224,21 +224,21 @@ export function parseConditionalStatement(initial: State): NodeResult {
           ? parseConditionalStatement(elseKeyword.state)
           : parseBlock(elseKeyword.state, false)
       state = otherwise.state
-      children = Object.freeze([...children, ...elseKeyword.elements, otherwise.node])
+      children = [...children, ...elseKeyword.elements, otherwise.node]
     }
-    return Object.freeze({
+    return {
       state,
       node: syntaxNode(state, 'PatternConditionalStatement', children),
-    })
+    }
   }
   const condition = parseExpression(keyword.state, 0, 'Identifier', false, ExpressionNesting.root)
   const taken = parseBlock(condition.state, false)
   let state = taken.state
-  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+  let children: ReadonlyArray<SyntaxTree.Element> = [
     ...keyword.elements,
     condition.node,
     taken.node,
-  ])
+  ]
 
   if (nextSignificantKind(state) === 'ElseKeyword') {
     const elseKeyword = expect(state, 'ElseKeyword', ['LeftBrace', 'IfKeyword'])
@@ -247,13 +247,13 @@ export function parseConditionalStatement(initial: State): NodeResult {
         ? parseConditionalStatement(elseKeyword.state)
         : parseBlock(elseKeyword.state, false)
     state = otherwise.state
-    children = Object.freeze([...children, ...elseKeyword.elements, otherwise.node])
+    children = [...children, ...elseKeyword.elements, otherwise.node]
   }
 
-  return Object.freeze({
+  return {
     state,
     node: syntaxNode(state, 'ConditionalStatement', children),
-  })
+  }
 }
 
 export const parseStaticConditionalStatement = (initial: State): NodeResult => {
@@ -266,34 +266,34 @@ export const parseStaticConditionalStatement = (initial: State): NodeResult => {
   const condition = parseExpression(ifKeyword.state, 0, 'Identifier', false, ExpressionNesting.root)
   const taken = parseBlock(condition.state, false)
   let state = taken.state
-  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+  let children: ReadonlyArray<SyntaxTree.Element> = [
     ...staticKeyword.elements,
     ...ifKeyword.elements,
     condition.node,
     taken.node,
-  ])
+  ]
   if (nextSignificantKind(state) === 'ElseKeyword') {
     const elseKeyword = expect(state, 'ElseKeyword', ['LeftBrace'])
     const otherwise = parseBlock(elseKeyword.state, false)
     state = otherwise.state
-    children = Object.freeze([...children, ...elseKeyword.elements, otherwise.node])
+    children = [...children, ...elseKeyword.elements, otherwise.node]
   }
-  return Object.freeze({
+  return {
     state,
     node: syntaxNode(state, 'StaticConditionalStatement', children),
-  })
+  }
 }
 
 const missingExpected = (initial: State, expected: Token.TokenKind): ElementsResult => {
   const leading = consumeTrivia(initial)
   const missing = missingToken(leading.state, expected)
-  return Object.freeze({
+  return {
     state: addDiagnostic(leading.state, Diagnostic.missingToken(expected, missing.span)),
-    elements: Object.freeze([...leading.elements, missing]),
-  })
+    elements: [...leading.elements, missing],
+  }
 }
 
-const staticForBodyBoundary: ReadonlyArray<Token.TokenKind> = Object.freeze([
+const staticForBodyBoundary: ReadonlyArray<Token.TokenKind> = [
   'LetKeyword',
   'StaticKeyword',
   'IfKeyword',
@@ -324,17 +324,17 @@ const staticForBodyBoundary: ReadonlyArray<Token.TokenKind> = Object.freeze([
   'ImportKeyword',
   'ImplKeyword',
   'EndOfFile',
-])
+]
 
 const parseStaticForBody = (initial: State): NodeResult => {
   if (nextSignificantKind(initial) === 'LeftBrace') return parseBlock(initial, false)
 
   const leftBrace = expect(initial, 'LeftBrace', staticForBodyBoundary)
   const rightBrace = expect(leftBrace.state, 'RightBrace', staticForBodyBoundary)
-  return Object.freeze({
+  return {
     state: rightBrace.state,
     node: syntaxNode(rightBrace.state, 'Block', [...leftBrace.elements, ...rightBrace.elements]),
-  })
+  }
 }
 
 export const parseStaticForStatement = (initial: State): NodeResult => {
@@ -353,7 +353,7 @@ export const parseStaticForStatement = (initial: State): NodeResult => {
     : missingExpected(binding.state, 'Identifier')
   const iterable = parseExpression(inKeyword.state, 0, 'Identifier', false, ExpressionNesting.root)
   const body = parseStaticForBody(iterable.state)
-  return Object.freeze({
+  return {
     state: body.state,
     node: syntaxNode(body.state, 'StaticForStatement', [
       ...staticKeyword.elements,
@@ -363,21 +363,21 @@ export const parseStaticForStatement = (initial: State): NodeResult => {
       iterable.node,
       body.node,
     ]),
-  })
+  }
 }
 
 export function parseWhileStatement(initial: State): NodeResult {
   const keyword = expect(initial, 'WhileKeyword', [...expressionStarts, 'LeftBrace', 'RightBrace'])
   const condition = parseExpression(keyword.state, 0, 'Identifier', false, ExpressionNesting.root)
   const body = parseBlock(condition.state, false)
-  return Object.freeze({
+  return {
     state: body.state,
     node: syntaxNode(body.state, 'WhileStatement', [
       ...keyword.elements,
       condition.node,
       body.node,
     ]),
-  })
+  }
 }
 
 export const parseTransferStatement = (
@@ -394,10 +394,10 @@ export const parseTransferStatement = (
     'ReturnKeyword',
     'RightBrace',
   ])
-  return Object.freeze({
+  return {
     state: result.state,
     node: syntaxNode(result.state, kind, result.elements),
-  })
+  }
 }
 
 export const startsBlockStatement = (state: State): boolean => {
@@ -446,12 +446,12 @@ export const endsBlock = (state: State): boolean => {
 export const parseErrorStatement = (initial: State): NodeResult => {
   const leading = consumeTrivia(initial)
   let state = leading.state
-  let unexpected: ReadonlyArray<Token.Token> = Object.freeze([])
+  let unexpected: ReadonlyArray<Token.Token> = []
   let token = currentToken(state)
 
   while (token !== undefined) {
     if (unexpected.length > 0 && (startsBlockStatement(state) || endsBlock(state))) break
-    unexpected = Object.freeze([...unexpected, token])
+    unexpected = [...unexpected, token]
     state = advance(state)
     token = currentToken(state)
   }
@@ -478,10 +478,10 @@ export const parseErrorStatement = (initial: State): NodeResult => {
       error.span,
     ),
   )
-  return Object.freeze({
+  return {
     state,
     node: syntaxNode(state, 'ErrorStatement', [...leading.elements, error]),
-  })
+  }
 }
 
 export const blockTerminatesSyntactically = (
@@ -597,10 +597,11 @@ const guardHasArmSeparator = (state: State): boolean => {
 const startsFollowingMatchArm = (state: State): boolean => {
   const kind = nextSignificantKind(state)
   if (kind !== 'Identifier' && kind !== 'DecimalInteger' && kind !== 'Minus') return false
-  const pattern = parsePattern(
-    Object.freeze({ ...state, diagnostics: Object.freeze([]), recovering: false }),
-    ['IfKeyword', 'FatArrow', 'RightBrace'],
-  )
+  const pattern = parsePattern({ ...state, diagnostics: [], recovering: false }, [
+    'IfKeyword',
+    'FatArrow',
+    'RightBrace',
+  ])
   if (pattern.state.diagnostics.length !== 0) return false
   if (nextSignificantKind(pattern.state) === 'FatArrow') return true
   if (nextSignificantKind(pattern.state) !== 'IfKeyword') return false
@@ -634,13 +635,13 @@ export function parseBlock(
     // If that token is not a block boundary here, consume it as an error rather than retrying
     // the same zero-width statement forever.
     const statement = parsed.state.index > state.index ? parsed : parseErrorStatement(parsed.state)
-    children = Object.freeze([...children, statement.node])
+    children = [...children, statement.node]
     state = statement.state
   }
 
   if ((requireReturn || implicitUnitReturn) && !blockTerminatesSyntactically(children)) {
     const statement = parseImplicitUnitReturnStatement(state)
-    children = Object.freeze([...children, statement.node])
+    children = [...children, statement.node]
   }
 
   const rightBrace = expect(state, 'RightBrace', [
@@ -667,8 +668,8 @@ export function parseBlock(
     'EffectKeyword',
     'ImportKeyword',
   ])
-  return Object.freeze({
+  return {
     state: rightBrace.state,
     node: syntaxNode(rightBrace.state, 'Block', [...children, ...rightBrace.elements]),
-  })
+  }
 }

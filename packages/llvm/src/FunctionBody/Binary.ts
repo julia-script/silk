@@ -177,21 +177,20 @@ export const binary = Effect.fnUntraced(function* (
         draft,
         operands.leftValue.type,
         name,
-        (result, finalName) =>
-          Object.freeze({
-            _tag: 'Binary',
-            kind,
-            left: operands.leftValue.operand,
-            right: operands.rightValue.operand,
-            integerFlags: Object.freeze({
-              noSignedWrap: integerMath.noSignedWrap,
-              noUnsignedWrap: integerMath.noUnsignedWrap,
-              exact: integerMath.exact,
-            }),
-            fastMath: fastMath(options.fastMath),
-            result,
-            name: finalName,
-          }),
+        (result, finalName) => ({
+          _tag: 'Binary',
+          kind,
+          left: operands.leftValue.operand,
+          right: operands.rightValue.operand,
+          integerFlags: {
+            noSignedWrap: integerMath.noSignedWrap,
+            noUnsignedWrap: integerMath.noUnsignedWrap,
+            exact: integerMath.exact,
+          },
+          fastMath: fastMath(options.fastMath),
+          result,
+          name: finalName,
+        }),
       )).value
     }),
   )
@@ -328,18 +327,16 @@ export const integerCompare = Effect.fnUntraced(function* (
           )
         }
         const type = yield* FunctionBodyState.comparisonType(draft, module, operands.leftValue.type)
-        return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) =>
-          Object.freeze({
-            _tag: 'Compare',
-            kind: 'integer',
-            predicate,
-            left: operands.leftValue.operand,
-            right: operands.rightValue.operand,
-            fastMath: FastMathActor.none,
-            result,
-            name: finalName,
-          }),
-        )).value
+        return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) => ({
+          _tag: 'Compare',
+          kind: 'integer',
+          predicate,
+          left: operands.leftValue.operand,
+          right: operands.rightValue.operand,
+          fastMath: FastMathActor.none,
+          result,
+          name: finalName,
+        }))).value
       }),
   )
 })
@@ -386,18 +383,16 @@ export const floatingCompare = Effect.fnUntraced(function* (
           )
         }
         const type = yield* FunctionBodyState.comparisonType(draft, module, operands.leftValue.type)
-        return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) =>
-          Object.freeze({
-            _tag: 'Compare',
-            kind: 'floating',
-            predicate,
-            left: operands.leftValue.operand,
-            right: operands.rightValue.operand,
-            fastMath: fastMath(options.fastMath),
-            result,
-            name: finalName,
-          }),
-        )).value
+        return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) => ({
+          _tag: 'Compare',
+          kind: 'floating',
+          predicate,
+          left: operands.leftValue.operand,
+          right: operands.rightValue.operand,
+          fastMath: fastMath(options.fastMath),
+          result,
+          name: finalName,
+        }))).value
       }),
   )
 })
@@ -483,16 +478,15 @@ export const select = Effect.fnUntraced(function* (
         draft,
         choices.leftValue.type,
         name,
-        (result, finalName) =>
-          Object.freeze({
-            _tag: 'Select',
-            condition: selected.operand,
-            onTrue: choices.leftValue.operand,
-            onFalse: choices.rightValue.operand,
-            fastMath: fastMath(options.fastMath),
-            result,
-            name: finalName,
-          }),
+        (result, finalName) => ({
+          _tag: 'Select',
+          condition: selected.operand,
+          onTrue: choices.leftValue.operand,
+          onFalse: choices.rightValue.operand,
+          fastMath: fastMath(options.fastMath),
+          result,
+          name: finalName,
+        }),
       )).value
     }),
   )

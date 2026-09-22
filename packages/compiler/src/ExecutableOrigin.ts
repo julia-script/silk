@@ -125,12 +125,12 @@ export const reachableIntrinsics = (
             )
           const span = expression.span
           const key = `${Intrinsic.operationText(operation)}\u0000${span.sourceId}\u0000${span.start}\u0000${span.end}`
-          retained.set(key, Object.freeze({ _tag: 'ReachableIntrinsicCall', operation, span }))
+          retained.set(key, { _tag: 'ReachableIntrinsicCall', operation, span })
         }
       }
     }
   }
-  return Object.freeze([...retained.values()].sort(compareIntrinsicCalls))
+  return [...retained.values()].sort(compareIntrinsicCalls)
 }
 
 /** The foreign header a canonical call target names, when it is one. */
@@ -193,22 +193,19 @@ export const reachableForeignCalls = (
           const existing = retained.get(key)
           if (existing !== undefined && compareSpans(existing.callSpan, expression.span) <= 0)
             continue
-          retained.set(
-            key,
-            Object.freeze({
-              _tag: 'ReachableForeignCall',
-              symbol: fact.foreign.symbol,
-              signature: foreignSignature(fact, target),
-              declaration: expression.target,
-              declarationSpan: registry.spanOf(fact.name.anchor),
-              callSpan: expression.span,
-            }),
-          )
+          retained.set(key, {
+            _tag: 'ReachableForeignCall',
+            symbol: fact.foreign.symbol,
+            signature: foreignSignature(fact, target),
+            declaration: expression.target,
+            declarationSpan: registry.spanOf(fact.name.anchor),
+            callSpan: expression.span,
+          })
         }
       }
     }
   }
-  return Object.freeze([...retained.values()].sort(compareForeignCalls))
+  return [...retained.values()].sort(compareForeignCalls)
 }
 
 /** Computes normalized direct/nested/external-park facts for every execution node. */
@@ -336,7 +333,7 @@ const enqueueProvider = (
   }
   if (environments.has(environment)) return
   environments.add(environment)
-  self.pending.push(Object.freeze({ node, environment }))
+  self.pending.push({ node, environment })
 }
 
 const enterProviderBinding = (
@@ -352,7 +349,7 @@ const enterProviderBinding = (
   }
   let extended = extensions.get(binding.node)
   if (extended === undefined) {
-    extended = Object.freeze([...environment, binding])
+    extended = [...environment, binding]
     extensions.set(binding.node, extended)
   }
   return extended
@@ -366,7 +363,7 @@ const providerWorklist = (bindings: Iterable<ProviderBinding>): ProviderWorklist
   }
   // Every path starts from the same empty environment, so identical binding sequences share
   // identity. Binding order remains significant: service lookup selects the last matching one.
-  const empty: ProviderEnvironment = Object.freeze([])
+  const empty: ProviderEnvironment = []
   for (const binding of bindings) enqueueProvider(self, binding.node, empty)
   return self
 }
@@ -432,15 +429,13 @@ export const make = (operations: Operations) => {
     provider: Type.Type,
     capability: Type.Nominal,
   ): ReadonlyArray<CallTarget> =>
-    ConformanceProof.witnessDependencyTargets(index, provider, capability).map((dependency) =>
-      Object.freeze({
-        declaration: dependency.implementation,
-        typeArguments: dependency.typeArguments,
-        ...(dependency.structuralProvider === undefined
-          ? {}
-          : { structuralProvider: dependency.structuralProvider }),
-      }),
-    )
+    ConformanceProof.witnessDependencyTargets(index, provider, capability).map((dependency) => ({
+      declaration: dependency.implementation,
+      typeArguments: dependency.typeArguments,
+      ...(dependency.structuralProvider === undefined
+        ? {}
+        : { structuralProvider: dependency.structuralProvider }),
+    }))
 
   /** Collects every Drop hook a cleanup plan will invoke, so cleanup reaches hook instances. */
   const hookCalls = (
@@ -455,9 +450,9 @@ export const make = (operations: Operations) => {
           ...(includeWitnessDependencies
             ? witnessDependencyCallTargets(index, cleanup.type, Type.dropCapability)
             : []),
-          Object.freeze({ declaration: cleanup.hook, typeArguments: cleanup.typeArguments }),
+          { declaration: cleanup.hook, typeArguments: cleanup.typeArguments },
           ...hookCalls(cleanup.inner, index, includeWitnessDependencies, cleanupRoot),
-        ].map((call) => Object.freeze({ ...call, cleanupRoot }))
+        ].map((call) => ({ ...call, cleanupRoot }))
       case 'StructCleanup':
         return cleanup.fields.flatMap((field) =>
           hookCalls(field.cleanup, index, includeWitnessDependencies, cleanupRoot),
@@ -615,7 +610,7 @@ export const make = (operations: Operations) => {
     return carriesHiddenIdentity(expression, substitution)
       ? nested
       : [
-          Object.freeze({
+          {
             declaration: expression.target,
             typeArguments: expression.typeArguments,
             evidence: (evidence.at(expression.evidence.ordinal)?.constraints ?? []).map(
@@ -628,7 +623,7 @@ export const make = (operations: Operations) => {
             expression.staticArgumentOrigins !== undefined
               ? { staticArgumentOrigins: expression.staticArgumentOrigins }
               : {}),
-          }),
+          },
           ...nested,
         ]
   }
@@ -793,13 +788,13 @@ export const make = (operations: Operations) => {
           ...(target === undefined || concreteOperands
             ? []
             : [
-                Object.freeze({
+                {
                   declaration: target.implementation,
                   typeArguments: target.typeArguments,
                   ...(target.structuralProvider === undefined
                     ? {}
                     : { structuralProvider: target.structuralProvider }),
-                }),
+                },
               ]),
         ]
       }
@@ -932,7 +927,7 @@ export const make = (operations: Operations) => {
     expression: Tir.Expression,
     fn: Tir.TirFunction,
     results: ReadonlyMap<string, Elaboration.Result>,
-    arguments_: ReadonlyArray<Tir.Expression> = Object.freeze([]),
+    arguments_: ReadonlyArray<Tir.Expression> = [],
     resolving: ReadonlySet<string> = new Set(),
   ): Tir.Expression | undefined => {
     if (expression._tag === 'Move')
@@ -1001,12 +996,12 @@ export const make = (operations: Operations) => {
         expression.captures.length === 0
           ? undefined
           : Tir.callableEnvironmentIdentity(expression.site, {
-              declaration: Object.freeze({
+              declaration: {
                 module: context.owner.declaration.module,
                 name: context.owner.declaration.name,
-              }),
+              },
               typeArguments: context.owner.typeArguments,
-              staticArgumentKeys: Object.freeze(context.owner.staticArguments.map(StaticValue.key)),
+              staticArgumentKeys: context.owner.staticArguments.map(StaticValue.key),
             })
       const target = Tir.callableTargetIdentity(expression.target)
       const identity =
@@ -1049,12 +1044,12 @@ export const make = (operations: Operations) => {
             base.target,
             base.typeArguments,
             Tir.callableEnvironmentIdentity(expression.staged.site, {
-              declaration: Object.freeze({
+              declaration: {
                 module: context.owner.declaration.module,
                 name: context.owner.declaration.name,
-              }),
+              },
               typeArguments: context.owner.typeArguments,
-              staticArgumentKeys: Object.freeze(context.owner.staticArguments.map(StaticValue.key)),
+              staticArgumentKeys: context.owner.staticArguments.map(StaticValue.key),
             }),
           )
     }
@@ -1106,11 +1101,11 @@ export const make = (operations: Operations) => {
   ): Type.CallableIdentityArgument | undefined => {
     const callable = callableOriginOf(expression.callee, context)
     if (callable?.target._tag !== 'Declaration') return callable
-    const declaration: DeclarationFacts.CanonicalId = Object.freeze({
+    const declaration: DeclarationFacts.CanonicalId = {
       _tag: 'CanonicalDeclarationId',
       module: callable.target.module,
       name: callable.target.name,
-    })
+    }
     const target = targetFunction(context.results, declaration)
     if (target === undefined) return callable
     const inferredAtSection = callableSubstitutionOf(expression.callee, context)
@@ -1154,11 +1149,11 @@ export const make = (operations: Operations) => {
   ): InstanceKey | undefined => {
     const callable = appliedCallableOriginOf(expression, context)
     if (callable?.target._tag !== 'Declaration') return undefined
-    const declaration: DeclarationFacts.CanonicalId = Object.freeze({
+    const declaration: DeclarationFacts.CanonicalId = {
       _tag: 'CanonicalDeclarationId',
       module: callable.target.module,
       name: callable.target.name,
-    })
+    }
     const target = targetFunction(context.results, declaration)
     if (target === undefined) return undefined
     const parameters = target.declaration.typeParameters.map((parameter) => parameter.type)
@@ -1288,7 +1283,7 @@ export const make = (operations: Operations) => {
       const body = result.bodies.find((candidate) => candidate.function === fn)
       if (body !== undefined) return body.results.evidence
     }
-    return Object.freeze([])
+    return []
   }
 
   function commonOrigin<A>(
@@ -1344,14 +1339,11 @@ export const make = (operations: Operations) => {
     context: EffectOriginContext,
     resolving: ReadonlySet<number> = new Set(),
   ): ReadonlyArray<ServiceEffectRecipe> {
-    if (expression._tag === 'ServiceEffectConstruct')
-      return Object.freeze([Object.freeze({ expression, context })])
+    if (expression._tag === 'ServiceEffectConstruct') return [{ expression, context }]
     if (expression._tag === 'EffectBlock')
-      return Object.freeze(
-        expression.statements.flatMap((statement) =>
-          Tir.statementExpressions(statement).flatMap((nested) =>
-            serviceEffectRecipes(nested, context, resolving),
-          ),
+      return expression.statements.flatMap((statement) =>
+        Tir.statementExpressions(statement).flatMap((nested) =>
+          serviceEffectRecipes(nested, context, resolving),
         ),
       )
     if (expression._tag === 'Run')
@@ -1361,29 +1353,23 @@ export const make = (operations: Operations) => {
     if (expression._tag === 'UnionConvert')
       return serviceEffectRecipes(expression.source, context, resolving)
     if (expression._tag === 'Match')
-      return Object.freeze(
-        expression.arms.flatMap((arm) =>
-          arm.reachable && arm.body._tag === 'Expression'
-            ? serviceEffectRecipes(arm.body.expression, context, resolving)
-            : [],
-        ),
+      return expression.arms.flatMap((arm) =>
+        arm.reachable && arm.body._tag === 'Expression'
+          ? serviceEffectRecipes(arm.body.expression, context, resolving)
+          : [],
       )
     if (expression._tag === 'EffectCatch')
-      return Object.freeze([
+      return [
         ...serviceEffectRecipes(expression.protected, context, resolving),
         ...serviceEffectRecipes(expression.handler, context, resolving),
-      ])
+      ]
     if (expression._tag === 'Call' || expression._tag === 'EffectConstruct')
-      return Object.freeze(
-        expression.arguments.flatMap((argument) =>
-          serviceEffectRecipes(argument, context, resolving),
-        ),
+      return expression.arguments.flatMap((argument) =>
+        serviceEffectRecipes(argument, context, resolving),
       )
     if (expression._tag === 'CallableSection')
-      return Object.freeze(
-        expression.captures.flatMap((capture) =>
-          serviceEffectRecipes(capture.value, context, resolving),
-        ),
+      return expression.captures.flatMap((capture) =>
+        serviceEffectRecipes(capture.value, context, resolving),
       )
     if (expression._tag === 'ForeignApply')
       return Tir.expressionChildren(expression).flatMap((child) =>
@@ -1394,15 +1380,11 @@ export const make = (operations: Operations) => {
         expression.evaluation === 'LeftThenCallable'
           ? [...expression.arguments, expression.callee]
           : [expression.callee, ...expression.arguments]
-      return Object.freeze(
-        children.flatMap((child) => serviceEffectRecipes(child, context, resolving)),
-      )
+      return children.flatMap((child) => serviceEffectRecipes(child, context, resolving))
     }
     if (expression._tag === 'BuiltinCall' || expression._tag === 'InterfaceOperationCall')
-      return Object.freeze(
-        expression.arguments.flatMap((argument) =>
-          serviceEffectRecipes(argument, context, resolving),
-        ),
+      return expression.arguments.flatMap((argument) =>
+        serviceEffectRecipes(argument, context, resolving),
       )
     if (expression._tag === 'ParameterReference') {
       const identity = parameterEffectIdentity(
@@ -1411,15 +1393,15 @@ export const make = (operations: Operations) => {
         expression.parameter.ordinal,
       )
       return identity === undefined
-        ? Object.freeze([])
-        : (context.serviceRecipesOfIdentity?.(identity, context.resolving) ?? Object.freeze([]))
+        ? []
+        : (context.serviceRecipesOfIdentity?.(identity, context.resolving) ?? [])
     }
-    if (expression._tag !== 'BindingReference') return Object.freeze([])
+    if (expression._tag !== 'BindingReference') return []
     const ordinal = expression.binding.ordinal
-    if (resolving.has(ordinal)) return Object.freeze([])
+    if (resolving.has(ordinal)) return []
     const initializer = callableBindings(context.fn).get(ordinal)
     return initializer === undefined
-      ? Object.freeze([])
+      ? []
       : serviceEffectRecipes(initializer, context, new Set(resolving).add(ordinal))
   }
 
@@ -2304,19 +2286,13 @@ export const make = (operations: Operations) => {
       resolving: new Set<string>(),
       successOfIdentity: successIdentityResolver(instances, results, index),
     }
-    return Object.freeze(
-      callableExpressions(fn).flatMap((expression) => {
-        if (expression._tag !== 'EffectBlock') return []
-        const success = Type.substitute(
-          expression.type.success,
-          substitution,
-          context.compatibility,
-        )
-        if (!Type.isEffect(success)) return []
-        const identity = successEffectOriginOf(expression, context)
-        return identity === undefined ? [] : [Object.freeze({ site: expression.site, identity })]
-      }),
-    )
+    return callableExpressions(fn).flatMap((expression) => {
+      if (expression._tag !== 'EffectBlock') return []
+      const success = Type.substitute(expression.type.success, substitution, context.compatibility)
+      if (!Type.isEffect(success)) return []
+      const identity = successEffectOriginOf(expression, context)
+      return identity === undefined ? [] : [{ site: expression.site, identity }]
+    })
   }
 
   const interfaceCallOf = (
@@ -2349,7 +2325,7 @@ export const make = (operations: Operations) => {
       target: witness.implementation,
       symbolicConformances: [],
       typeArguments: witness.typeArguments,
-      evidence: Object.freeze({ _tag: 'TirEvidence' as const, ordinal: -1 }),
+      evidence: { _tag: 'TirEvidence' as const, ordinal: -1 },
       staticArguments: [],
       arguments: expression.arguments,
       loanEnds: expression.loanEnds,
@@ -2387,8 +2363,8 @@ export const make = (operations: Operations) => {
       const span = expression.span
       calls.set(
         `${span.sourceId}:${span.start}:${span.end}\u0000${expression.id?.ordinal ?? -1}\u0000${keyText(target)}`,
-        Object.freeze({
-          call: Object.freeze({
+        {
+          call: {
             _tag: 'CallInstance',
             owner,
             ...(expression.id === undefined ? {} : { node: expression.id }),
@@ -2399,9 +2375,9 @@ export const make = (operations: Operations) => {
               ? { staticArgumentOrigins: expression.staticArgumentOrigins }
               : {}),
             ...(resultEffect === undefined ? {} : { resultEffect }),
-          }),
+          },
           ordinal,
-        }),
+        },
       )
     }
     const context: EffectOriginContext = {
@@ -2452,11 +2428,9 @@ export const make = (operations: Operations) => {
       if (!carriesHiddenIdentity(expression, substitution)) return
       targetKeyOfInvocation(expression, context)
     })
-    return Object.freeze(
-      [...calls.values()]
-        .sort((left, right) => left.ordinal - right.ordinal)
-        .map(({ call }) => call),
-    )
+    return [...calls.values()]
+      .sort((left, right) => left.ordinal - right.ordinal)
+      .map(({ call }) => call)
   }
 
   const callableValue = (
@@ -2530,7 +2504,7 @@ export const make = (operations: Operations) => {
       if (argument === undefined) return undefined
       complete.push(argument)
     }
-    return Object.freeze(complete)
+    return complete
   }
 
   const targetArguments = (
@@ -2539,7 +2513,7 @@ export const make = (operations: Operations) => {
     results: ReadonlyMap<string, Elaboration.Result>,
   ): ReadonlyArray<Type.GenericArgument> | undefined => {
     const declaration = declarationTarget(target)
-    if (declaration === undefined) return Object.freeze([])
+    if (declaration === undefined) return []
     const fn = targetFunction(results, declaration)
     if (fn === undefined) return undefined
     const invocationBinders = new Set(
@@ -2554,9 +2528,7 @@ export const make = (operations: Operations) => {
           : undefined)
       return type === undefined ? [] : [type]
     })
-    return arguments_.length === fn.declaration.typeParameters.length
-      ? Object.freeze(arguments_)
-      : undefined
+    return arguments_.length === fn.declaration.typeParameters.length ? arguments_ : undefined
   }
 
   const callableCallTargets = (
@@ -2568,7 +2540,7 @@ export const make = (operations: Operations) => {
   ): ReadonlyArray<CallTarget> => {
     const bindings = callableBindings(fn)
     const targets: Array<CallTarget> = []
-    const context: EffectOriginContext = Object.freeze({
+    const context: EffectOriginContext = {
       fn,
       evidence: evidenceOf(results, fn),
       owner,
@@ -2577,14 +2549,12 @@ export const make = (operations: Operations) => {
       results,
       index,
       resolving: new Set<string>(),
-    })
+    }
     for (const expression of callableExpressions(fn)) {
       if (expression._tag === 'CallableApply') {
         const key = targetKeyOfInvocation(expression, context)
         if (key !== undefined) {
-          targets.push(
-            Object.freeze({ declaration: key.declaration, typeArguments: key.typeArguments }),
-          )
+          targets.push({ declaration: key.declaration, typeArguments: key.typeArguments })
           continue
         }
         // A finite Effect composite deliberately has no single hidden effect identity. Preserve
@@ -2602,7 +2572,7 @@ export const make = (operations: Operations) => {
               : expression.substitution
           const arguments_ = targetArguments(fallback.target, substitution, results)
           if (declaration !== undefined && arguments_ !== undefined)
-            targets.push(Object.freeze({ declaration, typeArguments: arguments_ }))
+            targets.push({ declaration, typeArguments: arguments_ })
         }
         continue
       }
@@ -2666,12 +2636,9 @@ export const make = (operations: Operations) => {
         }
         hidden.push(identity)
       }
-      if (complete)
-        targets.push(
-          Object.freeze({ declaration, typeArguments: Object.freeze([...arguments_, ...hidden]) }),
-        )
+      if (complete) targets.push({ declaration, typeArguments: [...arguments_, ...hidden] })
     }
-    return Object.freeze(targets)
+    return targets
   }
 
   const forwardedRequirementTargets = (
@@ -2709,7 +2676,7 @@ export const make = (operations: Operations) => {
     )
     const seen = new Set<string>()
     const instances: Array<CallableInstance> = []
-    const context: EffectOriginContext = Object.freeze({
+    const context: EffectOriginContext = {
       fn,
       evidence: evidenceOf(results, fn),
       owner,
@@ -2718,7 +2685,7 @@ export const make = (operations: Operations) => {
       results,
       index,
       resolving: new Set<string>(),
-    })
+    }
     for (const section of sections) {
       const site = Tir.executableSiteKey(section.site)
       if (seen.has(site)) continue
@@ -2764,49 +2731,45 @@ export const make = (operations: Operations) => {
         ) {
           continue
         }
-        instances.push(
-          Object.freeze({
-            _tag: 'CallableInstance',
-            owner,
-            site: section.site,
-            target: section.target,
-            typeArguments: arguments_,
-            substitution,
-            captureTypes: Object.freeze(captureTypes),
-            captures: Object.freeze(
-              section.captures.flatMap((capture, ordinal) => {
-                const type_ = captureTypes.at(ordinal)
-                const callableIdentity =
-                  type_ !== undefined && Type.isCallable(type_)
-                    ? callableOriginOf(capture.value, {
-                        fn,
-                        evidence: evidenceOf(results, fn),
-                        owner,
-                        substitution: ownerSubstitution,
-                        compatibility: selectedCompatibility(fn, owner),
-                        results,
-                        index,
-                        resolving: new Set<string>(),
-                      })
-                    : undefined
-                if (type_ === undefined) {
-                  return []
-                }
-                return [
-                  Object.freeze({
-                    ordinal: capture.ordinal,
-                    parameterOrdinal: capture.parameterOrdinal,
-                    access: capture.access,
-                    type: type_,
-                    ...(callableIdentity === undefined ? {} : { callableIdentity }),
-                  }),
-                ]
-              }),
-            ),
-            type,
-            mode: section.mode,
+        instances.push({
+          _tag: 'CallableInstance',
+          owner,
+          site: section.site,
+          target: section.target,
+          typeArguments: arguments_,
+          substitution,
+          captureTypes: captureTypes,
+          captures: section.captures.flatMap((capture, ordinal) => {
+            const type_ = captureTypes.at(ordinal)
+            const callableIdentity =
+              type_ !== undefined && Type.isCallable(type_)
+                ? callableOriginOf(capture.value, {
+                    fn,
+                    evidence: evidenceOf(results, fn),
+                    owner,
+                    substitution: ownerSubstitution,
+                    compatibility: selectedCompatibility(fn, owner),
+                    results,
+                    index,
+                    resolving: new Set<string>(),
+                  })
+                : undefined
+            if (type_ === undefined) {
+              return []
+            }
+            return [
+              {
+                ordinal: capture.ordinal,
+                parameterOrdinal: capture.parameterOrdinal,
+                access: capture.access,
+                type: type_,
+                ...(callableIdentity === undefined ? {} : { callableIdentity }),
+              },
+            ]
           }),
-        )
+          type,
+          mode: section.mode,
+        })
       }
     }
     // A staged application splices the base value's environment ahead of its own captures, so
@@ -2831,9 +2794,7 @@ export const make = (operations: Operations) => {
                   Tir.callableEnvironmentIdentity(candidate.site, {
                     declaration: candidate.owner.declaration,
                     typeArguments: candidate.owner.typeArguments,
-                    staticArgumentKeys: Object.freeze(
-                      candidate.owner.staticArguments.map(StaticValue.key),
-                    ),
+                    staticArgumentKeys: candidate.owner.staticArguments.map(StaticValue.key),
                   }),
                 ),
             ) ?? resolveCallable(identity))
@@ -2878,34 +2839,30 @@ export const make = (operations: Operations) => {
         const callableIdentity = Type.isCallable(captureType)
           ? callableOriginOf(argument, context)
           : undefined
-        captures.push(
-          Object.freeze({
-            ordinal: baseCaptures.length + ordinal,
-            parameterOrdinal,
-            access: capture.access,
-            type: captureType,
-            ...(callableIdentity === undefined ? {} : { callableIdentity }),
-          }),
-        )
+        captures.push({
+          ordinal: baseCaptures.length + ordinal,
+          parameterOrdinal,
+          access: capture.access,
+          type: captureType,
+          ...(callableIdentity === undefined ? {} : { callableIdentity }),
+        })
         captureTypes.push(captureType)
       }
       if (!complete) continue
-      instances.push(
-        Object.freeze({
-          _tag: 'CallableInstance',
-          owner,
-          site: staged.site,
-          target: Tir.callableTargetFromIdentity(identity.target),
-          typeArguments: identity.typeArguments,
-          substitution: base?.substitution ?? new Map(),
-          captureTypes: Object.freeze(captureTypes),
-          captures: Object.freeze(captures),
-          type,
-          mode: type.mode,
-        }),
-      )
+      instances.push({
+        _tag: 'CallableInstance',
+        owner,
+        site: staged.site,
+        target: Tir.callableTargetFromIdentity(identity.target),
+        typeArguments: identity.typeArguments,
+        substitution: base?.substitution ?? new Map(),
+        captureTypes: captureTypes,
+        captures: captures,
+        type,
+        mode: type.mode,
+      })
     }
-    return Object.freeze(instances)
+    return instances
   }
 
   /**
@@ -2922,7 +2879,7 @@ export const make = (operations: Operations) => {
     const effects = new Map<string, EffectInstance>()
     for (const instance of instances) {
       const bindings = callableBindings(instance.function)
-      const context: EffectOriginContext = Object.freeze({
+      const context: EffectOriginContext = {
         fn: instance.function,
         evidence: instance.view.evidence,
         owner: instance.key,
@@ -2931,7 +2888,7 @@ export const make = (operations: Operations) => {
         results,
         index,
         resolving: new Set<string>(),
-      })
+      }
       const blocks = callableExpressions(instance.function).flatMap((expression) =>
         expression._tag === 'EffectBlock' ? [expression] : [],
       )
@@ -2948,13 +2905,13 @@ export const make = (operations: Operations) => {
             const selected = selectedRequirement(expression, instance.substitution)
             return selected !== undefined && Type.isNominal(selected.capability)
               ? [
-                  Object.freeze({
+                  {
                     parameter: expression.provider.parameter?.ordinal,
                     capability: selected.capability,
                     role: selected.role,
                     requirementAccess: selected.access,
                     providerAccess: expression.provider.selectionAccess,
-                  }),
+                  },
                 ]
               : []
           })
@@ -3076,13 +3033,13 @@ export const make = (operations: Operations) => {
                       Type.equals(specialized, evidence.provider)
                   return providerMatches
                     ? [
-                        Object.freeze({
+                        {
                           parameter: sourceOrdinal,
                           capability: evidence.selected.capability,
                           role: evidence.selected.role,
                           requirementAccess: evidence.selected.access,
                           providerAccess: evidence.providerMode,
-                        }),
+                        },
                       ]
                     : []
                 })
@@ -3091,7 +3048,7 @@ export const make = (operations: Operations) => {
             providedRequirement = undefined
           }
           return [
-            Object.freeze({
+            {
               ordinal,
               source,
               sourceOrdinal,
@@ -3106,33 +3063,30 @@ export const make = (operations: Operations) => {
               ...(providedRequirement === undefined
                 ? {}
                 : {
-                    providedRequirement: Object.freeze({
+                    providedRequirement: {
                       capability: providedRequirement.capability,
                       role: providedRequirement.role,
                       requirementAccess: providedRequirement.requirementAccess,
                       providerAccess: providedRequirement.providerAccess,
-                    }),
+                    },
                   }),
-            }),
+            },
           ]
         })
         if (captures.length !== block.captures.length) continue
         const identity = effectIdentity(instance.key, block.site)
-        effects.set(
+        effects.set(identity, {
+          _tag: 'EffectInstance',
+          representationIdentity: Tir.effectRepresentationIdentity(block.site),
           identity,
-          Object.freeze({
-            _tag: 'EffectInstance',
-            representationIdentity: Tir.effectRepresentationIdentity(block.site),
-            identity,
-            owner: instance.key,
-            site: block.site,
-            runner: Tir.effectRunnerId(instance.key.declaration, block.site),
-            typeArguments: Object.freeze([...instance.key.typeArguments]),
-            captures: Object.freeze(captures),
-            type: specializedType,
-            suspension: suspension.get(effectNode(identity)) ?? SuspensionMode.direct,
-          }),
-        )
+          owner: instance.key,
+          site: block.site,
+          runner: Tir.effectRunnerId(instance.key.declaration, block.site),
+          typeArguments: [...instance.key.typeArguments],
+          captures: captures,
+          type: specializedType,
+          suspension: suspension.get(effectNode(identity)) ?? SuspensionMode.direct,
+        })
       }
       const catches = callableExpressions(instance.function).flatMap((expression) =>
         expression._tag === 'EffectCatch' ? [expression] : [],
@@ -3164,38 +3118,35 @@ export const make = (operations: Operations) => {
           instance.function.declaration.id.ordinal,
         )
         const identity = effectIdentity(instance.key, site)
-        effects.set(
+        effects.set(identity, {
+          _tag: 'EffectInstance',
+          representationIdentity: Tir.effectRepresentationIdentity(site),
           identity,
-          Object.freeze({
-            _tag: 'EffectInstance',
-            representationIdentity: Tir.effectRepresentationIdentity(site),
-            identity,
-            owner: instance.key,
-            site,
-            runner: Tir.effectRunnerId(instance.key.declaration, site),
-            typeArguments: Object.freeze([...instance.key.typeArguments]),
-            captures: Object.freeze([
-              Object.freeze({
-                ordinal: 0,
-                source: 'Binding' as const,
-                sourceOrdinal: 0,
-                access: 'Take' as const,
-                type: protectedType,
-                effectIdentity: protectedIdentity,
-              }),
-              Object.freeze({
-                ordinal: 1,
-                source: 'Binding' as const,
-                sourceOrdinal: 1,
-                access: 'Take' as const,
-                type: handlerType,
-                callableIdentity: handlerIdentity,
-              }),
-            ]),
-            type,
-            suspension: suspension.get(effectNode(identity)) ?? SuspensionMode.direct,
-          }),
-        )
+          owner: instance.key,
+          site,
+          runner: Tir.effectRunnerId(instance.key.declaration, site),
+          typeArguments: [...instance.key.typeArguments],
+          captures: [
+            {
+              ordinal: 0,
+              source: 'Binding' as const,
+              sourceOrdinal: 0,
+              access: 'Take' as const,
+              type: protectedType,
+              effectIdentity: protectedIdentity,
+            },
+            {
+              ordinal: 1,
+              source: 'Binding' as const,
+              sourceOrdinal: 1,
+              access: 'Take' as const,
+              type: handlerType,
+              callableIdentity: handlerIdentity,
+            },
+          ],
+          type,
+          suspension: suspension.get(effectNode(identity)) ?? SuspensionMode.direct,
+        })
       }
       const builtins = callableExpressions(instance.function).flatMap((expression) =>
         expression._tag === 'BuiltinCall' && expression.witnessEffectSite === undefined
@@ -3224,7 +3175,7 @@ export const make = (operations: Operations) => {
             access = specialized.mode
           }
           return [
-            Object.freeze({
+            {
               ordinal,
               source: 'Binding' as const,
               sourceOrdinal: ordinal,
@@ -3232,7 +3183,7 @@ export const make = (operations: Operations) => {
               type: specialized,
               ...(effectIdentity === undefined ? {} : { effectIdentity }),
               ...(callableIdentity === undefined ? {} : { callableIdentity }),
-            }),
+            },
           ]
         })
         if (captures.length !== builtin.arguments.length) continue
@@ -3242,21 +3193,18 @@ export const make = (operations: Operations) => {
           instance.function.declaration.id.ordinal,
         )
         const identity = effectIdentity(instance.key, site)
-        effects.set(
+        effects.set(identity, {
+          _tag: 'EffectInstance',
+          representationIdentity: Tir.effectRepresentationIdentity(site),
           identity,
-          Object.freeze({
-            _tag: 'EffectInstance',
-            representationIdentity: Tir.effectRepresentationIdentity(site),
-            identity,
-            owner: instance.key,
-            site,
-            runner: Tir.effectRunnerId(instance.key.declaration, site),
-            typeArguments: Object.freeze([...instance.key.typeArguments]),
-            captures: Object.freeze(captures),
-            type,
-            suspension: suspension.get(effectNode(identity)) ?? SuspensionMode.direct,
-          }),
-        )
+          owner: instance.key,
+          site,
+          runner: Tir.effectRunnerId(instance.key.declaration, site),
+          typeArguments: [...instance.key.typeArguments],
+          captures: captures,
+          type,
+          suspension: suspension.get(effectNode(identity)) ?? SuspensionMode.direct,
+        })
       }
     }
     const callableFor = (identity: Type.CallableIdentityArgument): CallableInstance | undefined =>
@@ -3268,9 +3216,7 @@ export const make = (operations: Operations) => {
               Tir.callableEnvironmentIdentity(candidate.site, {
                 declaration: candidate.owner.declaration,
                 typeArguments: candidate.owner.typeArguments,
-                staticArgumentKeys: Object.freeze(
-                  candidate.owner.staticArguments.map(StaticValue.key),
-                ),
+                staticArgumentKeys: candidate.owner.staticArguments.map(StaticValue.key),
               }),
             ) &&
           Tir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
@@ -3303,7 +3249,7 @@ export const make = (operations: Operations) => {
             (capture.effectIdentity === undefined &&
               capture.callableIdentity === undefined &&
               ConformanceProof.copyType(index, capture.type))
-          return copy ? Object.freeze({ ...capture, access: 'Copy' as const }) : capture
+          return copy ? { ...capture, access: 'Copy' as const } : capture
         })
         let access: 'Take' | 'Exclusive' | 'Shared'
         if (captures.some((capture) => capture.access === 'Take')) {
@@ -3319,27 +3265,22 @@ export const make = (operations: Operations) => {
         )
           continue
         changed = true
-        next.set(
-          identity,
-          Object.freeze({
-            ...effect,
-            captures: Object.freeze(captures),
-            type: Type.effectWithRows(
-              effect.type.success,
-              effect.type.failureRow,
-              effect.type,
-              access,
-              effect.type.requirementRow,
-            ),
-          }),
-        )
+        next.set(identity, {
+          ...effect,
+          captures: captures,
+          type: Type.effectWithRows(
+            effect.type.success,
+            effect.type.failureRow,
+            effect.type,
+            access,
+            effect.type.requirementRow,
+          ),
+        })
       }
       refined = next
       if (!changed) break
     }
-    return Object.freeze(
-      [...refined.values()].sort((left, right) => left.identity.localeCompare(right.identity)),
-    )
+    return [...refined.values()].sort((left, right) => left.identity.localeCompare(right.identity))
   }
 
   const functionByKey = (
@@ -3417,10 +3358,10 @@ export const make = (operations: Operations) => {
           expression._tag === 'EffectBlock' &&
           Tir.effectRepresentationIdentity(expression.site) === identity.identity
             ? [
-                Object.freeze({
+                {
                   owner: instance.key,
                   identity: effectIdentity(instance.key, expression.site),
-                }),
+                },
               ]
             : [],
         ),
@@ -3448,12 +3389,12 @@ export const make = (operations: Operations) => {
       identity: string,
       resolving: ReadonlySet<string>,
     ): ReadonlyArray<ServiceEffectRecipe> => {
-      if (resolving.has(identity)) return Object.freeze([])
+      if (resolving.has(identity)) return []
       const candidates = instances.filter((candidate) => candidate.resultEffect === identity)
       const candidate = candidates.length === 1 ? candidates.at(0) : undefined
       const expressions =
         candidate === undefined ? [] : Tir.returnExpressions(candidate.function.statements)
-      if (candidate === undefined || expressions.length === 0) return Object.freeze([])
+      if (candidate === undefined || expressions.length === 0) return []
       const recipeContext: EffectOriginContext = {
         fn: candidate.function,
         evidence: candidate.view.evidence,
@@ -3467,9 +3408,7 @@ export const make = (operations: Operations) => {
         successOfIdentity,
         serviceRecipesOfIdentity,
       }
-      return Object.freeze(
-        expressions.flatMap((expression) => serviceEffectRecipes(expression, recipeContext)),
-      )
+      return expressions.flatMap((expression) => serviceEffectRecipes(expression, recipeContext))
     }
     const addDependency = (
       owner: string,
@@ -3536,7 +3475,7 @@ export const make = (operations: Operations) => {
         if (expression._tag === 'Move') return effectOrigins(expression.subject)
         if (expression._tag === 'UnionConvert') return effectOrigins(expression.source)
         if (expression._tag === 'Match') {
-          return Object.freeze([
+          return [
             ...new Set(
               expression.arms.flatMap((arm) =>
                 arm.reachable && arm.body._tag === 'Expression'
@@ -3544,19 +3483,17 @@ export const make = (operations: Operations) => {
                   : [],
               ),
             ),
-          ])
+          ]
         }
         const composite = compositeEffectRepresentationOf(expression, context)
         if (composite !== undefined)
-          return Object.freeze(
-            composite.alternatives.flatMap((alternative) => {
-              if (!Type.isEffectIdentityArgument(alternative.identity)) return []
-              const identity = resolveEffectIdentity(alternative.identity)
-              return identity === undefined ? [] : [identity]
-            }),
-          )
+          return composite.alternatives.flatMap((alternative) => {
+            if (!Type.isEffectIdentityArgument(alternative.identity)) return []
+            const identity = resolveEffectIdentity(alternative.identity)
+            return identity === undefined ? [] : [identity]
+          })
         const identity = effectOriginOf(expression, context)
-        return identity === undefined ? [] : Object.freeze([identity])
+        return identity === undefined ? [] : [identity]
       }
 
       const selectedInterfaceEffectTarget = (
@@ -3602,11 +3539,11 @@ export const make = (operations: Operations) => {
       const callableApplicationTarget = (expression: Tir.Expression): string | undefined => {
         const origin = callableOriginOf(expression, context)
         if (origin?.target._tag !== 'Declaration') return undefined
-        const declaration: DeclarationFacts.CanonicalId = Object.freeze({
+        const declaration: DeclarationFacts.CanonicalId = {
           _tag: 'CanonicalDeclarationId',
           module: origin.target.module,
           name: origin.target.name,
-        })
+        }
         const target = targetFunction(results, declaration)
         const arguments_ =
           target === undefined ? undefined : callableTargetArguments(target, origin.typeArguments)
@@ -3683,7 +3620,7 @@ export const make = (operations: Operations) => {
 
       const executionTargets = (expression: Tir.Expression): ReadonlyArray<string> => {
         if (expression._tag === 'EffectBindRequirement')
-          return Object.freeze([providerBindingNode(instance.key, expression)])
+          return [providerBindingNode(instance.key, expression)]
         if (expression._tag === 'BindingReference') {
           const initializer = bindings.get(expression.binding.ordinal)
           return initializer === undefined ? [] : executionTargets(initializer)
@@ -3691,7 +3628,7 @@ export const make = (operations: Operations) => {
         if (expression._tag === 'Move') return executionTargets(expression.subject)
         if (expression._tag === 'UnionConvert') return executionTargets(expression.source)
         if (expression._tag === 'Match') {
-          return Object.freeze([
+          return [
             ...new Set(
               expression.arms.flatMap((arm) =>
                 arm.reachable && arm.body._tag === 'Expression'
@@ -3699,7 +3636,7 @@ export const make = (operations: Operations) => {
                   : [],
               ),
             ),
-          ])
+          ]
         }
         if (
           (expression._tag === 'InterfaceOperationCall' || expression._tag === 'BuiltinCall') &&
@@ -3710,7 +3647,7 @@ export const make = (operations: Operations) => {
           effectIdentities.add(identity)
           const targetKey = selectedInterfaceEffectTarget(expression)
           if (targetKey !== undefined) addDependency(execution, executionNodeForKey(targetKey))
-          return Object.freeze([execution])
+          return [execution]
         }
         if (expression._tag === 'BuiltinCall') {
           const type = Type.substitute(
@@ -3754,7 +3691,7 @@ export const make = (operations: Operations) => {
                       ? 'Independent'
                       : 'Inherited',
                   )
-            return Object.freeze([execution])
+            return [execution]
           }
         }
         if (expression._tag === 'EffectConstruct') {
@@ -3766,10 +3703,10 @@ export const make = (operations: Operations) => {
               ? undefined
               : resultEffectIdentity(targetFn, target, results, index)
           if (identity !== undefined) {
-            return Object.freeze([effectNode(identity)])
+            return [effectNode(identity)]
           }
-          if (target === undefined) return Object.freeze([deferredCallNode(expression)])
-          return Object.freeze([instanceNode(target)])
+          if (target === undefined) return [deferredCallNode(expression)]
+          return [instanceNode(target)]
         }
         if (expression._tag === 'ServiceEffectConstruct') {
           const service = Type.substitute(
@@ -3792,22 +3729,19 @@ export const make = (operations: Operations) => {
                 candidate.name.spelling === expression.operation,
             )
           const nonParking = operation?.staticProperties.includes('Intrinsic.NonParking') === true
-          serviceCalls.set(
-            node,
-            Object.freeze({
-              service,
-              role: expression.role,
-              access: expression.access,
-              operation: expression.operation,
-              nonParking,
-              expression,
-              context,
-            }),
-          )
+          serviceCalls.set(node, {
+            service,
+            role: expression.role,
+            access: expression.access,
+            operation: expression.operation,
+            nonParking,
+            expression,
+            context,
+          })
           if (nonParking) permitted.set(node, new Set<SuspensionMode.Mode>(['NestedTransfer']))
-          return Object.freeze([node])
+          return [node]
         }
-        return Object.freeze(effectOrigins(expression).map(effectNode))
+        return effectOrigins(expression).map(effectNode)
       }
 
       const nonParkingExecutionTargets = (
@@ -3816,7 +3750,7 @@ export const make = (operations: Operations) => {
         if (expression._tag === 'BindingReference') {
           const initializer = bindings.get(expression.binding.ordinal)
           return initializer === undefined
-            ? Object.freeze({ targets: Object.freeze([]), complete: false })
+            ? { targets: [], complete: false }
             : nonParkingExecutionTargets(initializer)
         }
         if (expression._tag === 'Move') return nonParkingExecutionTargets(expression.subject)
@@ -3826,20 +3760,18 @@ export const make = (operations: Operations) => {
           const selected = reachable.map((arm) =>
             arm.body._tag === 'Expression'
               ? nonParkingExecutionTargets(arm.body.expression)
-              : Object.freeze({
-                  targets: Object.freeze<ReadonlyArray<string>>([]),
+              : {
+                  targets: [] as ReadonlyArray<string>,
                   complete: false,
-                }),
+                },
           )
-          return Object.freeze({
-            targets: Object.freeze([
-              ...new Set(selected.flatMap((candidate) => candidate.targets)),
-            ]),
+          return {
+            targets: [...new Set(selected.flatMap((candidate) => candidate.targets))],
             complete:
               selected.length === reachable.length &&
               selected.length > 0 &&
               selected.every((candidate) => candidate.complete),
-          })
+          }
         }
         const composite = compositeEffectRepresentationOf(expression, context)
         if (composite !== undefined) {
@@ -3848,20 +3780,20 @@ export const make = (operations: Operations) => {
               ? resolveEffectIdentity(alternative.identity)
               : undefined,
           )
-          return Object.freeze({
-            targets: Object.freeze([
+          return {
+            targets: [
               ...new Set(
                 identities.flatMap((identity) =>
                   identity === undefined ? [] : [effectNode(identity)],
                 ),
               ),
-            ]),
+            ],
             complete:
               identities.length > 0 && identities.every((identity) => identity !== undefined),
-          })
+          }
         }
         const targets = executionTargets(expression)
-        return Object.freeze({ targets, complete: targets.length > 0 })
+        return { targets, complete: targets.length > 0 }
       }
 
       const carriesNonParkingProof = (expression: Tir.Expression): boolean =>
@@ -3926,14 +3858,14 @@ export const make = (operations: Operations) => {
             const span = service.expression.span
             providedTargets.set(
               `${keyText(instance.key)}\0${keyText(target)}\0${span.sourceId}:${span.start}:${span.end}`,
-              Object.freeze({
+              {
                 owner: instance.key,
                 target,
                 span,
                 ...(service.expression.staticArgumentOrigins === undefined
                   ? {}
                   : { staticArgumentOrigins: service.expression.staticArgumentOrigins }),
-              }),
+              },
             )
             addDependency(execution, executionNodeForKey(target))
           }
@@ -3969,14 +3901,14 @@ export const make = (operations: Operations) => {
             const span = service.expression.span
             providedTargets.set(
               `${keyText(instance.key)}\0${keyText(target)}\0${span.sourceId}:${span.start}:${span.end}`,
-              Object.freeze({
+              {
                 owner: instance.key,
                 target,
                 span,
                 ...(service.expression.staticArgumentOrigins === undefined
                   ? {}
                   : { staticArgumentOrigins: service.expression.staticArgumentOrigins }),
-              }),
+              },
             )
             addDependency(execution, executionNodeForKey(target))
           }
@@ -4058,11 +3990,11 @@ export const make = (operations: Operations) => {
             addDependency(catchExecution, target)
           const handler = callableOriginOf(expression.handler, context)
           if (handler?.target._tag === 'Declaration') {
-            const declaration: DeclarationFacts.CanonicalId = Object.freeze({
+            const declaration: DeclarationFacts.CanonicalId = {
               _tag: 'CanonicalDeclarationId',
               module: handler.target.module,
               name: handler.target.name,
-            })
+            }
             const target = targetFunction(results, declaration)
             const targetKey =
               target === undefined
@@ -4108,24 +4040,21 @@ export const make = (operations: Operations) => {
             Type.isNominal(selected.capability) &&
             witness !== undefined
           )
-            providerBindings.set(
+            providerBindings.set(node, {
               node,
-              Object.freeze({
-                node,
-                execution: bindingExecution,
-                protectedTargets,
-                selected,
-                witness,
-                providerAccess: expression.provider.selectionAccess,
-                receiver: Type.reference(
-                  expression.provider.selectionAccess === 'Take'
-                    ? 'Exclusive'
-                    : expression.provider.selectionAccess,
-                  witness.provider,
-                  Type.substituteLifetime(expression.type.environment, instance.substitution),
-                ),
-              }),
-            )
+              execution: bindingExecution,
+              protectedTargets,
+              selected,
+              witness,
+              providerAccess: expression.provider.selectionAccess,
+              receiver: Type.reference(
+                expression.provider.selectionAccess === 'Take'
+                  ? 'Exclusive'
+                  : expression.provider.selectionAccess,
+                witness.provider,
+                Type.substituteLifetime(expression.type.environment, instance.substitution),
+              ),
+            })
         } else if (expression._tag === 'Call') {
           const target = targetKeyOfInvocation(expression, context)
           addDependency(
@@ -4155,27 +4084,27 @@ export const make = (operations: Operations) => {
             )
           }
           if (expression.operation === 'EffectObserveUnhandled')
-            terminalObservations.push(Object.freeze({ execution, span: expression.span }))
+            terminalObservations.push({ execution, span: expression.span })
           const targets = executionTargets(expression)
           if (expression.operation === 'EffectFinalizeNonParking') {
             const finalizer = expression.arguments.at(1)
             if (finalizer === undefined || !carriesNonParkingProof(finalizer)) {
               const resolved =
                 finalizer === undefined
-                  ? Object.freeze({
-                      targets: Object.freeze<ReadonlyArray<string>>([]),
+                  ? {
+                      targets: [] as ReadonlyArray<string>,
                       complete: false,
-                    })
+                    }
                   : nonParkingExecutionTargets(finalizer)
               if (!resolved.complete) {
                 const node = `nonparking-finalizer\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
                 unavailable.add(node)
-                nonParkingObligations.set(node, Object.freeze({ node, span: expression.span }))
+                nonParkingObligations.set(node, { node, span: expression.span })
               }
               for (const node of resolved.targets)
                 nonParkingObligations.set(
                   `${node}\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`,
-                  Object.freeze({ node, span: expression.span }),
+                  { node, span: expression.span },
                 )
             }
           }
@@ -4186,14 +4115,14 @@ export const make = (operations: Operations) => {
               if (node === undefined) {
                 const unavailableNode = `nonparking-resource-release\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
                 unavailable.add(unavailableNode)
-                nonParkingObligations.set(
-                  unavailableNode,
-                  Object.freeze({ node: unavailableNode, span: expression.span }),
-                )
+                nonParkingObligations.set(unavailableNode, {
+                  node: unavailableNode,
+                  span: expression.span,
+                })
               } else {
                 nonParkingObligations.set(
                   `${node}\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`,
-                  Object.freeze({ node, span: expression.span }),
+                  { node, span: expression.span },
                 )
               }
             }
@@ -4325,28 +4254,24 @@ export const make = (operations: Operations) => {
           const span = deferredCall.expression.span
           providedTargets.set(
             `${keyText(context.owner)}\0${keyText(target)}\0${span.sourceId}:${span.start}:${span.end}`,
-            Object.freeze({
+            {
               owner: context.owner,
               target,
               span,
               ...(deferredCall.expression.staticArgumentOrigins === undefined
                 ? {}
                 : { staticArgumentOrigins: deferredCall.expression.staticArgumentOrigins }),
-              providers: Object.freeze(
-                [...selectedBindings.values()].map((binding) =>
-                  Object.freeze({
-                    capability: binding.witness.capability,
-                    providerType: binding.witness.provider,
-                    role: binding.selected.role,
-                  }),
-                ),
-              ),
-            }),
+              providers: [...selectedBindings.values()].map((binding) => ({
+                capability: binding.witness.capability,
+                providerType: binding.witness.provider,
+                role: binding.selected.role,
+              })),
+            },
           )
           const targetNode = executionNodeForKey(target)
           // Keep provider-selected suspension on its lexical invocation, not the shared open call.
           for (const binding of selectedBindings.values())
-            selectedEdges.push(Object.freeze([binding.execution, targetNode]))
+            selectedEdges.push([binding.execution, targetNode])
           enqueueProvider(providers, targetNode, environment)
         }
       }
@@ -4370,37 +4295,34 @@ export const make = (operations: Operations) => {
           if (target !== undefined) {
             providedTargets.set(
               `${keyText(serviceCall.context.owner)}\0${keyText(target)}\0${serviceCall.expression.span.sourceId}:${serviceCall.expression.span.start}:${serviceCall.expression.span.end}`,
-              Object.freeze({
+              {
                 owner: serviceCall.context.owner,
                 target,
                 span: serviceCall.expression.span,
-                providers: Object.freeze([
-                  Object.freeze({
+                providers: [
+                  {
                     capability: binding.witness.capability,
                     providerType: binding.witness.provider,
                     role: binding.selected.role,
-                  }),
-                ]),
+                  },
+                ],
                 ...(serviceCall.expression.staticArgumentOrigins === undefined
                   ? {}
                   : { staticArgumentOrigins: serviceCall.expression.staticArgumentOrigins }),
-              }),
+              },
             )
             const targetNode = executionNodeForKey(target)
             if (serviceCall.nonParking)
               nonParkingObligations.set(
                 `${targetNode}\u0000${serviceCall.expression.span.sourceId}:${serviceCall.expression.span.start}:${serviceCall.expression.span.end}`,
-                Object.freeze({ node: targetNode, span: serviceCall.expression.span }),
+                { node: targetNode, span: serviceCall.expression.span },
               )
-            selectedEdges.push(Object.freeze([binding.execution, targetNode]))
+            selectedEdges.push([binding.execution, targetNode])
             enqueueProvider(providers, targetNode, environment)
           } else if (serviceCall.nonParking) {
             const node = `nonparking-provider\u0000${serviceCall.expression.span.sourceId}:${serviceCall.expression.span.start}:${serviceCall.expression.span.end}`
             unavailable.add(node)
-            nonParkingObligations.set(
-              node,
-              Object.freeze({ node, span: serviceCall.expression.span }),
-            )
+            nonParkingObligations.set(node, { node, span: serviceCall.expression.span })
           }
         }
       }
@@ -4430,19 +4352,18 @@ export const make = (operations: Operations) => {
         pendingSelected.push(target)
       }
     }
-    const contextFreeTerminalObservations = Object.freeze(
+    const contextFreeTerminalObservations =
       unresolvedRecovery ||
-        [...potentiallySelected].some(
-          (execution) =>
-            unresolvedDiagnosticExecutions.has(execution) || deferredCalls.has(execution),
-        )
+      [...potentiallySelected].some(
+        (execution) =>
+          unresolvedDiagnosticExecutions.has(execution) || deferredCalls.has(execution),
+      )
         ? []
         : terminalObservations
             .filter(({ execution }) => !potentiallySelected.has(execution))
-            .map(({ span }) => span),
-    )
+            .map(({ span }) => span)
 
-    return Object.freeze({
+    return {
       contextFreeTerminalObservations,
       roots: new Map<SuspensionMode.Mode, ReadonlySet<string>>([
         ['NestedTransfer', nestedRoots],
@@ -4453,12 +4374,12 @@ export const make = (operations: Operations) => {
       effectIdentities,
       permitted,
       unavailable,
-      nonParkingObligations: Object.freeze([...nonParkingObligations.values()]),
-      providedTargets: Object.freeze([...providedTargets.values()]),
-    })
+      nonParkingObligations: [...nonParkingObligations.values()],
+      providedTargets: [...providedTargets.values()],
+    }
   }
 
-  return Object.freeze({
+  return {
     functionByKey,
     instanceNode,
     effectNode,
@@ -4477,5 +4398,5 @@ export const make = (operations: Operations) => {
     concreteCallables,
     concreteEffects,
     suspensionGraph,
-  })
+  }
 }

@@ -34,7 +34,7 @@ export type ShortCircuit = 'And' | 'Or'
 export type Eligible = Exclude<Prefix | Infix, ShortCircuit>
 
 /** Token kinds retained after the contextual `operator` marker, including rejected control forms. */
-export const declarationTokenKinds: ReadonlyArray<Token.TokenKind> = Object.freeze([
+export const declarationTokenKinds: ReadonlyArray<Token.TokenKind> = [
   'Minus',
   'Bang',
   'Tilde',
@@ -56,7 +56,7 @@ export const declarationTokenKinds: ReadonlyArray<Token.TokenKind> = Object.free
   'PipeGreater',
   'Equals',
   'RunKeyword',
-])
+]
 
 /** True when a token can be retained for operator-marker validation. */
 export const isDeclarationToken = (kind: Token.TokenKind): boolean =>
@@ -110,99 +110,99 @@ export interface Target {
   readonly operation: string
 }
 
-const infixByToken: Readonly<Partial<Record<Token.TokenKind, InfixInfo>>> = Object.freeze({
-  Star: Object.freeze({
+const infixByToken: Readonly<Partial<Record<Token.TokenKind, InfixInfo>>> = {
+  Star: {
     operator: 'Multiply',
     spelling: '*',
     precedence: 50,
     associativity: 'Left',
-  }),
-  Slash: Object.freeze({
+  },
+  Slash: {
     operator: 'Divide',
     spelling: '/',
     precedence: 50,
     associativity: 'Left',
-  }),
-  Percent: Object.freeze({
+  },
+  Percent: {
     operator: 'Remainder',
     spelling: '%',
     precedence: 50,
     associativity: 'Left',
-  }),
-  Plus: Object.freeze({ operator: 'Add', spelling: '+', precedence: 40, associativity: 'Left' }),
-  Minus: Object.freeze({
+  },
+  Plus: { operator: 'Add', spelling: '+', precedence: 40, associativity: 'Left' },
+  Minus: {
     operator: 'Subtract',
     spelling: '-',
     precedence: 40,
     associativity: 'Left',
-  }),
-  Ampersand: Object.freeze({
+  },
+  Ampersand: {
     operator: 'BitAnd',
     spelling: '&',
     precedence: 37,
     associativity: 'Left',
-  }),
-  Caret: Object.freeze({
+  },
+  Caret: {
     operator: 'BitXor',
     spelling: '^',
     precedence: 35,
     associativity: 'Left',
-  }),
-  Pipe: Object.freeze({
+  },
+  Pipe: {
     operator: 'BitOr',
     spelling: '|',
     precedence: 33,
     associativity: 'Left',
-  }),
-  Less: Object.freeze({
+  },
+  Less: {
     operator: 'LessThan',
     spelling: '<',
     precedence: 30,
     associativity: 'None',
-  }),
-  LessEqual: Object.freeze({
+  },
+  LessEqual: {
     operator: 'LessOrEqual',
     spelling: '<=',
     precedence: 30,
     associativity: 'None',
-  }),
-  Greater: Object.freeze({
+  },
+  Greater: {
     operator: 'GreaterThan',
     spelling: '>',
     precedence: 30,
     associativity: 'None',
-  }),
-  GreaterEqual: Object.freeze({
+  },
+  GreaterEqual: {
     operator: 'GreaterOrEqual',
     spelling: '>=',
     precedence: 30,
     associativity: 'None',
-  }),
-  EqualEqual: Object.freeze({
+  },
+  EqualEqual: {
     operator: 'Equals',
     spelling: '==',
     precedence: 20,
     associativity: 'None',
-  }),
-  BangEqual: Object.freeze({
+  },
+  BangEqual: {
     operator: 'NotEquals',
     spelling: '!=',
     precedence: 20,
     associativity: 'None',
-  }),
-  AmpersandAmpersand: Object.freeze({
+  },
+  AmpersandAmpersand: {
     operator: 'And',
     spelling: '&&',
     precedence: 18,
     associativity: 'Left',
-  }),
-  PipePipe: Object.freeze({
+  },
+  PipePipe: {
     operator: 'Or',
     spelling: '||',
     precedence: 16,
     associativity: 'Left',
-  }),
-})
+  },
+}
 
 /** Returns the prefix operator represented by one token kind. */
 export const prefix = (kind: Token.TokenKind): Prefix | undefined => {
@@ -235,7 +235,7 @@ export const spelling = (self: Eligible): string => {
 
 const operationByOperator: Readonly<
   Record<Exclude<Prefix | Infix, 'Equals' | 'NotEquals' | ShortCircuit>, string>
-> = Object.freeze({
+> = {
   Negate: 'negate',
   Not: 'not',
   Multiply: 'multiply',
@@ -251,7 +251,7 @@ const operationByOperator: Readonly<
   BitOr: 'bitOr',
   BitXor: 'bitXor',
   BitNot: 'bitNot',
-})
+}
 
 /**
  * True only when the selected scalar itself declares the operation the operator spells.
@@ -277,18 +277,18 @@ export const target = (
 ): Target => {
   if (self === 'Equals' || self === 'NotEquals') {
     if (equalityActor === 'string') {
-      return Object.freeze({ actor: 'Intrinsic', operation: 'stringEqualsExact' })
+      return { actor: 'Intrinsic', operation: 'stringEqualsExact' }
     }
-    return Object.freeze({
+    return {
       actor: equalityActor,
       operation: self === 'Equals' ? 'equals' : 'notEquals',
-    })
+    }
   }
   if (equalityActor === 'string') {
-    return Object.freeze({
+    return {
       actor: Scalar.defaultInteger.spelling,
       operation: operationByOperator[self],
-    })
+    }
   }
   const selected = Scalar.find(equalityActor)
   const operation = operationByOperator[self]
@@ -296,7 +296,7 @@ export const target = (
   if (self === 'Not') actor = Scalar.boolean.spelling
   else if (selected === undefined || !declaresOperation(selected, operation))
     actor = Scalar.defaultInteger.spelling
-  return Object.freeze({ actor, operation })
+  return { actor, operation }
 }
 
 /** The binding power of prefix operators. */

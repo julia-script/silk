@@ -30,11 +30,11 @@ export interface Input {
  * @category integer math
  * @since 0.0.0
  */
-export const none: IntegerMath = Object.freeze({
+export const none: IntegerMath = {
   noSignedWrap: false,
   noUnsignedWrap: false,
   exact: false,
-})
+}
 
 /**
  * Constructs immutable integer instruction flags.
@@ -61,12 +61,11 @@ export const none: IntegerMath = Object.freeze({
  * @category integer math
  * @since 0.0.0
  */
-export const make = (input: Input = {}): IntegerMath =>
-  Object.freeze({
-    noSignedWrap: input.noSignedWrap ?? false,
-    noUnsignedWrap: input.noUnsignedWrap ?? false,
-    exact: input.exact ?? false,
-  })
+export const make = (input: Input = {}): IntegerMath => ({
+  noSignedWrap: input.noSignedWrap ?? false,
+  noUnsignedWrap: input.noUnsignedWrap ?? false,
+  exact: input.exact ?? false,
+})
 
 /**
  * Returns a copy with the signed-overflow promise enabled or disabled.
@@ -80,8 +79,7 @@ export const withNoSignedWrap: {
   (self: IntegerMath, enabled?: boolean): IntegerMath
 } = dual(
   (args) => typeof args[0] === 'object',
-  (self: IntegerMath, enabled = true): IntegerMath =>
-    Object.freeze({ ...self, noSignedWrap: enabled }),
+  (self: IntegerMath, enabled = true): IntegerMath => ({ ...self, noSignedWrap: enabled }),
 )
 
 /**
@@ -96,8 +94,7 @@ export const withNoUnsignedWrap: {
   (self: IntegerMath, enabled?: boolean): IntegerMath
 } = dual(
   (args) => typeof args[0] === 'object',
-  (self: IntegerMath, enabled = true): IntegerMath =>
-    Object.freeze({ ...self, noUnsignedWrap: enabled }),
+  (self: IntegerMath, enabled = true): IntegerMath => ({ ...self, noUnsignedWrap: enabled }),
 )
 
 /**
@@ -112,7 +109,7 @@ export const withExact: {
   (self: IntegerMath, enabled?: boolean): IntegerMath
 } = dual(
   (args) => typeof args[0] === 'object',
-  (self: IntegerMath, enabled = true): IntegerMath => Object.freeze({ ...self, exact: enabled }),
+  (self: IntegerMath, enabled = true): IntegerMath => ({ ...self, exact: enabled }),
 )
 
 /**
@@ -138,10 +135,8 @@ export const toBitcode = (self: IntegerMath): number =>
  * @since 0.0.0
  */
 export const toText = (self: IntegerMath): ReadonlyArray<string> =>
-  Object.freeze(
-    [
-      self.noUnsignedWrap ? 'nuw' : '',
-      self.noSignedWrap ? 'nsw' : '',
-      self.exact ? 'exact' : '',
-    ].filter((flag) => flag !== ''),
-  )
+  [
+    self.noUnsignedWrap ? 'nuw' : '',
+    self.noSignedWrap ? 'nsw' : '',
+    self.exact ? 'exact' : '',
+  ].filter((flag) => flag !== '')

@@ -57,39 +57,35 @@ const publishRunnerSuccess = (
   span: SourceSpan.SourceSpan,
 ): void => {
   if (success === 'Transferred') {
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id,
-        operations,
-        outcome: Object.freeze({
-          _tag: 'Trap',
-          reason: 'unreachable runner continuation',
-          provenance: generated(span),
-        }),
-      }),
-    )
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      operations,
+      outcome: {
+        _tag: 'Trap',
+        reason: 'unreachable runner continuation',
+        provenance: generated(span),
+      },
+    })
     return
   }
   const destination = fn.alloc(type)
-  fn.publish(
-    Object.freeze({
-      _tag: 'OperationRegion',
-      id,
-      operations: Object.freeze([
-        ...operations,
-        Object.freeze({
-          _tag: 'PackEffectOutcome' as const,
-          destination,
-          source: success.result,
-          tag: 0,
-          type,
-          provenance: generated(span),
-        }),
-      ]),
-      outcome: Object.freeze({ _tag: 'Return', value: destination, provenance: generated(span) }),
-    }),
-  )
+  fn.publish({
+    _tag: 'OperationRegion',
+    id,
+    operations: [
+      ...operations,
+      {
+        _tag: 'PackEffectOutcome' as const,
+        destination,
+        source: success.result,
+        tag: 0,
+        type,
+        provenance: generated(span),
+      },
+    ],
+    outcome: { _tag: 'Return', value: destination, provenance: generated(span) },
+  })
 }
 
 const runtimeParameterCount = (fn: Tir.TirFunction): number =>
@@ -101,27 +97,27 @@ export const trapFunction = (
   span: SourceSpan.SourceSpan,
 ): Mir.MirFunction => {
   const parameterCount = runtimeParameterCount(instance.function)
-  return Object.freeze({
+  return {
     _tag: 'MirFunction',
     id: instance.key.declaration,
     instance: instance.key,
     parameterCount,
-    localTypes: Object.freeze(Array.from({ length: parameterCount }, () => i32)),
+    localTypes: Array.from({ length: parameterCount }, () => i32),
     result: i32,
-    entry: Object.freeze({ _tag: 'Region', ordinal: 0 }),
-    regions: Object.freeze([
-      Object.freeze({
+    entry: { _tag: 'Region', ordinal: 0 },
+    regions: [
+      {
         _tag: 'OperationRegion' as const,
-        id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
-        operations: Object.freeze([]),
-        outcome: Object.freeze({
+        id: { _tag: 'Region' as const, ordinal: 0 },
+        operations: [],
+        outcome: {
           _tag: 'Trap' as const,
           reason,
-          provenance: Object.freeze({ span, generated: true }),
-        }),
-      }),
-    ]),
-  })
+          provenance: { span, generated: true },
+        },
+      },
+    ],
+  }
 }
 
 export interface LoweredGeneratedEffectRunner {
@@ -143,8 +139,7 @@ export type GeneratedEffectRunnerLowering =
 
 export const unavailableGeneratedEffectRunner = (
   failure: Omit<UnavailableGeneratedEffectRunner, '_tag'>,
-): UnavailableGeneratedEffectRunner =>
-  Object.freeze({ _tag: 'UnavailableGeneratedEffectRunner', ...failure })
+): UnavailableGeneratedEffectRunner => ({ _tag: 'UnavailableGeneratedEffectRunner', ...failure })
 
 export const generatedEffectRunnerKey = (
   runner: DeclarationFacts.CanonicalId,
@@ -189,12 +184,11 @@ const unavailableEffectRunner = (
     cause,
   })
 
-const runnerFallback = (spec: GeneratedBlockEffectRunner): LoweringFailure =>
-  Object.freeze({
-    boundary: 'Expression',
-    construct: 'EffectBlock',
-    provenance: Object.freeze({ span: spec.block.span, generated: false }),
-  })
+const runnerFallback = (spec: GeneratedBlockEffectRunner): LoweringFailure => ({
+  boundary: 'Expression',
+  construct: 'EffectBlock',
+  provenance: { span: spec.block.span, generated: false },
+})
 
 export const planFor = (
   ownership: Ownership.ModuleOwnership | undefined,
@@ -295,11 +289,11 @@ export const lowerInstance = (
         (borrowedCapture.access === 'Shared' || borrowedCapture.access === 'Exclusive')
       ) {
         return [
-          Object.freeze({
+          {
             _tag: 'EnvironmentBorrow' as const,
             type: borrowedCapture.type,
             access: borrowedCapture.access,
-          }),
+          },
         ]
       }
       const type = contract.parameters.at(ordinal) ?? specialized
@@ -480,11 +474,11 @@ export const lowerInstance = (
     .forEach((parameter, ordinal) => {
       lowering.parameterLocals.set(parameter.id.ordinal, local(ordinal))
     })
-  const terminal: Mir.Outcome = Object.freeze({
+  const terminal: Mir.Outcome = {
     _tag: 'Trap',
     reason: 'body fell through without return',
     provenance: generated(bodySpan(fn, registry)),
-  })
+  }
   const entry = lowerSequence(lowering, fn.statements, indexExits(plan), undefined, terminal)
 
   if (
@@ -497,20 +491,18 @@ export const lowerInstance = (
     return trapFunction(instance, 'unavailable body', unavailable?.span ?? bodySpan(fn, registry))
   }
 
-  return Object.freeze({
+  return {
     _tag: 'MirFunction',
     id: instance.key.declaration,
     instance: instance.key,
     ...(fn.declaration.machine === undefined ? {} : { machine: fn.declaration.machine }),
     parameterCount: runtimeParameterCount(fn),
-    localTypes: Object.freeze([...lowering.localTypes]),
+    localTypes: [...lowering.localTypes],
     initializationFlags: initializationFlagsOf(lowering),
     result: resultType,
     entry,
-    regions: Object.freeze(
-      lowering.regions.flatMap((region) => (region === undefined ? [] : [region])),
-    ),
-  })
+    regions: lowering.regions.flatMap((region) => (region === undefined ? [] : [region])),
+  }
 }
 
 const effectCaptureParameterTypes = (
@@ -518,49 +510,47 @@ const effectCaptureParameterTypes = (
   layout: Layout.Plan,
   opaqueRealizations: OpaqueRealization.Catalog,
 ): ReadonlyArray<Mir.Type> =>
-  Object.freeze(
-    fields.flatMap((field) => {
-      if (field.effectIdentity !== undefined) {
-        const resolvedEffectValue =
-          field.resolvedEffectIdentity === undefined
-            ? undefined
-            : effectValueByIdentity(
-                layout,
-                field.resolvedEffectIdentity,
-                EffectExecutionContract.fromType(field.type),
-              )
-        const effectValue =
-          resolvedEffectValue ??
-          effectValueByIdentity(
-            layout,
-            field.effectIdentity,
-            EffectExecutionContract.fromType(field.type),
-          )
-        return effectValue === undefined ? [] : [effectValue]
-      }
-      if (field.callableIdentity !== undefined && Type.isCallable(field.type)) {
-        const callable = callableValueByIdentity(layout, field.callableIdentity, field.type)
-        return callable === undefined ? [] : [callable]
-      }
-      if (Type.isRepresented(field.type)) {
-        const represented = representedValueType(layout, opaqueRealizations, field.type, new Map())
-        return represented === undefined ? [] : [represented]
-      }
-      // The layout resolves scalar-enum nominals to their Enum representation; without it a
-      // captured enum lowers as a bare Nominal and every enum operation in the runner body fails.
-      const lowered = mirType(field.type, new Map(), layout)
-      if (lowered === undefined) return []
-      if (field.representation === 'Value') return [lowered]
-      if (field.access !== 'Shared' && field.access !== 'Exclusive') return []
-      return [
-        Object.freeze({
-          _tag: 'EnvironmentBorrow' as const,
-          type: field.type,
-          access: field.access,
-        }),
-      ]
-    }),
-  )
+  fields.flatMap((field) => {
+    if (field.effectIdentity !== undefined) {
+      const resolvedEffectValue =
+        field.resolvedEffectIdentity === undefined
+          ? undefined
+          : effectValueByIdentity(
+              layout,
+              field.resolvedEffectIdentity,
+              EffectExecutionContract.fromType(field.type),
+            )
+      const effectValue =
+        resolvedEffectValue ??
+        effectValueByIdentity(
+          layout,
+          field.effectIdentity,
+          EffectExecutionContract.fromType(field.type),
+        )
+      return effectValue === undefined ? [] : [effectValue]
+    }
+    if (field.callableIdentity !== undefined && Type.isCallable(field.type)) {
+      const callable = callableValueByIdentity(layout, field.callableIdentity, field.type)
+      return callable === undefined ? [] : [callable]
+    }
+    if (Type.isRepresented(field.type)) {
+      const represented = representedValueType(layout, opaqueRealizations, field.type, new Map())
+      return represented === undefined ? [] : [represented]
+    }
+    // The layout resolves scalar-enum nominals to their Enum representation; without it a
+    // captured enum lowers as a bare Nominal and every enum operation in the runner body fails.
+    const lowered = mirType(field.type, new Map(), layout)
+    if (lowered === undefined) return []
+    if (field.representation === 'Value') return [lowered]
+    if (field.access !== 'Shared' && field.access !== 'Exclusive') return []
+    return [
+      {
+        _tag: 'EnvironmentBorrow' as const,
+        type: field.type,
+        access: field.access,
+      },
+    ]
+  })
 
 export const lowerEffectRunner = (
   spec: GeneratedBlockEffectRunner,
@@ -576,18 +566,18 @@ export const lowerEffectRunner = (
 ): GeneratedEffectRunnerLowering => {
   const { owner, block, type } = spec
   const id = spec.id
-  const instance: Instances.InstanceKey = Object.freeze({
+  const instance: Instances.InstanceKey = {
     _tag: 'InstanceKey',
     declaration: id,
     typeArguments: owner.key.typeArguments,
     evidence: owner.key.evidence,
     staticArguments: owner.key.staticArguments,
-    contractRow: Object.freeze([
+    contractRow: [
       ...owner.key.contractRow,
       `effect-site:${Tir.executableSiteKey(block.site)}`,
       ...spec.providedRequirements.map(providedContractEntry),
-    ]),
-  })
+    ],
+  }
   const captureParameterTypes = effectCaptureParameterTypes(
     type.environment.fields,
     layout,
@@ -599,19 +589,17 @@ export const lowerEffectRunner = (
     (requirement) => requirement.witness._tag === 'SourceConformanceWitness',
   )
   const requirementParameterTypes = parameterizedRequirements.flatMap((requirement) => {
-    const type = mirType(
-      Object.freeze({
-        _tag: 'ReferenceType' as const,
-        access: requirement.access === 'Take' ? ('Exclusive' as const) : requirement.access,
-        target: requirement.providerType,
-        lifetime: spec.type.type.environment,
-      }),
-    )
+    const type = mirType({
+      _tag: 'ReferenceType' as const,
+      access: requirement.access === 'Take' ? ('Exclusive' as const) : requirement.access,
+      target: requirement.providerType,
+      lifetime: spec.type.type.environment,
+    })
     return type === undefined ? [] : [type]
   })
   if (requirementParameterTypes.length !== parameterizedRequirements.length)
     return unavailableEffectRunner(spec, runnerFallback(spec))
-  const parameterTypes = Object.freeze([...captureParameterTypes, ...requirementParameterTypes])
+  const parameterTypes = [...captureParameterTypes, ...requirementParameterTypes]
   const plan = planFor(ownership, owner.function)
   const lowering = new FunctionLowering(
     layout,
@@ -627,15 +615,13 @@ export const lowerEffectRunner = (
     effectResults,
     generatedRunners,
     opaqueRealizations,
-    Object.freeze(
-      spec.providedRequirements.map((requirement) => {
-        const ordinal = parameterizedRequirements.indexOf(requirement)
-        return Object.freeze({
-          ...requirement,
-          ...(ordinal < 0 ? {} : { local: local(captureParameterTypes.length + ordinal) }),
-        })
-      }),
-    ),
+    spec.providedRequirements.map((requirement) => {
+      const ordinal = parameterizedRequirements.indexOf(requirement)
+      return {
+        ...requirement,
+        ...(ordinal < 0 ? {} : { local: local(captureParameterTypes.length + ordinal) }),
+      }
+    }),
     spec.witnessTargets,
   )
   lowering.parameterLocals.clear()
@@ -648,11 +634,11 @@ export const lowerEffectRunner = (
     if (capture.pattern !== undefined)
       lowering.patternLocals.set(patternKey(capture.pattern), captureLocal)
   })
-  const terminal: Mir.Outcome = Object.freeze({
+  const terminal: Mir.Outcome = {
     _tag: 'Trap',
     reason: 'effect body fell through without return',
     provenance: generated(block.span),
-  })
+  }
   const entry = lowerSequence(lowering, block.statements, indexExits(plan), undefined, terminal)
   if (
     entry === undefined ||
@@ -661,44 +647,38 @@ export const lowerEffectRunner = (
     )
   )
     return unavailableEffectRunner(spec, lowering.loweringFailure ?? runnerFallback(spec))
-  const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+  const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = {
     _tag: 'EffectOutcome',
     type: type.type,
-  })
-  return Object.freeze({
+  }
+  return {
     _tag: 'LoweredGeneratedEffectRunner',
-    runner: Object.freeze({
+    runner: {
       _tag: 'MirFunction',
       id,
       instance,
       parameterCount: parameterTypes.length,
-      localTypes: Object.freeze([...lowering.localTypes]),
+      localTypes: [...lowering.localTypes],
       initializationFlags: initializationFlagsOf(lowering),
       result,
       entry,
-      regions: Object.freeze(
-        lowering.regions.flatMap((region) => (region === undefined ? [] : [region])),
-      ),
-      effectRunner: Object.freeze({
-        base: Object.freeze({
+      regions: lowering.regions.flatMap((region) => (region === undefined ? [] : [region])),
+      effectRunner: {
+        base: {
           declaration: Tir.effectRunnerId(type.environment.instance.declaration, type.site),
           typeArguments: type.environment.instance.typeArguments,
-        }),
-        providers: Object.freeze(
-          spec.providedRequirements.map((requirement) =>
-            Object.freeze({
-              capability: requirement.capability,
-              providerType: requirement.providerType,
-              witness: requirement.witness,
-              role: requirement.role,
-              requirementAccess: requirement.requirementAccess,
-              access: requirement.access,
-            }),
-          ),
-        ),
-      }),
-    }),
-  })
+        },
+        providers: spec.providedRequirements.map((requirement) => ({
+          capability: requirement.capability,
+          providerType: requirement.providerType,
+          witness: requirement.witness,
+          role: requirement.role,
+          requirementAccess: requirement.requirementAccess,
+          access: requirement.access,
+        })),
+      },
+    },
+  }
 }
 
 export const lowerCatchEffectRunner = (
@@ -727,20 +707,20 @@ export const lowerCatchEffectRunner = (
     return type === undefined ? [] : [type]
   })
   if (requirementParameterTypes.length !== parameterizedRequirements.length) return undefined
-  const captureParameterTypes = Object.freeze([spec.protectedType, spec.handlerType])
-  const parameterTypes = Object.freeze([...captureParameterTypes, ...requirementParameterTypes])
-  const instance: Instances.InstanceKey = Object.freeze({
+  const captureParameterTypes = [spec.protectedType, spec.handlerType]
+  const parameterTypes = [...captureParameterTypes, ...requirementParameterTypes]
+  const instance: Instances.InstanceKey = {
     _tag: 'InstanceKey',
     declaration: spec.id,
     typeArguments: spec.owner.key.typeArguments,
     evidence: spec.owner.key.evidence,
     staticArguments: spec.owner.key.staticArguments,
-    contractRow: Object.freeze([
+    contractRow: [
       ...spec.owner.key.contractRow,
       `effect-site:${Tir.executableSiteKey(spec.type.site)}`,
       ...spec.providedRequirements.map(providedContractEntry),
-    ]),
-  })
+    ],
+  }
   const lowering = new FunctionLowering(
     layout,
     index,
@@ -755,15 +735,13 @@ export const lowerCatchEffectRunner = (
     effectResults,
     generatedRunners,
     opaqueRealizations,
-    Object.freeze(
-      spec.providedRequirements.map((requirement) => {
-        const ordinal = parameterizedRequirements.indexOf(requirement)
-        return Object.freeze({
-          ...requirement,
-          ...(ordinal < 0 ? {} : { local: local(captureParameterTypes.length + ordinal) }),
-        })
-      }),
-    ),
+    spec.providedRequirements.map((requirement) => {
+      const ordinal = parameterizedRequirements.indexOf(requirement)
+      return {
+        ...requirement,
+        ...(ordinal < 0 ? {} : { local: local(captureParameterTypes.length + ordinal) }),
+      }
+    }),
   )
   const region = lowering.reserve()
   const [success, operations] = lowering.capture(() =>
@@ -774,43 +752,37 @@ export const lowerCatchEffectRunner = (
       handlerType: spec.handlerType,
     }),
   )
-  const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+  const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = {
     _tag: 'EffectOutcome',
     type: spec.type.type,
-  })
+  }
   if (success === undefined) return undefined
   publishRunnerSuccess(lowering, region, operations, success, result, spec.expression.span)
-  return Object.freeze({
+  return {
     _tag: 'MirFunction',
     id: spec.id,
     instance,
     parameterCount: parameterTypes.length,
-    localTypes: Object.freeze([...lowering.localTypes]),
+    localTypes: [...lowering.localTypes],
     initializationFlags: initializationFlagsOf(lowering),
     result,
     entry: region,
-    regions: Object.freeze(
-      lowering.regions.flatMap((candidate) => (candidate === undefined ? [] : [candidate])),
-    ),
-    effectRunner: Object.freeze({
-      base: Object.freeze({
+    regions: lowering.regions.flatMap((candidate) => (candidate === undefined ? [] : [candidate])),
+    effectRunner: {
+      base: {
         declaration: Tir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
         typeArguments: spec.type.environment.instance.typeArguments,
-      }),
-      providers: Object.freeze(
-        spec.providedRequirements.map((requirement) =>
-          Object.freeze({
-            capability: requirement.capability,
-            providerType: requirement.providerType,
-            witness: requirement.witness,
-            role: requirement.role,
-            requirementAccess: requirement.requirementAccess,
-            access: requirement.access,
-          }),
-        ),
-      ),
-    }),
-  })
+      },
+      providers: spec.providedRequirements.map((requirement) => ({
+        capability: requirement.capability,
+        providerType: requirement.providerType,
+        witness: requirement.witness,
+        role: requirement.role,
+        requirementAccess: requirement.requirementAccess,
+        access: requirement.access,
+      })),
+    },
+  }
 }
 
 export const lowerBuiltinEffectRunner = (
@@ -845,18 +817,18 @@ export const lowerBuiltinEffectRunner = (
     return type === undefined ? [] : [type]
   })
   if (requirementParameterTypes.length !== parameterizedRequirements.length) return undefined
-  const allParameters = Object.freeze([...parameterTypes, ...requirementParameterTypes])
-  const instance: Instances.InstanceKey = Object.freeze({
+  const allParameters = [...parameterTypes, ...requirementParameterTypes]
+  const instance: Instances.InstanceKey = {
     _tag: 'InstanceKey',
     declaration: spec.id,
     typeArguments: spec.owner.key.typeArguments,
     evidence: spec.owner.key.evidence,
     staticArguments: spec.owner.key.staticArguments,
-    contractRow: Object.freeze([
+    contractRow: [
       ...spec.owner.key.contractRow,
       `builtin-effect-site:${Tir.executableSiteKey(spec.type.site)}`,
-    ]),
-  })
+    ],
+  }
   const lowering = new FunctionLowering(
     layout,
     index,
@@ -871,83 +843,68 @@ export const lowerBuiltinEffectRunner = (
     effectResults,
     generatedRunners,
     opaqueRealizations,
-    Object.freeze(
-      spec.providedRequirements.map((requirement) => {
-        const ordinal = parameterizedRequirements.indexOf(requirement)
-        return Object.freeze({
-          ...requirement,
-          ...(ordinal < 0 ? {} : { local: local(parameterTypes.length + ordinal) }),
-        })
-      }),
-    ),
+    spec.providedRequirements.map((requirement) => {
+      const ordinal = parameterizedRequirements.indexOf(requirement)
+      return {
+        ...requirement,
+        ...(ordinal < 0 ? {} : { local: local(parameterTypes.length + ordinal) }),
+      }
+    }),
   )
   lowering.builtinEffectRunner = true
   const region = lowering.reserve()
   const [success, operations] = lowering.capture(() =>
-    lowerExpressionInner(
-      lowering,
-      Object.freeze({
-        _tag: 'Run',
-        subject: Object.freeze({
-          ...spec.expression,
-          arguments: Object.freeze(
-            spec.expression.arguments.map((argument, ordinal) =>
-              Object.freeze({
-                _tag: 'ParameterReference' as const,
-                parameter: Object.freeze({
-                  _tag: 'TirLocal' as const,
-                  ordinal,
-                }),
-                type: argument._tag === 'Unavailable' ? ('never' as const) : argument.type,
-                span: argument.span,
-                origin: argument.origin,
-              }),
-            ),
-          ),
-        }),
-        type: spec.type.type.success,
-        span: spec.expression.span,
-        origin: spec.expression.origin,
-      }),
-    ),
+    lowerExpressionInner(lowering, {
+      _tag: 'Run',
+      subject: {
+        ...spec.expression,
+        arguments: spec.expression.arguments.map((argument, ordinal) => ({
+          _tag: 'ParameterReference' as const,
+          parameter: {
+            _tag: 'TirLocal' as const,
+            ordinal,
+          },
+          type: argument._tag === 'Unavailable' ? ('never' as const) : argument.type,
+          span: argument.span,
+          origin: argument.origin,
+        })),
+      },
+      type: spec.type.type.success,
+      span: spec.expression.span,
+      origin: spec.expression.origin,
+    }),
   )
   if (success === undefined) return undefined
-  const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+  const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = {
     _tag: 'EffectOutcome',
     type: spec.type.type,
-  })
+  }
   publishRunnerSuccess(lowering, region, operations, success, result, spec.expression.span)
-  return Object.freeze({
+  return {
     _tag: 'MirFunction',
     id: spec.id,
     instance,
     parameterCount: allParameters.length,
-    localTypes: Object.freeze([...lowering.localTypes]),
+    localTypes: [...lowering.localTypes],
     initializationFlags: initializationFlagsOf(lowering),
     result,
     entry: region,
-    regions: Object.freeze(
-      lowering.regions.flatMap((candidate) => (candidate === undefined ? [] : [candidate])),
-    ),
-    effectRunner: Object.freeze({
-      base: Object.freeze({
+    regions: lowering.regions.flatMap((candidate) => (candidate === undefined ? [] : [candidate])),
+    effectRunner: {
+      base: {
         declaration: Tir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
         typeArguments: spec.type.environment.instance.typeArguments,
-      }),
-      providers: Object.freeze(
-        spec.providedRequirements.map((requirement) =>
-          Object.freeze({
-            capability: requirement.capability,
-            providerType: requirement.providerType,
-            witness: requirement.witness,
-            role: requirement.role,
-            requirementAccess: requirement.requirementAccess,
-            access: requirement.access,
-          }),
-        ),
-      ),
-    }),
-  })
+      },
+      providers: spec.providedRequirements.map((requirement) => ({
+        capability: requirement.capability,
+        providerType: requirement.providerType,
+        witness: requirement.witness,
+        role: requirement.role,
+        requirementAccess: requirement.requirementAccess,
+        access: requirement.access,
+      })),
+    },
+  }
 }
 
 export const lowerWitnessEffectRunner = (
@@ -982,19 +939,19 @@ export const lowerWitnessEffectRunner = (
     return type === undefined ? [] : [type]
   })
   if (requirementParameterTypes.length !== parameterizedRequirements.length) return undefined
-  const allParameters = Object.freeze([...parameterTypes, ...requirementParameterTypes])
-  const instance: Instances.InstanceKey = Object.freeze({
+  const allParameters = [...parameterTypes, ...requirementParameterTypes]
+  const instance: Instances.InstanceKey = {
     _tag: 'InstanceKey',
     declaration: spec.id,
     typeArguments: spec.owner.key.typeArguments,
     evidence: spec.owner.key.evidence,
     staticArguments: spec.owner.key.staticArguments,
-    contractRow: Object.freeze([
+    contractRow: [
       ...spec.owner.key.contractRow,
       `witness-effect-site:${Tir.executableSiteKey(spec.type.site)}`,
       ...spec.providedRequirements.map(providedContractEntry),
-    ]),
-  })
+    ],
+  }
   const lowering = new FunctionLowering(
     layout,
     index,
@@ -1009,20 +966,18 @@ export const lowerWitnessEffectRunner = (
     effectResults,
     generatedRunners,
     opaqueRealizations,
-    Object.freeze(
-      spec.providedRequirements.map((requirement) => {
-        const ordinal = parameterizedRequirements.indexOf(requirement)
-        return Object.freeze({
-          ...requirement,
-          ...(ordinal < 0 ? {} : { local: local(parameterTypes.length + ordinal) }),
-        })
-      }),
-    ),
+    spec.providedRequirements.map((requirement) => {
+      const ordinal = parameterizedRequirements.indexOf(requirement)
+      return {
+        ...requirement,
+        ...(ordinal < 0 ? {} : { local: local(parameterTypes.length + ordinal) }),
+      }
+    }),
   )
   const region = lowering.reserve()
   const [returned, operations] = lowering.capture((): Mir.LocalId | 'Transferred' | undefined => {
     let success: LoweredExpression | undefined
-    let reborrows: WitnessArguments['reborrows'] = Object.freeze([])
+    let reborrows: WitnessArguments['reborrows'] = []
     if (spec.target !== undefined) {
       const declaration = DeclarationFacts.byCanonical(index, spec.target.implementation)
       if (declaration?._tag !== 'FunctionDeclaration') return undefined
@@ -1046,35 +1001,31 @@ export const lowerWitnessEffectRunner = (
             : lowering.type(Type.substitute(declaration.returnType.type, substitution))
         if (result === undefined) return undefined
         const destination = lowering.alloc(result)
-        lowering.emit(
-          Object.freeze({
-            _tag: 'Call',
-            destination,
-            target: spec.target.implementation,
-            typeArguments: spec.target.typeArguments,
-            arguments: arguments_.arguments,
-            type: result,
-            provenance: generated(spec.expression.span),
-          }),
-        )
-        success = Object.freeze({ result: destination })
+        lowering.emit({
+          _tag: 'Call',
+          destination,
+          target: spec.target.implementation,
+          typeArguments: spec.target.typeArguments,
+          arguments: arguments_.arguments,
+          type: result,
+          provenance: generated(spec.expression.span),
+        })
+        success = { result: destination }
       } else {
         const effectType = effectResults.get(
           instanceText(spec.target.implementation, spec.target.typeArguments),
         )
         if (effectType === undefined) return undefined
         const effect = lowering.alloc(effectType)
-        lowering.emit(
-          Object.freeze({
-            _tag: 'Call',
-            destination: effect,
-            target: spec.target.implementation,
-            typeArguments: spec.target.typeArguments,
-            arguments: arguments_.arguments,
-            type: effectType,
-            provenance: generated(spec.expression.span),
-          }),
-        )
+        lowering.emit({
+          _tag: 'Call',
+          destination: effect,
+          target: spec.target.implementation,
+          typeArguments: spec.target.typeArguments,
+          arguments: arguments_.arguments,
+          type: effectType,
+          provenance: generated(spec.expression.span),
+        })
         success =
           effectType._tag === 'EffectValue'
             ? lowerRunEffectValue(
@@ -1095,106 +1046,89 @@ export const lowerWitnessEffectRunner = (
     } else if (spec.intrinsic?.rule._tag === 'BuiltinRule') {
       const contract = witnessEffectContract(spec.expression)
       if (contract === undefined) return undefined
-      success = lowerExpressionInner(
-        lowering,
-        Object.freeze({
-          _tag: 'BuiltinCall',
-          operation: spec.intrinsic.rule.operation,
-          intrinsic: spec.intrinsic.id,
-          typeArguments: Object.freeze([]),
-          arguments: Object.freeze(
-            contract.operands.map((operand) =>
-              Object.freeze({
-                _tag: 'ParameterReference' as const,
-                parameter: Object.freeze({
-                  _tag: 'TirLocal' as const,
-                  ordinal: operand.parameter.id.ordinal,
-                }),
-                type: operand.type._tag === 'Resolved' ? operand.type.type : 'never',
-                span: spec.expression.span,
-                origin: spec.expression.origin,
-              }),
-            ),
-          ),
-          loanEnds: Object.freeze([]),
-          heldLoans: Object.freeze([]),
-          type: spec.type.type.success,
+      success = lowerExpressionInner(lowering, {
+        _tag: 'BuiltinCall',
+        operation: spec.intrinsic.rule.operation,
+        intrinsic: spec.intrinsic.id,
+        typeArguments: [],
+        arguments: contract.operands.map((operand) => ({
+          _tag: 'ParameterReference' as const,
+          parameter: {
+            _tag: 'TirLocal' as const,
+            ordinal: operand.parameter.id.ordinal,
+          },
+          type: operand.type._tag === 'Resolved' ? operand.type.type : 'never',
           span: spec.expression.span,
           origin: spec.expression.origin,
-        }),
-      )
+        })),
+        loanEnds: [],
+        heldLoans: [],
+        type: spec.type.type.success,
+        span: spec.expression.span,
+        origin: spec.expression.origin,
+      })
     }
     if (success === 'Transferred') return success
     if (success === undefined) return undefined
     endWitnessReborrows(lowering, reborrows, spec.expression.span)
-    const outcome: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+    const outcome: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = {
       _tag: 'EffectOutcome',
       type: spec.type.type,
-    })
+    }
     const destination = lowering.alloc(outcome)
-    lowering.emit(
-      Object.freeze({
-        _tag: 'PackEffectOutcome',
-        destination,
-        source: success.result,
-        tag: 0,
-        type: outcome,
-        provenance: generated(spec.expression.span),
-      }),
-    )
+    lowering.emit({
+      _tag: 'PackEffectOutcome',
+      destination,
+      source: success.result,
+      tag: 0,
+      type: outcome,
+      provenance: generated(spec.expression.span),
+    })
     return destination
   })
   if (returned === undefined) return undefined
-  lowering.publish(
-    Object.freeze({
-      _tag: 'OperationRegion',
-      id: region,
-      operations,
-      outcome:
-        returned === 'Transferred'
-          ? Object.freeze({
-              _tag: 'Trap',
-              reason: 'unreachable runner continuation',
-              provenance: generated(spec.expression.span),
-            })
-          : Object.freeze({
-              _tag: 'Return',
-              value: returned,
-              provenance: generated(spec.expression.span),
-            }),
-    }),
-  )
-  return Object.freeze({
+  lowering.publish({
+    _tag: 'OperationRegion',
+    id: region,
+    operations,
+    outcome:
+      returned === 'Transferred'
+        ? {
+            _tag: 'Trap',
+            reason: 'unreachable runner continuation',
+            provenance: generated(spec.expression.span),
+          }
+        : {
+            _tag: 'Return',
+            value: returned,
+            provenance: generated(spec.expression.span),
+          },
+  })
+  return {
     _tag: 'MirFunction',
     id: spec.id,
     instance,
     parameterCount: allParameters.length,
-    localTypes: Object.freeze([...lowering.localTypes]),
+    localTypes: [...lowering.localTypes],
     initializationFlags: initializationFlagsOf(lowering),
-    result: Object.freeze({ _tag: 'EffectOutcome', type: spec.type.type }),
+    result: { _tag: 'EffectOutcome', type: spec.type.type },
     entry: region,
-    regions: Object.freeze(
-      lowering.regions.flatMap((candidate) => (candidate === undefined ? [] : [candidate])),
-    ),
-    effectRunner: Object.freeze({
-      base: Object.freeze({
+    regions: lowering.regions.flatMap((candidate) => (candidate === undefined ? [] : [candidate])),
+    effectRunner: {
+      base: {
         declaration: Tir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
         typeArguments: spec.type.environment.instance.typeArguments,
-      }),
-      providers: Object.freeze(
-        spec.providedRequirements.map((requirement) =>
-          Object.freeze({
-            capability: requirement.capability,
-            providerType: requirement.providerType,
-            witness: requirement.witness,
-            role: requirement.role,
-            requirementAccess: requirement.requirementAccess,
-            access: requirement.access,
-          }),
-        ),
-      ),
-    }),
-  })
+      },
+      providers: spec.providedRequirements.map((requirement) => ({
+        capability: requirement.capability,
+        providerType: requirement.providerType,
+        witness: requirement.witness,
+        role: requirement.role,
+        requirementAccess: requirement.requirementAccess,
+        access: requirement.access,
+      })),
+    },
+  }
 }
 
 /** Lowers the discovered instances into one MIR program module in discovery order. */

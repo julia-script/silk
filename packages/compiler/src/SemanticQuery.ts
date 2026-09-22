@@ -123,7 +123,7 @@ const readFingerprint = (state: State, input: InputAddress): string =>
   state.provider.read(input) ?? missingFingerprint
 
 export const make = (epoch: string, provider: Provider, previous?: Snapshot): Session => {
-  const session = Object.freeze({ _tag: 'SemanticQuerySession' as const, epoch })
+  const session = { _tag: 'SemanticQuerySession' as const, epoch }
   states.set(session, {
     provider,
     previous: previous?.records ?? new Map(),
@@ -144,28 +144,24 @@ const observationKey = (observation: Observation): string =>
 const observeInto = (active: Active, observation: Observation): void => {
   const encoded = observationKey(observation)
   if (active.observations.some((candidate) => observationKey(candidate) === encoded)) return
-  active.observations.push(Object.freeze(observation))
+  active.observations.push(observation)
 }
 
 const observeParent = (state: State, descriptor: Descriptor, fingerprint: string): void => {
   const parent = state.active.at(-1)
-  if (parent !== undefined)
-    observeInto(parent, Object.freeze({ _tag: 'QueryRead', descriptor, fingerprint }))
+  if (parent !== undefined) observeInto(parent, { _tag: 'QueryRead', descriptor, fingerprint })
 }
 
 const cycle = (state: State, key: string): Result<never> => {
   const ordinal = state.active.findIndex((active) => active.key === key)
-  return Object.freeze({
+  return {
     _tag: 'Cycle',
-    cycle: Object.freeze({
+    cycle: {
       _tag: 'SemanticQueryCycle',
       key,
-      path: Object.freeze([
-        ...state.active.slice(Math.max(0, ordinal)).map((active) => active.key),
-        key,
-      ]),
-    }),
-  })
+      path: [...state.active.slice(Math.max(0, ordinal)).map((active) => active.key), key],
+    },
+  }
 }
 
 const storedAs = <A>(stored: Completed<unknown>): Completed<A> =>
@@ -219,28 +215,31 @@ const executeProvider = <A>(self: Session, descriptor: Descriptor, publish: bool
     state.counters.executions += 1
     state.executions.set(key, (state.executions.get(key) ?? 0) + 1)
     const answer = state.provider.execute(descriptor, (input) =>
-      observeInto(
-        active,
-        Object.freeze({
-          _tag: 'InputRead',
-          input,
-          fingerprint: readFingerprint(state, input),
-        }),
-      ),
+      observeInto(active, {
+        _tag: 'InputRead',
+        input,
+        fingerprint: readFingerprint(state, input),
+      }),
     ) as A
-    const completed = Object.freeze({
+    const observations = [...active.observations]
+    // Result identity walks the whole answer; only a dependent read or persistence needs it, so a
+    // root query with neither never pays. The answer and observations are frozen: same value later.
+    let fingerprint: string | undefined
+    const completed: Completed<A> = {
       descriptor,
       key,
       answer,
-      fingerprint: state.provider.fingerprint(descriptor, answer, active.observations),
-      observations: Object.freeze([...active.observations]),
-    })
+      get fingerprint() {
+        return (fingerprint ??= state.provider.fingerprint(descriptor, answer, observations))
+      },
+      observations,
+    }
     if (publish && state.provider.cacheable?.(descriptor, answer) !== false)
       state.current.set(key, completed)
     const removed = state.active.pop()
     if (removed !== active) throw new RangeError('Semantic query reservation stack is corrupted')
-    observeParent(state, descriptor, completed.fingerprint)
-    return Object.freeze({ _tag: 'Completed', completed, reused: false })
+    if (state.active.length > 0) observeParent(state, descriptor, completed.fingerprint)
+    return { _tag: 'Completed', completed, reused: false }
   } catch (cause) {
     if (state.active.at(-1) === active) state.active.pop()
     throw cause
@@ -257,7 +256,7 @@ const execute = <A>(self: Session, descriptor: Descriptor, allowReuse: boolean):
     if (current !== undefined) {
       state.counters.reuses += 1
       observeParent(state, descriptor, current.fingerprint)
-      return Object.freeze({ _tag: 'Completed', completed: storedAs<A>(current), reused: true })
+      return { _tag: 'Completed', completed: storedAs<A>(current), reused: true }
     }
     const previous = descriptor.reuse === 'Revision' ? state.previous.get(key) : undefined
     if (previous !== undefined) {
@@ -276,11 +275,11 @@ const execute = <A>(self: Session, descriptor: Descriptor, allowReuse: boolean):
         state.current.set(key, previous)
         state.counters.reuses += 1
         observeParent(state, descriptor, previous.fingerprint)
-        return Object.freeze({
+        return {
           _tag: 'Completed',
           completed: storedAs<A>(previous),
           reused: true,
-        })
+        }
       }
     }
   }
@@ -315,22 +314,19 @@ export const completed = <A>(self: Session, descriptor: Descriptor): Completed<A
   return stored === undefined ? undefined : storedAs<A>(stored)
 }
 
-export const snapshot = (self: Session): Snapshot =>
-  Object.freeze({
-    _tag: 'SemanticQuerySnapshot',
-    records: new Map(
-      [...stateOf(self).current].filter(
-        ([, completed]) => completed.descriptor.reuse === 'Revision',
-      ),
-    ),
-  })
+export const snapshot = (self: Session): Snapshot => ({
+  _tag: 'SemanticQuerySnapshot',
+  records: new Map(
+    [...stateOf(self).current].filter(([, completed]) => completed.descriptor.reuse === 'Revision'),
+  ),
+})
 
 export const executionCount = (self: Session, descriptor: Descriptor): number =>
   stateOf(self).executions.get(keyOf(descriptor)) ?? 0
 
 export const counters = (self: Session): Counters => {
   const counters = stateOf(self).counters
-  return Object.freeze({ _tag: 'SemanticQueryCounters', ...counters })
+  return { _tag: 'SemanticQueryCounters', ...counters }
 }
 
 export const isActive = (self: Session, descriptor: Descriptor): boolean =>
@@ -340,12 +336,9 @@ export const observe = (self: Session, input: InputAddress): void => {
   const state = stateOf(self)
   const active = state.active.at(-1)
   if (active !== undefined)
-    observeInto(
-      active,
-      Object.freeze({
-        _tag: 'InputRead',
-        input,
-        fingerprint: readFingerprint(state, input),
-      }),
-    )
+    observeInto(active, {
+      _tag: 'InputRead',
+      input,
+      fingerprint: readFingerprint(state, input),
+    })
 }

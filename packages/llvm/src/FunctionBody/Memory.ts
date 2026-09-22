@@ -56,12 +56,12 @@ export interface CompareExchangeOptions extends MemoryAccess.Input {
 /** @internal */
 const accessInfo = (input: MemoryAccess.Input): FunctionBodyDescription.MemoryInfo => {
   const access = MemoryAccess.make(input)
-  return Object.freeze({
+  return {
     kind: access.kind,
     alignment: access.alignment,
     syncScope: access.syncScope,
     ordering: access.ordering,
-  })
+  }
 }
 
 /**
@@ -159,17 +159,16 @@ export const alloca = Effect.fnUntraced(function* (
         draft,
         resultType,
         name,
-        (result, finalName) =>
-          Object.freeze({
-            _tag: 'Alloca',
-            allocationType: allocationTypeIndex,
-            count: countValue.operand,
-            addressSpace: addressSpace.value,
-            alignment: options.alignment ?? Alignment.defaultAlignment,
-            inAlloca: options.inAlloca ?? false,
-            result,
-            name: finalName,
-          }),
+        (result, finalName) => ({
+          _tag: 'Alloca',
+          allocationType: allocationTypeIndex,
+          count: countValue.operand,
+          addressSpace: addressSpace.value,
+          alignment: options.alignment ?? Alignment.defaultAlignment,
+          inAlloca: options.inAlloca ?? false,
+          result,
+          name: finalName,
+        }),
       )
       if (options.placement === 'entry' && draft.cursor !== 0) {
         const current = draft.cursor === undefined ? undefined : draft.blocks.at(draft.cursor)
@@ -238,16 +237,14 @@ export const load = Effect.fnUntraced(function* (
         'Type',
         'FunctionBody.load',
       )
-      return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) =>
-        Object.freeze({
-          _tag: 'Load',
-          valueType: type,
-          pointer: pointerValue.operand,
-          access,
-          result,
-          name: finalName,
-        }),
-      )).value
+      return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) => ({
+        _tag: 'Load',
+        valueType: type,
+        pointer: pointerValue.operand,
+        access,
+        result,
+        name: finalName,
+      }))).value
     }),
   )
 })
@@ -291,17 +288,14 @@ export const store = Effect.fnUntraced(function* (
           }),
         )
       }
-      return yield* FunctionBodyState.appendInstruction(
-        draft,
-        Object.freeze({
-          _tag: 'Store',
-          value: stored.operand,
-          pointer: destination.operand,
-          access,
-          result: undefined,
-          name: ByteString.empty,
-        }),
-      )
+      return yield* FunctionBodyState.appendInstruction(draft, {
+        _tag: 'Store',
+        value: stored.operand,
+        pointer: destination.operand,
+        access,
+        result: undefined,
+        name: ByteString.empty,
+      })
     }),
   )
 })
@@ -501,7 +495,7 @@ const gepPlan = Effect.fnUntraced(function* (
         return {
           sourceType: source,
           base: pointer.operand,
-          indices: Object.freeze(resolved),
+          indices: resolved,
           pointerType,
           pointerScalarType,
           baseIsVector: pointerDescription._tag === 'Vector',
@@ -551,17 +545,16 @@ export const getElementPtr = Effect.fnUntraced(function* (
         draft,
         resultTypeIndex,
         name,
-        (result, finalName) =>
-          Object.freeze({
-            _tag: 'GetElementPtr',
-            sourceType: plan.sourceType,
-            base: plan.base,
-            indices: plan.indices,
-            inbounds: options.inbounds ?? false,
-            inrange: options.inrange,
-            result,
-            name: finalName,
-          }),
+        (result, finalName) => ({
+          _tag: 'GetElementPtr',
+          sourceType: plan.sourceType,
+          base: plan.base,
+          indices: plan.indices,
+          inbounds: options.inbounds ?? false,
+          inrange: options.inrange,
+          result,
+          name: finalName,
+        }),
       )).value
     }),
   )
@@ -611,16 +604,13 @@ export const fence = Effect.fnUntraced(function* (
 ): Effect.fn.Return<Instruction, LlvmError> {
   yield* MemoryAccess.validateFenceOrdering(ordering)
   return yield* FunctionBodyState.mutate(self, 'FunctionBody.fence', (draft) =>
-    FunctionBodyState.appendInstruction(
-      draft,
-      Object.freeze({
-        _tag: 'Fence',
-        syncScope,
-        ordering,
-        result: undefined,
-        name: ByteString.empty,
-      }),
-    ),
+    FunctionBodyState.appendInstruction(draft, {
+      _tag: 'Fence',
+      syncScope,
+      ordering,
+      result: undefined,
+      name: ByteString.empty,
+    }),
   )
 })
 
@@ -720,19 +710,17 @@ export const compareExchange = Effect.fnUntraced(function* (
           'Type',
           'FunctionBody.compareExchange',
         )
-        return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) =>
-          Object.freeze({
-            _tag: 'CompareExchange',
-            pointer: address.operand,
-            comparison: expected.operand,
-            replacement: desired.operand,
-            access,
-            failureOrdering: options.failureOrdering,
-            weak: options.weak ?? false,
-            result,
-            name: finalName,
-          }),
-        )).value
+        return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) => ({
+          _tag: 'CompareExchange',
+          pointer: address.operand,
+          comparison: expected.operand,
+          replacement: desired.operand,
+          access,
+          failureOrdering: options.failureOrdering,
+          weak: options.weak ?? false,
+          result,
+          name: finalName,
+        }))).value
       }),
   )
 })
@@ -805,16 +793,15 @@ export const atomicRmw = Effect.fnUntraced(function* (
         draft,
         operand.type,
         name,
-        (result, finalName) =>
-          Object.freeze({
-            _tag: 'AtomicRmw',
-            operation,
-            pointer: address.operand,
-            value: operand.operand,
-            access,
-            result,
-            name: finalName,
-          }),
+        (result, finalName) => ({
+          _tag: 'AtomicRmw',
+          operation,
+          pointer: address.operand,
+          value: operand.operand,
+          access,
+          result,
+          name: finalName,
+        }),
       )).value
     }),
   )
@@ -856,15 +843,13 @@ export const vaArg = Effect.fnUntraced(function* (
         'Type',
         'FunctionBody.vaArg',
       )
-      return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) =>
-        Object.freeze({
-          _tag: 'VaArg',
-          list: source.operand,
-          valueType: type,
-          result,
-          name: finalName,
-        }),
-      )).value
+      return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) => ({
+        _tag: 'VaArg',
+        list: source.operand,
+        valueType: type,
+        result,
+        name: finalName,
+      }))).value
     }),
   )
 })

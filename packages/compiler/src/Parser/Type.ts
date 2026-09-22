@@ -24,14 +24,14 @@ const nullablePointerStarts = (state: State): boolean =>
   nextSignificantKind(state) === 'Question' &&
   (peek(state, 1) === 'Star' || (peek(state, 1) === 'LeftBracket' && peek(state, 2) === 'Star'))
 
-const argumentStarts: ReadonlyArray<Token.TokenKind> = Object.freeze(['Lifetime', ...typeStarts])
+const argumentStarts: ReadonlyArray<Token.TokenKind> = ['Lifetime', ...typeStarts]
 
 const parseLifetime = (initial: State, following: ReadonlyArray<Token.TokenKind>): NodeResult => {
   const lifetime = expect(initial, 'Lifetime', following)
-  return Object.freeze({
+  return {
     state: lifetime.state,
     node: syntaxNode(lifetime.state, 'LifetimeType', lifetime.elements),
-  })
+  }
 }
 
 /** Parses a finite intersection only in an Effect environment position. */
@@ -73,10 +73,10 @@ export const parseTypePath = (
   if (fieldStartsHere) {
     const leading = consumeTrivia(initial)
     const missing = missingToken(leading.state, 'Identifier')
-    first = Object.freeze({
+    first = {
       state: addDiagnostic(leading.state, Diagnostic.missingToken('Identifier', missing.span)),
-      elements: Object.freeze([...leading.elements, missing]),
-    })
+      elements: [...leading.elements, missing],
+    }
   } else first = expect(initial, 'Identifier', ['Dot', ...following])
   let state = first.state
   let children: ReadonlyArray<SyntaxTree.Element> = first.elements
@@ -99,9 +99,9 @@ export const parseTypePath = (
     const dot = expect(state, 'Dot', ['Identifier', ...following])
     const member = expect(dot.state, 'Identifier', following)
     state = member.state
-    children = Object.freeze([...children, ...dot.elements, ...member.elements])
+    children = [...children, ...dot.elements, ...member.elements]
   }
-  return Object.freeze({ state, node: syntaxNode(state, 'TypePath', children) })
+  return { state, node: syntaxNode(state, 'TypePath', children) }
 }
 
 export const parseTypeArgumentList = (
@@ -125,15 +125,15 @@ export const parseTypeArgumentList = (
     ])
     const separator = expect(lifetime.state, 'Semicolon', [...typeStarts, 'Greater', ...following])
     state = separator.state
-    children = Object.freeze([
+    children = [
       ...children,
       syntaxNode(state, 'EffectEnvironment', [...lifetime.elements, ...separator.elements]),
-    ])
+    ]
   }
   if (nextSignificantKind(state) === 'Greater') {
     const missing = missingToken(state, 'Identifier')
     state = addDiagnostic(state, Diagnostic.missingToken('Identifier', missing.span))
-    children = Object.freeze([...children, missing])
+    children = [...children, missing]
   }
   while (
     nextSignificantKind(state) !== 'Greater' &&
@@ -168,23 +168,23 @@ export const parseTypeArgumentList = (
         ...following,
       ])
       const role = parseTypePath(at.state, ['Comma', 'Greater', ...following])
-      children = Object.freeze([
+      children = [
         ...children,
         syntaxNode(role.state, 'RequirementSelector', [argument.node, ...at.elements, role.node]),
-      ])
+      ]
       state = role.state
     } else {
-      children = Object.freeze([...children, argument.node])
+      children = [...children, argument.node]
       state = argument.state
     }
     if (nextSignificantKind(state) !== 'Comma') break
     const comma = expect(state, 'Comma', [...argumentStarts, 'Greater', ...following])
-    children = Object.freeze([...children, ...comma.elements])
+    children = [...children, ...comma.elements]
     state = comma.state
   }
   if (kind === 'TypeArgumentList' && nextSignificantKind(state) === 'Bang') {
     const failure = parseFailureRow(state, ['Question', 'Greater', ...following])
-    children = Object.freeze([...children, failure.node])
+    children = [...children, failure.node]
     state = failure.state
   }
   if (
@@ -193,32 +193,28 @@ export const parseTypeArgumentList = (
     !nullablePointerStarts(state)
   ) {
     const requirements = parseRequirementRow(state, ['Greater', ...following])
-    children = Object.freeze([...children, requirements.node])
+    children = [...children, requirements.node]
     state = requirements.state
   }
   const right = expect(state, 'Greater', following)
-  return Object.freeze({
+  return {
     state: right.state,
     node: syntaxNode(right.state, kind, [...children, ...right.elements]),
-  })
+  }
 }
 
 export const parseTypeParameterList = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
 ): NodeResult => {
-  const parameterStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
-    'Lifetime',
-    'Identifier',
-    'Question',
-  ])
+  const parameterStarts: ReadonlyArray<Token.TokenKind> = ['Lifetime', 'Identifier', 'Question']
   const left = expect(initial, 'Less', [...parameterStarts, 'Greater', ...following])
   let state = left.state
   let children: ReadonlyArray<SyntaxTree.Element> = left.elements
   if (nextSignificantKind(state) === 'Greater') {
     const missing = missingToken(state, 'Identifier')
     state = addDiagnostic(state, Diagnostic.missingToken('Identifier', missing.span))
-    children = Object.freeze([...children, missing])
+    children = [...children, missing]
   }
   while (
     nextSignificantKind(state) !== 'Greater' &&
@@ -242,14 +238,14 @@ export const parseTypeParameterList = (
         ? expect(name.state, 'Colon', [...argumentStarts, 'Comma', 'Greater', ...following])
         : undefined
     let boundState = colon?.state
-    let boundElements: ReadonlyArray<SyntaxTree.Element> = Object.freeze([])
+    let boundElements: ReadonlyArray<SyntaxTree.Element> = []
     if (colon !== undefined) {
       while (boundState !== undefined) {
         const bound =
           nextSignificantKind(boundState) === 'Lifetime'
             ? parseLifetime(boundState, ['Plus', 'Comma', 'Greater', ...following])
             : parseType(boundState, ['Plus', 'Comma', 'Greater', ...following], true)
-        boundElements = Object.freeze([...boundElements, bound.node])
+        boundElements = [...boundElements, bound.node]
         boundState = bound.state
         if (nextSignificantKind(boundState) !== 'Plus') break
         const plus = expect(boundState, 'Plus', [
@@ -258,12 +254,12 @@ export const parseTypeParameterList = (
           'Greater',
           ...following,
         ])
-        boundElements = Object.freeze([...boundElements, ...plus.elements])
+        boundElements = [...boundElements, ...plus.elements]
         boundState = plus.state
       }
     }
     const completedState = boundState ?? name.state
-    children = Object.freeze([
+    children = [
       ...children,
       syntaxNode(completedState, lifetimeParameter ? 'LifetimeParameter' : 'TypeParameter', [
         ...(marker?.elements ?? []),
@@ -271,18 +267,18 @@ export const parseTypeParameterList = (
         ...(colon?.elements ?? []),
         ...boundElements,
       ]),
-    ])
+    ]
     state = completedState
     if (nextSignificantKind(state) !== 'Comma') break
     const comma = expect(state, 'Comma', [...parameterStarts, 'Greater', ...following])
-    children = Object.freeze([...children, ...comma.elements])
+    children = [...children, ...comma.elements]
     state = comma.state
   }
   const right = expect(state, 'Greater', following)
-  return Object.freeze({
+  return {
     state: right.state,
     node: syntaxNode(right.state, 'TypeParameterList', [...children, ...right.elements]),
-  })
+  }
 }
 
 /** Parses the one callable or Effect representation binder admitted by an opaque result. */
@@ -301,14 +297,14 @@ export const parseOpaqueResultBinderList = (
     nextSignificantKind(bound.state) === 'Comma'
       ? expect(bound.state, 'Greater', following)
       : expect(bound.state, 'Greater', [...typeStarts, ...following])
-  return Object.freeze({
+  return {
     state: right.state,
     node: syntaxNode(right.state, 'TypeParameterList', [
       ...left.elements,
       syntaxNode(bound.state, 'TypeParameter', [...name.elements, ...colon.elements, bound.node]),
       ...right.elements,
     ]),
-  })
+  }
 }
 
 /** Parses one named type reference: a path with an optional applied type-argument list. */
@@ -320,10 +316,10 @@ export const parseNamedTypeReference = (
   const path = parseTypePath(initial, ['Less', ...following], preserveFieldStart)
   if (nextSignificantKind(path.state) !== 'Less') return path
   const arguments_ = parseTypeArgumentList(path.state, 'TypeArgumentList', following)
-  return Object.freeze({
+  return {
     state: arguments_.state,
     node: syntaxNode(arguments_.state, 'AppliedType', [path.node, arguments_.node]),
-  })
+  }
 }
 
 /**
@@ -339,23 +335,21 @@ const parseRowOperand = (initial: State, following: ReadonlyArray<Token.TokenKin
     if (!hasContextualSpelling(path.state, 'at')) return path
     const at = expect(path.state, 'Identifier', ['Identifier', 'Pipe', ...following])
     const role = parseTypePath(at.state, ['Pipe', ...following])
-    return Object.freeze({
+    return {
       state: role.state,
       node: syntaxNode(role.state, 'Requirement', [path.node, ...at.elements, role.node]),
-    })
+    }
   }
   const first = parseMember(initial)
   let state = first.state
-  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([first.node])
+  let children: ReadonlyArray<SyntaxTree.Element> = [first.node]
   while (nextSignificantKind(state) === 'Pipe') {
     const pipe = expect(state, 'Pipe', ['Ampersand', 'Identifier', ...following])
     const member = parseMember(pipe.state)
-    children = Object.freeze([...children, ...pipe.elements, member.node])
+    children = [...children, ...pipe.elements, member.node]
     state = member.state
   }
-  return children.length === 1
-    ? first
-    : Object.freeze({ state, node: syntaxNode(state, 'UnionType', children) })
+  return children.length === 1 ? first : { state, node: syntaxNode(state, 'UnionType', children) }
 }
 
 export const parseTypePrimary = (
@@ -379,14 +373,14 @@ export const parseTypePrimary = (
       callable.node.kind === 'CallableType' || callable.node.kind === 'ForeignFunctionType'
         ? callable.state
         : addDiagnostic(callable.state, Diagnostic.missingToken('FnKeyword', callable.node.span))
-    return Object.freeze({
+    return {
       state,
       node: syntaxNode(
         state,
         callable.node.kind === 'ForeignFunctionType' ? 'ForeignFunctionType' : 'CallableType',
         [...keyword.elements, binders, ...callable.node.children],
       ),
-    })
+    }
   }
   if (isRowWithoutStart(initial)) {
     const keyword = expect(initial, 'Identifier', ['Less', ...following])
@@ -395,7 +389,7 @@ export const parseTypePrimary = (
     const comma = expect(source.state, 'Comma', [...typeStarts, 'Greater', ...following])
     const selected = parseRowOperand(comma.state, ['Greater', ...following])
     const right = expect(selected.state, 'Greater', following)
-    return Object.freeze({
+    return {
       state: right.state,
       node: syntaxNode(right.state, 'RowWithout', [
         ...keyword.elements,
@@ -405,7 +399,7 @@ export const parseTypePrimary = (
         selected.node,
         ...right.elements,
       ]),
-    })
+    }
   }
   if (isExactRepresentationStart(initial)) {
     const keyword = expect(initial, 'Identifier', ['LeftParenthesis', ...following])
@@ -416,7 +410,7 @@ export const parseTypePrimary = (
     ])
     const item = parseNamedTypeReference(left.state, ['RightParenthesis', ...following])
     const right = expect(item.state, 'RightParenthesis', following)
-    return Object.freeze({
+    return {
       state: right.state,
       node: syntaxNode(right.state, 'ExactRepresentationType', [
         ...keyword.elements,
@@ -424,7 +418,7 @@ export const parseTypePrimary = (
         item.node,
         ...right.elements,
       ]),
-    })
+    }
   }
   if (nextSignificantKind(initial) === 'ExternKeyword') {
     const externKeyword = expect(initial, 'ExternKeyword', [
@@ -441,14 +435,14 @@ export const parseTypePrimary = (
       ...following,
     ])
     let state = left.state
-    let parameters: ReadonlyArray<SyntaxTree.Element> = Object.freeze([])
+    let parameters: ReadonlyArray<SyntaxTree.Element> = []
     while (
       nextSignificantKind(state) !== 'RightParenthesis' &&
       nextSignificantKind(state) !== 'Arrow' &&
       nextSignificantKind(state) !== 'EndOfFile'
     ) {
       const parameter = parseType(state, ['Comma', 'RightParenthesis', 'Arrow', ...following])
-      parameters = Object.freeze([...parameters, parameter.node])
+      parameters = [...parameters, parameter.node]
       state = parameter.state
       if (nextSignificantKind(state) !== 'Comma') break
       const comma = expect(state, 'Comma', [
@@ -457,14 +451,14 @@ export const parseTypePrimary = (
         'Arrow',
         ...following,
       ])
-      parameters = Object.freeze([...parameters, ...comma.elements])
+      parameters = [...parameters, ...comma.elements]
       state = comma.state
     }
     const right = expect(state, 'RightParenthesis', ['Arrow', ...following])
     const arrow = expect(right.state, 'Arrow', [...typeStarts, ...following])
     const result = parseType(arrow.state, following)
     const properties = parseFunctionPropertyList(result.state)
-    return Object.freeze({
+    return {
       state: properties.state,
       node: syntaxNode(properties.state, 'ForeignFunctionType', [
         ...externKeyword.elements,
@@ -477,7 +471,7 @@ export const parseTypePrimary = (
         result.node,
         ...properties.elements,
       ]),
-    })
+    }
   }
   const unsafeCallable = nextSignificantKind(initial) === 'UnsafeKeyword'
   const unsafe = unsafeCallable
@@ -492,13 +486,13 @@ export const parseTypePrimary = (
   ) {
     const mode = expect(callableStart, callableMode, typeStarts)
     const subject = parseTypePrimary(mode.state, following, preserveFieldStart)
-    return Object.freeze({
+    return {
       state: subject.state,
       node: syntaxNode(subject.state, subject.node.kind, [
         ...mode.elements,
         ...subject.node.children,
       ]),
-    })
+    }
   }
   if (
     callableMode === 'FnKeyword' ||
@@ -524,14 +518,14 @@ export const parseTypePrimary = (
       ])
       const lifetime = expect(left.state, 'Lifetime', ['Greater', 'LeftParenthesis', ...following])
       const right = expect(lifetime.state, 'Greater', ['LeftParenthesis', ...following])
-      environment = Object.freeze({
+      environment = {
         state: right.state,
         node: syntaxNode(right.state, 'CallableEnvironment', [
           ...left.elements,
           ...lifetime.elements,
           ...right.elements,
         ]),
-      })
+      }
     }
     const left = expect(environment?.state ?? fn.state, 'LeftParenthesis', [
       ...typeStarts,
@@ -540,14 +534,14 @@ export const parseTypePrimary = (
       ...following,
     ])
     let state = left.state
-    let parameters: ReadonlyArray<SyntaxTree.Element> = Object.freeze([])
+    let parameters: ReadonlyArray<SyntaxTree.Element> = []
     while (
       nextSignificantKind(state) !== 'RightParenthesis' &&
       nextSignificantKind(state) !== 'Arrow' &&
       nextSignificantKind(state) !== 'EndOfFile'
     ) {
       const parameter = parseType(state, ['Comma', 'RightParenthesis', 'Arrow', ...following])
-      parameters = Object.freeze([...parameters, parameter.node])
+      parameters = [...parameters, parameter.node]
       state = parameter.state
       if (nextSignificantKind(state) !== 'Comma') break
       const comma = expect(state, 'Comma', [
@@ -556,13 +550,13 @@ export const parseTypePrimary = (
         'Arrow',
         ...following,
       ])
-      parameters = Object.freeze([...parameters, ...comma.elements])
+      parameters = [...parameters, ...comma.elements]
       state = comma.state
     }
     const right = expect(state, 'RightParenthesis', ['Arrow', ...following])
     const arrow = expect(right.state, 'Arrow', [...typeStarts, ...following])
     const result = parseType(arrow.state, following)
-    return Object.freeze({
+    return {
       state: result.state,
       node: syntaxNode(result.state, 'CallableType', [
         ...(unsafe?.elements ?? []),
@@ -575,7 +569,7 @@ export const parseTypePrimary = (
         ...arrow.elements,
         result.node,
       ]),
-    })
+    }
   }
   if (
     nextSignificantKind(initial) === 'Star' ||
@@ -628,7 +622,7 @@ export const parseTypePrimary = (
       state = close.state
     }
     const pointee = parseTypePrimary(state, following)
-    return Object.freeze({
+    return {
       state: pointee.state,
       node: syntaxNode(pointee.state, 'PointerType', [
         ...(nullable?.elements ?? []),
@@ -639,7 +633,7 @@ export const parseTypePrimary = (
         ...qualifiers,
         pointee.node,
       ]),
-    })
+    }
   }
   if (nextSignificantKind(initial) === 'Ampersand') {
     const ampersand = expect(initial, 'Ampersand', [
@@ -669,12 +663,12 @@ export const parseTypePrimary = (
       if (nextSignificantKind(subject.state) === 'At') {
         const at = expect(subject.state, 'At', ['Identifier', ...following])
         const name = expect(at.state, 'Identifier', following)
-        role = Object.freeze({
+        role = {
           state: name.state,
           elements: [...at.elements, ...name.elements],
-        })
+        }
       }
-      return Object.freeze({
+      return {
         state: role?.state ?? subject.state,
         node: syntaxNode(role?.state ?? subject.state, 'ReferenceType', [
           ...ampersand.elements,
@@ -683,7 +677,7 @@ export const parseTypePrimary = (
           subject.node,
           ...(role?.elements ?? []),
         ]),
-      })
+      }
     }
     const left = expect(mut?.state ?? accessState, 'LeftBracket', [
       ...typeStarts,
@@ -692,7 +686,7 @@ export const parseTypePrimary = (
     ])
     const element = parseType(left.state, ['RightBracket', ...following])
     const right = expect(element.state, 'RightBracket', following)
-    return Object.freeze({
+    return {
       state: right.state,
       node: syntaxNode(right.state, 'SliceType', [
         ...ampersand.elements,
@@ -702,7 +696,7 @@ export const parseTypePrimary = (
         element.node,
         ...right.elements,
       ]),
-    })
+    }
   }
   if (nextSignificantKind(initial) === 'LeftParenthesis') {
     const left = expect(initial, 'LeftParenthesis', [
@@ -712,21 +706,21 @@ export const parseTypePrimary = (
     ])
     if (nextSignificantKind(left.state) === 'RightParenthesis') {
       const right = expect(left.state, 'RightParenthesis', following)
-      return Object.freeze({
+      return {
         state: right.state,
         node: syntaxNode(right.state, 'UnitType', [...left.elements, ...right.elements]),
-      })
+      }
     }
     const type = parseType(left.state, ['RightParenthesis', ...following])
     const right = expect(type.state, 'RightParenthesis', following)
-    return Object.freeze({
+    return {
       state: right.state,
       node: syntaxNode(right.state, 'ParenthesizedType', [
         ...left.elements,
         type.node,
         ...right.elements,
       ]),
-    })
+    }
   }
   if (nextSignificantKind(initial) !== 'LeftBracket')
     return parseNamedTypeReference(initial, following, preserveFieldStart)
@@ -739,7 +733,7 @@ export const parseTypePrimary = (
   ])
   const length = expect(semicolon.state, 'DecimalInteger', ['RightBracket', ...following])
   const right = expect(length.state, 'RightBracket', following)
-  return Object.freeze({
+  return {
     state: right.state,
     node: syntaxNode(right.state, 'FixedArrayType', [
       ...left.elements,
@@ -748,7 +742,7 @@ export const parseTypePrimary = (
       ...length.elements,
       ...right.elements,
     ]),
-  })
+  }
 }
 
 export function parseType(
@@ -758,16 +752,14 @@ export function parseType(
 ): NodeResult {
   const first = parseTypePrimary(initial, ['Pipe', ...following], preserveFieldStart)
   let state = first.state
-  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([first.node])
+  let children: ReadonlyArray<SyntaxTree.Element> = [first.node]
   while (nextSignificantKind(state) === 'Pipe') {
     const pipe = expect(state, 'Pipe', [...typeStarts, ...following])
     const member = parseTypePrimary(pipe.state, ['Pipe', ...following], preserveFieldStart)
-    children = Object.freeze([...children, ...pipe.elements, member.node])
+    children = [...children, ...pipe.elements, member.node]
     state = member.state
   }
-  return children.length === 1
-    ? first
-    : Object.freeze({ state, node: syntaxNode(state, 'UnionType', children) })
+  return children.length === 1 ? first : { state, node: syntaxNode(state, 'UnionType', children) }
 }
 
 export const parseReturnType = (
@@ -786,16 +778,16 @@ export const parseReturnType = (
       binders.node,
       result.node,
     ])
-    return Object.freeze({
+    return {
       state: result.state,
       node: syntaxNode(result.state, 'ReturnType', [...arrow.elements, opaque]),
-    })
+    }
   }
   const type = parseType(arrow.state, following)
-  return Object.freeze({
+  return {
     state: type.state,
     node: syntaxNode(type.state, 'ReturnType', [...arrow.elements, type.node]),
-  })
+  }
 }
 
 export const parseFailureRow = (
@@ -804,10 +796,10 @@ export const parseFailureRow = (
 ): NodeResult => {
   const bang = expect(initial, 'Bang', [...typeStarts, ...following])
   const members = parseType(bang.state, following)
-  return Object.freeze({
+  return {
     state: members.state,
     node: syntaxNode(members.state, 'FailureRow', [...bang.elements, members.node]),
-  })
+  }
 }
 
 export const parseRequirement = (
@@ -824,9 +816,9 @@ export const parseRequirement = (
   if (hasContextualSpelling(capability.state, 'at')) {
     const at = expect(capability.state, 'Identifier', ['Identifier', ...following])
     const path = parseTypePath(at.state, following)
-    role = Object.freeze({ state: path.state, elements: [...at.elements, path.node] })
+    role = { state: path.state, elements: [...at.elements, path.node] }
   }
-  return Object.freeze({
+  return {
     state: role?.state ?? capability.state,
     node: syntaxNode(role?.state ?? capability.state, 'Requirement', [
       ...ampersand.elements,
@@ -834,14 +826,14 @@ export const parseRequirement = (
       capability.node,
       ...(role?.elements ?? []),
     ]),
-  })
+  }
 }
 
 export const parseRequirementRow = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
 ): NodeResult => {
-  const memberStarts: ReadonlyArray<Token.TokenKind> = Object.freeze(['Ampersand', 'Identifier'])
+  const memberStarts: ReadonlyArray<Token.TokenKind> = ['Ampersand', 'Identifier']
   const question = expect(initial, 'Question', [...memberStarts, ...following])
   const parseMember = (state: State): NodeResult => {
     if (nextSignificantKind(state) === 'Ampersand') {
@@ -854,17 +846,14 @@ export const parseRequirementRow = (
   }
   let member = parseMember(question.state)
   let state = member.state
-  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
-    ...question.elements,
-    member.node,
-  ])
+  let children: ReadonlyArray<SyntaxTree.Element> = [...question.elements, member.node]
   while (nextSignificantKind(state) === 'Pipe') {
     const pipe = expect(state, 'Pipe', [...memberStarts, ...following])
     member = parseMember(pipe.state)
-    children = Object.freeze([...children, ...pipe.elements, member.node])
+    children = [...children, ...pipe.elements, member.node]
     state = member.state
   }
-  return Object.freeze({ state, node: syntaxNode(state, 'RequirementRow', children) })
+  return { state, node: syntaxNode(state, 'RequirementRow', children) }
 }
 
 export const parseConstraint = (
@@ -875,20 +864,20 @@ export const parseConstraint = (
   if (hasContextualSpelling(subject.state, 'in')) {
     const keyword = expect(subject.state, 'Identifier', [...typeStarts, ...following])
     const source = parseType(keyword.state, following)
-    return Object.freeze({
+    return {
       state: source.state,
       node: syntaxNode(source.state, 'MembershipConstraint', [
         subject.node,
         ...keyword.elements,
         source.node,
       ]),
-    })
+    }
   }
   const provides = expect(subject.state, 'Identifier', [...typeStarts, ...following])
   const selected = parseType(provides.state, ['Identifier', ...following])
   const from = expect(selected.state, 'Identifier', [...typeStarts, ...following])
   const source = parseType(from.state, following)
-  return Object.freeze({
+  return {
     state: source.state,
     node: syntaxNode(source.state, 'ProviderConstraint', [
       subject.node,
@@ -897,7 +886,7 @@ export const parseConstraint = (
       ...from.elements,
       source.node,
     ]),
-  })
+  }
 }
 
 export const parseWhereClause = (
@@ -907,17 +896,14 @@ export const parseWhereClause = (
   const where = expect(initial, 'Identifier', [...typeStarts, ...following])
   let constraint = parseConstraint(where.state, ['Comma', ...following])
   let state = constraint.state
-  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
-    ...where.elements,
-    constraint.node,
-  ])
+  let children: ReadonlyArray<SyntaxTree.Element> = [...where.elements, constraint.node]
   while (nextSignificantKind(state) === 'Comma') {
     const comma = expect(state, 'Comma', [...typeStarts, ...following])
     constraint = parseConstraint(comma.state, ['Comma', ...following])
-    children = Object.freeze([...children, ...comma.elements, constraint.node])
+    children = [...children, ...comma.elements, constraint.node]
     state = constraint.state
   }
-  return Object.freeze({ state, node: syntaxNode(state, 'WhereClause', children) })
+  return { state, node: syntaxNode(state, 'WhereClause', children) }
 }
 
 export const parseParameterList = (initial: State): NodeResult => {
@@ -955,11 +941,11 @@ export const parseParameterList = (initial: State): NodeResult => {
   ) {
     if (kind === 'Ellipsis') {
       const marker = expect(state, 'Ellipsis', ['RightParenthesis'])
-      children = Object.freeze([...children, ...marker.elements])
+      children = [...children, ...marker.elements]
       state = marker.state
       break
     }
-    let modifier: ElementsResult = Object.freeze({ state, elements: Object.freeze([]) })
+    let modifier: ElementsResult = { state, elements: [] }
     if (nextSignificantKind(state) === 'StaticKeyword')
       modifier = expect(state, 'StaticKeyword', [
         'Identifier',
@@ -995,7 +981,7 @@ export const parseParameterList = (initial: State): NodeResult => {
       ...colon.elements,
       type.node,
     ])
-    children = Object.freeze([...children, parameter])
+    children = [...children, parameter]
     state = type.state
     kind = nextSignificantKind(state)
 
@@ -1040,7 +1026,7 @@ export const parseParameterList = (initial: State): NodeResult => {
       'RightBrace',
       'ImportKeyword',
     ])
-    children = Object.freeze([...children, ...comma.elements])
+    children = [...children, ...comma.elements]
     state = comma.state
     kind = nextSignificantKind(state)
   }
@@ -1062,11 +1048,11 @@ export const parseParameterList = (initial: State): NodeResult => {
     'ImportKeyword',
     'StaticKeyword',
   ])
-  return Object.freeze({
+  return {
     state: rightParenthesis.state,
     node: syntaxNode(rightParenthesis.state, 'ParameterList', [
       ...children,
       ...rightParenthesis.elements,
     ]),
-  })
+  }
 }

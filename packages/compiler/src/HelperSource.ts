@@ -5,9 +5,12 @@ import * as CompilationProfile from './CompilationProfile.js'
 import * as HelperCapability from './HelperCapability.js'
 import * as SourceResolver from './SourceResolver.js'
 
-/** Compiles one explicitly rooted source provider without an application or runtime root. */
+/**
+ * Compiles the selected source providers as one program without an application or runtime root.
+ * They share a frontend, which is most of their cost; the object is audited as one unit.
+ */
 export const compile = Effect.fn('HelperSource.compile')(function* (
-  provider: HelperCapability.Provider,
+  providers: ReadonlyArray<HelperCapability.Provider>,
   profile: CompilationProfile.Facts,
 ): Effect.fn.Return<
   {
@@ -21,10 +24,11 @@ export const compile = Effect.fn('HelperSource.compile')(function* (
       operation: 'HelperSource.compile',
       code: 'InvalidSupportProfile',
       subject,
-      origins: [provider.id],
+      origins: providers.map((provider) => provider.id),
     })
-  if (provider.kind !== 'source' || !provider.targets.includes(profile.target.id))
-    return yield* invalid('Provider is not a compatible source provider')
+  for (const provider of providers)
+    if (provider.kind !== 'source' || !provider.targets.includes(profile.target.id))
+      return yield* invalid(`Provider ${provider.id} is not a compatible source provider`)
   const input: CompilationProfile.Input = {
     target: profile.target.id,
     cpu: profile.cpu,
@@ -46,7 +50,14 @@ export const compile = Effect.fn('HelperSource.compile')(function* (
   }).pipe(
     Effect.provide(
       SourceResolver.memory(
-        new Map([['compiler-support/root', new TextEncoder().encode(`import ${provider.root}\n`)]]),
+        new Map([
+          [
+            'compiler-support/root',
+            new TextEncoder().encode(
+              providers.map((provider) => `import ${provider.root}\n`).join(''),
+            ),
+          ],
+        ]),
       ),
     ),
     Effect.mapError((error) => invalid(error.message)),
@@ -58,6 +69,6 @@ export const compile = Effect.fn('HelperSource.compile')(function* (
     mode: profile.optimization === 'none' ? 'debug' : 'release',
     support: true,
   }).pipe(Effect.mapError((failure) => invalid(failure.message)))
-  yield* HelperCapability.verifyExports(provider, artifact.foreignExports, profile.target)
-  return Object.freeze({ artifact, profile: snapshot.profile })
+  yield* HelperCapability.verifyExports(providers, artifact.foreignExports, profile.target)
+  return { artifact, profile: snapshot.profile }
 })

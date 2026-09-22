@@ -58,21 +58,21 @@ export interface Input {
   readonly allCallsDescribed?: boolean
 }
 
-const visibilityBits: Readonly<Record<Visibility, number>> = Object.freeze({
+const visibilityBits: Readonly<Record<Visibility, number>> = {
   zero: 0,
   private: 1,
   protected: 2,
   public: 3,
-})
+}
 
-const inheritanceBits: Readonly<Record<Inheritance, number>> = Object.freeze({
+const inheritanceBits: Readonly<Record<Inheritance, number>> = {
   zero: 0,
   single: 1,
   multiple: 2,
   virtual: 3,
-})
+}
 
-const boolFields: ReadonlyArray<readonly [keyof Input, number, string]> = Object.freeze([
+const boolFields: ReadonlyArray<readonly [keyof Input, number, string]> = [
   ['forwardDeclaration', 2, 'DIFlagFwdDecl'],
   ['appleBlock', 3, 'DIFlagAppleBlock'],
   ['virtual', 5, 'DIFlagVirtual'],
@@ -97,7 +97,7 @@ const boolFields: ReadonlyArray<readonly [keyof Input, number, string]> = Object
   ['bigEndian', 27, 'DIFlagBigEndian'],
   ['littleEndian', 28, 'DIFlagLittleEndian'],
   ['allCallsDescribed', 29, 'DIFlagAllCallsDescribed'],
-])
+]
 
 /**
  * An empty `DIFlags` bit set.
@@ -105,7 +105,7 @@ const boolFields: ReadonlyArray<readonly [keyof Input, number, string]> = Object
  * @category debug information
  * @since 0.0.0
  */
-export const none: DIFlags = Object.freeze({ bits: 0 })
+export const none: DIFlags = { bits: 0 }
 
 /**
  * Packs named debug flags into LLVM's stable bit representation.
@@ -126,7 +126,7 @@ export const make = (input: Input = {}): DIFlags => {
   let bits = visibilityBits[input.visibility ?? 'zero']
   bits |= inheritanceBits[input.inheritance ?? 'zero'] << 16
   for (const [field, shift] of boolFields) if (input[field] === true) bits |= 1 << shift
-  return Object.freeze({ bits: bits >>> 0 })
+  return { bits: bits >>> 0 }
 }
 
 /**
@@ -135,8 +135,9 @@ export const make = (input: Input = {}): DIFlags => {
  * @category debug information
  * @since 0.0.0
  */
-export const combine = (left: DIFlags, right: DIFlags): DIFlags =>
-  Object.freeze({ bits: (left.bits | right.bits) >>> 0 })
+export const combine = (left: DIFlags, right: DIFlags): DIFlags => ({
+  bits: (left.bits | right.bits) >>> 0,
+})
 
 /**
  * Returns LLVM's unsigned 32-bit encoding.
@@ -171,7 +172,7 @@ export const toText = (self: DIFlags): ReadonlyArray<string> => {
   for (const [, shift, name] of boolFields) {
     if (shift > 17 && (self.bits & (1 << shift)) !== 0) values.push(name)
   }
-  return Object.freeze(values.filter((value) => value !== ''))
+  return values.filter((value) => value !== '')
 }
 
 /**

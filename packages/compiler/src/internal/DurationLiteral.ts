@@ -76,7 +76,7 @@ interface UnitInfo {
 }
 
 /** Nanoseconds one whole unit denotes; authored components carry a magnitude and this unit. */
-export const unitNanoseconds: Readonly<Record<Unit, bigint>> = Object.freeze({
+export const unitNanoseconds: Readonly<Record<Unit, bigint>> = {
   w: 604_800_000_000_000n,
   d: 86_400_000_000_000n,
   h: 3_600_000_000_000n,
@@ -85,7 +85,7 @@ export const unitNanoseconds: Readonly<Record<Unit, bigint>> = Object.freeze({
   ms: 1_000_000n,
   us: 1_000n,
   ns: 1n,
-})
+}
 
 const unitInfo = (spelling: string): UnitInfo | undefined => {
   switch (spelling) {
@@ -155,14 +155,14 @@ export const parse = (bytes: ByteSequence, start = 0, end = bytes.length): Parse
       bytes[start + 1] === 0x6f ||
       bytes[start + 1] === 0x4f)
   ) {
-    return Object.freeze({
+    return {
       _tag: 'Invalid',
-      reason: Object.freeze({
+      reason: {
         _tag: 'InvalidAmount',
         start,
         end: invalidAmountEnd(bytes, start, end),
-      }),
-    })
+      },
+    }
   }
 
   const components: Array<Component> = []
@@ -195,25 +195,25 @@ export const parse = (bytes: ByteSequence, start = 0, end = bytes.length): Parse
 
     const amountEnd = index
     if (!digits || !separated || afterSeparator) {
-      return Object.freeze({
+      return {
         _tag: 'Invalid',
-        reason: Object.freeze({
+        reason: {
           _tag: 'InvalidDigitSeparator',
           start: componentStart,
           end: amountEnd,
-        }),
-      })
+        },
+      }
     }
 
     if (!ByteClass.isAsciiLetter(bytes[index])) {
-      return Object.freeze({
+      return {
         _tag: 'Invalid',
-        reason: Object.freeze({
+        reason: {
           _tag: 'InvalidAmount',
           start: componentStart,
           end: invalidAmountEnd(bytes, componentStart, end),
-        }),
-      })
+        },
+      }
     }
 
     const unitStart = index
@@ -233,94 +233,94 @@ export const parse = (bytes: ByteSequence, start = 0, end = bytes.length): Parse
             unitSpelling === 'o' ||
             unitSpelling === 'O'))
       if (exponentOrPrefix && index < end && ByteClass.isDecimalDigit(bytes[index])) {
-        return Object.freeze({
+        return {
           _tag: 'Invalid',
-          reason: Object.freeze({
+          reason: {
             _tag: 'InvalidAmount',
             start: componentStart,
             end: invalidAmountEnd(bytes, componentStart, end),
-          }),
-        })
+          },
+        }
       }
-      return Object.freeze({
+      return {
         _tag: 'Invalid',
-        reason: Object.freeze({
+        reason: {
           _tag: 'UnknownUnit',
           spelling: unitSpelling,
           start: unitStart,
           end: unitEnd,
-        }),
-      })
+        },
+      }
     }
 
     if (seen.has(info.unit)) {
-      return Object.freeze({
+      return {
         _tag: 'Invalid',
-        reason: Object.freeze({
+        reason: {
           _tag: 'RepeatedUnit',
           unit: info.unit,
           start: unitStart,
           end: unitEnd,
-        }),
-      })
+        },
+      }
     }
     if (previous !== undefined && info.rank < previous.rank) {
-      return Object.freeze({
+      return {
         _tag: 'Invalid',
-        reason: Object.freeze({
+        reason: {
           _tag: 'OutOfOrderUnit',
           unit: info.unit,
           previous: previous.unit,
           start: unitStart,
           end: unitEnd,
-        }),
-      })
+        },
+      }
     }
     if (
       components.length > 0 &&
       info.subordinateMaximum !== undefined &&
       amount > info.subordinateMaximum
     ) {
-      return Object.freeze({
+      return {
         _tag: 'Invalid',
-        reason: Object.freeze({
+        reason: {
           _tag: 'SubordinateOutOfRange',
           unit: info.unit,
           amount,
           maximum: info.subordinateMaximum,
           start: componentStart,
           end: unitEnd,
-        }),
-      })
+        },
+      }
     }
 
-    const component = Object.freeze({
+    const component = {
       amount,
       unit: info.unit,
       start: componentStart,
       amountEnd,
       end: unitEnd,
-    })
+    }
     components.push(component)
     seen.add(info.unit)
     previous = info
     nanoseconds += amount * info.nanoseconds
 
     if (index < end && !ByteClass.isDecimalDigit(bytes[index])) {
-      return Object.freeze({
+      return {
         _tag: 'Invalid',
-        reason: Object.freeze({
+        reason: {
           _tag: 'InvalidAmount',
           start: index,
           end: invalidAmountEnd(bytes, index, end),
-        }),
-      })
+        },
+      }
     }
   }
 
-  return Object.freeze({
+  return {
     _tag: 'Valid',
-    components: Object.freeze(components),
+    components: components,
     nanoseconds,
-  })
+  }
 }

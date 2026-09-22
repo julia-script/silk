@@ -86,9 +86,7 @@ export const resolve = Effect.fn('NativeRequirementBinding.resolve')(function* (
       continue
     }
     seen.add(identity)
-    choices.push(
-      Object.freeze({ kind: binding.kind, name: binding.name, alternative: binding.alternative }),
-    )
+    choices.push({ kind: binding.kind, name: binding.name, alternative: binding.alternative })
     // Archives and relocatable objects preserve unresolved link dependencies in their plan. Only
     // object/archive payloads can become members of these forms; source names never trigger search.
     if (
@@ -97,7 +95,7 @@ export const resolve = Effect.fn('NativeRequirementBinding.resolve')(function* (
       binding.kind === 'prebuilt-object' ||
       binding.kind === 'prebuilt-archive'
     )
-      inputs.push(...binding.inputs.map((input) => Object.freeze({ ...input })))
+      inputs.push(...binding.inputs.map((input) => ({ ...input })))
   }
   for (const [identity, requirement] of required) {
     if (needsLink && !seen.has(identity) && !subjects.includes(identity)) {
@@ -113,14 +111,14 @@ export const resolve = Effect.fn('NativeRequirementBinding.resolve')(function* (
       conflicts,
       [...new Set(subjects)].sort(Canonical.compare),
     )
-  return Object.freeze({
-    inputs: Object.freeze(inputs),
-    choices: Object.freeze(choices),
+  return {
+    inputs: inputs,
+    choices: choices,
     identity: Canonical.record(
       'NativeRequirementBindings.v1',
       choices.map((choice) =>
         Canonical.record(NativeRequirement.key(choice), [choice.alternative]),
       ),
     ),
-  })
+  }
 })

@@ -29,7 +29,7 @@ export interface Graph {
   readonly unavailable: ReadonlySet<string>
 }
 
-export const order: ReadonlyArray<Mode> = Object.freeze(['NestedTransfer', 'ExternalPark'])
+export const order: ReadonlyArray<Mode> = ['NestedTransfer', 'ExternalPark']
 
 const compareText = (left: string, right: string): number => {
   if (left < right) {
@@ -43,7 +43,7 @@ const compareText = (left: string, right: string): number => {
 
 const normalizeModes = (modes: Iterable<Mode>): ReadonlyArray<Mode> => {
   const retained = new Set(modes)
-  return Object.freeze(order.filter((mode) => retained.has(mode)))
+  return order.filter((mode) => retained.has(mode))
 }
 
 const comparePath = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): number => {
@@ -56,11 +56,11 @@ const pathTo = (
   origin: string,
   roots: ReadonlySet<string>,
 ): ReadonlyArray<string> | undefined => {
-  if (roots.has(origin)) return Object.freeze([origin])
+  if (roots.has(origin)) return [origin]
   // FIFO traversal with sorted neighbor expansion dequeues paths in exactly
   // (length, lexicographic) order: equal-length paths inherit their parents' order, and a parent
   // ordered before another parent orders every child before the other's children.
-  const pending: Array<ReadonlyArray<string>> = [Object.freeze([origin])]
+  const pending: Array<ReadonlyArray<string>> = [[origin]]
   const visited = new Set([origin])
   for (let cursor = 0; cursor < pending.length; cursor += 1) {
     const path = pending[cursor]
@@ -70,7 +70,7 @@ const pathTo = (
     for (const target of targets) {
       if (visited.has(target)) continue
       visited.add(target)
-      const next = Object.freeze([...path, target])
+      const next = [...path, target]
       if (roots.has(target)) return next
       pending.push(next)
     }
@@ -93,47 +93,41 @@ export const summarize = (graph: Graph): ReadonlyMap<string, Summary> => {
     for (const mode of order) {
       const roots = graph.roots.get(mode) ?? new Set<string>()
       const path = pathTo(graph, node, roots)
-      if (path !== undefined) causes.push(Object.freeze({ mode, path }))
+      if (path !== undefined) causes.push({ mode, path })
     }
     const permitted = graph.permitted.get(node) ?? new Set<Mode>()
     const modes = normalizeModes([...causes.map((cause) => cause.mode), ...permitted])
     let availability: Summary['availability'] = 'Complete'
     if (graph.unavailable.has(node)) availability = 'Unavailable'
     else if (permitted.size > 0) availability = 'Open'
-    summaries.set(
-      node,
-      Object.freeze({
-        _tag: 'SuspensionModeSummary',
-        availability,
-        modes,
-        causes: Object.freeze(causes),
-      }),
-    )
+    summaries.set(node, {
+      _tag: 'SuspensionModeSummary',
+      availability,
+      modes,
+      causes: causes,
+    })
   }
   return summaries
 }
 
-export const direct: Summary = Object.freeze({
+export const direct: Summary = {
   _tag: 'SuspensionModeSummary',
   availability: 'Complete',
-  modes: Object.freeze([]),
-  causes: Object.freeze([]),
-})
+  modes: [],
+  causes: [],
+}
 
 /** Conservatively summarizes one unresolved executable contract from its sealed obligations. */
 export const openExecutable = (
   staticProperties: ReadonlyArray<'Intrinsic.Detached' | 'Intrinsic.NonParking'>,
-): Summary =>
-  Object.freeze({
-    _tag: 'SuspensionModeSummary',
-    availability: 'Open',
-    modes: Object.freeze<ReadonlyArray<Mode>>(
-      staticProperties.includes('Intrinsic.NonParking')
-        ? ['NestedTransfer']
-        : ['NestedTransfer', 'ExternalPark'],
-    ),
-    causes: Object.freeze([]),
-  })
+): Summary => ({
+  _tag: 'SuspensionModeSummary',
+  availability: 'Open',
+  modes: staticProperties.includes('Intrinsic.NonParking')
+    ? ['NestedTransfer']
+    : (['NestedTransfer', 'ExternalPark'] as ReadonlyArray<Mode>),
+  causes: [],
+})
 
 export const has = (self: Summary, mode: Mode): boolean => self.modes.includes(mode)
 
@@ -157,12 +151,12 @@ export const join = (inputs: ReadonlyArray<Summary>): Summary => {
     (left, right) =>
       order.indexOf(left.mode) - order.indexOf(right.mode) || comparePath(left.path, right.path),
   )
-  return Object.freeze({
+  return {
     _tag: 'SuspensionModeSummary',
     availability,
     modes: normalizeModes(inputs.flatMap((input) => input.modes)),
-    causes: Object.freeze(causes),
-  })
+    causes: causes,
+  }
 }
 
 /** Canonical inspection encoding; graph node identities retain the complete causal path. */

@@ -33,13 +33,13 @@ const cstring = (bytes: Uint8Array, offset: number): string => {
   const end = bytes.indexOf(0, offset)
   return text(bytes, offset, (end < 0 ? bytes.length : end) - offset)
 }
-const invalid: Binary = Object.freeze({
+const invalid: Binary = {
   kind: 'object',
   compatible: false,
   imports: [],
   name: undefined,
   versions: [],
-})
+}
 
 /** Reads only the format facts used by supply compatibility; symbol resolution belongs to the linker. */
 export const inspect = (bytes: Uint8Array, target: Target.Target): Binary | undefined => {

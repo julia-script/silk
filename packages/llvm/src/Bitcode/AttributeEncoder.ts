@@ -69,7 +69,7 @@ export const writeAttributes = (
       }
       ids.push(id)
     }
-    return Object.freeze(ids)
+    return ids
   })
 
   if (groups.length > 0) {

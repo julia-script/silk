@@ -11,10 +11,10 @@ pub fn main() -> i32 { return increment(41) }
 `)
 
 const analyze = (persistence: SemanticPersistence.Persistence, bytes = source) =>
-  Frontend.frontendProject(
-    { roots: ['persistence/main'] },
-    { semanticPersistence: persistence },
-  ).pipe(Effect.provide(SourceResolver.memory(new Map([['persistence/main', bytes]]))))
+  Frontend.frontendProject({ roots: ['persistence/main'] }).pipe(
+    Effect.provideService(SemanticPersistence.SemanticPersistence, persistence),
+    Effect.provide(SourceResolver.memory(new Map([['persistence/main', bytes]]))),
+  )
 
 it.effect('restarts through Storage and admits complete units through the shared validator', () =>
   Effect.gen(function* () {

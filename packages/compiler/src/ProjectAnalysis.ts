@@ -125,33 +125,28 @@ const analyze = Effect.fnUntraced(function* (
     if (ordinal > 0 && ordinal % 8 === 0) yield* Effect.yieldNow
     const previousSyntax = previousModules.get(module.name)
     if (previousSyntax === undefined) {
-      syntaxRevisions.set(
-        module.name,
-        Object.freeze({ _tag: 'Fresh', module: module.name, current: module.syntax }),
-      )
+      syntaxRevisions.set(module.name, {
+        _tag: 'Fresh',
+        module: module.name,
+        current: module.syntax,
+      })
       continue
     }
     if (previousSyntax === module.syntax) {
-      syntaxRevisions.set(
-        module.name,
-        Object.freeze({
-          _tag: 'Reused',
-          module: module.name,
-          previous: previousSyntax,
-          current: module.syntax,
-        }),
-      )
-      continue
-    }
-    syntaxRevisions.set(
-      module.name,
-      Object.freeze({
-        _tag: 'Changed',
+      syntaxRevisions.set(module.name, {
+        _tag: 'Reused',
         module: module.name,
         previous: previousSyntax,
         current: module.syntax,
-      }),
-    )
+      })
+      continue
+    }
+    syntaxRevisions.set(module.name, {
+      _tag: 'Changed',
+      module: module.name,
+      previous: previousSyntax,
+      current: module.syntax,
+    })
   }
   const report = tooling.report
   const views = new Map<string, View>()
@@ -163,7 +158,7 @@ const analyze = Effect.fnUntraced(function* (
     views.set(
       rootModule,
       OpaqueRealization.withCatalog(
-        Object.freeze({
+        {
           _tag: 'ProjectAnalysisView',
           realization: 'ProjectView',
           ...frontend,
@@ -172,13 +167,13 @@ const analyze = Effect.fnUntraced(function* (
           closure,
           semanticInvalidation: frontend.semanticInvalidation,
           report,
-        }),
+        },
         OpaqueRealization.catalogOf(unconfigured),
       ),
     )
   }
   return OpaqueRealization.withCatalog(
-    Object.freeze({
+    {
       _tag: 'ProjectAnalysis',
       ...(frontend.profile === undefined ? {} : { profile: frontend.profile }),
       roots: frontend.closure.rootModules,
@@ -194,7 +189,7 @@ const analyze = Effect.fnUntraced(function* (
       semanticSession: frontend.session,
       semanticInvalidation: frontend.semanticInvalidation,
       report,
-    }),
+    },
     OpaqueRealization.catalogOf(unconfigured),
   )
 })

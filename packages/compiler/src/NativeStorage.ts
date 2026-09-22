@@ -39,7 +39,7 @@ export interface Context {
 export const readLocal = (context: Context, local: Mir.LocalId): NativeValue.NativeValue => {
   const type = context.fn.localTypes.at(local.ordinal)
   if (type !== undefined && NativeValue.classify(context.layout, type) === 'Empty')
-    return Object.freeze({ _tag: 'Empty' })
+    return { _tag: 'Empty' }
   const base = context.addressStorage.get(local.ordinal)
   if (
     type !== undefined &&
@@ -116,7 +116,7 @@ export const materialize = Effect.fnUntraced(function* (
   local: Mir.LocalId,
 ): Effect.fn.Return<ReadonlyArray<Value.Input>, LlvmError.LlvmError> {
   const value = readLocal(context, local)
-  if (value._tag === 'Empty') return Object.freeze([])
+  if (value._tag === 'Empty') return []
   if (value._tag === 'Direct') return value.values
   return yield* NativePlace.loadLanes(
     value,
@@ -199,7 +199,7 @@ export const reloadLocal = Effect.fnUntraced(function* (
       ),
     )
   }
-  context.locals.set(root.ordinal, Object.freeze({ _tag: 'Direct', values: Object.freeze(values) }))
+  context.locals.set(root.ordinal, { _tag: 'Direct', values: values })
 })
 
 /** Places an incoming boundary payload in its destination; aggregate lanes are never cached. */
@@ -213,11 +213,11 @@ export const writeLocal = Effect.fnUntraced(function* (
   if (type === undefined) throw new RangeError('Local write lost its type')
   const kind = NativeValue.classify(context.layout, type)
   if (kind === 'Empty') {
-    context.locals.set(root, Object.freeze({ _tag: 'Empty' }))
+    context.locals.set(root, { _tag: 'Empty' })
     return
   }
   if (kind === 'Direct') {
-    context.locals.set(root, Object.freeze({ _tag: 'Direct', values }))
+    context.locals.set(root, { _tag: 'Direct', values })
     return
   }
   const base = context.addressStorage.get(root)
@@ -364,7 +364,7 @@ export const receivePlace = Effect.fnUntraced(function* (
         `project${destination.ordinal}_${ordinal}`,
       ),
     )
-  yield* writeLocal(context, destination.ordinal, Object.freeze(values))
+  yield* writeLocal(context, destination.ordinal, values)
 })
 
 /** Writes one selected value into existing memory, preserving independent value semantics. */
@@ -418,7 +418,7 @@ export const reloadRoots = Effect.fnUntraced(function* (
         ),
       )
     }
-    context.locals.set(root, Object.freeze({ _tag: 'Direct', values: Object.freeze(loaded) }))
+    context.locals.set(root, { _tag: 'Direct', values: loaded })
   }
 })
 
@@ -448,7 +448,7 @@ export const addressLanes = Effect.fnUntraced(function* (context: Context, root:
       ),
     )
   }
-  return Object.freeze(pointers)
+  return pointers
 })
 
 /** Stores every physical lane of an address-taken root into its stable byte storage. */
@@ -592,6 +592,6 @@ export const reloadAddressRoot = Effect.fnUntraced(function* (context: Context, 
       ),
     )
   }
-  const frozen = Object.freeze(values)
-  context.locals.set(root, Object.freeze({ _tag: 'Direct', values: frozen }))
+  const frozen = values
+  context.locals.set(root, { _tag: 'Direct', values: frozen })
 })

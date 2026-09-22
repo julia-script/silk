@@ -446,7 +446,7 @@ export type PatternFieldState =
       readonly field: DeclarationFacts.FieldFact
       readonly cause: Diagnostic.Identity<Location.Location>
     }
-  | { readonly _tag: 'Unavailable' }
+  | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity<Location.Location> }
 
 export interface PatternFieldFact {
   readonly _tag: 'PatternField'
@@ -1513,20 +1513,20 @@ export interface Result {
 export const sourceBodyCount = (self: Result): number =>
   self.bodies.reduce((sum, body) => sum + (body.hidden ? 0 : 1), 0)
 
-export const compatible: ReturnCompatibility = Object.freeze({ _tag: 'Compatible' })
-export const unavailableCompatibility: ReturnCompatibility = Object.freeze({ _tag: 'Unavailable' })
-export const availableI32ExpressionType: ExpressionTypeFact = Object.freeze({
+export const compatible: ReturnCompatibility = { _tag: 'Compatible' }
+export const unavailableCompatibility: ReturnCompatibility = { _tag: 'Unavailable' }
+export const availableI32ExpressionType: ExpressionTypeFact = {
   _tag: 'Available',
   type: 'i32',
-})
-export const availableUsizeExpressionType: ExpressionTypeFact = Object.freeze({
+}
+export const availableUsizeExpressionType: ExpressionTypeFact = {
   _tag: 'Available',
   type: 'usize',
-})
-export const availableBoolExpressionType: ExpressionTypeFact = Object.freeze({
+}
+export const availableBoolExpressionType: ExpressionTypeFact = {
   _tag: 'Available',
   type: 'bool',
-})
+}
 export const availableExpressionType = (type: SemanticType): ExpressionTypeFact => {
   if (type === 'i32') {
     return availableI32ExpressionType
@@ -1537,9 +1537,9 @@ export const availableExpressionType = (type: SemanticType): ExpressionTypeFact 
   if (type === 'bool') {
     return availableBoolExpressionType
   }
-  return Object.freeze({ _tag: 'Available', type })
+  return { _tag: 'Available', type }
 }
-export const unavailableExpressionType: ExpressionTypeFact = Object.freeze({ _tag: 'Unavailable' })
+export const unavailableExpressionType: ExpressionTypeFact = { _tag: 'Unavailable' }
 
 export const typesCompatible = (
   source: SemanticType,
@@ -1623,7 +1623,7 @@ export const representationJoinDiagnostic = (
     : Diagnostic.divergentRepresentationJoin(
         Type.encodeGenericArgument(divergence.left),
         Type.encodeGenericArgument(divergence.right),
-        Object.freeze([expectedOrigin, actualOrigin]),
+        [expectedOrigin, actualOrigin],
         span,
       )
 }
@@ -1691,16 +1691,14 @@ const qualifierName = (type: AuthoredHir.Type): AuthoredHir.Name | undefined => 
 export const referenceNames = (node: AuthoredHir.Expression): ReadonlyArray<AuthoredHir.Name> => {
   const callee = callCallee(node)
   if (callee._tag === 'PipelineExpression') return referenceNames(callee.target)
-  if (callee._tag === 'IdentifierExpression') return Object.freeze([callee.name])
+  if (callee._tag === 'IdentifierExpression') return [callee.name]
   if (callee._tag === 'MemberExpression') {
     const qualifier = qualifierName(callee.selector.subject)
-    return qualifier === undefined
-      ? Object.freeze([])
-      : Object.freeze([qualifier, callee.selector.member])
+    return qualifier === undefined ? [] : [qualifier, callee.selector.member]
   }
-  if (callee._tag !== 'FieldExpression') return Object.freeze([])
+  if (callee._tag !== 'FieldExpression') return []
   const qualifier = referenceNames(callee.subject).at(-1)
-  return qualifier === undefined ? Object.freeze([]) : Object.freeze([qualifier, callee.field])
+  return qualifier === undefined ? [] : [qualifier, callee.field]
 }
 
 export const referencePath = (
@@ -1710,9 +1708,8 @@ export const referencePath = (
   const names = referenceNames(node)
   const member = names.at(-1)
   const qualifier = names.length > 1 ? names.at(0) : undefined
-  if (member === undefined)
-    return Object.freeze({ _tag: 'UnavailableReferencePath', anchor: node.anchor })
-  return Object.freeze({
+  if (member === undefined) return { _tag: 'UnavailableReferencePath', anchor: node.anchor }
+  return {
     _tag: 'ReferencePath',
     ...(qualifier === undefined
       ? {}
@@ -1722,7 +1719,7 @@ export const referencePath = (
         }),
     memberSpelling: SemanticContext.nameText(context, member) ?? '',
     memberAnchor: member.anchor,
-  })
+  }
 }
 
 export const lookupParameter = DeclarationFacts.lookupParameter
@@ -1798,36 +1795,36 @@ export const argumentFact = (
       return fact.borrowRoot
     if (fact._tag !== 'Identifier') return undefined
     if (fact.reference._tag === 'ResolvedBinding')
-      return Object.freeze({
+      return {
         _tag: 'BindingRoot' as const,
         binding: fact.reference.binding,
-        path: Object.freeze([]),
-      })
+        path: [],
+      }
     if (fact.reference._tag === 'Resolved')
-      return Object.freeze({
+      return {
         _tag: 'ParameterRoot' as const,
         parameter: fact.reference.parameter,
-        path: Object.freeze([]),
-      })
+        path: [],
+      }
     if (fact.reference._tag === 'ResolvedPattern')
-      return Object.freeze({
+      return {
         _tag: 'PatternRoot' as const,
         binding: fact.reference.binding,
-        path: Object.freeze([]),
-      })
+        path: [],
+      }
     return undefined
   })()
-  return Object.freeze({
+  return {
     _tag: 'Argument',
-    id: Object.freeze({
+    id: {
       _tag: 'ArgumentId',
       ordinal,
-    }),
+    },
     expression,
     ...(borrowRoot === undefined ? {} : { borrowRoot }),
     type,
     anchor,
-  })
+  }
 }
 
 import { copyAssumptionsOf } from './CallResolution.js'
@@ -2190,7 +2187,7 @@ const callableFlowOf = (
     leading.every((statement) => statement._tag === 'Bind')
       ? callableSourceOf(terminal.expression, new Set(), tirBindings, index)
       : undefined
-  return Object.freeze({
+  return {
     ...(source === undefined
       ? {}
       : {
@@ -2206,8 +2203,8 @@ const callableFlowOf = (
             source,
           },
         }),
-    escapes: Object.freeze(escapes),
-  })
+    escapes: escapes,
+  }
 }
 
 /** The parameter a relay body hands back, once the relays it calls are resolved. */
@@ -2268,7 +2265,7 @@ const constrainedCallableEscapeDiagnostics = (
         else reject(argument.at)
       if (escape.result !== undefined && !relayed) reject(escape.result)
     }
-  return Object.freeze(diagnostics)
+  return diagnostics
 }
 
 const lexicalScopesOf = (
@@ -2286,30 +2283,25 @@ const lexicalScopesOf = (
       readonly bindings?: ReadonlyArray<BindingDeclarationFact>
       readonly patternBindings?: ReadonlyArray<PatternBindingFact>
     }): LexicalScopeId => {
-      const id = Object.freeze({
+      const id = {
         _tag: 'LexicalScopeId' as const,
         function: fn.declaration.id,
         ordinal,
-      })
+      }
       ordinal += 1
-      scopes.push(
-        Object.freeze({
-          _tag: 'LexicalScope',
-          id,
-          ...(options.parent === undefined ? {} : { parent: options.parent }),
-          first: options.first,
-          last: options.last ?? options.first,
-          parameters: Object.freeze(Array.from(options.parameters ?? [])),
-          // A scope names its locals; their initializers are working records and stay behind.
-          bindings: Object.freeze(
-            (options.bindings ?? []).map(
-              ({ initializer: _initializer, exactCallable: _exactCallable, ...local }) =>
-                Object.freeze(local),
-            ),
-          ),
-          patternBindings: Object.freeze(Array.from(options.patternBindings ?? [])),
-        }),
-      )
+      scopes.push({
+        _tag: 'LexicalScope',
+        id,
+        ...(options.parent === undefined ? {} : { parent: options.parent }),
+        first: options.first,
+        last: options.last ?? options.first,
+        parameters: Array.from(options.parameters ?? []),
+        // A scope names its locals; their initializers are working records and stay behind.
+        bindings: (options.bindings ?? []).map(
+          ({ initializer: _initializer, exactCallable: _exactCallable, ...local }) => local,
+        ),
+        patternBindings: Array.from(options.patternBindings ?? []),
+      })
       return id
     }
     const anchorOf = (statement: Tir.Statement): AuthoredHir.Anchor => statement.origin.anchor
@@ -2443,7 +2435,7 @@ const lexicalScopesOf = (
     }
     visitStatements(fn.statements, undefined, fn.declaration.anchor)
   }
-  return Object.freeze(scopes)
+  return scopes
 }
 
 /** Elaborates every declaration body into immutable facts and the module's TIR. */
@@ -2472,13 +2464,11 @@ const runtimeTirFunction = (
   index: DeclarationIndex.Index,
   builder: BodyBuilder.BodyBuilder,
 ): Tir.TirFunction => {
-  const originalEntryRegion =
-    fact.regionOrder.at(0) ??
-    Object.freeze({
-      _tag: 'TirRegion' as const,
-      function: fact.declaration.id,
-      ordinal: 0,
-    })
+  const originalEntryRegion = fact.regionOrder.at(0) ?? {
+    _tag: 'TirRegion' as const,
+    function: fact.declaration.id,
+    ordinal: 0,
+  }
   const baseContract = Tir.contractOf(fact.declaration)
   if (
     fact.declaration.functionKind === 'Effect' &&
@@ -2491,7 +2481,7 @@ const runtimeTirFunction = (
       0,
       index,
       copyAssumptionsOf(fact.declaration),
-      Object.freeze({ builder }),
+      { builder },
     )
     // Every runtime argument enters the deferred environment at construction, even when the body
     // never reads it. Retaining declaration order also retains reverse-argument cleanup order.
@@ -2506,7 +2496,7 @@ const runtimeTirFunction = (
           return []
         const declared = parameter.declaredType
         return [
-          Object.freeze({
+          {
             _tag: 'EffectCapture',
             reference: parameter,
             access:
@@ -2515,7 +2505,7 @@ const runtimeTirFunction = (
                 : 'Take',
             span: context.spanOf(parameter.anchor),
             anchor: parameter.anchor,
-          }),
+          },
         ]
       },
     )
@@ -2529,7 +2519,7 @@ const runtimeTirFunction = (
         if (capture.reference._tag !== 'ParameterDeclaration') return capture
         const declared = capture.reference.declaredType
         if (declared._tag !== 'Resolved' || Type.isSlice(declared.type)) return capture
-        return Object.freeze({
+        return {
           ...capture,
           access: ConformanceProof.copyType(
             index,
@@ -2538,7 +2528,7 @@ const runtimeTirFunction = (
           )
             ? ('Copy' as const)
             : ('Take' as const),
-        })
+        }
       })
     const semanticCaptureAccess = (capture: EffectCaptureFact): Type.Effect['access'] | 'Copy' => {
       if (capture.reference._tag !== 'ParameterDeclaration') return capture.access
@@ -2568,79 +2558,67 @@ const runtimeTirFunction = (
     )
     const siteAnchor = fact.bodyAnchor ?? fact.declaration.anchor
     const siteSpan = context.spanOf(siteAnchor)
-    const entryRegion: Tir.RegionId = Object.freeze({
+    const entryRegion: Tir.RegionId = {
       _tag: 'TirRegion',
       function: fact.declaration.id,
       ordinal: Math.max(-1, ...fact.regionOrder.map((region) => region.ordinal)) + 1,
-    })
-    const effectBlock = BodyBuilder.node(
-      builder,
-      Object.freeze({
-        _tag: 'EffectBlock',
-        site: Tir.effectRootSite(
-          builder.artifact,
-          fact.declaration.id.ordinal,
-          fact.declaration.canonical._tag === 'Canonical'
-            ? fact.declaration.canonical.id
-            : undefined,
-        ),
-        statements: fact.statements,
-        captures: Object.freeze(
-          captures.map((capture) =>
-            Object.freeze({
-              ...(capture.reference._tag === 'BindingFact'
-                ? { binding: BodyBuilder.localId(builder, capture.reference.id) }
-                : {}),
-              ...(capture.reference._tag === 'PatternBinding'
-                ? { pattern: BodyBuilder.localId(builder, capture.reference.id) }
-                : {}),
-              ...(capture.reference._tag === 'ParameterDeclaration'
-                ? { parameter: BodyBuilder.localId(builder, capture.reference.id) }
-                : {}),
-              access: capture.access,
-              span: capture.span,
-            }),
-          ),
-        ),
-        type,
-        span: siteSpan,
-        origin: Tir.synthetic(siteAnchor, 'effect-body'),
-      }),
-    ) as Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }>
-    return Object.freeze({
+    }
+    const effectBlock = BodyBuilder.node(builder, {
+      _tag: 'EffectBlock',
+      site: Tir.effectRootSite(
+        builder.artifact,
+        fact.declaration.id.ordinal,
+        fact.declaration.canonical._tag === 'Canonical' ? fact.declaration.canonical.id : undefined,
+      ),
+      statements: fact.statements,
+      captures: captures.map((capture) => ({
+        ...(capture.reference._tag === 'BindingFact'
+          ? { binding: BodyBuilder.localId(builder, capture.reference.id) }
+          : {}),
+        ...(capture.reference._tag === 'PatternBinding'
+          ? { pattern: BodyBuilder.localId(builder, capture.reference.id) }
+          : {}),
+        ...(capture.reference._tag === 'ParameterDeclaration'
+          ? { parameter: BodyBuilder.localId(builder, capture.reference.id) }
+          : {}),
+        access: capture.access,
+        span: capture.span,
+      })),
+      type,
+      span: siteSpan,
+      origin: Tir.synthetic(siteAnchor, 'effect-body'),
+    }) as Extract<Tir.Expression, { readonly _tag: 'EffectBlock' }>
+    return {
       _tag: 'TirFunction',
       declaration: fact.declaration,
-      contract: Object.freeze({
+      contract: {
         _tag: 'Contract',
         unsafe: baseContract.unsafe,
         parameters: baseContract.parameters,
         result: type,
         constraints: baseContract.constraints,
-      }),
+      },
       entryRegion,
-      regionOrder: Object.freeze([entryRegion, ...fact.regionOrder]),
-      statements: Object.freeze([
-        BodyBuilder.node(
-          builder,
-          Object.freeze({
-            _tag: 'Return' as const,
-            expression: effectBlock,
-            region: entryRegion,
-            span: siteSpan,
-            origin: Tir.synthetic(siteAnchor, 'effect-return'),
-          }),
-        ),
-      ]),
-    })
+      regionOrder: [entryRegion, ...fact.regionOrder],
+      statements: [
+        BodyBuilder.node(builder, {
+          _tag: 'Return' as const,
+          expression: effectBlock,
+          region: entryRegion,
+          span: siteSpan,
+          origin: Tir.synthetic(siteAnchor, 'effect-return'),
+        }),
+      ],
+    }
   }
-  return Object.freeze({
+  return {
     _tag: 'TirFunction',
     declaration: fact.declaration,
     contract: baseContract,
     entryRegion: originalEntryRegion,
     regionOrder: fact.regionOrder,
     statements: fact.statements,
-  })
+  }
 }
 
 /**
@@ -2693,18 +2671,12 @@ const staticStructureOf = (
 const staticIterationRows = (
   iterations: ReadonlyArray<StaticIterationFact>,
 ): ReadonlyArray<StaticIterationRow> =>
-  Object.freeze(
-    iterations.map((iteration) =>
-      Object.freeze({
-        at: iteration.anchor,
-        state: iteration.state,
-        elements: Object.freeze(iteration.scopes.map((scope) => scope.binding.staticValue)),
-        nested: Object.freeze(
-          iteration.scopes.map((scope) => staticIterationRows(scope.staticIterations)),
-        ),
-      }),
-    ),
-  )
+  iterations.map((iteration) => ({
+    at: iteration.anchor,
+    state: iteration.state,
+    elements: iteration.scopes.map((scope) => scope.binding.staticValue),
+    nested: iteration.scopes.map((scope) => staticIterationRows(scope.staticIterations)),
+  }))
 
 const expressionTypesOf = (
   fact: FunctionConstruction,
@@ -2719,16 +2691,14 @@ const expressionTypesOf = (
         semantic?._tag === 'CallableSection' && semantic.anonymous !== undefined
           ? SemanticDisplay.anonymousCallable(semantic, semantic.anonymous)
           : undefined
-      rows.push(
-        Object.freeze({
-          at: expression.origin.anchor,
-          type: expression.type,
-          ...(presentation === undefined ? {} : { presentation }),
-        }),
-      )
+      rows.push({
+        at: expression.origin.anchor,
+        type: expression.type,
+        ...(presentation === undefined ? {} : { presentation }),
+      })
     },
   })
-  return Object.freeze(rows)
+  return rows
 }
 
 /** A `static fn` body keeps its static structure: it runs in the evaluator and never at run time. */
@@ -2736,17 +2706,18 @@ const staticTirFunction = (
   context: SemanticContext.SemanticContext,
   fact: FunctionConstruction,
   builder: BodyBuilder.BodyBuilder,
-): Tir.TirFunction =>
-  Object.freeze({
-    _tag: 'TirFunction',
-    declaration: fact.declaration,
-    contract: Tir.contractOf(fact.declaration),
-    entryRegion:
-      fact.regionOrder.at(0) ??
-      Object.freeze({ _tag: 'TirRegion' as const, function: fact.declaration.id, ordinal: 0 }),
-    regionOrder: fact.regionOrder,
-    statements: staticLowering(context, builder).statements(fact.statements),
-  })
+): Tir.TirFunction => ({
+  _tag: 'TirFunction',
+  declaration: fact.declaration,
+  contract: Tir.contractOf(fact.declaration),
+  entryRegion: fact.regionOrder.at(0) ?? {
+    _tag: 'TirRegion' as const,
+    function: fact.declaration.id,
+    ordinal: 0,
+  },
+  regionOrder: fact.regionOrder,
+  statements: staticLowering(context, builder).statements(fact.statements),
+})
 
 /**
  * A checked body as one revision reads it. The body itself names authored nodes only; every
@@ -2761,17 +2732,17 @@ export const presentBody = (
   const results =
     stamped.lifetimes === undefined
       ? stamped
-      : Object.freeze({
+      : {
           ...stamped,
           lifetimes: LifetimeFlow.present(stamped.lifetimes, context),
-        })
-  return Object.freeze({
+        }
+  return {
     artifact: self.artifact,
     declaration,
     hidden: self.hidden,
     function: Tir.present(self.function, context.spanOf, declaration),
     results,
-  })
+  }
 }
 
 /** Publishes one analyzed body: its nodes, when it runs, and the tables later stages read. */
@@ -2781,15 +2752,15 @@ export const checkedBody = (
   fact: FunctionConstruction,
   /** Set for a compiler-made body: the artifact whose construction produced it. */
   parent?: Tir.ArtifactId,
-  request: Tir.ArtifactId['request'] = Object.freeze({ _tag: 'Check' }),
+  request: Tir.ArtifactId['request'] = { _tag: 'Check' },
   construction?: BodyBuilder.BodyBuilder,
 ): CheckedBody => {
   const hidden = parent !== undefined
-  const artifact: Tir.ArtifactId = Object.freeze({
+  const artifact: Tir.ArtifactId = {
     owner: fact.declaration.owner,
     request,
     ...(parent === undefined ? {} : { parent }),
-  })
+  }
   const builder = construction ?? BodyBuilder.make(artifact)
   if (Tir.artifactKey(builder.artifact) !== Tir.artifactKey(artifact))
     throw new RangeError('TIR body builder belongs to another artifact')
@@ -2800,9 +2771,9 @@ export const checkedBody = (
       : runtimeTirFunction(context, fact, index, builder),
   )
   const staticStructure = staticStructureOf(fact, index, builder)
-  const results: BodyResults = Object.freeze({
-    evidence: Object.freeze(Array.from(builder.evidence)),
-    causes: Object.freeze(Array.from(builder.causes)),
+  const results: BodyResults = {
+    evidence: Array.from(builder.evidence),
+    causes: Array.from(builder.causes),
     occurrences: fact.occurrences,
     hints: fact.hints,
     opaqueEvidence: fact.opaqueEvidence,
@@ -2813,14 +2784,14 @@ export const checkedBody = (
     ...(staticStructure === undefined ? {} : { staticStructure }),
     expressionTypes: expressionTypesOf(fact, builder),
     staticIterations: staticIterationRows(fact.staticIterations),
-  })
-  return Object.freeze({
+  }
+  return {
     artifact,
     declaration: fact.declaration,
     hidden,
     function: lowered,
     results,
-  })
+  }
 }
 
 export const elaborateModule = (input: Input): Result => {
@@ -2848,32 +2819,29 @@ export const elaborateModule = (input: Input): Result => {
       : [],
   )
   const all = units.flatMap((unit) => unit.bodies)
-  const bodies = Object.freeze([
-    ...all.filter((body) => !body.hidden),
-    ...all.filter((body) => body.hidden),
-  ])
-  const tir: Tir.Module = Object.freeze({
+  const bodies = [...all.filter((body) => !body.hidden), ...all.filter((body) => body.hidden)]
+  const tir: Tir.Module = {
     _tag: 'TirModule',
     module: authored.module.owner.module,
-    functions: Object.freeze(
-      bodies.flatMap((body) => (body.declaration.phase === 'Static' ? [] : [body.function])),
+    functions: bodies.flatMap((body) =>
+      body.declaration.phase === 'Static' ? [] : [body.function],
     ),
-  })
+  }
 
-  const result: Result = Object.freeze({
+  const result: Result = {
     _tag: 'Elaboration',
     authored,
-    generatedAggregates: Object.freeze(bodies.flatMap((body) => body.results.aggregates)),
-    lexicalScopes: Object.freeze(bodies.flatMap((body) => body.results.scopes)),
+    generatedAggregates: bodies.flatMap((body) => body.results.aggregates),
+    lexicalScopes: bodies.flatMap((body) => body.results.scopes),
     tir,
     bodies,
-    diagnostics: Object.freeze([
+    diagnostics: [
       ...headers.diagnostics,
       ...constantDiagnostics,
       ...units.flatMap((unit) => unit.diagnostics),
       ...constrainedCallableEscapeDiagnostics(bodies),
-    ]),
-  })
+    ],
+  }
   return result
 }
 

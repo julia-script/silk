@@ -42,13 +42,13 @@ export const make = (
       : create.parameterTypes.at(create.diagnosticParameter + 1)
   if (Mir.hasDiagnosticObservation(program) && diagnosticCauseType === undefined)
     throw new RangeError('Storage bootstrap lost its diagnostic cause signature')
-  return Object.freeze({
+  return {
     ...(diagnosticCauseType === undefined ? {} : { diagnosticCauseType }),
     create: handle('create'),
     acquire: handle('acquire'),
     release: handle('release'),
     destroy: handle('destroy'),
-  })
+  }
 }
 
 /** The fifth transfer word carries the invocation's storage state. */

@@ -1054,24 +1054,24 @@ export const executableLifetimes = (
   if (synthesized || explicitEnvironment !== undefined)
     lifetimeBounds.push(...retained.map((longer) => ({ longer, shorter: environment })))
   typeOutlives.push(...genericStorage.map((type) => ({ type, lifetime: environment })))
-  return Object.freeze({
+  return {
     environment,
-    lifetimeBinders: Object.freeze(lifetimeBinders),
+    lifetimeBinders: lifetimeBinders,
     lifetimeBounds: Lifetime.assumptions(lifetimeBounds).bounds,
     typeOutlives: Type.normalizeTypeOutlives(typeOutlives),
-  })
+  }
 }
 
 /** Row normalization has no stored values and therefore no retained environment. */
-const rowLifetimes: Type.ExecutableLifetimes = Object.freeze({
+const rowLifetimes: Type.ExecutableLifetimes = {
   environment: Lifetime.staticLifetime,
-  lifetimeBinders: Object.freeze([]),
-})
+  lifetimeBinders: [],
+}
 
 /** Adapts a resolved source callable to the same contract consumed by sealed intrinsics. */
 export const callableContract = (
   declaration: DeclarationFact | ServiceOperationFact,
-  enclosingTypeParameters: ReadonlyArray<TypeParameterFact> = Object.freeze([]),
+  enclosingTypeParameters: ReadonlyArray<TypeParameterFact> = [],
 ): CallableContract.CallableContract => {
   const success = declaration.returnType._tag === 'Resolved' ? declaration.returnType.type : 'never'
   const result =
@@ -1094,10 +1094,10 @@ export const callableContract = (
     parameters: declaration.parameters.flatMap((parameter) =>
       parameter.declaredType._tag === 'Resolved'
         ? [
-            Object.freeze({
+            {
               type: parameter.declaredType.type,
               mode: contractParameterMode(parameter.declaredType.type),
-            }),
+            },
           ]
         : [],
     ),
@@ -1225,14 +1225,12 @@ const interfaceOperationContract = (
   dependencyEligible: boolean,
   capability: Type.Nominal | undefined,
 ): InterfaceOperationContractFact => {
-  const authored = operation.parameters.map((parameter): InterfaceOperandFact =>
-    Object.freeze({
-      _tag: 'InterfaceOperand',
-      parameter,
-      type: parameter.declaredType,
-      access: interfaceOperandAccess(parameter.declaredType),
-    }),
-  )
+  const authored = operation.parameters.map((parameter): InterfaceOperandFact => ({
+    _tag: 'InterfaceOperand',
+    parameter,
+    type: parameter.declaredType,
+    access: interfaceOperandAccess(parameter.declaredType),
+  }))
   // Only ambient dependency syntax (`? &Service` on the operation itself) obtains the provider
   // operand from the Effect environment; an operation written without it keeps exactly the
   // contract the equivalent interface operation has.
@@ -1255,36 +1253,36 @@ const interfaceOperationContract = (
             provider,
             executableLifetimes(operation).environment,
           )
-          const declaredType: DeclaredTypeFact = Object.freeze({
+          const declaredType: DeclaredTypeFact = {
             _tag: 'Resolved',
             type,
             spelling: Type.encode(type),
             anchor: operation.anchor,
-          })
-          const parameter: ParameterFact = Object.freeze({
+          }
+          const parameter: ParameterFact = {
             _tag: 'ParameterDeclaration',
-            id: Object.freeze({ _tag: 'ParameterId', function: operation.id, ordinal: -1 }),
-            name: Object.freeze({
+            id: { _tag: 'ParameterId', function: operation.id, ordinal: -1 },
+            name: {
               _tag: 'Present',
               spelling: 'self',
               anchor: operation.anchor,
-            }),
+            },
             phase: 'Runtime',
             bindingMutability: 'Immutable',
             declaredType,
             anchor: operation.anchor,
-          })
+          }
           return [
-            Object.freeze({
+            {
               _tag: 'InterfaceOperand' as const,
               parameter,
               type: declaredType,
               access: serviceAccess,
-            }),
+            },
           ]
         })()
-  const operands = Object.freeze([...receiver, ...authored])
-  return Object.freeze({
+  const operands = [...receiver, ...authored]
+  return {
     _tag: 'InterfaceOperationContract',
     declaration: operation,
     ...(provider === undefined ? {} : { provider }),
@@ -1296,7 +1294,7 @@ const interfaceOperationContract = (
     failureRow: operation.failureRow,
     requirementRow: operation.requirementRow,
     receiverAccess: interfaceReceiverAccess(operands, provider),
-  })
+  }
 }
 
 export const interfaceOperationContracts = (
@@ -1311,10 +1309,8 @@ export const interfaceOperationContracts = (
           contract.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
         )
       : undefined
-  return Object.freeze(
-    operations.map((operation) =>
-      interfaceOperationContract(operation, contract.self, contract.dependencyEligible, capability),
-    ),
+  return operations.map((operation) =>
+    interfaceOperationContract(operation, contract.self, contract.dependencyEligible, capability),
   )
 }
 
@@ -1328,19 +1324,19 @@ const substituteDeclaredTypeFact = (
     const lifetime = Type.substituteLifetime(fact.lifetime, substitution)
     return target === fact.target && Lifetime.equals(lifetime, fact.lifetime)
       ? fact
-      : Object.freeze({
+      : {
           ...fact,
           lifetime,
           target,
           spelling: `&${Lifetime.display(lifetime)} ${fact.access === 'Exclusive' ? 'mut ' : ''}${target._tag === 'Unavailable' ? '_' : target.spelling}`,
-        })
+        }
   }
   // ponytail: Callable, Applied, and Union facts keep their `Self` spelling; recurse when a
   // presentation needs `fn(Self) -> U` closed too.
   if (fact._tag !== 'Resolved') return fact
   const type = Type.substitute(fact.type, substitution)
   // The spelling stays source-like: the local owner reads `Option<T>`, not `main.Option<T>`.
-  return Object.freeze({ ...fact, type, spelling: Presentation.type(type, module) })
+  return { ...fact, type, spelling: Presentation.type(type, module) }
 }
 
 const substituteRowExpressionDecision = (
@@ -1354,31 +1350,29 @@ const substituteRowExpressionDecision = (
     case 'UnavailableRowExpression':
       return fact
     case 'FailureMemberExpression':
-      return Object.freeze({
+      return {
         ...fact,
         member: substituteDeclaredTypeFact(fact.member, substitution, module),
-      })
+      }
     case 'RequirementMemberExpression': {
-      return Object.freeze({
+      return {
         ...fact,
         capability: substituteDeclaredTypeFact(fact.capability, substitution, module),
-      })
+      }
     }
     case 'UnionRowExpression':
-      return Object.freeze({
+      return {
         ...fact,
-        operands: Object.freeze(
-          fact.operands.map((operand) =>
-            substituteRowExpressionDecision(operand, substitution, module),
-          ),
+        operands: fact.operands.map((operand) =>
+          substituteRowExpressionDecision(operand, substitution, module),
         ),
-      })
+      }
     case 'WithoutRowExpression':
-      return Object.freeze({
+      return {
         ...fact,
         source: substituteRowExpressionDecision(fact.source, substitution, module),
         selected: substituteRowExpressionDecision(fact.selected, substitution, module),
-      })
+      }
   }
 }
 
@@ -1432,29 +1426,24 @@ export const closeConformanceSelf = (
   )
     return declaration
   if (!rowsMentionSelf || Type.equals(rowsBefore, rowsType)) {
-    return Object.freeze({
+    return {
       ...declaration,
-      parameters: Object.freeze(
-        declaration.parameters.map((parameter) =>
-          Object.freeze({ ...parameter, declaredType: closeFact(parameter.declaredType) }),
-        ),
-      ),
+      parameters: declaration.parameters.map((parameter) => ({
+        ...parameter,
+        declaredType: closeFact(parameter.declaredType),
+      })),
       returnType: closeFact(declaration.returnType),
-    })
+    }
   }
   const rows = Type.isEffect(rowsType)
     ? rowsType
     : Type.effect(Type.unit, [], rowLifetimes, 'Shared')
-  return Object.freeze({
+  return {
     ...declaration,
-    parameters: Object.freeze(
-      declaration.parameters.map((parameter) =>
-        Object.freeze({
-          ...parameter,
-          declaredType: substituteDeclaredTypeFact(parameter.declaredType, substitution, module),
-        }),
-      ),
-    ),
+    parameters: declaration.parameters.map((parameter) => ({
+      ...parameter,
+      declaredType: substituteDeclaredTypeFact(parameter.declaredType, substitution, module),
+    })),
     returnType: substituteDeclaredTypeFact(declaration.returnType, substitution, module),
     failureRow: substituteFailureRowFact(declaration.failureRow, substitution, rows, module),
     requirementRow: substituteRequirementRowFact(
@@ -1463,7 +1452,7 @@ export const closeConformanceSelf = (
       rows,
       module,
     ),
-  })
+  }
 }
 
 const failureRowFromEffect = (effect: Type.Effect): Type.FailureRow => effect.failureRow
@@ -1487,20 +1476,20 @@ const substituteFailureRowFact = (
   rows: Type.Effect,
   module: string,
 ): FailureRowFact => {
-  const members = Object.freeze(
-    fact.members.map((member) => substituteDeclaredTypeFact(member, substitution, module)),
+  const members = fact.members.map((member) =>
+    substituteDeclaredTypeFact(member, substitution, module),
   )
-  return Object.freeze({
+  return {
     ...fact,
     members,
     expression: substituteRowExpressionDecision(fact.expression, substitution, module),
     row: failureRowFromEffect(rows),
-    parameters: Object.freeze([]),
+    parameters: [],
     failures: Type.failureMembers(rows),
     available: members.every(
       (member) => member._tag === 'Resolved' && Type.isTypeArgument(member.type),
     ),
-  })
+  }
 }
 
 const substituteRequirementRowFact = (
@@ -1509,15 +1498,11 @@ const substituteRequirementRowFact = (
   rows: Type.Effect,
   module: string,
 ): RequirementRowFact => {
-  const entries = Object.freeze(
-    fact.entries.map((entry) =>
-      Object.freeze({
-        ...entry,
-        capability: substituteDeclaredTypeFact(entry.capability, substitution, module),
-      }),
-    ),
-  )
-  return Object.freeze({
+  const entries = fact.entries.map((entry) => ({
+    ...entry,
+    capability: substituteDeclaredTypeFact(entry.capability, substitution, module),
+  }))
+  return {
     ...fact,
     entries,
     expression: substituteRowExpressionDecision(fact.expression, substitution, module),
@@ -1533,7 +1518,7 @@ const substituteRequirementRowFact = (
             Type.isRuntimeConcrete(entry.capability.type)) ||
             (Type.isParameter(entry.capability.type) && entry.capability.type.kind === 'Value')),
       ),
-  })
+  }
 }
 
 const applyInterfaceOperation = (
@@ -1543,7 +1528,7 @@ const applyInterfaceOperation = (
   substitution: Type.Substitution | undefined,
 ): InterfaceOperationApplicationFact => {
   if (substitution === undefined)
-    return Object.freeze({
+    return {
       _tag: 'InterfaceOperationApplication',
       declaration: source.declaration,
       capability,
@@ -1557,18 +1542,16 @@ const applyInterfaceOperation = (
       failureRow: source.failureRow,
       requirementRow: source.requirementRow,
       receiverAccess: source.receiverAccess,
-    })
-  const operands = Object.freeze(
-    source.operands.map((operand): InterfaceOperandFact => {
-      const type = substituteDeclaredTypeFact(operand.type, substitution, capability.module)
-      return Object.freeze({
-        ...operand,
-        parameter: Object.freeze({ ...operand.parameter, declaredType: type }),
-        type,
-        access: interfaceOperandAccess(type),
-      })
-    }),
-  )
+    }
+  const operands = source.operands.map((operand): InterfaceOperandFact => {
+    const type = substituteDeclaredTypeFact(operand.type, substitution, capability.module)
+    return {
+      ...operand,
+      parameter: { ...operand.parameter, declaredType: type },
+      type,
+      access: interfaceOperandAccess(type),
+    }
+  })
   const substitutedRows = Type.substitute(
     Type.effectWithRows(
       Type.unit,
@@ -1582,7 +1565,7 @@ const applyInterfaceOperation = (
   const rows = Type.isEffect(substitutedRows)
     ? substitutedRows
     : Type.effect(Type.unit, [], rowLifetimes, 'Shared')
-  return Object.freeze({
+  return {
     _tag: 'InterfaceOperationApplication',
     declaration: source.declaration,
     capability,
@@ -1606,32 +1589,31 @@ const applyInterfaceOperation = (
       capability.module,
     ),
     receiverAccess: interfaceReceiverAccess(operands, provider),
-  })
+  }
 }
 
 /** Instantiates invocation binders after an interface application has already selected its provider. */
 export const instantiateInterfaceOperation = (
   self: InterfaceOperationApplicationFact,
   substitution: Type.Substitution,
-): InterfaceOperationApplicationFact =>
-  Object.freeze({
-    ...applyInterfaceOperation(
-      {
-        ...self,
-        _tag: 'InterfaceOperationContract',
-        lifetimes: {
-          ...self.lifetimes,
-          lifetimeBinders: self.lifetimes.lifetimeBinders.filter(
-            (binder) => !substitution.has(Lifetime.key(binder)),
-          ),
-        },
+): InterfaceOperationApplicationFact => ({
+  ...applyInterfaceOperation(
+    {
+      ...self,
+      _tag: 'InterfaceOperationContract',
+      lifetimes: {
+        ...self.lifetimes,
+        lifetimeBinders: self.lifetimes.lifetimeBinders.filter(
+          (binder) => !substitution.has(Lifetime.key(binder)),
+        ),
       },
-      self.capability,
-      self.provider,
-      substitution,
-    ),
-    source: self.source,
-  })
+    },
+    self.capability,
+    self.provider,
+    substitution,
+  ),
+  source: self.source,
+})
 
 const interfaceOperationAvailable = (operation: InterfaceOperationApplicationFact): boolean =>
   operation.operands.every((operand) => operand.type._tag === 'Resolved') &&
@@ -1661,14 +1643,12 @@ export const interfaceApplication = (
     declaration.operationContracts.length === declaration.operations.length
       ? declaration.operationContracts
       : interfaceOperationContracts(declaration, declaration.operations)
-  const operations = Object.freeze(
-    sourceContracts.map((operation) =>
-      applyInterfaceOperation(operation, capability, provider, substitution),
-    ),
+  const operations = sourceContracts.map((operation) =>
+    applyInterfaceOperation(operation, capability, provider, substitution),
   )
   const available =
     providerMatches && substitution !== undefined && operations.every(interfaceOperationAvailable)
-  return Object.freeze({
+  return {
     _tag: 'InterfaceApplication',
     declaration: declaration.canonical.id,
     capability,
@@ -1677,25 +1657,24 @@ export const interfaceApplication = (
     visibility: declaration.visibility,
     operations,
     available,
-  })
+  }
 }
 
 /** The operation-free application carried by the compiler-sealed `Copy` property. */
-export const copyApplication = (provider: Type.Type): InterfaceApplicationFact =>
-  Object.freeze({
-    _tag: 'InterfaceApplication',
-    declaration: Object.freeze({
-      _tag: 'CanonicalDeclarationId',
-      module: Type.copyCapability.module,
-      name: Type.copyCapability.name,
-    }),
-    capability: Type.copyCapability,
-    provider,
-    providerMatches: Type.isTypeArgument(provider),
-    visibility: 'Public',
-    operations: Object.freeze([]),
-    available: Type.isTypeArgument(provider),
-  })
+export const copyApplication = (provider: Type.Type): InterfaceApplicationFact => ({
+  _tag: 'InterfaceApplication',
+  declaration: {
+    _tag: 'CanonicalDeclarationId',
+    module: Type.copyCapability.module,
+    name: Type.copyCapability.name,
+  },
+  capability: Type.copyCapability,
+  provider,
+  providerMatches: Type.isTypeArgument(provider),
+  visibility: 'Public',
+  operations: [],
+  available: Type.isTypeArgument(provider),
+})
 
 /**
  * One interface application a conditional conformance must prove before it admits a witness.
@@ -1974,11 +1953,11 @@ export const presentParameterEntries = (parameters: ReadonlyArray<ParameterFact>
   parameters.flatMap((parameter) =>
     parameter.name._tag === 'Present'
       ? [
-          Object.freeze({
+          {
             spelling: parameter.name.spelling,
             anchor: parameter.name.anchor,
             parameter,
-          }),
+          },
         ]
       : [],
   )
@@ -1991,10 +1970,10 @@ export const lookupParameter = (
     .filter((entry) => entry.spelling === name)
     .map((entry) => entry.parameter)
   const first = matches.at(0)
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  if (first === undefined) return { _tag: 'Missing', spelling: name }
   return matches.length === 1
-    ? Object.freeze({ _tag: 'Resolved', spelling: name, parameter: first })
-    : Object.freeze({ _tag: 'Ambiguous', spelling: name, parameters: Object.freeze(matches) })
+    ? { _tag: 'Resolved', spelling: name, parameter: first }
+    : { _tag: 'Ambiguous', spelling: name, parameters: matches }
 }
 
 const memberIndexCache = new WeakMap<ReadonlyArray<MemberFact>, Map<string, Array<MemberFact>>>()
@@ -2030,14 +2009,14 @@ const memberIndex = (members: ReadonlyArray<MemberFact>): Map<string, Array<Memb
 export const lookupMember = (members: ReadonlyArray<MemberFact>, name: string): MemberLookup => {
   const matches = memberIndex(members).get(name) ?? []
   const first = matches.at(0)
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  if (first === undefined) return { _tag: 'Missing', spelling: name }
   return matches.length === 1
-    ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: first })
-    : Object.freeze({
+    ? { _tag: 'Resolved', spelling: name, declaration: first }
+    : {
         _tag: 'Ambiguous',
         spelling: name,
-        declarations: Object.freeze([...matches]),
-      })
+        declarations: [...matches],
+      }
 }
 
 export const lookupDeclaration = (
@@ -2048,10 +2027,10 @@ export const lookupDeclaration = (
   // found as `Owner.member` and never as the bare spelling a root declaration would use.
   const matches = declarations.filter((declaration) => memberKey(declaration) === name)
   const first = matches.at(0)
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  if (first === undefined) return { _tag: 'Missing', spelling: name }
   return matches.length === 1
-    ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: first })
-    : Object.freeze({ _tag: 'Ambiguous', spelling: name, declarations: Object.freeze(matches) })
+    ? { _tag: 'Resolved', spelling: name, declaration: first }
+    : { _tag: 'Ambiguous', spelling: name, declarations: matches }
 }
 
 export const enumValueOperation = (
@@ -2060,19 +2039,19 @@ export const enumValueOperation = (
   if (declaration.canonical._tag !== 'Canonical' || declaration.representation._tag !== 'Available')
     return undefined
   const enum_ = declaration.canonical.id
-  return Object.freeze({
+  return {
     _tag: 'EnumAssociatedOperation',
-    id: Object.freeze({ _tag: 'EnumAssociatedOperationId', enum: enum_, name: 'value' }),
+    id: { _tag: 'EnumAssociatedOperationId', enum: enum_, name: 'value' },
     name: 'value',
     enum: enum_,
     parameter: Type.nominal(enum_.module, enum_.name),
     result: declaration.representation.scalar,
-    intrinsic: Object.freeze({
+    intrinsic: {
       _tag: 'IntrinsicOperationId',
       actor: 'Intrinsic',
       name: 'enumValue',
-    }),
-  })
+    },
+  }
 }
 
 export const lookupEnumMember = (
@@ -2083,10 +2062,10 @@ export const lookupEnumMember = (
     (member) => member.name._tag === 'Present' && member.name.spelling === name,
   )
   const first = matches.at(0)
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  if (first === undefined) return { _tag: 'Missing', spelling: name }
   return matches.length === 1
-    ? Object.freeze({ _tag: 'Resolved', spelling: name, member: first })
-    : Object.freeze({ _tag: 'Ambiguous', spelling: name, members: Object.freeze(matches) })
+    ? { _tag: 'Resolved', spelling: name, member: first }
+    : { _tag: 'Ambiguous', spelling: name, members: matches }
 }
 
 export const lookupStruct = (structs: ReadonlyArray<StructFact>, name: string): StructLookup => {
@@ -2094,10 +2073,10 @@ export const lookupStruct = (structs: ReadonlyArray<StructFact>, name: string): 
     (struct) => struct.name._tag === 'Present' && struct.name.spelling === name,
   )
   const first = matches.at(0)
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  if (first === undefined) return { _tag: 'Missing', spelling: name }
   return matches.length === 1
-    ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: first })
-    : Object.freeze({ _tag: 'Ambiguous', spelling: name, declarations: Object.freeze(matches) })
+    ? { _tag: 'Resolved', spelling: name, declaration: first }
+    : { _tag: 'Ambiguous', spelling: name, declarations: matches }
 }
 
 export const lookupUnion = (unions: ReadonlyArray<UnionFact>, name: string): UnionLookup => {
@@ -2105,10 +2084,10 @@ export const lookupUnion = (unions: ReadonlyArray<UnionFact>, name: string): Uni
     (union) => union.name._tag === 'Present' && union.name.spelling === name,
   )
   const first = matches.at(0)
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  if (first === undefined) return { _tag: 'Missing', spelling: name }
   return matches.length === 1
-    ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: first })
-    : Object.freeze({ _tag: 'Ambiguous', spelling: name, declarations: Object.freeze(matches) })
+    ? { _tag: 'Resolved', spelling: name, declaration: first }
+    : { _tag: 'Ambiguous', spelling: name, declarations: matches }
 }
 
 export const lookupUnionVariant = (
@@ -2119,10 +2098,10 @@ export const lookupUnionVariant = (
     (variant) => variant.name._tag === 'Present' && variant.name.spelling === name,
   )
   const first = matches.at(0)
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  if (first === undefined) return { _tag: 'Missing', spelling: name }
   return matches.length === 1
-    ? Object.freeze({ _tag: 'Resolved', spelling: name, variant: first })
-    : Object.freeze({ _tag: 'Ambiguous', spelling: name, variants: Object.freeze(matches) })
+    ? { _tag: 'Resolved', spelling: name, variant: first }
+    : { _tag: 'Ambiguous', spelling: name, variants: matches }
 }
 
 export const lookupField = (fields: ReadonlyArray<FieldFact>, name: string): FieldLookup => {
@@ -2130,10 +2109,10 @@ export const lookupField = (fields: ReadonlyArray<FieldFact>, name: string): Fie
     (field) => field.name._tag === 'Present' && field.name.spelling === name,
   )
   const first = matches.at(0)
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  if (first === undefined) return { _tag: 'Missing', spelling: name }
   return matches.length === 1
-    ? Object.freeze({ _tag: 'Resolved', spelling: name, field: first })
-    : Object.freeze({ _tag: 'Ambiguous', spelling: name, fields: Object.freeze(matches) })
+    ? { _tag: 'Resolved', spelling: name, field: first }
+    : { _tag: 'Ambiguous', spelling: name, fields: matches }
 }
 
 /** Looks up one aggregate member without conflating ordinal positions with source field names. */
@@ -2152,24 +2131,20 @@ export const lookupAggregateMember = (
   })
   const spelling = member._tag === 'LabeledAggregateMember' ? member.label : `${member.ordinal}`
   const first = matches.at(0)
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling })
+  if (first === undefined) return { _tag: 'Missing', spelling }
   return matches.length === 1
-    ? Object.freeze({ _tag: 'Resolved', spelling, field: first })
-    : Object.freeze({ _tag: 'Ambiguous', spelling, fields: Object.freeze(matches) })
+    ? { _tag: 'Resolved', spelling, field: first }
+    : { _tag: 'Ambiguous', spelling, fields: matches }
 }
 
 export const lookup = (self: Index, module: string, name: string): DeclarationLookup =>
   lookupDeclaration(
-    self.modules.find((candidate) => candidate.module === module)?.declarations ??
-      Object.freeze([]),
+    self.modules.find((candidate) => candidate.module === module)?.declarations ?? [],
     name,
   )
 
 export const member = (self: Index, module: string, name: string): MemberLookup =>
-  lookupMember(
-    self.modules.find((candidate) => candidate.module === module)?.members ?? Object.freeze([]),
-    name,
-  )
+  lookupMember(self.modules.find((candidate) => candidate.module === module)?.members ?? [], name)
 
 /** Looks through explicit selective publication while preserving the original declaration identity. */
 export const publishedMember = (
@@ -2194,10 +2169,10 @@ export const publishedMember = (
   }
   const unique = [...new Set(candidates)]
   const first = unique[0]
-  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  if (first === undefined) return { _tag: 'Missing', spelling: name }
   return unique.length === 1
-    ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: first })
-    : Object.freeze({ _tag: 'Ambiguous', spelling: name, declarations: Object.freeze(unique) })
+    ? { _tag: 'Resolved', spelling: name, declaration: first }
+    : { _tag: 'Ambiguous', spelling: name, declarations: unique }
 }
 
 export const enumByName = (self: Index, module: string, name: string): EnumLookup => {
@@ -2205,43 +2180,40 @@ export const enumByName = (self: Index, module: string, name: string): EnumLooku
   if (result._tag === 'Missing') return result
   if (result._tag === 'Resolved')
     return result.declaration._tag === 'EnumDeclaration'
-      ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: result.declaration })
-      : Object.freeze({ _tag: 'Missing', spelling: name })
+      ? { _tag: 'Resolved', spelling: name, declaration: result.declaration }
+      : { _tag: 'Missing', spelling: name }
   const declarations = result.declarations.filter(
     (declaration): declaration is EnumFact => declaration._tag === 'EnumDeclaration',
   )
   return declarations.length === 0
-    ? Object.freeze({ _tag: 'Missing', spelling: name })
-    : Object.freeze({
+    ? { _tag: 'Missing', spelling: name }
+    : {
         _tag: 'Ambiguous',
         spelling: name,
-        declarations: Object.freeze(declarations),
-      })
+        declarations: declarations,
+      }
 }
 
 export const struct = (self: Index, module: string, name: string): StructLookup =>
-  lookupStruct(
-    self.modules.find((candidate) => candidate.module === module)?.structs ?? Object.freeze([]),
-    name,
-  )
+  lookupStruct(self.modules.find((candidate) => candidate.module === module)?.structs ?? [], name)
 
 export const unionByName = (self: Index, module: string, name: string): UnionLookup => {
   const result = member(self, module, name)
   if (result._tag === 'Missing') return result
   if (result._tag === 'Resolved')
     return result.declaration._tag === 'UnionDeclaration'
-      ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: result.declaration })
-      : Object.freeze({ _tag: 'Missing', spelling: name })
+      ? { _tag: 'Resolved', spelling: name, declaration: result.declaration }
+      : { _tag: 'Missing', spelling: name }
   const declarations = result.declarations.filter(
     (declaration): declaration is UnionFact => declaration._tag === 'UnionDeclaration',
   )
   return declarations.length === 0
-    ? Object.freeze({ _tag: 'Missing', spelling: name })
-    : Object.freeze({
+    ? { _tag: 'Missing', spelling: name }
+    : {
         _tag: 'Ambiguous',
         spelling: name,
-        declarations: Object.freeze(declarations),
-      })
+        declarations: declarations,
+      }
 }
 
 /** Resolves a mapped provider operation, preferring its inherent member to a module sibling. */
@@ -2336,14 +2308,8 @@ export const storedExecutable = (
   kind: 'Callable' | 'Effect',
   seen: ReadonlySet<string> = new Set(),
 ): StoredExecutable | undefined => {
-  if (Type.isCallable(type))
-    return kind === 'Callable'
-      ? Object.freeze({ path: Object.freeze([]), contract: type })
-      : undefined
-  if (Type.isEffect(type))
-    return kind === 'Effect'
-      ? Object.freeze({ path: Object.freeze([]), contract: type })
-      : undefined
+  if (Type.isCallable(type)) return kind === 'Callable' ? { path: [], contract: type } : undefined
+  if (Type.isEffect(type)) return kind === 'Effect' ? { path: [], contract: type } : undefined
   if (Type.isFixedArray(type) || Type.isSlice(type))
     return storedExecutable(self, type.element, kind, seen)
   if (Type.isUnion(type)) {
@@ -2371,17 +2337,12 @@ export const storedExecutable = (
   const next = new Set(seen).add(key)
   const fields =
     declaration._tag === 'StructDeclaration'
-      ? declaration.fields.map((field) => Object.freeze({ field, path: Object.freeze([]) }))
+      ? declaration.fields.map((field) => ({ field, path: [] }))
       : declaration.variants.flatMap((variant) =>
-          variant.fields.map((field) =>
-            Object.freeze({
-              field,
-              path:
-                variant.name._tag === 'Present'
-                  ? Object.freeze([variant.name.spelling])
-                  : Object.freeze([]),
-            }),
-          ),
+          variant.fields.map((field) => ({
+            field,
+            path: variant.name._tag === 'Present' ? [variant.name.spelling] : [],
+          })),
         )
   for (const { field, path } of fields) {
     if (field.declaredType._tag !== 'Resolved' || field.name._tag !== 'Present') continue
@@ -2392,10 +2353,10 @@ export const storedExecutable = (
       next,
     )
     if (found !== undefined)
-      return Object.freeze({
-        path: Object.freeze([...path, field.name.spelling, ...found.path]),
+      return {
+        path: [...path, field.name.spelling, ...found.path],
         contract: found.contract,
-      })
+      }
   }
   return undefined
 }

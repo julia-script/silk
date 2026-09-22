@@ -79,6 +79,6 @@ export const intern = <D, H>(
 export const freeze = <D, H>(
   table: Table<D, H>,
 ): { readonly descriptions: ReadonlyArray<D>; readonly handles: ReadonlyArray<H> } => ({
-  descriptions: Object.freeze([...table.descriptions]),
-  handles: Object.freeze([...table.handles]),
+  descriptions: [...table.descriptions],
+  handles: [...table.handles],
 })

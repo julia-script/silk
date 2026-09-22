@@ -166,7 +166,7 @@ const renumber = <A>(value: A, moved: ReadonlyMap<string, number>): A => {
       const result: Array<unknown> = []
       copies.set(input, result)
       for (const child of input) result.push(copy(child))
-      return Object.freeze(result)
+      return result
     }
     if (!records(input)) return input
     if (
@@ -180,15 +180,15 @@ const renumber = <A>(value: A, moved: ReadonlyMap<string, number>): A => {
       const enclosing = made ? (input.ordinal - hiddenOrdinals - site) / 65536 : input.ordinal
       const current = moved.get(declarationKey(input.sourceId, enclosing))
       if (current === undefined) return input
-      return Object.freeze({
+      return {
         ...input,
         ordinal: made ? Tir.hiddenDeclarationOrdinal(current, site) : current,
-      })
+      }
     }
     const result: Record<string, unknown> = {}
     copies.set(input, result)
     for (const key of Object.keys(input)) result[key] = copy(input[key])
-    return Object.freeze(result)
+    return result
   }
   return copy(value) as A
 }
@@ -215,11 +215,7 @@ const semanticMemberFingerprint = (member: DeclarationFacts.MemberFact): Readonl
       nominal.add(`${value.module}/${value.name}`)
     return !(records(value) && (value._tag === 'SyntaxNode' || value._tag === 'Token'))
   })
-  return Object.freeze([
-    key,
-    ModuleSurface.memberSignature(member),
-    Object.freeze([...nominal].sort()),
-  ])
+  return [key, ModuleSurface.memberSignature(member), [...nominal].sort()]
 }
 
 /** The declaration's direct semantic header input consumed by one checked-unit query. */
@@ -411,7 +407,7 @@ export const presentationModules = (
 ): ReadonlyArray<string> => {
   const modules = new Set<string>()
   collectPresentationModules(self, authored, declaration, scope, new Set(), modules)
-  return Object.freeze([...modules].sort())
+  return [...modules].sort()
 }
 
 /** Position-independent result identity used for dependent-query cutoffs. */
@@ -456,29 +452,26 @@ const present = (
   moved: ReadonlyMap<string, number>,
   context: SemanticContext.SemanticContext,
   declaration: DeclarationFacts.DeclarationFact,
-): Elaboration.CheckedUnit =>
-  Object.freeze({
-    diagnostics: renumber(previous.diagnostics, moved),
-    bodies: Object.freeze(
-      previous.bodies.map((body) =>
-        // A source body belongs to this revision's header object, which is never copied; a
-        // compiler-made body owns its declaration, which is renumbered with the rest.
-        Elaboration.presentBody(
-          {
-            artifact: body.artifact,
-            declaration: body.hidden ? renumber(body.declaration, moved) : declaration,
-            hidden: body.hidden,
-            function: {
-              ...renumber({ ...body.function, declaration: undefined }, moved),
-              declaration,
-            },
-            results: renumber(body.results, moved),
-          },
-          context,
-        ),
-      ),
+): Elaboration.CheckedUnit => ({
+  diagnostics: renumber(previous.diagnostics, moved),
+  bodies: previous.bodies.map((body) =>
+    // A source body belongs to this revision's header object, which is never copied; a
+    // compiler-made body owns its declaration, which is renumbered with the rest.
+    Elaboration.presentBody(
+      {
+        artifact: body.artifact,
+        declaration: body.hidden ? renumber(body.declaration, moved) : declaration,
+        hidden: body.hidden,
+        function: {
+          ...renumber({ ...body.function, declaration: undefined }, moved),
+          declaration,
+        },
+        results: renumber(body.results, moved),
+      },
+      context,
     ),
-  })
+  ),
+})
 
 const record = (
   self: BodyQuery,
@@ -557,7 +550,7 @@ export const reuse = (
           authored,
           declaration,
           admitted,
-          Object.freeze([declaration.owner.module]),
+          [declaration.owner.module],
           [],
         )
       }
@@ -670,13 +663,13 @@ const moved = <A>(value: A, moves: ReadonlyMap<string, SourceSpan.SourceSpan>): 
       const result: Array<unknown> = []
       copies.set(input, result)
       for (const child of input) result.push(copy(child))
-      return Object.freeze(result)
+      return result
     }
     if (!records(input)) return input
     const result: Record<string, unknown> = {}
     copies.set(input, result)
     for (const key of Object.keys(input)) result[key] = copy(input[key])
-    return Object.freeze(result)
+    return result
   }
   const result = copy(value) as A
   return complete ? result : undefined

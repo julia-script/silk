@@ -35,13 +35,13 @@ export interface Input {
   readonly objcDirect?: boolean
 }
 
-const virtualityBits: Readonly<Record<Virtuality, number>> = Object.freeze({
+const virtualityBits: Readonly<Record<Virtuality, number>> = {
   zero: 0,
   virtual: 1,
   pureVirtual: 2,
-})
+}
 
-const boolFields: ReadonlyArray<readonly [keyof Input, number, string]> = Object.freeze([
+const boolFields: ReadonlyArray<readonly [keyof Input, number, string]> = [
   ['localToUnit', 2, 'DISPFlagLocalToUnit'],
   ['definition', 3, 'DISPFlagDefinition'],
   ['optimized', 4, 'DISPFlagOptimized'],
@@ -51,7 +51,7 @@ const boolFields: ReadonlyArray<readonly [keyof Input, number, string]> = Object
   ['mainSubprogram', 8, 'DISPFlagMainSubprogram'],
   ['deleted', 9, 'DISPFlagDeleted'],
   ['objcDirect', 11, 'DISPFlagObjCDirect'],
-])
+]
 
 /**
  * An empty `DISPFlags` bit set.
@@ -59,7 +59,7 @@ const boolFields: ReadonlyArray<readonly [keyof Input, number, string]> = Object
  * @category debug information
  * @since 0.0.0
  */
-export const none: DISPFlags = Object.freeze({ bits: 0 })
+export const none: DISPFlags = { bits: 0 }
 
 /**
  * Packs named subprogram flags into LLVM's stable bit representation.
@@ -79,7 +79,7 @@ export const none: DISPFlags = Object.freeze({ bits: 0 })
 export const make = (input: Input = {}): DISPFlags => {
   let bits = virtualityBits[input.virtuality ?? 'zero']
   for (const [field, shift] of boolFields) if (input[field] === true) bits |= 1 << shift
-  return Object.freeze({ bits: bits >>> 0 })
+  return { bits: bits >>> 0 }
 }
 
 /**
@@ -88,8 +88,9 @@ export const make = (input: Input = {}): DISPFlags => {
  * @category debug information
  * @since 0.0.0
  */
-export const combine = (left: DISPFlags, right: DISPFlags): DISPFlags =>
-  Object.freeze({ bits: (left.bits | right.bits) >>> 0 })
+export const combine = (left: DISPFlags, right: DISPFlags): DISPFlags => ({
+  bits: (left.bits | right.bits) >>> 0,
+})
 
 /**
  * Returns LLVM's unsigned subprogram-flag encoding.
@@ -110,7 +111,7 @@ export const toText = (self: DISPFlags): ReadonlyArray<string> => {
   const virtuality = self.bits & 3
   if (virtuality !== 0) values.push(virtuality === 1 ? 'DISPFlagVirtual' : 'DISPFlagPureVirtual')
   for (const [, shift, name] of boolFields) if ((self.bits & (1 << shift)) !== 0) values.push(name)
-  return Object.freeze(values)
+  return values
 }
 
 /**

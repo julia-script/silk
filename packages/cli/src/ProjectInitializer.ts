@@ -137,7 +137,7 @@ const preflight = Effect.fnUntraced(function* (
         .readFile(ignorePath)
         .pipe(Effect.mapError((cause) => wrapped(ignorePath, cause)))
     : undefined
-  return Object.freeze({
+  return {
     directory,
     name,
     manifestPath,
@@ -145,10 +145,10 @@ const preflight = Effect.fnUntraced(function* (
     entryPath,
     ignorePath,
     directoryExists,
-    directoriesToCreate: Object.freeze(directoriesToCreate),
+    directoriesToCreate: directoriesToCreate,
     sourceDirectoryExists,
     ignore,
-  })
+  }
 })
 
 const hasIgnoreRule = (bytes: Uint8Array): boolean =>
@@ -242,13 +242,13 @@ export const initialize = Effect.fn('ProjectInitializer.initialize')(function* (
         .writeFileString(plan.entryPath, entry)
         .pipe(Effect.mapError((cause) => wrapped(plan.entryPath, cause)))
       state.committed = true
-      return Object.freeze({
+      return {
         _tag: 'InitializedProject' as const,
         directory: plan.directory,
         name: plan.name,
         manifestPath: plan.manifestPath,
         entryPath: plan.entryPath,
-      })
+      }
     }),
     rollback,
   )

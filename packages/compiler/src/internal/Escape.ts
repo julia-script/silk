@@ -24,7 +24,7 @@ export type Decoded =
   | { readonly _tag: 'Invalid'; readonly detail: string }
 
 const utf8 = (scalar: number): ReadonlyArray<number> =>
-  Object.freeze(Array.from(new TextEncoder().encode(String.fromCodePoint(scalar))))
+  Array.from(new TextEncoder().encode(String.fromCodePoint(scalar)))
 
 /** Decodes one escape whose leading backslash is immediately before `escapedAt`. */
 export const decodeAt = (
@@ -36,37 +36,36 @@ export const decodeAt = (
 ): Decoded => {
   const escaped = token[escapedAt]
   if (escaped === 0x0a || escaped === 0x0d)
-    return Object.freeze({
+    return {
       _tag: 'Invalid',
       detail: 'backslash cannot continue a physical line',
-    })
+    }
   const simple = simpleByte(escaped, delimiter)
-  if (simple !== undefined)
-    return Object.freeze({ _tag: 'Decoded', bytes: Object.freeze([simple]), next: escapedAt + 1 })
+  if (simple !== undefined) return { _tag: 'Decoded', bytes: [simple], next: escapedAt + 1 }
   if (escaped === 0x78) {
     const high = ByteClass.digitValue(token[escapedAt + 1])
     const low = ByteClass.digitValue(token[escapedAt + 2])
     return high === undefined || low === undefined
-      ? Object.freeze({
+      ? {
           _tag: 'Invalid',
           detail: '`\\x` escape requires exactly two hexadecimal digits',
-        })
-      : Object.freeze({
+        }
+      : {
           _tag: 'Decoded',
-          bytes: Object.freeze([high * 16 + low]),
+          bytes: [high * 16 + low],
           next: escapedAt + 3,
-        })
+        }
   }
-  if (escaped !== 0x75) return Object.freeze({ _tag: 'Invalid', detail: 'unknown escape sequence' })
+  if (escaped !== 0x75) return { _tag: 'Invalid', detail: 'unknown escape sequence' }
   if (token[escapedAt + 1] !== 0x7b)
-    return Object.freeze({ _tag: 'Invalid', detail: '`\\u` escape requires `{...}`' })
+    return { _tag: 'Invalid', detail: '`\\u` escape requires `{...}`' }
   let index = escapedAt + 2
   let scalar = 0
   let digits = 0
   while (index < end && token[index] !== 0x7d) {
     const digit = ByteClass.digitValue(token[index])
     if (digit === undefined || digits === 6)
-      return Object.freeze({ _tag: 'Invalid', detail: 'invalid Unicode scalar escape' })
+      return { _tag: 'Invalid', detail: 'invalid Unicode scalar escape' }
     scalar = scalar * 16 + digit
     digits += 1
     index += 1
@@ -77,17 +76,17 @@ export const decodeAt = (
     scalar > 0x10ffff ||
     (scalar >= 0xd800 && scalar <= 0xdfff)
   )
-    return Object.freeze({ _tag: 'Invalid', detail: 'invalid Unicode scalar escape' })
+    return { _tag: 'Invalid', detail: 'invalid Unicode scalar escape' }
   if (byteString && scalar > 0xff)
-    return Object.freeze({
+    return {
       _tag: 'Invalid',
       detail: 'byte-string escape is outside the u8 range',
-    })
-  return Object.freeze({
+    }
+  return {
     _tag: 'Decoded',
-    bytes: byteString ? Object.freeze([scalar]) : utf8(scalar),
+    bytes: byteString ? [scalar] : utf8(scalar),
     next: index + 1,
-  })
+  }
 }
 
 /**

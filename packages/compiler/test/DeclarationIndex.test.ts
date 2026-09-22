@@ -225,8 +225,6 @@ enum(i64) Signed { Minimum = -9223372036854775808, Next }`,
       ),
       [-9223372036854775808n, -9223372036854775807n],
     )
-    assert.strictEqual(Object.isFrozen(direction), true)
-    assert.strictEqual(Object.isFrozen(direction?.members), true)
     assert.deepEqual(index.published, [])
   }),
 )

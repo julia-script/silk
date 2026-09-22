@@ -400,10 +400,10 @@ export const renderBody = (
           ...(body.debugLocations[instructionIndex] === undefined
             ? []
             : [
-                Object.freeze({
+                {
                   kind: 'dbg' as const,
                   metadata: body.debugLocations[instructionIndex],
-                }),
+                },
               ]),
           ...(body.metadata[instructionIndex] ?? []),
         ]

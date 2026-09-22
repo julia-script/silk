@@ -69,33 +69,31 @@ const descriptor = (
   family: string,
   address: ReadonlyArray<string>,
   reuse: SemanticQuery.Descriptor['reuse'] = 'Revision',
-): SemanticQuery.Descriptor =>
-  Object.freeze({
-    _tag: 'SemanticQueryDescriptor',
-    family,
-    schema,
-    address: JSON.stringify(address),
-    reuse,
-  })
+): SemanticQuery.Descriptor => ({
+  _tag: 'SemanticQueryDescriptor',
+  family,
+  schema,
+  address: JSON.stringify(address),
+  reuse,
+})
 
 /** Stable semantic-query address for one declaration's complete checked unit. */
 export const checkBodyDescriptor = (
   declaration: DeclarationFacts.DeclarationFact,
 ): SemanticQuery.Descriptor => descriptor('CheckBody', [BodyQuery.identity(declaration)])
 
-const input = (family: string, address: ReadonlyArray<string>): SemanticQuery.InputAddress =>
-  Object.freeze({
-    _tag: 'SemanticInputAddress',
-    family,
-    schema,
-    address: JSON.stringify(address),
-  })
+const input = (family: string, address: ReadonlyArray<string>): SemanticQuery.InputAddress => ({
+  _tag: 'SemanticInputAddress',
+  family,
+  schema,
+  address: JSON.stringify(address),
+})
 
 const partsOf = (address: string): ReadonlyArray<string> => {
   const value: unknown = JSON.parse(address)
   return Array.isArray(value) && value.every((part): part is string => typeof part === 'string')
     ? value
-    : Object.freeze([])
+    : []
 }
 
 const runtimeOf = (self: Session): Runtime => {
@@ -560,14 +558,14 @@ export const makeSession = (
     previous,
   )
   runtime.queries = queries
-  const session = Object.freeze({
+  const session = {
     _tag: 'SemanticSession' as const,
     epoch,
     configuration,
     index,
     resolution,
     queries,
-  })
+  }
   runtimes.set(session, runtime)
   return session
 }
@@ -589,7 +587,7 @@ export const resolveName = (
 ): NameResolution.Lookup => {
   const request = nameDescriptor(scope.module, spelling)
   const result = SemanticQuery.query<string>(self.queries, request)
-  if (result._tag === 'Cycle') return Object.freeze({ _tag: 'Unavailable', spelling })
+  if (result._tag === 'Cycle') return { _tag: 'Unavailable', spelling }
   return presented(self, SemanticQuery.keyOf(request), () =>
     NameResolution.lookup(scope, self.index, spelling),
   )
@@ -602,7 +600,7 @@ export const resolveNameFresh = (
 ): NameResolution.Lookup => {
   const result = SemanticQuery.fresh<string>(self.queries, nameDescriptor(scope.module, spelling))
   return result._tag === 'Cycle'
-    ? Object.freeze({ _tag: 'Unavailable', spelling })
+    ? { _tag: 'Unavailable', spelling }
     : NameResolution.lookup(scope, self.index, spelling)
 }
 
@@ -616,7 +614,7 @@ export const resolveQualifiedName = (
 ): NameResolution.Lookup => {
   const request = qualifiedDescriptor(scope.module, namespace, member)
   const result = SemanticQuery.query<string>(self.queries, request)
-  if (result._tag === 'Cycle') return Object.freeze({ _tag: 'Unavailable', spelling: member })
+  if (result._tag === 'Cycle') return { _tag: 'Unavailable', spelling: member }
   const presentationKey = SemanticQuery.keyOf(request) + ':' + AuthoredIdentity.anchorKey(anchor)
   return presented(self, presentationKey, () =>
     NameResolution.lookupQualified(scope, self.index, namespace, member, anchor),
@@ -639,7 +637,7 @@ export const resolveAssociatedName = (
     requestingModule,
   )
   const result = SemanticQuery.query<string>(self.queries, request)
-  if (result._tag === 'Cycle') return Object.freeze({ _tag: 'Missing' })
+  if (result._tag === 'Cycle') return { _tag: 'Missing' }
   return presented(self, SemanticQuery.keyOf(request), () =>
     NameResolution.lookupAssociated(self.index, owner, member, requestingModule),
   )
@@ -652,22 +650,22 @@ export type TypeOf =
 export const typeOf = (self: Session, declaration: DeclarationFacts.CanonicalId): TypeOf => {
   const request = typeDescriptor(declaration)
   const result = SemanticQuery.query<string>(self.queries, request)
-  if (result._tag === 'Cycle') return Object.freeze({ _tag: 'Unavailable', declaration })
+  if (result._tag === 'Cycle') return { _tag: 'Unavailable', declaration }
   return presented(self, SemanticQuery.keyOf(request), () => {
     const fact = DeclarationFacts.byCanonical(self.index, declaration)
     return fact === undefined
-      ? Object.freeze({ _tag: 'Unavailable' as const, declaration })
-      : Object.freeze({ _tag: 'Resolved' as const, declaration: fact })
+      ? { _tag: 'Unavailable' as const, declaration }
+      : { _tag: 'Resolved' as const, declaration: fact }
   })
 }
 
 export const typeOfFresh = (self: Session, declaration: DeclarationFacts.CanonicalId): TypeOf => {
   const result = SemanticQuery.fresh<string>(self.queries, typeDescriptor(declaration))
-  if (result._tag === 'Cycle') return Object.freeze({ _tag: 'Unavailable', declaration })
+  if (result._tag === 'Cycle') return { _tag: 'Unavailable', declaration }
   const fact = DeclarationFacts.byCanonical(self.index, declaration)
   return fact === undefined
-    ? Object.freeze({ _tag: 'Unavailable', declaration })
-    : Object.freeze({ _tag: 'Resolved', declaration: fact })
+    ? { _tag: 'Unavailable', declaration }
+    : { _tag: 'Resolved', declaration: fact }
 }
 
 export const snapshot = (self: Session): SemanticQuery.Snapshot =>
@@ -697,12 +695,12 @@ export const checkBody = (bodyInput: BodyInput): Elaboration.CheckedUnit => {
       context,
       bodyInput.declaration,
       bodyInput.headers.declarations,
-      Object.freeze({
+      {
         semantic: bodyInput.session,
         scope: bodyInput.scope,
         index: bodyInput.index,
         hiddenFunctions,
-      }),
+      },
     )
     const own = Elaboration.checkedBody(
       context,
@@ -713,8 +711,8 @@ export const checkBody = (bodyInput: BodyInput): Elaboration.CheckedUnit => {
       analysis.builder,
     )
     return {
-      unit: Object.freeze({
-        bodies: Object.freeze([
+      unit: {
+        bodies: [
           own,
           ...hiddenFunctions.map((hidden) =>
             Elaboration.checkedBody(
@@ -726,9 +724,9 @@ export const checkBody = (bodyInput: BodyInput): Elaboration.CheckedUnit => {
               hidden.builder,
             ),
           ),
-        ]),
+        ],
         diagnostics: analysis.diagnostics,
-      }),
+      },
     }
   }
   const request = checkBodyDescriptor(bodyInput.declaration)
@@ -865,17 +863,17 @@ const evaluateQuery = <A>(
           ? Evaluation.evaluate(evaluation, application, callback)
           : Evaluation.evaluateFrom(evaluation, application, parentTrace, callback)
       const entry = Evaluation.cacheEntry(evaluation, evaluated.key)
-      if (entry !== undefined) return Object.freeze({ entry, result: evaluated, reusable: true })
+      if (entry !== undefined) return { entry, result: evaluated, reusable: true }
       if (evaluated._tag === 'Complete')
         throw new RangeError('Completed evaluation did not publish its cache entry')
-      return Object.freeze({
-        entry: Object.freeze({
+      return {
+        entry: {
           key: evaluated.key,
-          state: Object.freeze({ _tag: 'Failed' as const, failure: evaluated.failure }),
-        }),
+          state: { _tag: 'Failed' as const, failure: evaluated.failure },
+        },
         result: evaluated,
         reusable: false,
-      })
+      }
     },
   }
   runtime.evaluations.set(request.address, provider)
@@ -904,7 +902,7 @@ export const evaluate = <A>(
   application: Evaluation.Application,
   callback: Evaluation.EvaluationCallback<A>,
 ): Evaluation.ApplicationResult<A> =>
-  evaluateQuery('Evaluate', self, evaluation, application, Object.freeze([]), callback)
+  evaluateQuery('Evaluate', self, evaluation, application, [], callback)
 
 export const evaluateFrom = <A>(
   self: Session,
@@ -923,4 +921,4 @@ export const constructResidual = <A>(
   application: Evaluation.Application,
   callback: Evaluation.EvaluationCallback<A>,
 ): Evaluation.ApplicationResult<A> =>
-  evaluateQuery('ConstructResidual', self, evaluation, application, Object.freeze([]), callback)
+  evaluateQuery('ConstructResidual', self, evaluation, application, [], callback)

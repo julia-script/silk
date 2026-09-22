@@ -26,6 +26,7 @@ import * as FileSystem from 'effect/FileSystem'
 import type * as PathService from 'effect/Path'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
+import * as Context from 'effect/Context'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import * as ArtifactKind from './ArtifactKind.js'
@@ -52,8 +53,16 @@ export interface Toolchain {
   readonly projectSupply?: PlatformSupply.Pin
   readonly supply?: PlatformSupply.PlatformSupply
   readonly runtimeObjectCache?: RuntimeObjectCache
-  readonly artifactStorage?: Storage.Service
 }
+
+/**
+ * Byte storage for backend and final native artifacts. The driver resolves it from its environment
+ * and falls back to {@link defaultArtifactStorage}; it is a tag of its own so artifact and semantic
+ * records can live in different stores.
+ */
+export class ArtifactStorage extends Context.Service<ArtifactStorage, Storage.Service>()(
+  '@silklang/compiler/NativeToolchain/ArtifactStorage',
+) {}
 
 export interface RuntimeObjectCache {
   readonly _tag: 'RuntimeObjectCache'
@@ -83,14 +92,14 @@ const runtimeObjectCacheState = (self: RuntimeObjectCache): RuntimeObjectCacheSt
 export const makeRuntimeObjectCache = (
   storage: Storage.Service = Storage.memoryService(),
 ): RuntimeObjectCache => {
-  const cache = Object.freeze({ _tag: 'RuntimeObjectCache' as const, storage })
+  const cache = { _tag: 'RuntimeObjectCache' as const, storage }
   runtimeObjectCacheStates.set(cache, { entries: new Set(), hits: 0, misses: 0 })
   return cache
 }
 
 export const runtimeObjectCacheStats = (self: RuntimeObjectCache): RuntimeObjectCacheStats => {
   const state = runtimeObjectCacheState(self)
-  return Object.freeze({ entries: state.entries.size, hits: state.hits, misses: state.misses })
+  return { entries: state.entries.size, hits: state.hits, misses: state.misses }
 }
 
 /** Returns the exact runtime source participating in one final artifact and its cache identity. */
@@ -222,12 +231,12 @@ export const resolveToolchain = Effect.fn('NativeToolchain.resolveToolchain')(fu
       ...(toolchain.projectSupply === undefined ? {} : { project: toolchain.projectSupply }),
     },
   ).pipe(Effect.mapError(supplyError), Effect.provide(NodeServices.layer))
-  return Object.freeze({
+  return {
     ...toolchain,
     clang: supply.compiler.command,
     llvmAr: supply.archiver.command,
     supply,
-  })
+  }
 })
 
 const storageError = (
@@ -402,10 +411,10 @@ class CleanupAttemptError extends Data.TaggedError('CleanupAttemptError')<{
   readonly cause: unknown
 }> {}
 
-const nodeCleanup: CleanupOperation = Object.freeze({
+const nodeCleanup: CleanupOperation = {
   remove: (path: string, options: { readonly force: true; readonly recursive?: boolean }) =>
     rmSync(path, options),
-})
+}
 
 /** Removes one scoped path, retrying once while retaining both arbitrary failure causes. */
 const cleanupPath = Effect.fnUntraced(function* (
@@ -539,16 +548,16 @@ export const commitLibraryInterface = Effect.fn('NativeToolchain.commitLibraryIn
           if (!Project.isPackageName(packageName))
             return yield* invalidPackageNameError(packageName)
           return yield* Effect.acquireUseRelease(
-            Effect.succeed(Object.freeze([cHeaderDestination, abiManifestDestination])),
+            Effect.succeed([cHeaderDestination, abiManifestDestination]),
             () =>
               Effect.gen(function* () {
                 const cHeaderPath = yield* atomicCommit(cHeaderDestination, cHeader)
                 const abiManifestPath = yield* atomicCommit(abiManifestDestination, abiManifest)
-                return Object.freeze({
+                return {
                   _tag: 'LibraryInterfaceArtifacts' as const,
                   cHeader: cHeaderPath,
                   abiManifest: abiManifestPath,
-                })
+                }
               }),
             cleanupCommittedSetOnFailure,
           )
@@ -576,12 +585,12 @@ const toolVersionOf = Effect.fnUntraced(function* (
 ): Effect.fn.Return<string, ToolchainError> {
   const cached = toolVersions.get(command)
   if (cached !== undefined) return cached
-  const planned: ToolchainPlan.PlannedCommand = Object.freeze({
+  const planned: ToolchainPlan.PlannedCommand = {
     _tag: 'PlannedCommand',
     command,
-    arguments: Object.freeze(['--version']),
+    arguments: ['--version'],
     target: Target.wasm32UnknownUnknown,
-  })
+  }
   const result = yield* Effect.try({
     try: () => spawnSync(command, ['--version'], { encoding: 'utf8' }),
     catch: (cause) =>
@@ -616,10 +625,10 @@ export const finalArtifactCacheAdmission = (
   kind: FinalArtifact['kind'],
   plan?: NativeLinkPlan.NativeLinkPlan,
 ): FinalArtifactCacheAdmission => {
-  if (kind === 'WebAssemblyModule') return Object.freeze({ _tag: 'ExistingWebAssemblyPolicy' })
+  if (kind === 'WebAssemblyModule') return { _tag: 'ExistingWebAssemblyPolicy' }
   if (plan === undefined || plan.kind !== kind)
-    return Object.freeze({ _tag: 'Ineligible', reason: 'IncompleteNativeInputAccounting' })
-  return Object.freeze({ _tag: 'CompleteNativePlan', identity: plan.identity })
+    return { _tag: 'Ineligible', reason: 'IncompleteNativeInputAccounting' }
+  return { _tag: 'CompleteNativePlan', identity: plan.identity }
 }
 
 /** Computes the independently existing freestanding WebAssembly final-cache identity. */
@@ -706,7 +715,7 @@ export const withBuildScope = Effect.fn('NativeToolchain.withBuildScope')(functi
     Effect.try({
       try: () => {
         const root = mkdtempSync(join(tmpdir(), `silk-${name.replace(/[^A-Za-z0-9_-]/g, '_')}-`))
-        return Object.freeze({ _tag: 'BuildScope' as const, name, root })
+        return { _tag: 'BuildScope' as const, name, root }
       },
       catch: (cause) =>
         storageError('NativeToolchain.withBuildScope', 'scope-acquire', tmpdir(), cause),
@@ -778,7 +787,7 @@ export const writeArtifact = Effect.fn('NativeToolchain.writeArtifact')(function
     try: () => writeFileSync(path, bytes),
     catch: (cause) => storageError('NativeToolchain.writeArtifact', 'scope-write', path, cause),
   })
-  return Object.freeze({ _tag: 'PathArtifact', scope: scope.name, path, target })
+  return { _tag: 'PathArtifact', scope: scope.name, path, target }
 })
 
 const runPlanned = Effect.fnUntraced(function* (
@@ -855,23 +864,21 @@ export const materializeObject = Effect.fnUntraced(function* (
   const bitcodePath = join(scope.root, `${baseName}.bc`)
   const objectPath = join(scope.root, `${baseName}.o`)
   const base = ToolchainPlan.objectCommand(toolchain.clang, profile, bitcodePath, objectPath)
-  const planned = Object.freeze({
+  const planned = {
     ...base,
-    arguments: Object.freeze([
+    arguments: [
       '--no-default-config',
       ...base.arguments,
       ...(artifact.support
         ? ['-mllvm', '-disable-loop-idiom-memcpy', '-mllvm', '-disable-loop-idiom-memset']
         : []),
-    ]),
-    environment:
-      toolchain.supply?.environment ??
-      Object.freeze({
-        PATH: yield* Config.string('PATH').pipe(Config.withDefault(''), Effect.orDie),
-        LC_ALL: 'C',
-        LANG: 'C',
-      }),
-  })
+    ],
+    environment: toolchain.supply?.environment ?? {
+      PATH: yield* Config.string('PATH').pipe(Config.withDefault(''), Effect.orDie),
+      LC_ALL: 'C',
+      LANG: 'C',
+    },
+  }
   if (artifact.target.id !== target.id) {
     return yield* processError(
       'ObjectEmission.materialize',
@@ -906,21 +913,21 @@ export const materializeObject = Effect.fnUntraced(function* (
     ToolchainIntegrity.contentDigest(bytes),
   ).pipe(Effect.mapError(helperError))
 
-  return Object.freeze({
+  return {
     _tag: 'ObjectArtifact',
     helpers,
     inventory: inventory.success,
-    artifact: Object.freeze({
+    artifact: {
       _tag: 'PathArtifact',
       scope: scope.name,
       path: objectPath,
       target,
-    }),
+    },
     planned,
-  })
+  }
 })
 
-/** Realizes each source helper once and audits its actual emitted dependency closure. */
+/** Realizes the selected source helpers as one object and audits its emitted dependency closure. */
 export const compileHelpers = Effect.fn('NativeToolchain.compileHelpers')(function* (
   toolchain: Toolchain,
   scope: BuildScope,
@@ -935,32 +942,29 @@ export const compileHelpers = Effect.fn('NativeToolchain.compileHelpers')(functi
     providers,
     profile.target,
   ).pipe(Effect.mapError(helperError))
-  const objects: Array<ObjectArtifact> = []
-  for (const provider of selected) {
-    if (provider.kind !== 'source') continue
-    const source = yield* HelperSource.compile(provider, profile).pipe(Effect.mapError(helperError))
-    const object = yield* materializeObject(
-      toolchain,
-      scope,
-      source.artifact,
-      source.profile,
-      `helper-${objects.length}`,
+  const sources = selected.filter((provider) => provider.kind === 'source')
+  if (sources.length === 0) return []
+  const source = yield* HelperSource.compile(sources, profile).pipe(Effect.mapError(helperError))
+  const object = yield* materializeObject(
+    toolchain,
+    scope,
+    source.artifact,
+    source.profile,
+    'helpers',
+  )
+  if (object.inventory === undefined)
+    return yield* helperError(
+      new HelperCapability.HelperError({
+        operation: 'NativeToolchain.compileHelpers',
+        code: 'InvalidObject',
+        subject: 'Missing provider inventory',
+        origins: sources.map((provider) => provider.id),
+      }),
     )
-    if (object.inventory === undefined)
-      return yield* helperError(
-        new HelperCapability.HelperError({
-          operation: 'NativeToolchain.compileHelpers',
-          code: 'InvalidObject',
-          subject: 'Missing provider inventory',
-          origins: [provider.id],
-        }),
-      )
-    yield* HelperCapability.verifyProvider(provider, object.inventory, profile.target).pipe(
-      Effect.mapError(helperError),
-    )
-    objects.push(object)
-  }
-  return Object.freeze(objects)
+  yield* HelperCapability.verifyProviders(sources, object.inventory, profile.target).pipe(
+    Effect.mapError(helperError),
+  )
+  return [object]
 })
 
 /**
@@ -1008,9 +1012,9 @@ export const compileCObject = Effect.fn('NativeToolchain.compileCObject')(functi
     ).pipe(Effect.mapError(supplyError), Effect.provide(NodeServices.layer))
     const frozen = yield* writeArtifact(scope, target, `${name}.i`, translation.source)
     cacheKey = translation.identity
-    planned = Object.freeze({
+    planned = {
       ...planned,
-      arguments: Object.freeze([
+      arguments: [
         ...selected.supply.compilationArguments,
         '-c',
         '-x',
@@ -1021,9 +1025,9 @@ export const compileCObject = Effect.fn('NativeToolchain.compileCObject')(functi
         '-fvisibility=hidden',
         '-o',
         objectPath,
-      ]),
+      ],
       environment: selected.supply.environment,
-    })
+    }
   } else {
     // Freestanding Wasm C uses no platform headers; its source remains under the Wasm cache policy.
     cacheKey = `${selected.clang}\u0000${target.id}\u0000${sourceText}`
@@ -1045,17 +1049,17 @@ export const compileCObject = Effect.fn('NativeToolchain.compileCObject')(functi
     if (toolchain.runtimeObjectCache !== undefined)
       yield* writeRuntimeObjectCache(toolchain.runtimeObjectCache, cacheKey, bytes)
   }
-  return Object.freeze({
+  return {
     _tag: 'ObjectArtifact',
-    artifact: Object.freeze({
+    artifact: {
       _tag: 'PathArtifact',
       ...(translation === undefined ? {} : { translation }),
       scope: scope.name,
       path: objectPath,
       target,
-    }),
+    },
     planned,
-  })
+  }
 })
 
 export const compileRuntime = Effect.fn('NativeToolchain.compileRuntime')(function* (
@@ -1208,7 +1212,7 @@ export const finalizeLink = Effect.fnUntraced(function* (
         .writeFileString(script.path, script.source)
         .pipe(Effect.mapError((cause) => storageError('Linker.link', 'link', script.path, cause)))
     }).pipe(Effect.provide(NodeServices.layer))
-  const planned = Object.freeze({ ...plan.command, environment: plan.supply.environment })
+  const planned = { ...plan.command, environment: plan.supply.environment }
   const result = yield* PlatformSupplyResolver.query(
     planned.environment,
     planned.command,
@@ -1241,7 +1245,7 @@ export const finalizeLink = Effect.fnUntraced(function* (
     ...(artifactKind === 'NativeExecutable' ? { mode: 0o755 } : {}),
     stage: 'artifact-commit',
   })
-  return Object.freeze({
+  return {
     _tag: 'FinalArtifact',
     kind: artifactKind,
     path,
@@ -1249,7 +1253,7 @@ export const finalizeLink = Effect.fnUntraced(function* (
     target: plan.supply.target,
     planned,
     linkPlan: plan,
-  })
+  }
 })
 
 const hasWasmHeader = (bytes: Uint8Array): boolean =>
@@ -1428,22 +1432,24 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
         origins: [runtime.artifact.path],
       }),
     )
-  yield* HelperCapability.verifyProvider(
-    {
-      id: 'llvm-wasm-memory.v1',
-      kind: 'bootstrap',
-      root: 'llvm-wasm-memory.v1',
-      targets: [target.id],
-      provides: ['memcpy', 'memmove', 'memset', 'memcmp'],
-      requires: [
-        '__heap_base',
-        '__stack_pointer',
-        '__memory_base',
-        '__table_base',
-        '__indirect_function_table',
-      ],
-      identity: ToolchainIntegrity.contentDigest(LlvmWasmRuntime.source),
-    },
+  yield* HelperCapability.verifyProviders(
+    [
+      {
+        id: 'llvm-wasm-memory.v1',
+        kind: 'bootstrap',
+        root: 'llvm-wasm-memory.v1',
+        targets: [target.id],
+        provides: ['memcpy', 'memmove', 'memset', 'memcmp'],
+        requires: [
+          '__heap_base',
+          '__stack_pointer',
+          '__memory_base',
+          '__table_base',
+          '__indirect_function_table',
+        ],
+        identity: ToolchainIntegrity.contentDigest(LlvmWasmRuntime.source),
+      },
+    ],
     bootstrap.success,
     target,
   ).pipe(Effect.mapError(helperError))
@@ -1481,7 +1487,7 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
     )
   }
   const path = yield* atomicCommit(destination, bytes)
-  return Object.freeze({
+  return {
     _tag: 'FinalArtifact',
     kind: 'WebAssemblyModule',
     ...(object.helpers === undefined ? {} : { helpers: object.helpers }),
@@ -1489,7 +1495,7 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
     bytes,
     target,
     planned,
-  })
+  }
 })
 
 export const commitCachedArtifact = Effect.fn('NativeToolchain.commitCachedArtifact')(function* (
@@ -1511,7 +1517,7 @@ export const commitCachedArtifact = Effect.fn('NativeToolchain.commitCachedArtif
     ...(kind === 'NativeExecutable' ? { mode: 0o755 } : {}),
     stage: 'artifact-commit',
   })
-  return Object.freeze({ _tag: 'FinalArtifact', kind, path, bytes: copy, target })
+  return { _tag: 'FinalArtifact', kind, path, bytes: copy, target }
 })
 
 /** Commits an emitted representation independently of its semantic artifact form. */
@@ -1561,12 +1567,10 @@ export const emitRepresentation = Effect.fn('NativeToolchain.emitRepresentation'
   const bitcode = yield* writeArtifact(scope, profile.target, 'program.bc', artifact.bitcode)
   const assemblyPath = join(scope.root, 'program.s')
   const object = ToolchainPlan.objectCommand(toolchain.clang, profile, bitcode.path, assemblyPath)
-  const planned = Object.freeze({
+  const planned = {
     ...object,
-    arguments: Object.freeze(
-      object.arguments.map((argument) => (argument === '-c' ? '-S' : argument)),
-    ),
-  })
+    arguments: object.arguments.map((argument) => (argument === '-c' ? '-S' : argument)),
+  }
   yield* runPlanned('NativeToolchain.emitRepresentation', 'object', planned)
   yield* requirePath('NativeToolchain.emitRepresentation', 'object', assemblyPath)
   return yield* commitPathRepresentation(

@@ -22,28 +22,30 @@ export interface CommonOptions {
 }
 
 /** @internal */
-const defaults = (name: ByteString.ByteString, options: CommonOptions): GlobalDescription.Common =>
-  Object.freeze({
-    name,
-    addressSpace: options.addressSpace ?? AddrSpace.defaultAddrSpace,
-    linkage: options.linkage ?? 'external',
-    visibility: options.visibility ?? 'default',
-    preemption: options.preemption ?? 'dso_preemptable',
-    dllStorage: options.dllStorage ?? 'default',
-    unnamedAddress: options.unnamedAddress ?? 'none',
-    section: options.section ?? ByteString.empty,
-    alignment: options.alignment ?? Alignment.defaultAlignment,
-  })
+const defaults = (
+  name: ByteString.ByteString,
+  options: CommonOptions,
+): GlobalDescription.Common => ({
+  name,
+  addressSpace: options.addressSpace ?? AddrSpace.defaultAddrSpace,
+  linkage: options.linkage ?? 'external',
+  visibility: options.visibility ?? 'default',
+  preemption: options.preemption ?? 'dso_preemptable',
+  dllStorage: options.dllStorage ?? 'default',
+  unnamedAddress: options.unnamedAddress ?? 'none',
+  section: options.section ?? ByteString.empty,
+  alignment: options.alignment ?? Alignment.defaultAlignment,
+})
 
 /** @internal */
 const availableAnonymousName = (state: BuilderState.MutableState): ByteString.ByteString => {
   while (true) {
-    const name: ByteString.ByteString = Object.freeze({
+    const name: ByteString.ByteString = {
       _tag: 'ByteString',
-      bytes: Object.freeze(
-        Array.from(String(state.globals.nextAnonymous), (character) => character.charCodeAt(0)),
+      bytes: Array.from(String(state.globals.nextAnonymous), (character) =>
+        character.charCodeAt(0),
       ),
-    })
+    }
     state.globals.nextAnonymous += 1
     if (!state.globals.entries.keys.has(CanonicalKey.bytes(name))) return name
   }
@@ -73,18 +75,16 @@ export const allocate = (
   }
   const index = state.globals.entries.descriptions.length
   const handle = Handle.make('Global', owner, index)
-  state.globals.entries.descriptions.push(
-    Object.freeze({
-      _tag: 'Global',
-      ...defaults(resolvedName, options),
-      kind,
-      actorIndex,
-      replacement: undefined,
-      deleted: false,
-    }),
-  )
+  state.globals.entries.descriptions.push({
+    _tag: 'Global',
+    ...defaults(resolvedName, options),
+    kind,
+    actorIndex,
+    replacement: undefined,
+    deleted: false,
+  })
   state.globals.entries.handles.push(handle)
-  state.globals.attachments.push(Object.freeze([]))
+  state.globals.attachments.push([])
   state.globals.entries.keys.set(key, index)
   return Result.succeed({ index, handle })
 }

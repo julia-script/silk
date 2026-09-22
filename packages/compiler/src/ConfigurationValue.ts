@@ -46,18 +46,16 @@ const inspect = (
         input.value.length > 21
       )
         return fail()
-      return Result.succeed(
-        Object.freeze({ kind: 'integer', value: input.value === '-0' ? '0' : input.value }),
-      )
+      return Result.succeed({ kind: 'integer', value: input.value === '-0' ? '0' : input.value })
     case 'boolean':
       return exactKeys(input, ['kind', 'value']) && typeof input.value === 'boolean'
-        ? Result.succeed(Object.freeze({ kind: 'boolean', value: input.value }))
+        ? Result.succeed({ kind: 'boolean', value: input.value })
         : fail()
     case 'string':
       return exactKeys(input, ['kind', 'value']) &&
         typeof input.value === 'string' &&
         !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(input.value)
-        ? Result.succeed(Object.freeze({ kind: 'string', value: input.value }))
+        ? Result.succeed({ kind: 'string', value: input.value })
         : fail()
     case 'enum':
       return exactKeys(input, ['kind', 'type', 'member']) &&
@@ -65,16 +63,16 @@ const inspect = (
         input.type.length > 0 &&
         typeof input.member === 'string' &&
         input.member.length > 0
-        ? Result.succeed(Object.freeze({ kind: 'enum', type: input.type, member: input.member }))
+        ? Result.succeed({ kind: 'enum', type: input.type, member: input.member })
         : fail()
     case 'none':
-      return exactKeys(input, ['kind']) ? Result.succeed(Object.freeze({ kind: 'none' })) : fail()
+      return exactKeys(input, ['kind']) ? Result.succeed({ kind: 'none' }) : fail()
     case 'some': {
       if (!exactKeys(input, ['kind', 'value'])) return fail()
       const value = inspect(input.value, origin, depth + 1)
       return Result.isFailure(value)
         ? value
-        : Result.succeed(Object.freeze({ kind: 'some', value: value.success }))
+        : Result.succeed({ kind: 'some', value: value.success })
     }
     case 'array': {
       if (!exactKeys(input, ['kind', 'values']) || !Array.isArray(input.values)) return fail()
@@ -84,7 +82,7 @@ const inspect = (
         if (Result.isFailure(value)) return value
         values.push(value.success)
       }
-      return Result.succeed(Object.freeze({ kind: 'array', values: Object.freeze(values) }))
+      return Result.succeed({ kind: 'array', values: values })
     }
     case 'record': {
       if (!exactKeys(input, ['kind', 'fields']) || !isRecord(input.fields)) return fail()
@@ -94,9 +92,7 @@ const inspect = (
         if (Result.isFailure(value)) return value
         fields.push([name, value.success])
       }
-      return Result.succeed(
-        Object.freeze({ kind: 'record', fields: Object.freeze(Object.fromEntries(fields)) }),
-      )
+      return Result.succeed({ kind: 'record', fields: Object.fromEntries(fields) })
     }
     default:
       return fail()

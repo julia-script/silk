@@ -16,19 +16,19 @@ const compareDiagnostics = (left: Diagnostic.Diagnostic, right: Diagnostic.Diagn
 
 /** Parses zero or more bootstrap declarations with lossless local recovery. */
 export const parse = (lexical: Lexer.LexicalResult): SyntaxFile.SyntaxFile => {
-  const initial: State = Object.freeze({
+  const initial: State = {
     lexical,
     index: 0,
-    diagnostics: Object.freeze([]),
+    diagnostics: [],
     recovering: false,
-  })
+  }
   let state = initial
-  let declarations: ReadonlyArray<SyntaxTree.Node> = Object.freeze([])
+  let declarations: ReadonlyArray<SyntaxTree.Node> = []
   let significantKind = nextSignificantKind(state)
 
   while (significantKind !== undefined && significantKind !== 'EndOfFile') {
     const declaration = parseTopLevelDeclaration(state)
-    declarations = Object.freeze([...declarations, declaration.node])
+    declarations = [...declarations, declaration.node]
     state = declaration.state
     significantKind = nextSignificantKind(state)
   }
@@ -41,6 +41,6 @@ export const parse = (lexical: Lexer.LexicalResult): SyntaxFile.SyntaxFile => {
     lexical.tokens,
     root,
     lexical.diagnostics,
-    Object.freeze([...endOfFile.state.diagnostics].sort(compareDiagnostics)),
+    [...endOfFile.state.diagnostics].sort(compareDiagnostics),
   )
 }

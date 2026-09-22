@@ -156,7 +156,7 @@ const headerGenerics = (
     case 'ImplHeader':
       return header.generics
     default:
-      return Object.freeze([])
+      return []
   }
 }
 
@@ -199,7 +199,7 @@ export const forHeader = (
     while (names.has(name)) name += '_'
     names.add(name)
     const parameter = Type.parameter(owner, position, name, 'Lifetime')
-    implicit.push(Object.freeze({ parameter, anchor }))
+    implicit.push({ parameter, anchor })
     return Lifetime.bound(owner, position, name)
   }
 
@@ -260,7 +260,7 @@ export const forHeader = (
     output: boolean,
     defaultOutput: Lifetime.Lifetime | undefined,
     allocate: (anchor: AuthoredHir.Anchor) => Lifetime.Lifetime | undefined,
-    written: ReadonlyArray<AuthoredHir.GenericArgument> = Object.freeze([]),
+    written: ReadonlyArray<AuthoredHir.GenericArgument> = [],
   ): void => {
     const binders =
       nominalParameters?.(type)?.filter((parameter) => parameter.kind === 'Lifetime') ?? []
@@ -271,7 +271,7 @@ export const forHeader = (
       return value === undefined ? [] : [value]
     })
     if (arguments_.length === binders.length)
-      nominalArguments.set(AuthoredIdentity.anchorKey(type.anchor), Object.freeze(arguments_))
+      nominalArguments.set(AuthoredIdentity.anchorKey(type.anchor), arguments_)
   }
 
   const walkType = (
@@ -533,14 +533,11 @@ export const forHeader = (
       true,
     )
     if (environment !== undefined)
-      callables.set(
-        AuthoredIdentity.anchorKey(type.anchor),
-        Object.freeze({
-          environment,
-          lifetimeBinders: Object.freeze(binders),
-          lifetimeBounds: Lifetime.assumptions(lifetimeBounds).bounds,
-        }),
-      )
+      callables.set(AuthoredIdentity.anchorKey(type.anchor), {
+        environment,
+        lifetimeBinders: binders,
+        lifetimeBounds: Lifetime.assumptions(lifetimeBounds).bounds,
+      })
   }
 
   /** A position that can supply the elided output region. */
@@ -601,16 +598,16 @@ export const forHeader = (
       ? undefined
       : resolveEnvironment(declaration.header.anchor, written, bindings)
 
-  return Object.freeze({
+  return {
     owner,
     ...(explicitEnvironment === undefined ? {} : { explicitEnvironment }),
     parameters: new Map(parameters),
     nominalArguments,
     regions,
     callables,
-    implicit: Object.freeze(implicit),
-    diagnostics: Object.freeze(diagnostics),
-  })
+    implicit: implicit,
+    diagnostics: diagnostics,
+  }
 }
 
 /** Assigns local annotation variables in the enclosing body's canonical declaration scope. */

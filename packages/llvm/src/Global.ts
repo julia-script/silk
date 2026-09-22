@@ -179,7 +179,7 @@ export const properties = Effect.fnUntraced(function* (
         self,
         'Global.properties',
       )).description
-      return Object.freeze({
+      return {
         name: description.name,
         addressSpace: description.addressSpace,
         linkage: description.linkage,
@@ -190,7 +190,7 @@ export const properties = Effect.fnUntraced(function* (
         section: description.section,
         alignment: description.alignment,
         kind: description.kind,
-      })
+      }
     }),
   )
 })
@@ -246,7 +246,7 @@ export const rename = Effect.fnUntraced(function* (
       }
       state.globals.entries.keys.delete(CanonicalKey.bytes(description.name))
       state.globals.entries.keys.set(nextKey, index)
-      state.globals.entries.descriptions[index] = Object.freeze({ ...description, name: requested })
+      state.globals.entries.descriptions[index] = { ...description, name: requested }
     }),
   )
 })
@@ -271,7 +271,7 @@ export const configure = Effect.fnUntraced(function* (
         self,
         'Global.configure',
       )
-      state.globals.entries.descriptions[index] = Object.freeze({
+      state.globals.entries.descriptions[index] = {
         ...description,
         addressSpace: options.addressSpace ?? description.addressSpace,
         linkage: options.linkage ?? description.linkage,
@@ -281,7 +281,7 @@ export const configure = Effect.fnUntraced(function* (
         unnamedAddress: options.unnamedAddress ?? description.unnamedAddress,
         section: options.section ?? description.section,
         alignment: options.alignment ?? description.alignment,
-      })
+      }
     }),
   )
 })
@@ -317,10 +317,10 @@ export const attachMetadata = Effect.fnUntraced(function* (
       )
       if (metadataIndex === undefined) return
       const current = state.globals.attachments[index] ?? []
-      state.globals.attachments[index] = Object.freeze([
+      state.globals.attachments[index] = [
         ...current.filter((attachment) => attachment.kind !== kind),
-        Object.freeze({ kind, metadata: metadataIndex }),
-      ])
+        { kind, metadata: metadataIndex },
+      ]
     }),
   )
 })
@@ -352,11 +352,11 @@ export const replace = Effect.fnUntraced(function* (
       )
       if (source.index === target.index) return
       state.globals.entries.keys.delete(CanonicalKey.bytes(source.description.name))
-      state.globals.entries.descriptions[source.index] = Object.freeze({
+      state.globals.entries.descriptions[source.index] = {
         ...source.description,
         replacement: target.index,
         deleted: true,
-      })
+      }
     }),
   )
 })
@@ -381,7 +381,7 @@ export const remove = Effect.fnUntraced(function* (
         'Global.remove',
       )
       state.globals.entries.keys.delete(CanonicalKey.bytes(description.name))
-      state.globals.entries.descriptions[index] = Object.freeze({ ...description, deleted: true })
+      state.globals.entries.descriptions[index] = { ...description, deleted: true }
     }),
   )
 })

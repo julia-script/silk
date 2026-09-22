@@ -28,7 +28,7 @@ export interface ModuleTooling {
 
 /** Returns every expression nested under one statement in deterministic source order. */
 export const statementExpressions = (statement: Tir.Statement): ReadonlyArray<Tir.Expression> =>
-  Object.freeze(Tir.statementExpressions(statement).flatMap(Tir.expressionTree))
+  Tir.statementExpressions(statement).flatMap(Tir.expressionTree)
 
 /** Builds one module's anonymous-expression entries. */
 export const anonymousExpressionIndex = (
@@ -40,22 +40,17 @@ export const anonymousExpressionIndex = (
     if (body.hidden) continue
     for (const row of body.results.expressionTypes) {
       const span = context.spanOf(row.at)
-      found.set(
-        `${span.start}:${span.end}`,
-        Object.freeze({
-          span,
-          type: row.type,
-          ...(row.presentation === undefined ? {} : { presentation: row.presentation }),
-        }),
-      )
+      found.set(`${span.start}:${span.end}`, {
+        span,
+        type: row.type,
+        ...(row.presentation === undefined ? {} : { presentation: row.presentation }),
+      })
     }
   }
-  return Object.freeze(
-    [...found.values()].sort(
-      (left, right) =>
-        left.span.start - right.span.start ||
-        left.span.end - left.span.start - (right.span.end - right.span.start),
-    ),
+  return [...found.values()].sort(
+    (left, right) =>
+      left.span.start - right.span.start ||
+      left.span.end - left.span.start - (right.span.end - right.span.start),
   )
 }
 
@@ -83,11 +78,10 @@ export const fromIndexes = (
   semantics: ModuleSemantics.ModuleSemantics,
   semanticOccurrences: SemanticOccurrence.ModuleIndex,
   anonymousExpressions: ReadonlyArray<AnonymousExpression>,
-): ModuleTooling =>
-  Object.freeze({
-    _tag: 'ModuleTooling',
-    module: semantics.module,
-    semantics,
-    semanticOccurrences,
-    anonymousExpressions,
-  })
+): ModuleTooling => ({
+  _tag: 'ModuleTooling',
+  module: semantics.module,
+  semantics,
+  semanticOccurrences,
+  anonymousExpressions,
+})

@@ -33,24 +33,20 @@ const decoded = (
   sourceRanges: ReadonlyArray<SourceRange>,
   contentRange: SourceRange,
   utf8: boolean,
-): DecodeResult =>
-  Object.freeze({
-    _tag: 'Decoded',
-    data: Object.freeze({
-      _tag: 'StaticData',
-      id: `${kind === 'Text' ? 'text' : 'bytes'}:${hex(bytes)}`,
-      kind,
-      bytes: Object.freeze([...bytes]),
-      sourceRanges: Object.freeze(
-        sourceRanges.map((range) => Object.freeze({ start: range.start, end: range.end })),
-      ),
-      contentRange: Object.freeze({ start: contentRange.start, end: contentRange.end }),
-      utf8,
-    }),
-  })
+): DecodeResult => ({
+  _tag: 'Decoded',
+  data: {
+    _tag: 'StaticData',
+    id: `${kind === 'Text' ? 'text' : 'bytes'}:${hex(bytes)}`,
+    kind,
+    bytes: [...bytes],
+    sourceRanges: sourceRanges.map((range) => ({ start: range.start, end: range.end })),
+    contentRange: { start: contentRange.start, end: contentRange.end },
+    utf8,
+  },
+})
 
-const invalid = (detail: string, offset: number) =>
-  Object.freeze({ _tag: 'Invalid' as const, detail, offset })
+const invalid = (detail: string, offset: number) => ({ _tag: 'Invalid' as const, detail, offset })
 
 /** Decodes a complete literal token once, preserving exact bytes for all later phases. */
 export const decode = (
@@ -80,13 +76,13 @@ export const decode = (
         if (token[index + 1] !== 0x0a)
           return invalid('isolated carriage return in multiline literal', index)
         output.push(0x0a)
-        sourceRanges.push(Object.freeze({ start: index, end: index + 2 }))
+        sourceRanges.push({ start: index, end: index + 2 })
         index += 2
         continue
       }
       if (byte !== undefined) {
         output.push(byte)
-        sourceRanges.push(Object.freeze({ start: index, end: index + 1 }))
+        sourceRanges.push({ start: index, end: index + 1 })
       }
       index += 1
       continue
@@ -95,12 +91,10 @@ export const decode = (
     const escaped = Escape.decodeAt(token, index + 1, end, form.delimiter, byteString)
     if (escaped._tag === 'Invalid') return invalid(escaped.detail, escapeOffset)
     output.push(...escaped.bytes)
-    sourceRanges.push(
-      ...escaped.bytes.map(() => Object.freeze({ start: escapeOffset, end: escaped.next })),
-    )
+    sourceRanges.push(...escaped.bytes.map(() => ({ start: escapeOffset, end: escaped.next })))
     index = escaped.next
   }
-  const contentRange = Object.freeze({ start: contentStart, end })
+  const contentRange = { start: contentStart, end }
   if (byteString) return decoded('Bytes', output, sourceRanges, contentRange, false)
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(output))
@@ -135,5 +129,5 @@ export const decodeScalar = (
   const value = text.codePointAt(0)
   if (value === undefined || String.fromCodePoint(value).length !== text.length)
     return invalid('character literal must hold exactly one Unicode scalar', form.delimiterWidth)
-  return Object.freeze({ _tag: 'Scalar', value })
+  return { _tag: 'Scalar', value }
 }

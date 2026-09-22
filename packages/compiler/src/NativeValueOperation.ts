@@ -141,26 +141,18 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           `LLVM match binding %${operation.destination.ordinal} disagrees with its payload lanes (${physical.length} selected, ${targetLanes.length} required)`,
         )
       }
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze(selected),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, selected)
       break
     }
     case 'EnumConstant': {
       const lane = NativeType.lanesFor(types, operation.type).at(0)
       if (lane === undefined) throw new RangeError('LLVM enum constant lost its lane')
       const physicalType = NativeType.laneType(types, lane)
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([
-          operation.representation.signedness === 'Signed'
-            ? yield* Constant.integerSigned(builder, physicalType, operation.discriminant)
-            : yield* Constant.integerUnsigned(builder, physicalType, operation.discriminant),
-        ]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+        operation.representation.signedness === 'Signed'
+          ? yield* Constant.integerSigned(builder, physicalType, operation.discriminant)
+          : yield* Constant.integerUnsigned(builder, physicalType, operation.discriminant),
+      ])
       break
     }
     case 'EnumValue': {
@@ -183,19 +175,15 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         right,
         `enum${operation.destination.ordinal}_${operation.negated ? 'not_equal' : 'equal'}`,
       )
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([
-          yield* FunctionBody.cast(
-            body,
-            'zext',
-            compared,
-            i32,
-            `enum${operation.destination.ordinal}_result`,
-          ),
-        ]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+        yield* FunctionBody.cast(
+          body,
+          'zext',
+          compared,
+          i32,
+          `enum${operation.destination.ordinal}_result`,
+        ),
+      ])
       break
     }
     case 'Literal': {
@@ -205,34 +193,26 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const semantic = Mir.semanticType(operation.type)
       const floating = typeof semantic === 'string' ? Scalar.find(semantic) : undefined
       if (floating?.category === 'Floating') {
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([
-            yield* Constant.floatingRaw(
-              builder,
-              physicalType,
-              floating.spelling === 'f32' ? 'float' : 'double',
-              FloatingPoint.littleEndianBytes({
-                width: floating.spelling === 'f32' ? 32 : 64,
-                bits: BigInt(operation.value),
-              }),
-            ),
-          ]),
-        )
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+          yield* Constant.floatingRaw(
+            builder,
+            physicalType,
+            floating.spelling === 'f32' ? 'float' : 'double',
+            FloatingPoint.littleEndianBytes({
+              width: floating.spelling === 'f32' ? 32 : 64,
+              bits: BigInt(operation.value),
+            }),
+          ),
+        ])
         break
       }
       const unsigned =
         typeof semantic === 'string' && Scalar.find(semantic)?.signedness === 'Unsigned'
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([
-          unsigned
-            ? yield* Constant.integerUnsigned(builder, physicalType, BigInt(operation.value))
-            : yield* Constant.integerSigned(builder, physicalType, BigInt(operation.value)),
-        ]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+        unsigned
+          ? yield* Constant.integerUnsigned(builder, physicalType, BigInt(operation.value))
+          : yield* Constant.integerSigned(builder, physicalType, BigInt(operation.value)),
+      ])
       break
     }
     case 'StaticView': {
@@ -240,14 +220,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       if (address === undefined || usizeType === undefined) {
         throw new RangeError('LLVM static view lost its data placement or usize type')
       }
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([
-          address,
-          yield* Constant.integerUnsigned(builder, usizeType, operation.length),
-        ]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+        address,
+        yield* Constant.integerUnsigned(builder, usizeType, operation.length),
+      ])
       break
     }
     case 'StaticString': {
@@ -255,14 +231,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       if (address === undefined || usizeType === undefined) {
         throw new RangeError('LLVM static string lost its data placement or usize type')
       }
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([
-          address,
-          yield* Constant.integerUnsigned(builder, usizeType, operation.byteLength),
-        ]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+        address,
+        yield* Constant.integerUnsigned(builder, usizeType, operation.byteLength),
+      ])
       break
     }
     case 'StringFromUtf8Unchecked': {
@@ -286,11 +258,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       if (length === undefined) {
         throw new RangeError('LLVM string lost its byte-length lane')
       }
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([length]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [length])
       break
     }
     case 'StringEqualsExact': {
@@ -360,19 +328,15 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             `string${operation.destination.ordinal}_negated`,
           )
         : exact
-      yield* NativeStorage.writeLocal(
-        nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze([
-          yield* FunctionBody.cast(
-            body,
-            'zext',
-            selected,
-            i32,
-            `string${operation.destination.ordinal}_result`,
-          ),
-        ]),
-      )
+      yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [
+        yield* FunctionBody.cast(
+          body,
+          'zext',
+          selected,
+          i32,
+          `string${operation.destination.ordinal}_result`,
+        ),
+      ])
       break
     }
   }

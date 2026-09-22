@@ -6,20 +6,20 @@ export interface Bits {
 
 const specification = (width: 32 | 64) =>
   width === 32
-    ? Object.freeze({
+    ? {
         precision: 24,
         exponentBits: 8,
         bias: 127,
         minimumExponent: -126,
         maximumExponent: 127,
-      })
-    : Object.freeze({
+      }
+    : {
         precision: 53,
         exponentBits: 11,
         bias: 1023,
         minimumExponent: -1022,
         maximumExponent: 1023,
-      })
+      }
 
 const bitLength = (value: bigint): number => value.toString(2).length
 
@@ -56,15 +56,15 @@ export const fromDecimal = (spelling: string, width: 32 | 64): Bits | undefined 
   const coefficient = BigInt(`${whole}${fraction}`)
   const spec = specification(width)
   const sign = negative ? 1n << BigInt(width - 1) : 0n
-  if (coefficient === 0n) return Object.freeze({ width, bits: sign })
+  if (coefficient === 0n) return { width, bits: sign }
 
   // Bounds prevent hostile exponent spellings from allocating enormous intermediate BigInts.
   const decimalMagnitude = whole.length + Number(match[4] ?? '0')
   if (!Number.isSafeInteger(exponent) || decimalMagnitude > (width === 32 ? 50 : 400)) {
     const infinityExponent = (1n << BigInt(spec.exponentBits)) - 1n
-    return Object.freeze({ width, bits: sign | (infinityExponent << BigInt(spec.precision - 1)) })
+    return { width, bits: sign | (infinityExponent << BigInt(spec.precision - 1)) }
   }
-  if (decimalMagnitude < (width === 32 ? -60 : -500)) return Object.freeze({ width, bits: sign })
+  if (decimalMagnitude < (width === 32 ? -60 : -500)) return { width, bits: sign }
 
   const numerator = exponent >= 0 ? coefficient * powerOfTen(exponent) : coefficient
   const denominator = exponent >= 0 ? 1n : powerOfTen(-exponent)
@@ -98,10 +98,10 @@ export const fromDecimal = (spelling: string, width: 32 | 64): Bits | undefined 
       fractionField = significand
     }
   }
-  return Object.freeze({
+  return {
     width,
     bits: sign | (exponentField << BigInt(spec.precision - 1)) | fractionField,
-  })
+  }
 }
 
 const buffer = new ArrayBuffer(8)
@@ -123,13 +123,13 @@ export const canonicalNaN = (width: 32 | 64): bigint =>
 
 /** Encodes a host arithmetic result, canonicalizing NaNs as required by Silk evaluation. */
 export const fromNumber = (value: number, width: 32 | 64): Bits => {
-  if (Number.isNaN(value)) return Object.freeze({ width, bits: canonicalNaN(width) })
+  if (Number.isNaN(value)) return { width, bits: canonicalNaN(width) }
   if (width === 32) {
     view.setFloat32(0, Math.fround(value), true)
-    return Object.freeze({ width, bits: BigInt(view.getUint32(0, true)) })
+    return { width, bits: BigInt(view.getUint32(0, true)) }
   }
   view.setFloat64(0, value, true)
-  return Object.freeze({ width, bits: view.getBigUint64(0, true) })
+  return { width, bits: view.getBigUint64(0, true) }
 }
 
 /**
@@ -203,11 +203,11 @@ export const squareRoot = (value: Bits): Bits => {
   const negative = isSignNegative(value)
   if (exponentField === (1n << BigInt(spec.exponentBits)) - 1n)
     return fractionField !== 0n || negative
-      ? Object.freeze({ width: value.width, bits: canonicalNaNValue })
+      ? { width: value.width, bits: canonicalNaNValue }
       : value
   // IEEE-754 keeps the sign of a zero root, so -0 squares back to -0.
   if (exponentField === 0n && fractionField === 0n) return value
-  if (negative) return Object.freeze({ width: value.width, bits: canonicalNaNValue })
+  if (negative) return { width: value.width, bits: canonicalNaNValue }
 
   const significand =
     exponentField === 0n ? fractionField : fractionField | (1n << BigInt(spec.precision - 1))
@@ -224,12 +224,12 @@ export const squareRoot = (value: Bits): Bits => {
   const carried = rounded === 1n << BigInt(spec.precision)
   const finalRoot = carried ? 1n << BigInt(spec.precision - 1) : rounded
   const finalExponent = BigInt((carried ? rootExponent + 1 : rootExponent) + spec.bias)
-  return Object.freeze({
+  return {
     width: value.width,
     bits:
       (finalExponent << BigInt(spec.precision - 1)) |
       (finalRoot & ((1n << BigInt(spec.precision - 1)) - 1n)),
-  })
+  }
 }
 
 /** IEEE totalOrder key: negatives reverse their payload ordering, positives set the sign key. */

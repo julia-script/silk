@@ -22,20 +22,19 @@ const samePoint = (left: ProvisionalMir.ControlId, right: ProvisionalMir.Control
 const pointOf = (
   owner: Instances.InstanceKey,
   point: ProvisionalMir.ControlId,
-): Mir.SuspensionPointId =>
-  Object.freeze({
-    _tag: 'SuspensionPointId',
-    owner,
-    sourceId: point.sourceId,
-    spanStart: point.spanStart,
-    spanEnd: point.spanEnd,
-    ordinal: point.ordinal,
-  })
+): Mir.SuspensionPointId => ({
+  _tag: 'SuspensionPointId',
+  owner,
+  sourceId: point.sourceId,
+  spanStart: point.spanStart,
+  spanEnd: point.spanEnd,
+  ordinal: point.ordinal,
+})
 
 const resumeOf = (
   point: Mir.SuspensionPointId,
   path: Mir.ResumePointId['path'],
-): Mir.ResumePointId => Object.freeze({ _tag: 'ResumePointId', point, path })
+): Mir.ResumePointId => ({ _tag: 'ResumePointId', point, path })
 
 const runnerOf = (
   runner: ProvisionalMir.Runner,
@@ -65,12 +64,12 @@ const runnerOf = (
     left.role === right.role &&
     left.requirementAccess === right.requirementAccess &&
     Type.equals(left.capability, right.capability)
-  const providersWithRuntimeSelections = Object.freeze([
+  const providersWithRuntimeSelections = [
     ...operationProviders,
     ...runner.providers.filter(
       (provider) => !operationProviders.some((selected) => sameSelection(provider, selected)),
     ),
-  ])
+  ]
   const runtimeProviders = providersWithRuntimeSelections.filter(
     (provider) => provider.witness?._tag === 'SourceConformanceWitness',
   )
@@ -97,12 +96,12 @@ const runnerOf = (
       const witness =
         provider.witness ??
         ConformanceProof.witness(index, provider.providerType, provider.capability)
-      return Object.freeze({
+      return {
         ...provider,
         ...(witness === undefined ? {} : { witness }),
         ...(argument === undefined ? {} : { argument }),
         purposes: ['ChildRequirement'] as const,
-      })
+      }
     })
   let declaration: typeof runner.declaration | undefined
   if (operation === undefined || operation._tag === 'ExecutionPark') {
@@ -122,12 +121,11 @@ const runnerOf = (
   }
   let staticArguments: ReadonlyArray<StaticValue.Value>
   if (operation === undefined || operation._tag === 'ExecutionPark')
-    staticArguments = runner.instance?.staticArguments ?? Object.freeze([])
-  else if (operation._tag === 'RunEffect')
-    staticArguments = operation.staticArguments ?? Object.freeze([])
+    staticArguments = runner.instance?.staticArguments ?? []
+  else if (operation._tag === 'RunEffect') staticArguments = operation.staticArguments ?? []
   else if (operation._tag === 'RunEffectValue' || operation._tag === 'CatchEffect')
-    staticArguments = operation.runnerStaticArguments ?? Object.freeze([])
-  else staticArguments = Object.freeze([])
+    staticArguments = operation.runnerStaticArguments ?? []
+  else staticArguments = []
   const exact = functions.find((fn) => {
     if (declaration === undefined) return false
     if (operation === undefined || operation._tag === 'ExecutionPark')
@@ -150,7 +148,7 @@ const runnerOf = (
     runner.instance.declaration.name === declaration.name
   )
     instance = runner.instance
-  return Object.freeze({
+  return {
     classification: runner.classification,
     ...(declaration === undefined ? {} : { declaration }),
     ...(instance === undefined ? {} : { instance }),
@@ -161,8 +159,8 @@ const runnerOf = (
         ? runner.outcome
         : operation.outcomeType.type,
     captures: runner.captures,
-    providers: Object.freeze(providers),
-  })
+    providers: providers,
+  }
 }
 
 const completionOf = (
@@ -173,7 +171,7 @@ const completionOf = (
   // infallible arm. Transport the selected call's exact outcome and projections.
   if (completion._tag === 'Reify') {
     if (operation._tag === 'CatchEffect')
-      return Object.freeze({
+      return {
         _tag: 'Reify',
         outcome: operation.outcomeType.type,
         successType: operation.outcomeType.type.success,
@@ -181,51 +179,49 @@ const completionOf = (
         successShape: operation.successShape,
         outcomeShape: operation.outcomeShape,
         failureValueShape: operation.failureValueShape,
-      })
+      }
     if (
       operation._tag !== 'ExecutionPark' &&
       Type.failureMembers(operation.outcomeType.type).length === 0
     )
-      return Object.freeze({
+      return {
         _tag: 'Propagate',
         outcome: operation.outcomeType.type,
-        failureMappings: Object.freeze([]),
-      })
+        failureMappings: [],
+      }
   }
-  return Object.freeze({ ...completion })
+  return { ...completion }
 }
 
-const pathPlanOf = (plan: SuspensionOwnership.ResumePlan): Mir.CoroutineFramePathPlan =>
-  Object.freeze({
-    restores: plan.restores,
-    loanEnds: plan.loanEnds,
-    releases: plan.releases,
-  })
+const pathPlanOf = (plan: SuspensionOwnership.ResumePlan): Mir.CoroutineFramePathPlan => ({
+  restores: plan.restores,
+  loanEnds: plan.loanEnds,
+  releases: plan.releases,
+})
 
 const descriptorOf = (
   point: Mir.SuspensionPointId,
   runner: Mir.SuspensionRunner,
   plan: SuspensionOwnership.Plan,
-): Mir.CoroutineFrameState =>
-  Object.freeze({
-    _tag: 'CoroutineFrameState',
-    point,
-    runner,
-    outcome: runner.outcome,
-    slots: plan.slots,
-    ...('cancellationFinalizer' in plan.operation &&
-    plan.operation.cancellationFinalizer !== undefined
-      ? { cancellationFinalizer: plan.operation.cancellationFinalizer }
-      : {}),
-    success: Object.freeze({
-      ...pathPlanOf(plan.success),
-      resume: resumeOf(point, 'Success'),
-    }),
-    failure: Object.freeze({
-      ...pathPlanOf(plan.failure),
-      resume: resumeOf(point, 'Failure'),
-    }),
-  })
+): Mir.CoroutineFrameState => ({
+  _tag: 'CoroutineFrameState',
+  point,
+  runner,
+  outcome: runner.outcome,
+  slots: plan.slots,
+  ...('cancellationFinalizer' in plan.operation &&
+  plan.operation.cancellationFinalizer !== undefined
+    ? { cancellationFinalizer: plan.operation.cancellationFinalizer }
+    : {}),
+  success: {
+    ...pathPlanOf(plan.success),
+    resume: resumeOf(point, 'Success'),
+  },
+  failure: {
+    ...pathPlanOf(plan.failure),
+    resume: resumeOf(point, 'Failure'),
+  },
+})
 
 interface LocatedOperation {
   readonly region: Mir.RegionId
@@ -252,7 +248,7 @@ const operationsOf = (fn: Mir.MirFunction): ReadonlyArray<LocatedOperation> =>
         operation._tag === 'RunEffectValue' ||
         operation._tag === 'CatchEffect' ||
         operation._tag === 'ExecutionPark'
-          ? [Object.freeze({ region: region.id, operation })]
+          ? [{ region: region.id, operation }]
           : [],
       )
   })
@@ -273,90 +269,87 @@ const regionsOf = (
   ownership: SuspensionOwnership.Module,
   index: DeclarationIndex.Index,
 ): ReadonlyArray<Mir.SuspensionRegion> => {
-  if (execution === undefined) return Object.freeze([])
+  if (execution === undefined) return []
   const located = operationsOf(fn)
   let expandedOrdinal = Math.max(-1, ...execution.regions.map((region) => region.id.ordinal)) + 1
-  return Object.freeze(
-    execution.regions.flatMap((region): ReadonlyArray<Mir.SuspensionRegion> => {
-      if (region.outcome._tag === 'Complete') return []
-      const point = pointOf(fn.instance, region.id)
-      if (region.outcome._tag === 'SuspendEffect') {
-        const outcome = region.outcome
-        const candidate = located.find(
-          (entry) =>
-            entry.operation.provenance.span.sourceId === outcome.span.sourceId &&
-            entry.operation.provenance.span.start === outcome.span.start &&
-            entry.operation.provenance.span.end === outcome.span.end,
-        )
-        if (candidate === undefined || candidate.operation._tag === 'ExecutionPark') return []
-        const deferred = runnerOf(outcome.deferred, index, candidate.operation, program.functions)
-        return [
-          Object.freeze({
-            _tag: 'SuspendEffectRegion',
-            point,
-            ownerRegion: candidate.region,
-            operation: candidate.operation,
-            deferred,
-            transfer: Object.freeze({ _tag: 'OriginateTransfer' as const }),
-            provenance: Object.freeze({ span: outcome.span, generated: false }),
-          }),
-        ]
-      }
+  return execution.regions.flatMap((region): ReadonlyArray<Mir.SuspensionRegion> => {
+    if (region.outcome._tag === 'Complete') return []
+    const point = pointOf(fn.instance, region.id)
+    if (region.outcome._tag === 'SuspendEffect') {
       const outcome = region.outcome
-      const candidates = located.filter(
+      const candidate = located.find(
         (entry) =>
-          sameSpan(entry.operation, outcome) &&
-          (outcome.completion._tag === 'Reify'
-            ? entry.operation._tag === 'CatchEffect' ||
-              (entry.operation._tag !== 'ExecutionPark' &&
-                Type.failureMembers(entry.operation.outcomeType.type).length === 0)
-            : entry.operation._tag !== 'CatchEffect') &&
-          (entry.operation._tag === 'ExecutionPark'
-            ? Type.equals(outcome.runner.outcome.success, Type.unit)
-            : true),
+          entry.operation.provenance.span.sourceId === outcome.span.sourceId &&
+          entry.operation.provenance.span.start === outcome.span.start &&
+          entry.operation.provenance.span.end === outcome.span.end,
       )
-      return candidates.flatMap((candidate, ordinal): ReadonlyArray<Mir.SuspensionRegion> => {
-        const runner = runnerOf(outcome.runner, index, candidate.operation, program.functions)
-        // Lowering a selected failure handler can produce a synchronous call at the same
-        // source span as its protected suspendable recipe. Only the actual runner can relay.
-        if (
-          candidate.operation._tag !== 'ExecutionPark' &&
-          runner.instance !== undefined &&
-          ProvisionalMir.classificationOfExecution(provisional, runner.instance) === 'Synchronous'
-        )
-          return []
-        const selectedPoint =
-          ordinal === 0 ? point : Object.freeze({ ...point, ordinal: expandedOrdinal++ })
-        const plan = ownership.plans.find(
-          (candidatePlan) =>
-            Instances.keyText(candidatePlan.function) === Instances.keyText(fn.instance) &&
-            samePoint(candidatePlan.point, region.id) &&
-            candidatePlan.operation === candidate.operation,
-        )
-        return [
-          Object.freeze({
-            _tag: 'RunSuspendableEffectRegion',
-            point: selectedPoint,
-            ownerRegion: candidate.region,
-            operation: candidate.operation,
-            runner,
-            completion: completionOf(outcome.completion, candidate.operation),
-            liveLocals: plan?.slots.map((slot) => slot.local) ?? Object.freeze([]),
-            complete: Object.freeze({ _tag: 'CompleteInCurrentActivation' }),
-            relay: Object.freeze({
-              _tag: 'RelayExistingTransfer',
-              preserves: outcome.relay.preserves,
-              frame: plan?.frame ?? 'MissingOwnershipPlan',
-              ...(plan?.frame === 'StatefulRelay'
-                ? { state: descriptorOf(selectedPoint, runner, plan) }
-                : {}),
-            }),
-            provenance: candidate.operation.provenance,
-          }),
-        ]
-      })
-    }),
-  )
+      if (candidate === undefined || candidate.operation._tag === 'ExecutionPark') return []
+      const deferred = runnerOf(outcome.deferred, index, candidate.operation, program.functions)
+      return [
+        {
+          _tag: 'SuspendEffectRegion',
+          point,
+          ownerRegion: candidate.region,
+          operation: candidate.operation,
+          deferred,
+          transfer: { _tag: 'OriginateTransfer' as const },
+          provenance: { span: outcome.span, generated: false },
+        },
+      ]
+    }
+    const outcome = region.outcome
+    const candidates = located.filter(
+      (entry) =>
+        sameSpan(entry.operation, outcome) &&
+        (outcome.completion._tag === 'Reify'
+          ? entry.operation._tag === 'CatchEffect' ||
+            (entry.operation._tag !== 'ExecutionPark' &&
+              Type.failureMembers(entry.operation.outcomeType.type).length === 0)
+          : entry.operation._tag !== 'CatchEffect') &&
+        (entry.operation._tag === 'ExecutionPark'
+          ? Type.equals(outcome.runner.outcome.success, Type.unit)
+          : true),
+    )
+    return candidates.flatMap((candidate, ordinal): ReadonlyArray<Mir.SuspensionRegion> => {
+      const runner = runnerOf(outcome.runner, index, candidate.operation, program.functions)
+      // Lowering a selected failure handler can produce a synchronous call at the same
+      // source span as its protected suspendable recipe. Only the actual runner can relay.
+      if (
+        candidate.operation._tag !== 'ExecutionPark' &&
+        runner.instance !== undefined &&
+        ProvisionalMir.classificationOfExecution(provisional, runner.instance) === 'Synchronous'
+      )
+        return []
+      const selectedPoint = ordinal === 0 ? point : { ...point, ordinal: expandedOrdinal++ }
+      const plan = ownership.plans.find(
+        (candidatePlan) =>
+          Instances.keyText(candidatePlan.function) === Instances.keyText(fn.instance) &&
+          samePoint(candidatePlan.point, region.id) &&
+          candidatePlan.operation === candidate.operation,
+      )
+      return [
+        {
+          _tag: 'RunSuspendableEffectRegion',
+          point: selectedPoint,
+          ownerRegion: candidate.region,
+          operation: candidate.operation,
+          runner,
+          completion: completionOf(outcome.completion, candidate.operation),
+          liveLocals: plan?.slots.map((slot) => slot.local) ?? [],
+          complete: { _tag: 'CompleteInCurrentActivation' },
+          relay: {
+            _tag: 'RelayExistingTransfer',
+            preserves: outcome.relay.preserves,
+            frame: plan?.frame ?? 'MissingOwnershipPlan',
+            ...(plan?.frame === 'StatefulRelay'
+              ? { state: descriptorOf(selectedPoint, runner, plan) }
+              : {}),
+          },
+          provenance: candidate.operation.provenance,
+        },
+      ]
+    })
+  })
 }
 
 interface SuspensionCallTarget {
@@ -373,61 +366,58 @@ const suspensionCallTargets = (
     case 'Call':
     case 'RunEffect':
       return [
-        Object.freeze({
+        {
           declaration: operation.target,
           typeArguments: operation.typeArguments,
-          staticArguments: operation.staticArguments ?? Object.freeze([]),
-        }),
+          staticArguments: operation.staticArguments ?? [],
+        },
       ]
     case 'RunEffectValue':
     case 'RunStaticEffect':
     case 'CatchEffect':
       return [
-        Object.freeze({
+        {
           declaration: operation.runner,
           typeArguments: operation.runnerTypeArguments,
-          staticArguments: operation.runnerStaticArguments ?? Object.freeze([]),
-        }),
+          staticArguments: operation.runnerStaticArguments ?? [],
+        },
         ...('cancellationFinalizer' in operation && operation.cancellationFinalizer !== undefined
           ? [
-              Object.freeze({
+              {
                 declaration: operation.cancellationFinalizer.runner,
                 typeArguments: operation.cancellationFinalizer.runnerTypeArguments,
-                staticArguments:
-                  operation.cancellationFinalizer.runnerStaticArguments ?? Object.freeze([]),
-              }),
+                staticArguments: operation.cancellationFinalizer.runnerStaticArguments ?? [],
+              },
             ]
           : []),
         ...('cancellationFinalizer' in operation &&
         operation.cancellationFinalizer?._tag === 'ResourceCancellationFinalizer'
           ? [
-              Object.freeze({
+              {
                 declaration: operation.cancellationFinalizer.releaseTarget,
                 typeArguments: operation.cancellationFinalizer.releaseTypeArguments,
-                staticArguments: Object.freeze([]),
-              }),
+                staticArguments: [],
+              },
             ]
           : []),
       ]
     case 'RunEffectComposite':
-      return operation.alternatives.map((alternative) =>
-        Object.freeze({
-          declaration: alternative.runner,
-          typeArguments: alternative.runnerTypeArguments,
-          staticArguments: alternative.runnerStaticArguments ?? Object.freeze([]),
-        }),
-      )
+      return operation.alternatives.map((alternative) => ({
+        declaration: alternative.runner,
+        typeArguments: alternative.runnerTypeArguments,
+        staticArguments: alternative.runnerStaticArguments ?? [],
+      }))
     case 'ApplyCallable': {
       const type =
         operation.callable === undefined ? undefined : fn.localTypes.at(operation.callable.ordinal)
       const target = operation.target ?? (type?._tag === 'CallableValue' ? type.target : undefined)
       return target?._tag === 'DeclarationCallableTarget'
         ? [
-            Object.freeze({
+            {
               declaration: target.declaration,
               typeArguments: operation.typeArguments,
-              staticArguments: Object.freeze([]),
-            }),
+              staticArguments: [],
+            },
           ]
         : []
     }
@@ -472,7 +462,7 @@ export const originReachableFunctions = (self: Mir.Module): ReadonlySet<string> 
                 {
                   declaration: region.runner.declaration,
                   typeArguments: region.runner.typeArguments,
-                  staticArguments: region.runner.instance?.staticArguments ?? Object.freeze([]),
+                  staticArguments: region.runner.instance?.staticArguments ?? [],
                 },
               ]
             : [],
@@ -516,99 +506,92 @@ export const finalize = (
   ownership: SuspensionOwnership.Module,
   index: DeclarationIndex.Index,
 ): Mir.Module => {
-  const functions = Object.freeze(
-    program.functions.map((fn) => {
-      const execution = ProvisionalMir.executionOf(provisional, fn.instance)
-      const classification = ProvisionalMir.classificationOfExecution(provisional, fn.instance)
-      const regions = regionsOf(program, provisional, fn, execution, ownership, index)
-      const states = Object.freeze(
-        regions
-          .flatMap((region) =>
-            region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
-              ? [region.relay.state]
-              : [],
-          )
-          .sort(
-            (left, right) =>
-              left.point.sourceId.localeCompare(right.point.sourceId) ||
-              left.point.spanStart - right.point.spanStart ||
-              left.point.ordinal - right.point.ordinal,
-          ),
+  const functions = program.functions.map((fn) => {
+    const execution = ProvisionalMir.executionOf(provisional, fn.instance)
+    const classification = ProvisionalMir.classificationOfExecution(provisional, fn.instance)
+    const regions = regionsOf(program, provisional, fn, execution, ownership, index)
+    const states = regions
+      .flatMap((region) =>
+        region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
+          ? [region.relay.state]
+          : [],
       )
-      if (regions.length === 0 && (classification === 'Synchronous' || execution === undefined))
-        return fn
-      return Object.freeze({
-        ...fn,
-        suspension: Object.freeze({
-          classification,
-          regions,
-          ...(states.length === 0
-            ? {}
-            : {
-                frame: Object.freeze({
-                  _tag: 'CoroutineFrameDescriptor' as const,
-                  function: fn.instance,
-                  states,
-                }),
-              }),
-        }),
-      })
-    }),
-  )
+      .sort(
+        (left, right) =>
+          left.point.sourceId.localeCompare(right.point.sourceId) ||
+          left.point.spanStart - right.point.spanStart ||
+          left.point.ordinal - right.point.ordinal,
+      )
+    if (regions.length === 0 && (classification === 'Synchronous' || execution === undefined))
+      return fn
+    return {
+      ...fn,
+      suspension: {
+        classification,
+        regions,
+        ...(states.length === 0
+          ? {}
+          : {
+              frame: {
+                _tag: 'CoroutineFrameDescriptor' as const,
+                function: fn.instance,
+                states,
+              },
+            }),
+      },
+    }
+  })
   // Unknown provisional runners are conservative discovery facts. In closed MIR, only actual
   // calls to a retained origin require a transfer ABI; an independently managed execution must
   // not keep suspension machinery alive in an otherwise synchronous part of the program.
   const reachable = originReachableFunctions({ ...program, functions })
-  return Object.freeze({
+  return {
     ...program,
-    functions: Object.freeze(
-      functions.map((fn, ordinal) => {
-        if (!reachable.has(Instances.keyText(fn.instance))) return program.functions[ordinal] ?? fn
-        if (fn.suspension === undefined) return fn
-        const regions = fn.suspension.regions.filter(
-          (region) =>
-            region._tag === 'SuspendEffectRegion' ||
-            region.operation._tag === 'ExecutionPark' ||
-            functions.some(
-              (candidate) =>
-                reachable.has(Instances.keyText(candidate.instance)) &&
-                region.runner.declaration !== undefined &&
-                Mir.matchesInstance(
-                  candidate,
-                  region.runner.declaration,
-                  region.runner.typeArguments,
-                  region.runner.instance?.staticArguments,
-                ),
-            ),
-        )
-        const retainedStates = new Set(
-          regions.flatMap((region) =>
-            region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
-              ? [region.relay.state]
-              : [],
+    functions: functions.map((fn, ordinal) => {
+      if (!reachable.has(Instances.keyText(fn.instance))) return program.functions[ordinal] ?? fn
+      if (fn.suspension === undefined) return fn
+      const regions = fn.suspension.regions.filter(
+        (region) =>
+          region._tag === 'SuspendEffectRegion' ||
+          region.operation._tag === 'ExecutionPark' ||
+          functions.some(
+            (candidate) =>
+              reachable.has(Instances.keyText(candidate.instance)) &&
+              region.runner.declaration !== undefined &&
+              Mir.matchesInstance(
+                candidate,
+                region.runner.declaration,
+                region.runner.typeArguments,
+                region.runner.instance?.staticArguments,
+              ),
           ),
-        )
-        const states =
-          fn.suspension.frame?.states.filter((state) => retainedStates.has(state)) ?? []
-        return Object.freeze({
-          ...fn,
-          suspension: Object.freeze({
-            classification: fn.suspension.classification,
-            regions: Object.freeze(regions),
-            ...(states.length === 0
-              ? {}
-              : {
-                  frame: Object.freeze({
-                    _tag: 'CoroutineFrameDescriptor' as const,
-                    function: fn.instance,
-                    states: Object.freeze(states),
-                  }),
-                }),
-          }),
-        })
-      }),
-    ),
-  })
+      )
+      const retainedStates = new Set(
+        regions.flatMap((region) =>
+          region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
+            ? [region.relay.state]
+            : [],
+        ),
+      )
+      const states = fn.suspension.frame?.states.filter((state) => retainedStates.has(state)) ?? []
+      return {
+        ...fn,
+        suspension: {
+          classification: fn.suspension.classification,
+          regions: regions,
+          ...(states.length === 0
+            ? {}
+            : {
+                frame: {
+                  _tag: 'CoroutineFrameDescriptor' as const,
+                  function: fn.instance,
+                  states: states,
+                },
+              }),
+        },
+      }
+    }),
+  }
 }
 
 /** Stable inspection summary for focused finalization tests. */

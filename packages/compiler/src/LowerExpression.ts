@@ -115,17 +115,15 @@ const packEffectComposite = (
   )
   if (alternative < 0) return undefined
   const packed = fn.alloc(composite)
-  fn.emit(
-    Object.freeze({
-      _tag: 'PackEffectComposite',
-      destination: packed,
-      source: lowered.result,
-      alternative,
-      type: composite,
-      provenance: authored(span),
-    }),
-  )
-  return Object.freeze({ result: packed })
+  fn.emit({
+    _tag: 'PackEffectComposite',
+    destination: packed,
+    source: lowered.result,
+    alternative,
+    type: composite,
+    provenance: authored(span),
+  })
+  return { result: packed }
 }
 
 /**
@@ -165,15 +163,12 @@ const forwardedServiceProvision = (
   const provider = lowerExpression(fn, forwarded.provider, availableRequirements)
   if (provider === 'Transferred') return provider
   if (provider === undefined) return undefined
-  return Object.freeze({
+  return {
     provider: forwarded.provider,
     local: provider.result,
     protected: forwarded.binding.protected,
-    requirements: Object.freeze([
-      ...availableRequirements,
-      Object.freeze({ ...forwarded.selection, local: provider.result }),
-    ]),
-  })
+    requirements: [...availableRequirements, { ...forwarded.selection, local: provider.result }],
+  }
 }
 
 const lowerOperandWithProvision = (
@@ -183,7 +178,7 @@ const lowerOperandWithProvision = (
   availableRequirements: ReadonlyArray<ProvidedRequirement>,
 ): LoweredExpression | undefined => {
   if (provision === undefined) return lowerExpression(fn, operand, availableRequirements)
-  if (operand === provision.provider) return Object.freeze({ result: provision.local })
+  if (operand === provision.provider) return { result: provision.local }
   return lowerExpression(
     fn,
     operand,
@@ -268,25 +263,21 @@ export const lowerExecution = (
     const entry = fn.reserve()
     const [lowered, operations] = fn.capture(body)
     if (lowered === undefined) return undefined
-    fn.publish(
-      Object.freeze({
-        _tag: 'OperationRegion',
-        id: entry,
-        ...ownerFields(fn.ownerLoop),
-        operations,
-        outcome:
-          lowered === 'Transferred'
-            ? Object.freeze({
-                _tag: 'Trap',
-                reason: 'unreachable expression continuation',
-                provenance: generated(span),
-              })
-            : Object.freeze({ _tag: 'Complete', provenance: generated(span) }),
-      }),
-    )
-    return lowered === 'Transferred'
-      ? Object.freeze({ entry })
-      : Object.freeze({ entry, result: lowered.result })
+    fn.publish({
+      _tag: 'OperationRegion',
+      id: entry,
+      ...ownerFields(fn.ownerLoop),
+      operations,
+      outcome:
+        lowered === 'Transferred'
+          ? {
+              _tag: 'Trap',
+              reason: 'unreachable expression continuation',
+              provenance: generated(span),
+            }
+          : { _tag: 'Complete', provenance: generated(span) },
+    })
+    return lowered === 'Transferred' ? { entry } : { entry, result: lowered.result }
   })
 
 export function lowerExpressionInner(
@@ -299,34 +290,30 @@ export function lowerExpressionInner(
       const type = fn.type(expression.type)
       if (type === undefined || type._tag !== 'ForeignFunction') return undefined
       const destination = fn.alloc(type)
-      fn.emit(
-        Object.freeze({
-          _tag: 'ForeignFunctionAddress',
-          destination,
-          target: expression.target,
-          symbol: expression.symbol,
-          type,
-          provenance: authored(expression.span),
-        }),
-      )
-      return Object.freeze({ result: destination })
+      fn.emit({
+        _tag: 'ForeignFunctionAddress',
+        destination,
+        target: expression.target,
+        symbol: expression.symbol,
+        type,
+        provenance: authored(expression.span),
+      })
+      return { result: destination }
     }
     case 'ForeignStaticLoad': {
       const type = fn.type(expression.type)
       if (type === undefined) return undefined
       const destination = fn.alloc(type)
-      fn.emit(
-        Object.freeze({
-          _tag: 'ForeignStaticLoad',
-          destination,
-          declaration: expression.declaration,
-          direction: expression.direction,
-          symbol: expression.symbol,
-          type,
-          provenance: authored(expression.span),
-        }),
-      )
-      return Object.freeze({ result: destination })
+      fn.emit({
+        _tag: 'ForeignStaticLoad',
+        destination,
+        declaration: expression.declaration,
+        direction: expression.direction,
+        symbol: expression.symbol,
+        type,
+        provenance: authored(expression.span),
+      })
+      return { result: destination }
     }
     case 'IntegerLiteral':
       return lowerIntegerLiteralExpression(fn, expression)
@@ -501,15 +488,13 @@ function lowerIntegerLiteralExpression(
   const type = fn.type(expression.type)
   if (type === undefined || !Type.isBuiltin(Mir.semanticType(type))) return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Literal',
-      destination,
-      type,
-      value: expression.value,
-      provenance: Object.freeze({ span: expression.span, generated: false }),
-    }),
-  )
+  fn.emit({
+    _tag: 'Literal',
+    destination,
+    type,
+    value: expression.value,
+    provenance: { span: expression.span, generated: false },
+  })
   return { result: destination }
 }
 
@@ -520,15 +505,13 @@ function lowerFloatingLiteralExpression(
   const type = fn.type(expression.type)
   if (type?._tag !== expression.type) return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Literal',
-      destination,
-      type,
-      value: expression.bits,
-      provenance: authored(expression.span),
-    }),
-  )
+  fn.emit({
+    _tag: 'Literal',
+    destination,
+    type,
+    value: expression.bits,
+    provenance: authored(expression.span),
+  })
   return { result: destination }
 }
 
@@ -544,19 +527,17 @@ function lowerEnumMemberExpression(
   )
     return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'EnumConstant',
-      destination,
-      enum: expression.enum,
-      member: expression.member,
-      discriminant: expression.discriminant,
-      representation: type.representation,
-      type,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'EnumConstant',
+    destination,
+    enum: expression.enum,
+    member: expression.member,
+    discriminant: expression.discriminant,
+    representation: type.representation,
+    type,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerEnumValueExpression(
@@ -578,18 +559,16 @@ function lowerEnumValueExpression(
   )
     return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'EnumValue',
-      destination,
-      source: value.result,
-      enum: expression.enum,
-      representation: sourceType.representation,
-      type,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'EnumValue',
+    destination,
+    source: value.result,
+    enum: expression.enum,
+    representation: sourceType.representation,
+    type,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerEnumEqualityExpression(
@@ -615,20 +594,18 @@ function lowerEnumEqualityExpression(
   )
     return undefined
   const destination = fn.alloc(bool)
-  fn.emit(
-    Object.freeze({
-      _tag: 'EnumEquality',
-      destination,
-      left: left.result,
-      right: right.result,
-      enum: expression.enum,
-      negated: expression.negated,
-      representation: leftType.representation,
-      type: bool,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'EnumEquality',
+    destination,
+    left: left.result,
+    right: right.result,
+    enum: expression.enum,
+    negated: expression.negated,
+    representation: leftType.representation,
+    type: bool,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerStaticStringLiteralExpression(
@@ -638,17 +615,15 @@ function lowerStaticStringLiteralExpression(
   const type = fn.type(expression.type)
   if (type?._tag !== 'String') return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'StaticString',
-      destination,
-      data: expression.data.id,
-      byteLength: expression.data.bytes.length,
-      type,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'StaticString',
+    destination,
+    data: expression.data.id,
+    byteLength: expression.data.bytes.length,
+    type,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerRuntimeStringViewExpression(
@@ -669,18 +644,16 @@ function lowerRuntimeStringViewExpression(
   )
     return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'StringFromUtf8Unchecked',
-      destination,
-      bytes: source.result,
-      heldLoans: expression.heldLoans,
-      authorization: 'Unsafe',
-      type,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'StringFromUtf8Unchecked',
+    destination,
+    bytes: source.result,
+    heldLoans: expression.heldLoans,
+    authorization: 'Unsafe',
+    type,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerStringEqualityExpression(
@@ -702,18 +675,16 @@ function lowerStringEqualityExpression(
   )
     return undefined
   const destination = fn.alloc(bool)
-  fn.emit(
-    Object.freeze({
-      _tag: 'StringEqualsExact',
-      destination,
-      left: left.result,
-      right: right.result,
-      negated: expression.negated,
-      type: bool,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'StringEqualsExact',
+    destination,
+    left: left.result,
+    right: right.result,
+    negated: expression.negated,
+    type: bool,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerStaticByteViewLiteralExpression(
@@ -723,17 +694,15 @@ function lowerStaticByteViewLiteralExpression(
   const type = fn.type(expression.type)
   if (type?._tag !== 'Slice') return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'StaticView',
-      destination,
-      data: expression.data.id,
-      length: expression.data.bytes.length,
-      type,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'StaticView',
+    destination,
+    data: expression.data.id,
+    length: expression.data.bytes.length,
+    type,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerUnitLiteralExpression(
@@ -743,15 +712,13 @@ function lowerUnitLiteralExpression(
   const type = fn.type(expression.type)
   if (type?._tag !== 'Nominal' || !Type.equals(type.type, Type.unit)) return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Construct',
-      destination,
-      type,
-      fields: Object.freeze([]),
-      provenance: authored(expression.span),
-    }),
-  )
+  fn.emit({
+    _tag: 'Construct',
+    destination,
+    type,
+    fields: [],
+    provenance: authored(expression.span),
+  })
   return { result: destination }
 }
 
@@ -760,15 +727,13 @@ function lowerBooleanLiteralExpression(
   expression: Extract<Tir.Expression, { readonly _tag: 'BooleanLiteral' }>,
 ): LoweredExpression | undefined {
   const destination = fn.alloc(bool)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Literal',
-      destination,
-      type: bool,
-      value: expression.value ? 1 : 0,
-      provenance: Object.freeze({ span: expression.span, generated: false }),
-    }),
-  )
+  fn.emit({
+    _tag: 'Literal',
+    destination,
+    type: bool,
+    value: expression.value ? 1 : 0,
+    provenance: { span: expression.span, generated: false },
+  })
   return { result: destination }
 }
 
@@ -777,15 +742,13 @@ function lowerCharacterLiteralExpression(
   expression: Extract<Tir.Expression, { readonly _tag: 'CharacterLiteral' }>,
 ): LoweredExpression | undefined {
   const destination = fn.alloc(character)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Literal',
-      destination,
-      type: character,
-      value: expression.value,
-      provenance: Object.freeze({ span: expression.span, generated: false }),
-    }),
-  )
+  fn.emit({
+    _tag: 'Literal',
+    destination,
+    type: character,
+    value: expression.value,
+    provenance: { span: expression.span, generated: false },
+  })
   return { result: destination }
 }
 
@@ -821,44 +784,38 @@ function lowerReplaceExpression(
   }
   rootType = fn.localTypes.at(root.ordinal)
   if (rootType === undefined) return undefined
-  fn.emit(
-    Object.freeze({
-      _tag: 'CheckPlace',
-      root,
-      selectors,
-      type,
-      provenance: authored(place.span),
-    }),
-  )
+  fn.emit({
+    _tag: 'CheckPlace',
+    root,
+    selectors,
+    type,
+    provenance: authored(place.span),
+  })
   const value = lowerExpression(fn, expression.value, availableRequirements)
   if (value === 'Transferred') return value
   if (value === undefined) return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'ReadPlace',
-      destination,
-      root,
-      selectors,
-      type,
-      consume: true,
-      provenance: authored(expression.span),
-    }),
-  )
-  fn.emit(
-    Object.freeze({
-      _tag: 'WritePlace',
-      root,
-      selectors,
-      source: value.result,
-      rootType,
-      type,
-      mutable: true,
-      replacement: 'Copy',
-      commit: 'AfterCleanup',
-      provenance: authored(expression.span),
-    }),
-  )
+  fn.emit({
+    _tag: 'ReadPlace',
+    destination,
+    root,
+    selectors,
+    type,
+    consume: true,
+    provenance: authored(expression.span),
+  })
+  fn.emit({
+    _tag: 'WritePlace',
+    root,
+    selectors,
+    source: value.result,
+    rootType,
+    type,
+    mutable: true,
+    replacement: 'Copy',
+    commit: 'AfterCleanup',
+    provenance: authored(expression.span),
+  })
   return { result: destination }
 }
 
@@ -869,20 +826,16 @@ function lowerFunctionItemExpression(
   const type = functionItemValueType(fn, expression)
   if (type === undefined) return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'MakeCallable',
-      destination,
-      target: expression.target,
-      typeArguments: Object.freeze(
-        expression.typeArguments.map((argument) => fn.semanticArgument(argument)),
-      ),
-      captures: Object.freeze([]),
-      type,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'MakeCallable',
+    destination,
+    target: expression.target,
+    typeArguments: expression.typeArguments.map((argument) => fn.semanticArgument(argument)),
+    captures: [],
+    type,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerCallableSectionExpression(
@@ -902,31 +855,27 @@ function lowerCallableSectionExpression(
     const lowered = lowerExpression(fn, capture.value, availableRequirements)
     if (lowered === 'Transferred') return lowered
     if (lowered === undefined) return undefined
-    captures.push(
-      Object.freeze({
-        ordinal: capture.ordinal,
-        parameterOrdinal: capture.parameterOrdinal,
-        source: lowered.result,
-        access: capture.access,
-      }),
-    )
+    captures.push({
+      ordinal: capture.ordinal,
+      parameterOrdinal: capture.parameterOrdinal,
+      source: lowered.result,
+      access: capture.access,
+    })
   }
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'MakeCallable',
-      destination,
-      target: expression.target,
-      typeArguments:
-        type.environment === undefined
-          ? (type.typeArguments ?? Object.freeze([]))
-          : Object.freeze([...Layout.callableTargetArguments(type.environment)]),
-      captures: Object.freeze(captures),
-      type,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'MakeCallable',
+    destination,
+    target: expression.target,
+    typeArguments:
+      type.environment === undefined
+        ? (type.typeArguments ?? [])
+        : [...Layout.callableTargetArguments(type.environment)],
+    captures: captures,
+    type,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 /**
@@ -977,29 +926,25 @@ function lowerStagedCallableApply(
   for (const [ordinal, source] of sources.entries()) {
     const field = environment.fields.find((candidate) => candidate.ordinal === baseCount + ordinal)
     if (field === undefined) return undefined
-    captures.push(
-      Object.freeze({
-        ordinal: field.ordinal,
-        parameterOrdinal: field.parameterOrdinal,
-        source,
-        access: field.access,
-      }),
-    )
+    captures.push({
+      ordinal: field.ordinal,
+      parameterOrdinal: field.parameterOrdinal,
+      source,
+      access: field.access,
+    })
   }
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'MakeCallable',
-      destination,
-      target: type.target,
-      typeArguments: Object.freeze([...Layout.callableTargetArguments(environment)]),
-      base,
-      captures: Object.freeze(captures),
-      type,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'MakeCallable',
+    destination,
+    target: type.target,
+    typeArguments: [...Layout.callableTargetArguments(environment)],
+    base,
+    captures: captures,
+    type,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerCallableApplyExpression(
@@ -1031,7 +976,7 @@ function lowerCallableApplyExpression(
   let callable: Mir.LocalId | undefined
   let callableType: Type.Callable | undefined
   let target: Tir.CallableTarget | undefined
-  let typeArguments: ReadonlyArray<Type.GenericArgument> = Object.freeze([])
+  let typeArguments: ReadonlyArray<Type.GenericArgument> = []
   const provision = forwardedServiceProvision(fn, expression, availableRequirements)
   if (provision === 'Transferred') return provision
   const lowerArguments = (): boolean | 'Transferred' => {
@@ -1051,9 +996,7 @@ function lowerCallableApplyExpression(
       typeArguments =
         call?.target.typeArguments ??
         directType.environment?.callable.typeArguments ??
-        Object.freeze(
-          [...expression.substitution.values()].map((argument) => fn.semanticArgument(argument)),
-        )
+        [...expression.substitution.values()].map((argument) => fn.semanticArgument(argument))
       if (directSection !== undefined) {
         for (const capture of directSection.captures) {
           const lowered = lowerOperandWithProvision(
@@ -1064,14 +1007,12 @@ function lowerCallableApplyExpression(
           )
           if (lowered === 'Transferred') return lowered
           if (lowered === undefined) return false
-          captures.push(
-            Object.freeze({
-              ordinal: capture.ordinal,
-              parameterOrdinal: capture.parameterOrdinal,
-              source: lowered.result,
-              access: capture.access,
-            }),
-          )
+          captures.push({
+            ordinal: capture.ordinal,
+            parameterOrdinal: capture.parameterOrdinal,
+            source: lowered.result,
+            access: capture.access,
+          })
         }
       }
       return true
@@ -1086,10 +1027,8 @@ function lowerCallableApplyExpression(
     // identities of the callables it captured, exactly as its construction registered it.
     typeArguments =
       loweredType.environment === undefined
-        ? (loweredType.storage?.realization.targetArguments ??
-          loweredType.typeArguments ??
-          Object.freeze([]))
-        : Object.freeze([...Layout.callableTargetArguments(loweredType.environment)])
+        ? (loweredType.storage?.realization.targetArguments ?? loweredType.typeArguments ?? [])
+        : [...Layout.callableTargetArguments(loweredType.environment)]
     return true
   }
   const first = expression.evaluation === 'LeftThenCallable' ? lowerArguments() : lowerCallee()
@@ -1174,59 +1113,53 @@ function lowerCallableApplyExpression(
       operands.some((operand) => fn.localTypes.at(operand.ordinal)?._tag !== sourceType._tag)
     )
       return undefined
-    const valid = fn.alloc(Object.freeze({ _tag: 'bool' as const }))
-    const value = fn.alloc(Object.freeze({ _tag: valueScalar.spelling }))
+    const valid = fn.alloc({ _tag: 'bool' as const })
+    const value = fn.alloc({ _tag: valueScalar.spelling })
     const destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'CheckedScalar' as const,
-        operation: scalarOperation.code,
-        destination,
-        valid,
-        value,
-        operands: Object.freeze(operands),
-        present,
-        absent,
-        presentCleanup: ConcreteCleanup.forCallable(fn, presentType),
-        absentCleanup: ConcreteCleanup.forCallable(fn, absentType),
-        sourceType,
-        valueType: Object.freeze({ _tag: valueScalar.spelling }),
-        type,
-        provenance: authored(expression.span),
-      }),
-    )
-    return Object.freeze({ result: destination })
-  }
-  const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'ApplyCallable',
+    fn.emit({
+      _tag: 'CheckedScalar' as const,
+      operation: scalarOperation.code,
       destination,
-      ...(callable === undefined ? {} : { callable }),
-      ...(target === undefined ? {} : { target }),
-      typeArguments,
-      captures: Object.freeze(captures),
-      arguments: Object.freeze(arguments_),
-      callableType,
-      access: callableType.mode,
-      evaluation: expression.evaluation,
-      realization: callable === undefined ? 'DirectErasedSection' : expression.realization,
+      valid,
+      value,
+      operands: operands,
+      present,
+      absent,
+      presentCleanup: ConcreteCleanup.forCallable(fn, presentType),
+      absentCleanup: ConcreteCleanup.forCallable(fn, absentType),
+      sourceType,
+      valueType: { _tag: valueScalar.spelling },
       type,
       provenance: authored(expression.span),
-    }),
-  )
+    })
+    return { result: destination }
+  }
+  const destination = fn.alloc(type)
+  fn.emit({
+    _tag: 'ApplyCallable',
+    destination,
+    ...(callable === undefined ? {} : { callable }),
+    ...(target === undefined ? {} : { target }),
+    typeArguments,
+    captures: captures,
+    arguments: arguments_,
+    callableType,
+    access: callableType.mode,
+    evaluation: expression.evaluation,
+    realization: callable === undefined ? 'DirectErasedSection' : expression.realization,
+    type,
+    provenance: authored(expression.span),
+  })
   for (const authored of expression.loanEnds) {
     const borrow = fn.recipeBorrow(authored)
     const loan = fn.loanLocals.get(borrowKey(borrow))
     if (loan === undefined) return undefined
-    fn.emit(
-      Object.freeze({
-        _tag: 'EndLoan',
-        borrow,
-        slice: loan,
-        provenance: generated(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'EndLoan',
+      borrow,
+      slice: loan,
+      provenance: generated(expression.span),
+    })
     fn.loanLocals.delete(borrowKey(borrow))
   }
   for (const capture of directSection?.captures ?? []) {
@@ -1239,17 +1172,15 @@ function lowerCallableApplyExpression(
     }
     const held = fn.loanLocals.get(borrowKey(borrow))
     if (held === undefined) return undefined
-    fn.emit(
-      Object.freeze({
-        _tag: 'EndLoan',
-        borrow,
-        slice: held,
-        provenance: generated(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'EndLoan',
+      borrow,
+      slice: held,
+      provenance: generated(expression.span),
+    })
     fn.loanLocals.delete(borrowKey(borrow))
   }
-  return Object.freeze({ result: destination })
+  return { result: destination }
 }
 
 function lowerEffectConstructExpression(
@@ -1295,19 +1226,17 @@ function lowerEffectConstructExpression(
     arguments_.push(lowered.result)
   }
   const destination = fn.alloc(resultType)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Call',
-      destination,
-      target: expression.target,
-      typeArguments: Object.freeze(typeArguments),
-      ...(staticArguments.length === 0 ? {} : { staticArguments }),
-      arguments: Object.freeze(arguments_),
-      type: resultType,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'Call',
+    destination,
+    target: expression.target,
+    typeArguments: typeArguments,
+    ...(staticArguments.length === 0 ? {} : { staticArguments }),
+    arguments: arguments_,
+    type: resultType,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerEffectBlockExpression(
@@ -1335,41 +1264,37 @@ function lowerEffectBlockExpression(
     if (source === undefined) return undefined
     const access = type.environment.fields.at(ordinal)?.access
     if (access === undefined) return undefined
-    captures.push(Object.freeze({ source, access }))
+    captures.push({ source, access })
   }
   const destination = fn.alloc(type)
   const runner = Tir.effectRunnerId(fn.owner.key.declaration, expression.site)
-  fn.emit(
-    Object.freeze({
-      _tag: 'MakeEffect',
-      destination,
-      runner,
-      runnerTypeArguments: fn.owner.key.typeArguments,
-      captures: Object.freeze(captures),
-      type,
-      provenance: authored(expression.span),
-    }),
-  )
+  fn.emit({
+    _tag: 'MakeEffect',
+    destination,
+    runner,
+    runnerTypeArguments: fn.owner.key.typeArguments,
+    captures: captures,
+    type,
+    provenance: authored(expression.span),
+  })
   if (
     !fn.generatedRunners.some(
       (candidate) =>
         candidate.specializationKey === baseRunnerKey(fn.owner.key, expression.site, type.type),
     )
   ) {
-    fn.generatedRunners.push(
-      Object.freeze({
-        _tag: 'BlockEffectRunner',
-        id: runner,
-        owner: fn.owner,
-        block: expression,
-        type,
-        specializationKey: baseRunnerKey(fn.owner.key, expression.site, type.type),
-        providedRequirements: Object.freeze([]),
-        witnessTargets: specializedWitnessEffectTargets(fn.index, fn.owner, expression),
-      }),
-    )
+    fn.generatedRunners.push({
+      _tag: 'BlockEffectRunner',
+      id: runner,
+      owner: fn.owner,
+      block: expression,
+      type,
+      specializationKey: baseRunnerKey(fn.owner.key, expression.site, type.type),
+      providedRequirements: [],
+      witnessTargets: specializedWitnessEffectTargets(fn.index, fn.owner, expression),
+    })
   }
-  return Object.freeze({ result: destination })
+  return { result: destination }
 }
 
 function lowerRunExpression(
@@ -1427,10 +1352,10 @@ function lowerRunExpression(
     const effectValueType =
       loweredSubject === undefined ? undefined : fn.localTypes.at(loweredSubject.result.ordinal)
     if (loweredSubject !== undefined && effectValueType?._tag === 'EffectValue') {
-      const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
+      const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = {
         _tag: 'EffectOutcome',
         type: effectValueType.type,
-      })
+      }
       const structuralSuccess = fn.semantic(expression.type)
       const successType = Type.isEffect(structuralSuccess)
         ? effectValueByIdentity(
@@ -1457,7 +1382,7 @@ function lowerRunExpression(
               )
         return target === undefined || target < 0
           ? []
-          : [Object.freeze({ source: source + 1, target: target + 1 })]
+          : [{ source: source + 1, target: target + 1 }]
       })
       if (tagMappings.length !== Type.failureMembers(effectValueType.type).length) return undefined
       const propagationShape =
@@ -1478,44 +1403,42 @@ function lowerRunExpression(
       const baseRunnerTypeArguments =
         effectValueType.storage?.realization.runnerArguments ??
         effectValueType.environment.instance.typeArguments
-      fn.emit(
-        Object.freeze({
-          _tag: 'RunEffectValue',
-          destination,
-          outcome,
-          effect: loweredSubject.result,
-          runner,
-          runnerTypeArguments: baseRunnerTypeArguments,
-          ...(runnerInstance.staticArguments.length === 0
-            ? {}
-            : {
-                runnerStaticArguments: runnerInstance.staticArguments,
-              }),
-          ...(provided.length === 0
-            ? {}
-            : {
-                runnerBase: Object.freeze({
-                  declaration: baseRunner,
-                  typeArguments: baseRunnerTypeArguments,
-                  ...(runnerInstance.staticArguments.length === 0
-                    ? {}
-                    : { staticArguments: runnerInstance.staticArguments }),
-                }),
-              }),
-          providers: providerBindings(provided),
-          arguments: runtimeRequirementArguments(provided),
-          outcomeType,
-          ...(propagationType === undefined ? {} : { propagationType }),
-          tagMappings: Object.freeze(tagMappings),
-          propagationLaneCount: propagationShape?.laneCount ?? 0,
-          ...(Type.failureMembers(effectValueType.type).length === 0 || failureEnds.length === 0
-            ? {}
-            : { failureLoanEnds: failureEnds }),
-          ...(propagationType === undefined || releases.length === 0 ? {} : { releases }),
-          type: successType,
-          provenance: authored(expression.span),
-        }),
-      )
+      fn.emit({
+        _tag: 'RunEffectValue',
+        destination,
+        outcome,
+        effect: loweredSubject.result,
+        runner,
+        runnerTypeArguments: baseRunnerTypeArguments,
+        ...(runnerInstance.staticArguments.length === 0
+          ? {}
+          : {
+              runnerStaticArguments: runnerInstance.staticArguments,
+            }),
+        ...(provided.length === 0
+          ? {}
+          : {
+              runnerBase: {
+                declaration: baseRunner,
+                typeArguments: baseRunnerTypeArguments,
+                ...(runnerInstance.staticArguments.length === 0
+                  ? {}
+                  : { staticArguments: runnerInstance.staticArguments }),
+              },
+            }),
+        providers: providerBindings(provided),
+        arguments: runtimeRequirementArguments(provided),
+        outcomeType,
+        ...(propagationType === undefined ? {} : { propagationType }),
+        tagMappings: tagMappings,
+        propagationLaneCount: propagationShape?.laneCount ?? 0,
+        ...(Type.failureMembers(effectValueType.type).length === 0 || failureEnds.length === 0
+          ? {}
+          : { failureLoanEnds: failureEnds }),
+        ...(propagationType === undefined || releases.length === 0 ? {} : { releases }),
+        type: successType,
+        provenance: authored(expression.span),
+      })
       endRunLoans(fn, expression.span)
       let storedBinding: number | undefined
       if (expression.subject._tag === 'BindingReference') {
@@ -1537,7 +1460,7 @@ function lowerRunExpression(
           expression.subject.witnessEffectSite !== undefined)
       )
         endLoans(fn, expression.subject.loanEnds, expression.span)
-      return Object.freeze({ result: destination })
+      return { result: destination }
     }
     if (loweredSubject !== undefined && effectValueType?._tag === 'EffectComposite') {
       const result = lowerRunEffectComposite(
@@ -1663,21 +1586,19 @@ function lowerRunExpression(
       )
       if (body === undefined) return undefined
       const destination = fn.alloc(type)
-      fn.emit(
-        Object.freeze({
-          _tag: 'DiagnosticScope',
-          destination,
-          state: state.result,
-          observer: observer.result,
-          body,
-          stateCleanup: ConcreteCleanup.forType(fn, stateExpression.type),
-          observerCleanup: ConcreteCleanup.forCallable(fn, observerType),
-          type,
-          resultShape,
-          provenance: generated(expression.span),
-        }),
-      )
-      return body.result === undefined ? 'Transferred' : Object.freeze({ result: destination })
+      fn.emit({
+        _tag: 'DiagnosticScope',
+        destination,
+        state: state.result,
+        observer: observer.result,
+        body,
+        stateCleanup: ConcreteCleanup.forType(fn, stateExpression.type),
+        observerCleanup: ConcreteCleanup.forCallable(fn, observerType),
+        type,
+        resultShape,
+        provenance: generated(expression.span),
+      })
+      return body.result === undefined ? 'Transferred' : { result: destination }
     }
     if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'ExecutionDrive') {
       const [executionExpression, branchExpression, completeExpression, suspendExpression] =
@@ -1725,7 +1646,7 @@ function lowerRunExpression(
           Type.isExactRepresentationArgument(argument) &&
           Type.isCallableIdentityArgument(argument.identity)
           ? argument.identity.typeArguments
-          : Object.freeze([])
+          : []
       }
       const callbackCleanup = (local: Mir.LocalId): CleanupPlan.CleanupPlan => {
         const localType = fn.localTypes.at(local.ordinal)
@@ -1736,28 +1657,26 @@ function lowerRunExpression(
               localType === undefined ? Type.unit : Mir.semanticType(localType),
             )
       }
-      fn.emit(
-        Object.freeze({
-          _tag: 'ExecutionDrive' as const,
-          destination,
-          result: resultLocal,
-          execution: execution.result,
-          branch: branch.result,
-          onComplete: onComplete.result,
-          onSuspend: onSuspend.result,
-          executionAccess: 'Take' as const,
-          branchAccess: 'Take' as const,
-          completionAccess: 'Take' as const,
-          suspensionAccess: 'Take' as const,
-          completionCleanup: callbackCleanup(onComplete.result),
-          suspensionCleanup: callbackCleanup(onSuspend.result),
-          completionTypeArguments: callableTypeArguments(2),
-          suspensionTypeArguments: callableTypeArguments(3),
-          type,
-          provenance: authored(expression.span),
-        }),
-      )
-      return Object.freeze({ result: destination })
+      fn.emit({
+        _tag: 'ExecutionDrive' as const,
+        destination,
+        result: resultLocal,
+        execution: execution.result,
+        branch: branch.result,
+        onComplete: onComplete.result,
+        onSuspend: onSuspend.result,
+        executionAccess: 'Take' as const,
+        branchAccess: 'Take' as const,
+        completionAccess: 'Take' as const,
+        suspensionAccess: 'Take' as const,
+        completionCleanup: callbackCleanup(onComplete.result),
+        suspensionCleanup: callbackCleanup(onSuspend.result),
+        completionTypeArguments: callableTypeArguments(2),
+        suspensionTypeArguments: callableTypeArguments(3),
+        type,
+        provenance: authored(expression.span),
+      })
+      return { result: destination }
     }
     if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'ExecutionPark') {
       const [registerExpression] = recipe.arguments
@@ -1784,7 +1703,7 @@ function lowerRunExpression(
           ? semanticRepresentation.identity
           : undefined
       const registrationTarget = registrationIdentity?.target
-      const registrationArguments = registrationIdentity?.typeArguments ?? Object.freeze([])
+      const registrationArguments = registrationIdentity?.typeArguments ?? []
       const resultCallableCandidates =
         registrationTarget?._tag === 'Declaration'
           ? fn.instances.flatMap((candidate) => {
@@ -1803,7 +1722,7 @@ function lowerRunExpression(
                 return []
               return [candidate.resultCallable]
             })
-          : Object.freeze([])
+          : []
       const resultCallable = resultCallableCandidates.at(0)
       const unambiguousResultCallable =
         resultCallable !== undefined &&
@@ -1823,9 +1742,7 @@ function lowerRunExpression(
                     unambiguousResultCallable,
                     guardType,
                   )
-                  return realized === undefined
-                    ? undefined
-                    : Object.freeze({ ...realized, type: guardType })
+                  return realized === undefined ? undefined : { ...realized, type: guardType }
                 })()
               : undefined))
       const registerType =
@@ -1846,25 +1763,23 @@ function lowerRunExpression(
         Type.isExactRepresentationArgument(semanticRepresentation) &&
         Type.isCallableIdentityArgument(semanticRepresentation.identity)
           ? semanticRepresentation.identity.typeArguments
-          : Object.freeze([])
-      fn.emit(
-        Object.freeze({
-          _tag: 'ExecutionPark' as const,
-          destination,
-          guard: guardLocal,
-          register: register.result,
-          registerAccess: 'Take' as const,
-          guardCleanup:
-            guard._tag === 'CallableValue'
-              ? ConcreteCleanup.forCallable(fn, guard)
-              : ConcreteCleanup.forType(fn, Mir.semanticType(guard)),
-          registerCleanup: ConcreteCleanup.forCallable(fn, registerType),
-          registrationTypeArguments,
-          type,
-          provenance: authored(expression.span),
-        }),
-      )
-      return Object.freeze({ result: destination })
+          : []
+      fn.emit({
+        _tag: 'ExecutionPark' as const,
+        destination,
+        guard: guardLocal,
+        register: register.result,
+        registerAccess: 'Take' as const,
+        guardCleanup:
+          guard._tag === 'CallableValue'
+            ? ConcreteCleanup.forCallable(fn, guard)
+            : ConcreteCleanup.forType(fn, Mir.semanticType(guard)),
+        registerCleanup: ConcreteCleanup.forCallable(fn, registerType),
+        registrationTypeArguments,
+        type,
+        provenance: authored(expression.span),
+      })
+      return { result: destination }
     }
     if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'StorageAcquire') {
       const [layoutExpression] = recipe.arguments
@@ -1885,19 +1800,17 @@ function lowerRunExpression(
       )
         return undefined
       const destination = fn.alloc(type)
-      fn.emit(
-        Object.freeze({
-          _tag: 'Allocate' as const,
-          destination,
-          layout: loweredLayout.result,
-          type,
-          failure: Type.storageFailure,
-          propagationType,
-          failureTag: failureTag + 1,
-          provenance: authored(expression.span),
-        }),
-      )
-      return Object.freeze({ result: destination })
+      fn.emit({
+        _tag: 'Allocate' as const,
+        destination,
+        layout: loweredLayout.result,
+        type,
+        failure: Type.storageFailure,
+        propagationType,
+        failureTag: failureTag + 1,
+        provenance: authored(expression.span),
+      })
+      return { result: destination }
     }
     if (recipe?._tag !== 'EffectConstruct') return undefined
     const authoredTypeArguments = recipe.typeArguments.map((argument) =>
@@ -1913,7 +1826,7 @@ function lowerRunExpression(
     // Every Effect constructor carries a hidden executable identity. Never emit an authored-only
     // target when discovery could not select its complete callable/Effect specialization.
     if (call === undefined) return undefined
-    const typeArguments = Object.freeze(call.target.typeArguments)
+    const typeArguments = call.target.typeArguments
     const staticArguments = call.target.staticArguments
     const arguments_: Array<Mir.LocalId> = []
     for (const argument of recipe.arguments) {
@@ -1944,57 +1857,51 @@ function lowerRunExpression(
         const target = Type.failureMembers(propagationType.type).findIndex(
           (candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(failure),
         )
-        return target < 0 ? [] : [Object.freeze({ source: source + 1, target: target + 1 })]
+        return target < 0 ? [] : [{ source: source + 1, target: target + 1 }]
       })
       if (tagMappings.length !== Type.failureMembers(recipe.type).length) return undefined
       const failureEnds = propagationLoanEnds(fn, expression.span)
       const releases = propagationReleases(fn, expression.span)
-      fn.emit(
-        Object.freeze({
-          _tag: 'RunEffect',
-          destination,
-          outcome,
-          target: recipe.target,
-          typeArguments,
-          ...(staticArguments.length === 0 ? {} : { staticArguments }),
-          arguments: Object.freeze(arguments_),
-          outcomeType,
-          propagationType,
-          ...(failureEnds.length === 0 ? {} : { failureLoanEnds: failureEnds }),
-          ...(releases.length === 0 ? {} : { releases }),
-          tagMappings: Object.freeze(tagMappings),
-          propagationLaneCount: propagationShape.laneCount,
-          type: successType,
-          provenance: authored(expression.span),
-        }),
-      )
-      // The effect held its argument borrows for exactly this run; end them here.
-      endLoans(fn, recipe.loanEnds, expression.span)
-      return Object.freeze({ result: destination })
-    }
-    fn.emit(
-      Object.freeze({
-        _tag: 'Call',
-        destination: outcome,
+      fn.emit({
+        _tag: 'RunEffect',
+        destination,
+        outcome,
         target: recipe.target,
         typeArguments,
         ...(staticArguments.length === 0 ? {} : { staticArguments }),
-        arguments: Object.freeze(arguments_),
-        type: outcomeType,
-        provenance: authored(expression.span),
-      }),
-    )
-    endLoans(fn, recipe.loanEnds, expression.span)
-    fn.emit(
-      Object.freeze({
-        _tag: 'UnpackEffectSuccess',
-        destination,
-        source: outcome,
+        arguments: arguments_,
+        outcomeType,
+        propagationType,
+        ...(failureEnds.length === 0 ? {} : { failureLoanEnds: failureEnds }),
+        ...(releases.length === 0 ? {} : { releases }),
+        tagMappings: tagMappings,
+        propagationLaneCount: propagationShape.laneCount,
         type: successType,
         provenance: authored(expression.span),
-      }),
-    )
-    return Object.freeze({ result: destination })
+      })
+      // The effect held its argument borrows for exactly this run; end them here.
+      endLoans(fn, recipe.loanEnds, expression.span)
+      return { result: destination }
+    }
+    fn.emit({
+      _tag: 'Call',
+      destination: outcome,
+      target: recipe.target,
+      typeArguments,
+      ...(staticArguments.length === 0 ? {} : { staticArguments }),
+      arguments: arguments_,
+      type: outcomeType,
+      provenance: authored(expression.span),
+    })
+    endLoans(fn, recipe.loanEnds, expression.span)
+    fn.emit({
+      _tag: 'UnpackEffectSuccess',
+      destination,
+      source: outcome,
+      type: successType,
+      provenance: authored(expression.span),
+    })
+    return { result: destination }
   })
 }
 
@@ -2042,23 +1949,21 @@ function lowerUnionConvertExpression(
     substituted._tag === 'Inject' || substituted._tag === 'Widen'
       ? substituted.mappings
       : expression.mappings
-  fn.emit(
-    Object.freeze({
-      _tag: 'ConvertUnion',
-      destination,
-      source: source.result,
-      sourceType,
-      sourceSemantic: fn.semantic(expression.sourceType),
-      targetType,
-      conversion: expression.conversion,
-      mappings,
-      sourceShape,
-      targetShape,
-      access: expression.access,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'ConvertUnion',
+    destination,
+    source: source.result,
+    sourceType,
+    sourceSemantic: fn.semantic(expression.sourceType),
+    targetType,
+    conversion: expression.conversion,
+    mappings,
+    sourceShape,
+    targetShape,
+    access: expression.access,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerShortCircuitExpression(
@@ -2079,18 +1984,16 @@ function lowerShortCircuitExpression(
   )
   if (right === undefined) return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'ShortCircuit',
-      operator: expression.operator,
-      destination,
-      left: left.result,
-      right,
-      type,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'ShortCircuit',
+    operator: expression.operator,
+    destination,
+    left: left.result,
+    right,
+    type,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 /** Retains checked nested discriminants before selected payload bindings. */
@@ -2210,29 +2113,25 @@ function lowerMatchExpression(
   const specializedMembers = expression.members.map(specializeMember)
   const members =
     scrutineeType._tag === 'Enum'
-      ? Object.freeze(
-          specializedMembers.filter(
-            (member, ordinal) =>
-              specializedMembers.findIndex((candidate) =>
-                Match.identityEquals(candidate, member, 'Runtime'),
-              ) === ordinal,
-          ),
+      ? specializedMembers.filter(
+          (member, ordinal) =>
+            specializedMembers.findIndex((candidate) =>
+              Match.identityEquals(candidate, member, 'Runtime'),
+            ) === ordinal,
         )
       : Layout.coverageMembers(scrutineeShape)
   const specializedCoverage = Match.cover(
     members,
-    expression.arms.map((arm) =>
-      Object.freeze({
-        ...(arm.member === undefined ? {} : { member: specializeMember(arm.member) }),
-        universal: arm.universal,
-        guarded: arm.guard !== undefined,
-        tests: (arm.tests ?? []).map((test) => ({
-          ...test,
-          member: specializeMember(test.member),
-          domain: test.domain.map(specializeMember),
-        })),
-      }),
-    ),
+    expression.arms.map((arm) => ({
+      ...(arm.member === undefined ? {} : { member: specializeMember(arm.member) }),
+      universal: arm.universal,
+      guarded: arm.guard !== undefined,
+      tests: (arm.tests ?? []).map((test) => ({
+        ...test,
+        member: specializeMember(test.member),
+        domain: test.domain.map(specializeMember),
+      })),
+    })),
     'Runtime',
   )
   const arms: Array<Mir.MatchArm> = []
@@ -2273,16 +2172,14 @@ function lowerMatchExpression(
       if (type === undefined) return undefined
       const destination = fn.alloc(type)
       fn.patternLocals.set(patternKey(binding.id), destination)
-      bindings.push(
-        Object.freeze({
-          id: binding.id,
-          destination,
-          path: binding.path,
-          type,
-          access: binding.access,
-          provenance: authored(binding.span),
-        }),
-      )
+      bindings.push({
+        id: binding.id,
+        destination,
+        path: binding.path,
+        type,
+        access: binding.access,
+        provenance: authored(binding.span),
+      })
     }
     const ownedArm = executes
       ? ownership?.arms.find((candidate) => candidate.id.ordinal === arm.id.ordinal)
@@ -2307,14 +2204,14 @@ function lowerMatchExpression(
       if (type === undefined) return undefined
       const destination = fn.alloc(type)
       fn.matchCleanupLocals.set(key, destination)
-      cleanupBindings.push(Object.freeze({ destination, path: release.path, type }))
+      cleanupBindings.push({ destination, path: release.path, type })
     }
     for (const release of ownedArm?.cleanup ?? []) {
       const plan = specializedCleanup(fn, release.cleanup)
       if (plan._tag === 'NoCleanup') continue
       const destination = fn.matchCleanupLocals.get(matchCleanupKey(arm.id, release.path))
       if (destination === undefined) return undefined
-      cleanup.push(Object.freeze({ destination, path: release.path, cleanup: plan }))
+      cleanup.push({ destination, path: release.path, cleanup: plan })
     }
     const [, initialization] = fn.capture(() => {
       for (const binding of bindings)
@@ -2339,8 +2236,7 @@ function lowerMatchExpression(
       (arm.tests?.length ?? 0) === 0
     )
       pendingMembers = pendingMembers.filter((candidate) => !selectedMembers.includes(candidate))
-    const guard =
-      guardExecution === undefined ? undefined : Object.freeze({ execution: guardExecution })
+    const guard = guardExecution === undefined ? undefined : { execution: guardExecution }
     const armExit = fn.exits.armEnds.get(`${spanKey(arm.span)}:Taken`)
     const body = arm.body
     let execution: Mir.Execution | undefined
@@ -2369,16 +2265,16 @@ function lowerMatchExpression(
           fn.exits,
           fn.ownerLoop,
           finish === undefined
-            ? Object.freeze({
+            ? {
                 _tag: 'Trap',
                 reason: 'unreachable arm continuation',
                 provenance: generated(body.span),
-              })
-            : Object.freeze({
+              }
+            : {
                 _tag: 'Forward',
                 target: finish,
                 provenance: generated(body.span),
-              }),
+              },
           undefined,
           armExit,
         )
@@ -2392,7 +2288,7 @@ function lowerMatchExpression(
             operations: initialization,
             outcome: { _tag: 'Forward', target: bodyEntry, provenance: generated(arm.span) },
           })
-        if (finish === undefined) return Object.freeze({ entry })
+        if (finish === undefined) return { entry }
         const [unit, operations] = fn.capture(() =>
           lowerUnitLiteralExpression(fn, {
             _tag: 'UnitLiteral',
@@ -2402,39 +2298,35 @@ function lowerMatchExpression(
           }),
         )
         if (unit === undefined || unit === 'Transferred') return undefined
-        fn.publish(
-          Object.freeze({
-            _tag: 'OperationRegion',
-            id: finish,
-            ...ownerFields(fn.ownerLoop),
-            operations,
-            outcome: Object.freeze({ _tag: 'Complete', provenance: generated(body.span) }),
-          }),
-        )
-        return Object.freeze({ entry, result: unit.result })
+        fn.publish({
+          _tag: 'OperationRegion',
+          id: finish,
+          ...ownerFields(fn.ownerLoop),
+          operations,
+          outcome: { _tag: 'Complete', provenance: generated(body.span) },
+        })
+        return { entry, result: unit.result }
       })
     if (execution === undefined) return undefined
     if (execution.result !== undefined) armStates.set(arm.id.ordinal, delayedEffectState(fn))
-    arms.push(
-      Object.freeze({
-        id: arm.id,
-        tests,
-        ...(member === undefined ? {} : { member }),
-        universal: arm.universal,
-        before: Object.freeze(before),
-        after: Object.freeze(after),
-        bindings: Object.freeze(bindings),
-        cleanupBindings: Object.freeze(cleanupBindings),
-        ...(guard === undefined ? {} : { guard }),
-        selected: Object.freeze({
-          access: expression.access,
-          execution,
-          cleanup: Object.freeze(cleanup),
-          endBorrow: expression.access === 'Shared' || expression.access === 'Exclusive',
-        }),
-        provenance: authored(arm.span),
-      }),
-    )
+    arms.push({
+      id: arm.id,
+      tests,
+      ...(member === undefined ? {} : { member }),
+      universal: arm.universal,
+      before: before,
+      after: after,
+      bindings: bindings,
+      cleanupBindings: cleanupBindings,
+      ...(guard === undefined ? {} : { guard }),
+      selected: {
+        access: expression.access,
+        execution,
+        cleanup: cleanup,
+        endBorrow: expression.access === 'Shared' || expression.access === 'Exclusive',
+      },
+      provenance: authored(arm.span),
+    })
     for (const binding of arm.bindings) fn.patternLocals.delete(patternKey(binding.id))
     for (const release of [...(ownedArm?.cleanup ?? []), ...transferCleanup])
       fn.matchCleanupLocals.delete(matchCleanupKey(arm.id, release.path))
@@ -2450,24 +2342,20 @@ function lowerMatchExpression(
   // Contextual typing can retain an expected result even when every selected arm transfers.
   // MIR records the actual join: a transferring match has no result storage or calling lanes.
   const joinType: Mir.Type =
-    destination === undefined ? Object.freeze({ _tag: 'Bottom', type: 'never' }) : resultType
+    destination === undefined ? { _tag: 'Bottom', type: 'never' } : resultType
   const joinShape =
     destination === undefined ? Layout.callingShape(fn.layout, 'never') : resultShape
   if (joinShape === undefined) return undefined
-  const decisions = members.map((member) =>
-    Object.freeze({
-      member,
-      candidates: Object.freeze(
-        arms
-          .filter(
-            (arm) =>
-              arm.universal ||
-              (arm.member !== undefined && Match.selects(arm.member, member, 'Runtime')),
-          )
-          .map((arm) => arm.id),
-      ),
-    }),
-  )
+  const decisions = members.map((member) => ({
+    member,
+    candidates: arms
+      .filter(
+        (arm) =>
+          arm.universal ||
+          (arm.member !== undefined && Match.selects(arm.member, member, 'Runtime')),
+      )
+      .map((arm) => arm.id),
+  }))
   for (const key of branchState.loanLocals.keys()) {
     const endedOnEveryPath = decisions.every((decision) => {
       const candidates = decision.candidates.flatMap((candidate) => {
@@ -2484,32 +2372,28 @@ function lowerMatchExpression(
     })
     if (endedOnEveryPath) fn.loanLocals.delete(key)
   }
-  const mirDecisions = decisions.map((decision) =>
-    Object.freeze({
-      member: decision.member,
-      candidates: decision.candidates,
-    }),
-  )
-  fn.emit(
-    Object.freeze({
-      _tag: 'Match',
-      id: expression.match,
-      ...(destination === undefined ? {} : { destination }),
-      scrutinee: scrutinee.result,
-      ...(selectors === undefined ? {} : { selectors }),
-      scrutineeType,
-      scrutineeShape,
-      access: expression.access,
-      retainsBindings: false,
-      members: Object.freeze(members),
-      decisions: Object.freeze(mirDecisions),
-      arms: Object.freeze(arms),
-      type: joinType,
-      resultShape: joinShape,
-      provenance: authored(expression.span),
-    }),
-  )
-  return destination === undefined ? 'Transferred' : Object.freeze({ result: destination })
+  const mirDecisions = decisions.map((decision) => ({
+    member: decision.member,
+    candidates: decision.candidates,
+  }))
+  fn.emit({
+    _tag: 'Match',
+    id: expression.match,
+    ...(destination === undefined ? {} : { destination }),
+    scrutinee: scrutinee.result,
+    ...(selectors === undefined ? {} : { selectors }),
+    scrutineeType,
+    scrutineeShape,
+    access: expression.access,
+    retainsBindings: false,
+    members: members,
+    decisions: mirDecisions,
+    arms: arms,
+    type: joinType,
+    resultShape: joinShape,
+    provenance: authored(expression.span),
+  })
+  return destination === undefined ? 'Transferred' : { result: destination }
 }
 
 function lowerConstructExpression(
@@ -2548,24 +2432,22 @@ function lowerConstructExpression(
     return value === undefined
       ? []
       : [
-          Object.freeze({
+          {
             field: field.field,
             value,
             ...(stored === undefined ? {} : { stored }),
-          }),
+          },
         ]
   })
   if (fields.length !== expression.fields.length) return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Construct',
-      destination,
-      type,
-      fields: Object.freeze(fields),
-      provenance: Object.freeze({ span: expression.span, generated: false }),
-    }),
-  )
+  fn.emit({
+    _tag: 'Construct',
+    destination,
+    type,
+    fields: fields,
+    provenance: { span: expression.span, generated: false },
+  })
   return { result: destination }
 }
 
@@ -2611,26 +2493,24 @@ function lowerConstructUnionVariantExpression(
     return value === undefined
       ? []
       : [
-          Object.freeze({
+          {
             field: field.field,
             value,
             ...(stored === undefined ? {} : { stored }),
-          }),
+          },
         ]
   })
   if (fields.length !== expression.fields.length) return undefined
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'ConstructUnionVariant',
-      destination,
-      type,
-      variant: expression.variant,
-      variantOrdinal: expression.variantOrdinal,
-      fields: Object.freeze(fields),
-      provenance: authored(expression.span),
-    }),
-  )
+  fn.emit({
+    _tag: 'ConstructUnionVariant',
+    destination,
+    type,
+    variant: expression.variant,
+    variantOrdinal: expression.variantOrdinal,
+    fields: fields,
+    provenance: authored(expression.span),
+  })
   return { result: destination }
 }
 
@@ -2649,15 +2529,13 @@ function lowerArrayConstructExpression(
     elements.push(lowered.result)
   }
   const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'ConstructArray',
-      destination,
-      type,
-      elements: Object.freeze(elements),
-      provenance: Object.freeze({ span: expression.span, generated: false }),
-    }),
-  )
+  fn.emit({
+    _tag: 'ConstructArray',
+    destination,
+    type,
+    elements: elements,
+    provenance: { span: expression.span, generated: false },
+  })
   return { result: destination }
 }
 
@@ -2703,35 +2581,30 @@ function lowerSliceBorrowExpression(
   const borrow = fn.beginRecipeBorrow(expression.borrow)
   const place = lowerBorrowPlace(fn, root, expression.selectors, alias?.selectors)
   if (place === undefined || place === 'Transferred') return place
-  fn.emit(
-    Object.freeze({
-      _tag: 'BeginLoan',
-      borrow,
-      destination,
-      root: place.root,
-      selectors: place.selectors,
-      sourceType,
-      type,
-      access: expression.access,
-      reborrow: expression.reborrow,
-      suspendsParent: expression.suspendsParent,
-      provenance: authored(expression.span),
-    }),
-  )
+  fn.emit({
+    _tag: 'BeginLoan',
+    borrow,
+    destination,
+    root: place.root,
+    selectors: place.selectors,
+    sourceType,
+    type,
+    access: expression.access,
+    reborrow: expression.reborrow,
+    suspendsParent: expression.suspendsParent,
+    provenance: authored(expression.span),
+  })
   if (expression.root._tag === 'TemporarySliceRoot') {
     const owner = BodyView.node(fn.owner.view, expression.root.owner.node)
     if (owner === undefined) return undefined
-    fn.temporaryBorrowOwners.set(
-      borrowKey(borrow),
-      Object.freeze({
-        local: root,
-        cleanup: CleanupPlan.cleanupPlan(fn.index, fn.semantic(expression.source)),
-        span: owner.span,
-      }),
-    )
+    fn.temporaryBorrowOwners.set(borrowKey(borrow), {
+      local: root,
+      cleanup: CleanupPlan.cleanupPlan(fn.index, fn.semantic(expression.source)),
+      span: owner.span,
+    })
   }
   fn.loanLocals.set(borrowKey(borrow), destination)
-  return Object.freeze({ result: destination })
+  return { result: destination }
 }
 
 function lowerValueBorrowExpression(
@@ -2772,35 +2645,30 @@ function lowerValueBorrowExpression(
   const borrow = fn.beginRecipeBorrow(expression.borrow)
   const place = lowerBorrowPlace(fn, root, expression.selectors, alias?.selectors)
   if (place === undefined || place === 'Transferred') return place
-  fn.emit(
-    Object.freeze({
-      _tag: 'BeginLoan',
-      borrow,
-      destination,
-      root: place.root,
-      selectors: place.selectors,
-      sourceType,
-      type,
-      access: expression.access,
-      reborrow: expression.reborrow,
-      suspendsParent: expression.suspendsParent,
-      provenance: authored(expression.span),
-    }),
-  )
+  fn.emit({
+    _tag: 'BeginLoan',
+    borrow,
+    destination,
+    root: place.root,
+    selectors: place.selectors,
+    sourceType,
+    type,
+    access: expression.access,
+    reborrow: expression.reborrow,
+    suspendsParent: expression.suspendsParent,
+    provenance: authored(expression.span),
+  })
   if (expression.root._tag === 'TemporarySliceRoot') {
     const owner = BodyView.node(fn.owner.view, expression.root.owner.node)
     if (owner === undefined) return undefined
-    fn.temporaryBorrowOwners.set(
-      borrowKey(borrow),
-      Object.freeze({
-        local: root,
-        cleanup: CleanupPlan.cleanupPlan(fn.index, fn.semantic(expression.source)),
-        span: owner.span,
-      }),
-    )
+    fn.temporaryBorrowOwners.set(borrowKey(borrow), {
+      local: root,
+      cleanup: CleanupPlan.cleanupPlan(fn.index, fn.semantic(expression.source)),
+      span: owner.span,
+    })
   }
   fn.loanLocals.set(borrowKey(borrow), destination)
-  return Object.freeze({ result: destination })
+  return { result: destination }
 }
 
 function lowerSliceLengthExpression(
@@ -2819,16 +2687,14 @@ function lowerSliceLengthExpression(
     return undefined
   }
   const destination = fn.alloc(usize)
-  fn.emit(
-    Object.freeze({
-      _tag: 'SliceLength',
-      destination,
-      slice: slice.result,
-      type: usize,
-      provenance: authored(expression.span),
-    }),
-  )
-  return Object.freeze({ result: destination })
+  fn.emit({
+    _tag: 'SliceLength',
+    destination,
+    slice: slice.result,
+    type: usize,
+    provenance: authored(expression.span),
+  })
+  return { result: destination }
 }
 
 function lowerCallExpression(
@@ -2860,19 +2726,17 @@ function lowerCallExpression(
     const type = fn.type(expression.type)
     if (type === undefined) return undefined
     destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'ForeignCall',
-        variadicArguments: Object.freeze(variadicArguments),
-        destination,
-        symbol: foreign.foreign.symbol,
-        abi: 'C',
-        signature: ExecutableOrigin.foreignSignature(foreign, fn.layout.target),
-        arguments: Object.freeze(argumentLocals),
-        type,
-        provenance: Object.freeze({ span: expression.span, generated: false }),
-      }),
-    )
+    fn.emit({
+      _tag: 'ForeignCall',
+      variadicArguments: variadicArguments,
+      destination,
+      symbol: foreign.foreign.symbol,
+      abi: 'C',
+      signature: ExecutableOrigin.foreignSignature(foreign, fn.layout.target),
+      arguments: argumentLocals,
+      type,
+      provenance: { span: expression.span, generated: false },
+    })
   } else {
     const authoredTypeArguments = expression.typeArguments.map((argument) =>
       fn.semanticArgument(argument),
@@ -2884,7 +2748,7 @@ function lowerCallExpression(
       expression.staticArguments,
       availableRequirements,
     )
-    const typeArguments = Object.freeze(call?.target.typeArguments ?? authoredTypeArguments)
+    const typeArguments = call?.target.typeArguments ?? authoredTypeArguments
     const staticArguments = call?.target.staticArguments ?? expression.staticArguments
     const semanticType = fn.semantic(expression.type)
     const type =
@@ -2906,31 +2770,27 @@ function lowerCallExpression(
       )
     if (type === undefined) return undefined
     destination = fn.alloc(type)
-    fn.emit(
-      Object.freeze({
-        _tag: 'Call',
-        destination,
-        target: expression.target,
-        typeArguments,
-        ...(staticArguments.length === 0 ? {} : { staticArguments }),
-        arguments: Object.freeze(argumentLocals),
-        type,
-        provenance: Object.freeze({ span: expression.span, generated: false }),
-      }),
-    )
+    fn.emit({
+      _tag: 'Call',
+      destination,
+      target: expression.target,
+      typeArguments,
+      ...(staticArguments.length === 0 ? {} : { staticArguments }),
+      arguments: argumentLocals,
+      type,
+      provenance: { span: expression.span, generated: false },
+    })
   }
   for (const authored of expression.loanEnds) {
     const borrow = fn.recipeBorrow(authored)
     const slice = fn.loanLocals.get(borrowKey(borrow))
     if (slice === undefined) return undefined
-    fn.emit(
-      Object.freeze({
-        _tag: 'EndLoan',
-        borrow,
-        slice,
-        provenance: generated(expression.span),
-      }),
-    )
+    fn.emit({
+      _tag: 'EndLoan',
+      borrow,
+      slice,
+      provenance: generated(expression.span),
+    })
     fn.loanLocals.delete(borrowKey(borrow))
   }
   return { result: destination }
@@ -2978,33 +2838,28 @@ function lowerInterfaceOperationCallExpression(
       const borrow = fn.recipeBorrow(authored)
       const loan = fn.loanLocals.get(borrowKey(borrow))
       if (loan === undefined) continue
-      fn.emit(
-        Object.freeze({
-          _tag: 'EndLoan' as const,
-          borrow,
-          slice: loan,
-          provenance: generated(expression.span),
-        }),
-      )
+      fn.emit({
+        _tag: 'EndLoan' as const,
+        borrow,
+        slice: loan,
+        provenance: generated(expression.span),
+      })
       fn.loanLocals.delete(borrowKey(borrow))
     }
-    return Object.freeze({ result })
+    return { result }
   }
   // The call the witness names, at this call's own span: the enclosing `lowerExpression` ends
   // this span's returned-view loans once, after the operation it selected has been lowered.
-  return lowerExpressionInner(
-    fn,
-    Object.freeze({
-      _tag: 'BuiltinCall',
-      operation: selected.rule.operation,
-      intrinsic: selected.id,
-      typeArguments: Object.freeze([]),
-      arguments: expression.arguments,
-      loanEnds: expression.loanEnds,
-      heldLoans: Object.freeze([]),
-      type: expression.type,
-      span: expression.span,
-      origin: expression.origin,
-    }),
-  )
+  return lowerExpressionInner(fn, {
+    _tag: 'BuiltinCall',
+    operation: selected.rule.operation,
+    intrinsic: selected.id,
+    typeArguments: [],
+    arguments: expression.arguments,
+    loanEnds: expression.loanEnds,
+    heldLoans: [],
+    type: expression.type,
+    span: expression.span,
+    origin: expression.origin,
+  })
 }

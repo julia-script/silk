@@ -114,10 +114,10 @@ const compositionComponents = (frontend: Frontend.Frontend): ReadonlyArray<Compo
     .map((module) => ({ module, reason: 'composition' as const }))
 
 const seal = <Tag extends Bundle['_tag']>(bundle: Extract<Bundle, { readonly _tag: Tag }>) =>
-  OpaqueRealization.withCatalog(
-    Object.freeze(bundle),
-    OpaqueRealization.catalogOf(bundle.frontend),
-  ) as Extract<Bundle, { readonly _tag: Tag }>
+  OpaqueRealization.withCatalog(bundle, OpaqueRealization.catalogOf(bundle.frontend)) as Extract<
+    Bundle,
+    { readonly _tag: Tag }
+  >
 
 const programOf = (product: ExecutableProduct): Mir.Module | undefined => {
   if (product._tag === 'Realized')
@@ -195,12 +195,12 @@ const withArtifactPlan = Effect.fnUntraced(function* (
   if (product._tag === 'Realized')
     return {
       _tag: 'Realized',
-      value: Object.freeze({ ...product.value, artifactPlan: plan.success }),
+      value: { ...product.value, artifactPlan: plan.success },
     }
   if (product.value._tag !== 'Prepared') return product
   return {
     _tag: 'Prepared',
-    value: Object.freeze({ ...product.value, artifactPlan: plan.success }),
+    value: { ...product.value, artifactPlan: plan.success },
   }
 })
 
@@ -521,25 +521,23 @@ export const manifest = (self: Bundle): Manifest => {
     frontend.closure.resolutionFailures.length > 0 ||
     frontend.closure.missingRoots.length > 0 ||
     frontend.configurationError !== undefined
-  return Object.freeze({
+  return {
     _tag: 'PreparationManifest',
     intent: self.intent,
     root: frontend.closure.rootModule,
     identity: self.identity,
     profile: frontend.profile?.identity,
     target: self._tag === 'ExecutableBundle' ? self.targetId : frontend.requestedTarget,
-    modules: frontend.closure.modules.map((module) =>
-      Object.freeze({
-        name: module.name,
-        origin: module.syntax.source.origin,
-        revision: module.authored.presentation.revision,
-        imports: module.imports.flatMap((fact) =>
-          fact.target._tag === 'Resolved' ? [fact.target.module] : [],
-        ),
-      }),
-    ),
+    modules: frontend.closure.modules.map((module) => ({
+      name: module.name,
+      origin: module.syntax.source.origin,
+      revision: module.authored.presentation.revision,
+      imports: module.imports.flatMap((fact) =>
+        fact.target._tag === 'Resolved' ? [fact.target.module] : [],
+      ),
+    })),
     components: self.components,
     status: partial ? 'Partial' : 'SourceClosed',
     diagnostics: frontend.diagnostics.length,
-  })
+  }
 }

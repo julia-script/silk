@@ -84,11 +84,11 @@ export const make = Effect.fn('FrontendTooling.make')(function* (
     [...toolingModules].map(([module, tooling]) => [module, tooling.anonymousExpressions]),
   )
   const recomputed = toolingModules.size - reused
-  const counters: PhaseReport.ModuleReuseCounters = Object.freeze({
+  const counters: PhaseReport.ModuleReuseCounters = {
     _tag: 'ModuleReuseCounters',
     reused,
     recomputed,
-  })
+  }
   const report = [
     ...frontend.report,
     PhaseReport.make({
@@ -111,10 +111,10 @@ export const make = Effect.fn('FrontendTooling.make')(function* (
       counters,
     }),
   ]
-  return Object.freeze({
+  return {
     toolingModules,
     semanticOccurrences,
     anonymousExpressions,
-    report: Object.freeze(report),
-  })
+    report: report,
+  }
 })

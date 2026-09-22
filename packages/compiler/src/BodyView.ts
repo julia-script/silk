@@ -13,13 +13,12 @@ export interface BodyView {
 
 export const make = (
   body: Pick<Elaboration.CheckedBody, 'artifact' | 'function' | 'results'>,
-): BodyView =>
-  Object.freeze({
-    artifact: body.artifact,
-    function: body.function,
-    evidence: body.results.evidence,
-    causes: body.results.causes,
-  })
+): BodyView => ({
+  artifact: body.artifact,
+  function: body.function,
+  evidence: body.results.evidence,
+  causes: body.results.causes,
+})
 
 export const node = (
   self: BodyView,

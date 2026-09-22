@@ -99,12 +99,12 @@ export const analyze = (
   return diagnostics.length > 0
     ? { diagnostics }
     : {
-        properties: Object.freeze({
+        properties: {
           naked: true,
           noReturn: true,
           span: context.spanOf(clause.anchor),
           anchor: clause.anchor,
-        }),
+        },
         diagnostics: [],
       }
 }

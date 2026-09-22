@@ -6,8 +6,6 @@ it('owns immutable bytes and returns defensive adapter copies', () => {
   const document = FormattedDocument.make(input, true)
   input[0] = 0x62
 
-  assert.strictEqual(Object.isFrozen(document), true)
-  assert.strictEqual(Object.isFrozen(document.bytes), true)
   assert.deepEqual(document.bytes, [0x61, 0x0a])
   assert.strictEqual(document.changed, true)
 

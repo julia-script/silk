@@ -53,7 +53,7 @@ export type FactResult =
   | { readonly _tag: 'Available'; readonly fact: Fact }
   | { readonly _tag: 'Unavailable'; readonly reason: 'NotExecution' | 'UnavailableResult' }
 
-export const states: ReadonlyArray<State> = Object.freeze([
+export const states: ReadonlyArray<State> = [
   'Initial',
   'InitialReady',
   'Running',
@@ -62,17 +62,17 @@ export const states: ReadonlyArray<State> = Object.freeze([
   'Eligible',
   'Completed',
   'Destroyed',
-])
+]
 
 /** Publishes representation-free ownership and lifecycle semantics for one sealed specialization. */
 export const ofType = (index: DeclarationIndex.Index, type: Type.Type): FactResult => {
-  if (!Type.isExecution(type)) return Object.freeze({ _tag: 'Unavailable', reason: 'NotExecution' })
+  if (!Type.isExecution(type)) return { _tag: 'Unavailable', reason: 'NotExecution' }
   const result = type.arguments.at(0)
   if (result === undefined || !Type.isTypeArgument(result) || !Type.runtimeAvailable(result))
-    return Object.freeze({ _tag: 'Unavailable', reason: 'UnavailableResult' })
-  return Object.freeze({
+    return { _tag: 'Unavailable', reason: 'UnavailableResult' }
+  return {
     _tag: 'Available',
-    fact: Object.freeze({
+    fact: {
       _tag: 'ExecutionSemanticFact',
       identity: 'Intrinsic.Execution',
       result,
@@ -82,45 +82,43 @@ export const ofType = (index: DeclarationIndex.Index, type: Type.Type): FactResu
       affinity: ExecutionAffinity.ofType(index, type),
       initial: 'Initial',
       states,
-      loans: Object.freeze({
+      loans: {
         externalConstruction: 'Rejected',
         internalStable: 'MayCrossParking',
         cleanup: 'LoanBeforeReferent',
         completionBorrow: 'Rejected',
-      }),
-      localShared: Object.freeze({
+      },
+      localShared: {
         ownedStrongHandle: 'PreservedAcrossParking',
         activeAccess: 'RejectParking',
-      }),
-    }),
-  })
+      },
+    },
+  }
 }
 
 /** Applies the owner-neutral logical transition contract without selecting storage. */
 export const transition = (state: State, event: Event): Transition => {
   if (event === 'Drive') {
     if (state === 'Initial' || state === 'InitialReady' || state === 'Eligible')
-      return Object.freeze({ _tag: 'Transition', state: 'Running' })
+      return { _tag: 'Transition', state: 'Running' }
     if (state === 'Dormant' || state === 'Notifying')
-      return Object.freeze({ _tag: 'FatalIntrinsicStateTrap', state, event })
-    return Object.freeze({ _tag: 'OwnershipRejected', state, event })
+      return { _tag: 'FatalIntrinsicStateTrap', state, event }
+    return { _tag: 'OwnershipRejected', state, event }
   }
   if (event === 'NotifyInitial' && state === 'Initial')
-    return Object.freeze({ _tag: 'Transition', state: 'InitialReady' })
-  if (event === 'Park' && state === 'Running')
-    return Object.freeze({ _tag: 'Transition', state: 'Dormant' })
+    return { _tag: 'Transition', state: 'InitialReady' }
+  if (event === 'Park' && state === 'Running') return { _tag: 'Transition', state: 'Dormant' }
   if (event === 'BeginNotification' && state === 'Dormant')
-    return Object.freeze({ _tag: 'Transition', state: 'Notifying' })
+    return { _tag: 'Transition', state: 'Notifying' }
   if (event === 'FinishNotification' && state === 'Notifying')
-    return Object.freeze({ _tag: 'Transition', state: 'Eligible' })
-  if (event === 'Complete' && state === 'Running')
-    return Object.freeze({ _tag: 'Transition', state: 'Completed' })
+    return { _tag: 'Transition', state: 'Eligible' }
+  if (event === 'Complete' && state === 'Running') return { _tag: 'Transition', state: 'Completed' }
   if (
     event === 'Drop' &&
     (state === 'Initial' || state === 'InitialReady' || state === 'Dormant' || state === 'Eligible')
   )
-    return Object.freeze({ _tag: 'Transition', state: 'Destroyed' })
-  return Object.freeze({ _tag: 'OwnershipRejected', state, event })
+    return { _tag: 'Transition', state: 'Destroyed' }
+  return { _tag: 'OwnershipRejected', state, event }
 }
 
 export const encode = (self: Fact): string =>

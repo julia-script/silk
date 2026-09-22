@@ -107,19 +107,17 @@ export const select = Effect.fn('PlatformSupply.select')(function* (
       selected.request.origin,
       `Provide an explicit supply for ${target.id}.`,
     )
-  return Object.freeze({
+  return {
     ...selected,
-    request: Object.freeze({
+    request: {
       ...selected.request,
       ...(selected.request.kind === 'explicit' && selected.request.support !== undefined
         ? {
-            support: Object.freeze(
-              selected.request.support.map((item) => Object.freeze({ ...item })),
-            ),
+            support: selected.request.support.map((item) => ({ ...item })),
           }
         : {}),
-    }),
-  })
+    },
+  }
 })
 
 export interface Query {
@@ -214,9 +212,9 @@ export const decode = Effect.fn('PlatformSupply.decode')(function* (
   const exact = (keys: ReadonlyArray<string>) =>
     Object.keys(value).every((key) => keys.includes(key))
   if ((value['kind'] === 'automatic' || value['kind'] === 'native') && exact(['kind']))
-    return Object.freeze({ kind: value['kind'] })
+    return { kind: value['kind'] }
   if (value['kind'] === 'managed' && typeof value['name'] === 'string' && exact(['kind', 'name']))
-    return Object.freeze({ kind: 'managed', name: value['name'] })
+    return { kind: 'managed', name: value['name'] }
   const targets: ReadonlyArray<Target.Id> = [
     'aarch64-apple-darwin',
     'x86_64-unknown-linux-gnu',
@@ -245,17 +243,15 @@ export const decode = Effect.fn('PlatformSupply.decode')(function* (
       !Object.keys(fields).every((key) => ['root', 'target', 'origin'].includes(key))
     )
       return yield* invalid()
-    support.push(
-      Object.freeze({ root: fields['root'], target: supportTarget, origin: fields['origin'] }),
-    )
+    support.push({ root: fields['root'], target: supportTarget, origin: fields['origin'] })
   }
   if (value['origin'] !== undefined && typeof value['origin'] !== 'string') return yield* invalid()
-  return Object.freeze({
+  return {
     kind: 'explicit',
     target,
     root: value['root'],
     linker: value['linker'],
     origin: typeof value['origin'] === 'string' ? value['origin'] : origin,
-    support: Object.freeze(support),
-  })
+    support: support,
+  }
 })

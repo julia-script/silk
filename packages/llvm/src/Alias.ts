@@ -160,14 +160,12 @@ export const make = Effect.fnUntraced(function* (
         'Alias.make',
       )
       const handle = Handle.make('Alias', owner, index)
-      state.globals.aliases.descriptions.push(
-        Object.freeze({
-          _tag: 'Alias',
-          global: allocated.index,
-          valueType: typeIndex,
-          aliasee: target,
-        }),
-      )
+      state.globals.aliases.descriptions.push({
+        _tag: 'Alias',
+        global: allocated.index,
+        valueType: typeIndex,
+        aliasee: target,
+      })
       state.globals.aliases.handles.push(handle)
       return handle
     }),
@@ -194,20 +192,18 @@ export const fromGlobal = Effect.fnUntraced(function* (
       }
       const index = state.globals.aliases.descriptions.length
       const handle = Handle.make('Alias', owner, index)
-      state.globals.aliases.descriptions.push(
-        Object.freeze({
-          _tag: 'Alias',
-          global: resolved.index,
-          valueType: yield* Handle.resolve(builder, owner, valueType, 'Type', 'Alias.fromGlobal'),
-          aliasee: yield* aliaseeIndex(builder, state, owner, aliasee, 'Alias.fromGlobal'),
-        }),
-      )
+      state.globals.aliases.descriptions.push({
+        _tag: 'Alias',
+        global: resolved.index,
+        valueType: yield* Handle.resolve(builder, owner, valueType, 'Type', 'Alias.fromGlobal'),
+        aliasee: yield* aliaseeIndex(builder, state, owner, aliasee, 'Alias.fromGlobal'),
+      })
       state.globals.aliases.handles.push(handle)
-      state.globals.entries.descriptions[resolved.index] = Object.freeze({
+      state.globals.entries.descriptions[resolved.index] = {
         ...resolved.description,
         kind: 'Alias',
         actorIndex: index,
-      })
+      }
       return handle
     }),
   )
@@ -227,10 +223,10 @@ export const setAliasee = Effect.fnUntraced(function* (
   yield* BuilderState.mutate(builder, 'Alias.setAliasee', (state, owner) =>
     Result.gen(function* () {
       const { description, index } = yield* resolve(builder, state, owner, self, 'Alias.setAliasee')
-      state.globals.aliases.descriptions[index] = Object.freeze({
+      state.globals.aliases.descriptions[index] = {
         ...description,
         aliasee: yield* aliaseeIndex(builder, state, owner, aliasee, 'Alias.setAliasee'),
-      })
+      }
     }),
   )
 })

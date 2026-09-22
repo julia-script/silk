@@ -77,13 +77,13 @@ const build = (
   const add = (tier: Tier, summaries: ReadonlyMap<string, ModuleSummary.ModuleSummary>): void => {
     for (const [module, summary] of summaries)
       for (const declaration of summary.publicDeclarations) {
-        const candidate: Candidate = Object.freeze({
+        const candidate: Candidate = {
           _tag: 'WorkspaceInventoryCandidate',
           tier,
           module,
           summary,
           declaration,
-        })
+        }
         const bucket = byName.get(declaration.spelling)
         if (bucket === undefined) byName.set(declaration.spelling, [candidate])
         else bucket.push(candidate)
@@ -94,13 +94,13 @@ const build = (
   const exact = new Map(
     [...byName]
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([name, entries]) => [name, Object.freeze(entries.sort(compareCandidate))] as const),
+      .map(([name, entries]) => [name, entries.sort(compareCandidate)] as const),
   )
   const indexedDeclarations = [...exact.values()].reduce(
     (total, entries) => total + entries.length,
     0,
   )
-  const observation: Observation = Object.freeze({
+  const observation: Observation = {
     _tag: 'WorkspaceInventoryObservation',
     scanned: input.scanned ?? 0,
     reused: input.reused ?? 0,
@@ -110,8 +110,8 @@ const build = (
     indexedDeclarations,
     discoveryElapsedMs: input.discoveryElapsedMs ?? 0,
     summaryElapsedMs: input.summaryElapsedMs ?? 0,
-  })
-  return Object.freeze({
+  }
+  return {
     _tag: 'WorkspaceInventory',
     ...selection,
     project,
@@ -120,7 +120,7 @@ const build = (
     distribution,
     integrity: ToolchainIntegrity.validateFrontend(distribution),
     observation,
-  })
+  }
 }
 
 /** Builds a deterministic inventory from already summarized module partitions. */
@@ -186,7 +186,7 @@ export const revise = (self: WorkspaceInventory, revision: Revision): WorkspaceI
 
 /** Returns candidates for one exact, case-sensitive spelling in deterministic order. */
 export const candidates = (self: WorkspaceInventory, spelling: string): ReadonlyArray<Candidate> =>
-  self.byName.get(spelling) ?? Object.freeze([])
+  self.byName.get(spelling) ?? []
 
 /** Returns a summary for one canonical module identity from either tier. */
 export const summary = (

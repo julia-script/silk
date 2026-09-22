@@ -639,10 +639,7 @@ const sameLocalSequence = (left: ReadonlyArray<LocalId>, right: ReadonlyArray<Lo
   left.every((local, ordinal) => local.ordinal === right.at(ordinal)?.ordinal)
 
 const sameEffectContract = (left: SilkType.Effect, right: SilkType.Effect): boolean =>
-  SilkType.equals(
-    Object.freeze({ ...left, access: 'Shared' }),
-    Object.freeze({ ...right, access: 'Shared' }),
-  )
+  SilkType.equals({ ...left, access: 'Shared' }, { ...right, access: 'Shared' })
 
 const sameEffectChannels = (left: SilkType.Effect, right: SilkType.Effect): boolean =>
   SilkType.equals(left.success, right.success) &&
@@ -676,7 +673,7 @@ const runnerText = (runner: SuspensionRunner): string =>
     runner.instance === undefined ? 'unknown' : instanceText(runner.instance),
     runner.effectIdentity ?? 'none',
     runner.typeArguments.map(SilkType.genericArgumentKey).join(','),
-    SilkType.key(Object.freeze({ ...runner.outcome, access: 'Shared' })),
+    SilkType.key({ ...runner.outcome, access: 'Shared' }),
     runner.captures
       .map(
         (capture) =>
@@ -688,11 +685,7 @@ const runnerText = (runner: SuspensionRunner): string =>
 
 const runnerOutcomeMatches = (fn: MirFunction, effect: SilkType.Effect): boolean =>
   fn.result._tag === 'EffectOutcome' &&
-  EffectExecutionContract.matches(
-    fn.result.type,
-    effect,
-    fn.effectRunner?.providers ?? Object.freeze([]),
-  )
+  EffectExecutionContract.matches(fn.result.type, effect, fn.effectRunner?.providers ?? [])
 
 const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArray<Violation> => {
   const violations: Array<Violation> = []
@@ -732,18 +725,16 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
     detail: string,
     region?: RegionId,
   ): void => {
-    violations.push(
-      Object.freeze({
-        _tag: 'Violation',
-        rule,
-        function: fn.id,
-        ...(region === undefined ? {} : { region }),
-        detail,
-      }),
-    )
+    violations.push({
+      _tag: 'Violation',
+      rule,
+      function: fn.id,
+      ...(region === undefined ? {} : { region }),
+      detail,
+    })
   }
   const suspension = fn.suspension
-  if (suspension === undefined) return Object.freeze([])
+  if (suspension === undefined) return []
   for (const local of suspensionLocals(fn))
     if (local.ordinal < 0 || local.ordinal >= fn.localTypes.length)
       invalid(
@@ -872,7 +863,7 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
     for (const provider of region.runner.providers) {
       const argumentValid =
         provider.argument === undefined ||
-        projectedProviderValid(Object.freeze({ ...provider, argument: provider.argument }))
+        projectedProviderValid({ ...provider, argument: provider.argument })
       const purposeValid = provider.purposes.join(',') === 'ChildRequirement'
       if (!argumentValid || !purposeValid)
         invalid(
@@ -1020,17 +1011,15 @@ const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArr
     )
       invalid('InvalidCoroutineFrame', 'success or failure cleanup plan diverges')
   }
-  return Object.freeze(violations)
+  return violations
 }
 
 /** Source-stable operations across canonical topological region order. */
 export const operations = (self: MirFunction): ReadonlyArray<Operation> =>
-  Object.freeze(
-    topologicalRegions(self).flatMap((region) => operationsOf(region).flatMap(operationTree)),
-  )
+  topologicalRegions(self).flatMap((region) => operationsOf(region).flatMap(operationTree))
 
 export const outcomes = (self: MirFunction): ReadonlyArray<Outcome> =>
-  Object.freeze(topologicalRegions(self).flatMap((region) => outcomeOf(region) ?? []))
+  topologicalRegions(self).flatMap((region) => outcomeOf(region) ?? [])
 
 const outcomeOf = (region: Region): Outcome | undefined =>
   region._tag === 'OperationRegion' || region._tag === 'CleanupRegion' ? region.outcome : undefined
@@ -1691,14 +1680,14 @@ const effectEnvironmentCleanupValid = (
     const laneCount = effectFieldLaneCount(layout, field)
     const currentOffset = laneOffset
     laneOffset += laneCount
-    const noCleanup: CleanupPlan.CleanupPlan = Object.freeze({
+    const noCleanup: CleanupPlan.CleanupPlan = {
       _tag: 'NoCleanup',
       type: field.type,
-    })
+    }
     return field.representation === 'Borrow' ||
       executableFieldCleanupValid(layout, field, noCleanup, next)
       ? []
-      : [Object.freeze({ field, ordinal, laneOffset: currentOffset, laneCount })]
+      : [{ field, ordinal, laneOffset: currentOffset, laneCount }]
   })
   if (expected.length === 0)
     return cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, environment.effect)
@@ -1948,11 +1937,11 @@ const storedEffectCleanupPlanValid = (
     const laneOffset = shape.fields
       .slice(0, ordinal)
       .reduce((total, candidate) => total + candidate.shape.laneCount, 0)
-    return Object.freeze({ field, fieldShape, laneOffset })
+    return { field, fieldShape, laneOffset }
   })
   const expected = [...representation.realization.cleanup.unrunLanes].reverse().flatMap((owned) => {
     const range = ranges.find((candidate) => candidate.field.capture === owned)
-    return range === undefined ? [] : [Object.freeze({ owned, ...range })]
+    return range === undefined ? [] : [{ owned, ...range }]
   })
   const active = new Set([`effect:${representation.realization.runnerIdentity}`])
   return (
@@ -2486,15 +2475,13 @@ const loanViolations = (
 ): ReadonlyArray<Violation> => {
   const violations: Array<Violation> = []
   const invalid = (detail: string): void => {
-    violations.push(
-      Object.freeze({
-        _tag: 'Violation',
-        rule: 'InvalidLoan',
-        function: fn.id,
-        region: region.id,
-        detail,
-      }),
-    )
+    violations.push({
+      _tag: 'Violation',
+      rule: 'InvalidLoan',
+      function: fn.id,
+      region: region.id,
+      detail,
+    })
   }
   const process = (
     sequence: ReadonlyArray<Operation>,
@@ -2591,15 +2578,12 @@ const loanViolations = (
           return candidate.operation.access === 'Exclusive' || operation.access === 'Exclusive'
         })
         if (conflicts) invalid(`loan ${key} conflicts with an active loan of %${root.ordinal}`)
-        active.set(
-          key,
-          Object.freeze({
-            operation,
-            root,
-            selectors,
-            ...(parent === undefined ? {} : { parent: parent[0] }),
-          }),
-        )
+        active.set(key, {
+          operation,
+          root,
+          selectors,
+          ...(parent === undefined ? {} : { parent: parent[0] }),
+        })
         continue
       }
       if (operation._tag === 'EndLoan') {
@@ -2670,7 +2654,7 @@ const loanViolations = (
     }
   }
   process(roots, new Map())
-  return Object.freeze(violations)
+  return violations
 }
 
 const suspensionTypes = (fn: MirFunction): ReadonlyArray<SilkType.Type> =>
@@ -2708,29 +2692,25 @@ const suspensionTypes = (fn: MirFunction): ReadonlyArray<SilkType.Type> =>
 
 const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> => {
   const invalid = (detail: string, fn?: MirFunction): Violation =>
-    Object.freeze(
-      fn === undefined
-        ? { _tag: 'Violation', rule: 'InvalidCoroutineFrame', detail }
-        : { _tag: 'Violation', rule: 'InvalidCoroutineFrame', function: fn.id, detail },
-    )
+    fn === undefined
+      ? { _tag: 'Violation', rule: 'InvalidCoroutineFrame', detail }
+      : { _tag: 'Violation', rule: 'InvalidCoroutineFrame', function: fn.id, detail }
   const descriptors = self.functions.flatMap((fn) =>
-    fn.suspension?.frame === undefined
-      ? []
-      : [Object.freeze({ fn, descriptor: fn.suspension.frame })],
+    fn.suspension?.frame === undefined ? [] : [{ fn, descriptor: fn.suspension.frame }],
   )
   if (descriptors.length === 0)
     return self.coroutineFrames === undefined
-      ? Object.freeze([])
-      : Object.freeze([invalid('MIR without frames retains a coroutine-frame layout plan')])
+      ? []
+      : [invalid('MIR without frames retains a coroutine-frame layout plan')]
   if (self.coroutineFrames === undefined)
-    return Object.freeze([invalid('frame-producing suspension has no target-layout plan')])
+    return [invalid('frame-producing suspension has no target-layout plan')]
   const violations: Array<Violation> = []
   if (self.coroutineFrames.target.id !== self.layout.target.id)
     violations.push(invalid('coroutine-frame layout disagrees with the MIR target'))
   const matched = new Set<number>()
   for (const { fn, descriptor } of descriptors) {
     const candidates = self.coroutineFrames.entries
-      .map((entry, ordinal) => Object.freeze({ entry, ordinal }))
+      .map((entry, ordinal) => ({ entry, ordinal }))
       .filter(({ entry }) => instanceText(entry.function) === instanceText(descriptor.function))
     const selected = candidates.at(0)
     if (selected === undefined || candidates.length !== 1) {
@@ -2918,7 +2898,7 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
   }
   if (matched.size !== self.coroutineFrames.entries.length)
     violations.push(invalid('coroutine-frame layout plan contains a stale or duplicate entry'))
-  return Object.freeze(violations)
+  return violations
 }
 type PropagatingRun = Extract<
   Operation,
@@ -3160,8 +3140,8 @@ const computeVerify = Effect.fnUntraced(function* (
   self: Module,
   trace: CompilerTrace.CompilerTrace,
 ): Effect.fn.Return<ReadonlyArray<Violation>> {
-  const violations: Array<Violation> = (yield* LayoutVerify.verify(self.layout)).map((violation) =>
-    Object.freeze({
+  const violations: Array<Violation> = (yield* LayoutVerify.verify(self.layout)).map(
+    (violation) => ({
       _tag: 'Violation' as const,
       rule: 'InvalidLayout' as const,
       detail: `${violation.rule}: ${violation.detail}`,
@@ -3247,24 +3227,20 @@ const computeVerify = Effect.fnUntraced(function* (
       for (const root of self.retainedRoots ?? []) {
         const key = Instances.keyText(root)
         if (retained.has(key) || !self.functions.some((fn) => matchesInstanceKey(fn, root)))
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'InvalidArtifactRoot',
-              detail: 'Retained roots must uniquely identify emitted function instances',
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'InvalidArtifactRoot',
+            detail: 'Retained roots must uniquely identify emitted function instances',
+          })
         retained.add(key)
       }
       for (const record of [...self.foreignCalls, ...self.foreignExports]) {
         if (!CAbi.isCanonicalSignature(record.signature, self.layout.target))
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'InvalidForeignOperation',
-              detail: `Foreign signature ${record.symbol} has noncanonical target ABI facts`,
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'InvalidForeignOperation',
+            detail: `Foreign signature ${record.symbol} has noncanonical target ABI facts`,
+          })
       }
 
       const sameDeclaration = (
@@ -3286,13 +3262,11 @@ const computeVerify = Effect.fnUntraced(function* (
       })
       const exportDeclarations = new Set<string>()
       if (!exportInventoryCanonical) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidForeignOperation',
-            detail: 'Foreign export inventory is duplicated or outside canonical declaration order',
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidForeignOperation',
+          detail: 'Foreign export inventory is duplicated or outside canonical declaration order',
+        })
       }
       for (const record of self.foreignExports) {
         const key = declarationKey(record.declaration)
@@ -3333,13 +3307,11 @@ const computeVerify = Effect.fnUntraced(function* (
           signature === undefined ||
           CAbi.signatureKey(record.signature) !== CAbi.signatureKey(signature)
         ) {
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'InvalidForeignOperation',
-              detail: `Foreign export ${record.symbol} does not match one unique canonical implementation`,
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'InvalidForeignOperation',
+            detail: `Foreign export ${record.symbol} does not match one unique canonical implementation`,
+          })
         }
       }
       const foreignStaticInitializerValid = (record: Module['foreignStatics'][number]): boolean => {
@@ -3377,13 +3349,11 @@ const computeVerify = Effect.fnUntraced(function* (
         )
       })
       if (!staticInventoryCanonical) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidForeignOperation',
-            detail: 'Foreign static inventory is duplicated or outside canonical source order',
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidForeignOperation',
+          detail: 'Foreign static inventory is duplicated or outside canonical source order',
+        })
       }
       for (const record of self.foreignStatics) {
         const key = declarationKey(record.declaration)
@@ -3400,13 +3370,11 @@ const computeVerify = Effect.fnUntraced(function* (
           !foreignStaticInitializerValid(record) ||
           !retainedImportValid
         ) {
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'InvalidForeignOperation',
-              detail: `Foreign static ${record.symbol} has an invalid ${record.direction.toLowerCase()} type, initializer, or reachability record`,
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'InvalidForeignOperation',
+            detail: `Foreign static ${record.symbol} has an invalid ${record.direction.toLowerCase()} type, initializer, or reachability record`,
+          })
         }
       }
       const expectedAuthorities = self.layout.executionPackages.plans.length
@@ -3421,13 +3389,11 @@ const computeVerify = Effect.fnUntraced(function* (
             ExecutionTransition.verifyAuthority(authority).length > 0,
         )
       ) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidExecutionOperation',
-            detail: 'execution transition authority is incomplete or non-canonical',
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidExecutionOperation',
+          detail: 'execution transition authority is incomplete or non-canonical',
+        })
       }
       const staticData = self.staticData ?? []
       const staticTableValid = staticData.every((data, ordinal) => {
@@ -3447,13 +3413,11 @@ const computeVerify = Effect.fnUntraced(function* (
         placements.length === staticData.length &&
         placements.every((placement, ordinal) => placement.data.id === staticData.at(ordinal)?.id)
       if (!staticTableValid || !placementMatches) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidSliceOperation',
-            detail: 'static-data table is non-canonical or disagrees with target placement',
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidSliceOperation',
+          detail: 'static-data table is non-canonical or disagrees with target placement',
+        })
       }
       const originReachable = SuspensionMir.originReachableFunctions(self)
       const orphanRelay = self.functions
@@ -3475,37 +3439,33 @@ const computeVerify = Effect.fnUntraced(function* (
                     candidate,
                     declaration,
                     region.runner.typeArguments,
-                    region.runner.instance?.staticArguments ?? Object.freeze([]),
+                    region.runner.instance?.staticArguments ?? [],
                   ),
               )
-              ? [Object.freeze({ fn, region })]
+              ? [{ fn, region }]
               : []
           }),
         )
         .at(0)
       if (orphanRelay !== undefined)
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'OrphanSuspensionMachinery',
-            function: orphanRelay.fn.id,
-            detail: `suspendable relay through ${orphanRelay.region.runner.declaration === undefined ? 'an unknown runner' : targetText(orphanRelay.region.runner.declaration)} belongs to a function with no reachable explicit transfer origin (origin-reachable: ${
-              self.functions
-                .filter((fn) => originReachable.has(instanceText(fn.instance)))
-                .map((fn) => targetText(fn.id))
-                .join(', ') || 'none'
-            })`,
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'OrphanSuspensionMachinery',
+          function: orphanRelay.fn.id,
+          detail: `suspendable relay through ${orphanRelay.region.runner.declaration === undefined ? 'an unknown runner' : targetText(orphanRelay.region.runner.declaration)} belongs to a function with no reachable explicit transfer origin (origin-reachable: ${
+            self.functions
+              .filter((fn) => originReachable.has(instanceText(fn.instance)))
+              .map((fn) => targetText(fn.id))
+              .join(', ') || 'none'
+          })`,
+        })
       for (const root of self.foreignExports.map((item) => item.key)) {
         if (!self.functions.some((fn) => matchesInstanceKey(fn, root)))
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'InvalidArtifactRoot',
-              detail: `artifact root ${instanceText(root)} has no retained function`,
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'InvalidArtifactRoot',
+            detail: `artifact root ${instanceText(root)} has no retained function`,
+          })
       }
       const sharedElements = [
         ...new Map(
@@ -3536,26 +3496,22 @@ const computeVerify = Effect.fnUntraced(function* (
           helper.result._tag !== 'i32' ||
           helper.suspension !== undefined
         ) {
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'InvalidLocalSharedOperation',
-              localSharedReason: 'CleanupContract',
-              ...(helper === undefined ? {} : { function: helper.id }),
-              detail: `local-shared payload ${SilkType.encode(element)} must resolve to one synchronous single-parameter cleanup helper`,
-            }),
-          )
-        }
-      }
-      if (payloadCleanupHelpers.length !== sharedElements.length) {
-        violations.push(
-          Object.freeze({
+          violations.push({
             _tag: 'Violation',
             rule: 'InvalidLocalSharedOperation',
             localSharedReason: 'CleanupContract',
-            detail: 'local-shared payload cleanup helper inventory is stale or contains duplicates',
-          }),
-        )
+            ...(helper === undefined ? {} : { function: helper.id }),
+            detail: `local-shared payload ${SilkType.encode(element)} must resolve to one synchronous single-parameter cleanup helper`,
+          })
+        }
+      }
+      if (payloadCleanupHelpers.length !== sharedElements.length) {
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidLocalSharedOperation',
+          localSharedReason: 'CleanupContract',
+          detail: 'local-shared payload cleanup helper inventory is stale or contains duplicates',
+        })
       }
       return { sameDeclaration, foreignStaticInitializerValid }
     },
@@ -3616,16 +3572,14 @@ const computeVerify = Effect.fnUntraced(function* (
       concreteTypes.some((type) => !SilkType.isRuntimeConcrete(type)) ||
       instanceKeys.has(currentInstance)
     ) {
-      violations.push(
-        Object.freeze({
-          _tag: 'Violation',
-          rule: 'InvalidInstance',
-          function: fn.id,
-          detail: instanceKeys.has(currentInstance)
-            ? 'function repeats an existing concrete instance key'
-            : 'function instance identity is inconsistent or retains an open type parameter',
-        }),
-      )
+      violations.push({
+        _tag: 'Violation',
+        rule: 'InvalidInstance',
+        function: fn.id,
+        detail: instanceKeys.has(currentInstance)
+          ? 'function repeats an existing concrete instance key'
+          : 'function instance identity is inconsistent or retains an open type parameter',
+      })
     }
     instanceKeys.add(currentInstance)
     const missingTypes = new Set(
@@ -3640,52 +3594,44 @@ const computeVerify = Effect.fnUntraced(function* (
         .map(SilkType.key),
     )
     for (const type of [...missingTypes].sort()) {
-      violations.push(
-        Object.freeze({
-          _tag: 'Violation',
-          rule: 'MissingTypeLayout',
-          function: fn.id,
-          detail: `function references ${type} without a layout entry`,
-        }),
-      )
+      violations.push({
+        _tag: 'Violation',
+        rule: 'MissingTypeLayout',
+        function: fn.id,
+        detail: `function references ${type} without a layout entry`,
+      })
     }
 
     const byId = new Map<number, Region>()
     for (const region of allRegions) {
       if (byId.has(region.id.ordinal)) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'DuplicateRegionIdentity',
-            function: fn.id,
-            region: region.id,
-            detail: `region r${region.id.ordinal} is declared more than once`,
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'DuplicateRegionIdentity',
+          function: fn.id,
+          region: region.id,
+          detail: `region r${region.id.ordinal} is declared more than once`,
+        })
       } else byId.set(region.id.ordinal, region)
     }
     if (!byId.has(fn.entry.ordinal)) {
-      violations.push(
-        Object.freeze({
-          _tag: 'Violation',
-          rule: 'MissingEntryRegion',
-          function: fn.id,
-          detail: `entry region r${fn.entry.ordinal} is missing`,
-        }),
-      )
+      violations.push({
+        _tag: 'Violation',
+        rule: 'MissingEntryRegion',
+        function: fn.id,
+        detail: `entry region r${fn.entry.ordinal} is missing`,
+      })
     }
     for (const region of allRegions) {
       for (const [target] of regionTargets(region)) {
         if (!byId.has(target.ordinal)) {
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'UnknownRegionTarget',
-              function: fn.id,
-              region: region.id,
-              detail: `region references missing r${target.ordinal}`,
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'UnknownRegionTarget',
+            function: fn.id,
+            region: region.id,
+            detail: `region references missing r${target.ordinal}`,
+          })
         }
       }
     }
@@ -3709,15 +3655,13 @@ const computeVerify = Effect.fnUntraced(function* (
         const targetRegion = byId.get(target.ordinal)
         if (targetRegion === undefined) continue
         if (color.get(target.ordinal) === 1) {
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'StructuralCycle',
-              function: fn.id,
-              region: frame.region.id,
-              detail: `structural edge r${frame.region.id.ordinal} -> r${target.ordinal} forms a cycle`,
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'StructuralCycle',
+            function: fn.id,
+            region: frame.region.id,
+            detail: `structural edge r${frame.region.id.ordinal} -> r${target.ordinal} forms a cycle`,
+          })
         } else if (color.get(target.ordinal) !== 2) {
           color.set(target.ordinal, 1)
           pending.push({
@@ -3755,15 +3699,13 @@ const computeVerify = Effect.fnUntraced(function* (
         condition.outcome._tag !== 'Yield' ||
         condition.ownerLoop?.ordinal !== loop.loop.ordinal
       ) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidLoopTarget',
-            function: fn.id,
-            region: loop.id,
-            detail: `loop${loop.loop.ordinal} must own one unique yielding operation condition`,
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidLoopTarget',
+          function: fn.id,
+          region: loop.id,
+          detail: `loop${loop.loop.ordinal} must own one unique yielding operation condition`,
+        })
       }
     }
     for (const region of allRegions) {
@@ -3775,15 +3717,13 @@ const computeVerify = Effect.fnUntraced(function* (
         owners.length !== 1 ||
         region.ownerLoop?.ordinal !== owners.at(0)?.loop.ordinal
       ) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidLoopTarget',
-            function: fn.id,
-            region: region.id,
-            detail: 'yield must be the uniquely owned operation condition of one lexical loop',
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidLoopTarget',
+          function: fn.id,
+          region: region.id,
+          detail: 'yield must be the uniquely owned operation condition of one lexical loop',
+        })
       }
     }
     const loanBeginnings = new Map<string, number>()
@@ -3849,30 +3789,26 @@ const computeVerify = Effect.fnUntraced(function* (
     }
     for (const [key, loan] of localSharedLoans) {
       if (loan.count !== 1 || loanBeginnings.has(key) || loanEndings.has(key)) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidLocalSharedOperation',
-            localSharedReason: 'AccessContract',
-            function: fn.id,
-            provenance: loan.operation.provenance,
-            detail: `local-shared callback loan ${key} must identify exactly one closed access operation`,
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidLocalSharedOperation',
+          localSharedReason: 'AccessContract',
+          function: fn.id,
+          provenance: loan.operation.provenance,
+          detail: `local-shared callback loan ${key} must identify exactly one closed access operation`,
+        })
       }
     }
     const globalEndings = new Set(loanEndings.keys())
     for (const key of new Set([...loanBeginnings.keys(), ...loanEndings.keys()])) {
       const endings = loanEndings.get(key) ?? 0
       if (loanBeginnings.get(key) !== 1 || endings < 1 || !loanPathsValid(fn, key, byId, loops)) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidLoan',
-            function: fn.id,
-            detail: `loan ${key} must begin once and end exactly once on every terminating path`,
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidLoan',
+          function: fn.id,
+          detail: `loan ${key} must begin once and end exactly once on every terminating path`,
+        })
       }
     }
     const beginningsByDestination = new Map<
@@ -3888,14 +3824,12 @@ const computeVerify = Effect.fnUntraced(function* (
         parent[0] !== childKey &&
         !loanAncestryPathsValid(fn, parent[0], childKey, byId, loops)
       ) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidLoan',
-            function: fn.id,
-            detail: `reborrow ${childKey} must remain within parent loan ${parent[0]} on every path`,
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidLoan',
+          function: fn.id,
+          detail: `reborrow ${childKey} must remain within parent loan ${parent[0]} on every path`,
+        })
       }
     }
     const isAncestor = (owner: LoopId | undefined, target: LoopId): boolean => {
@@ -3912,28 +3846,24 @@ const computeVerify = Effect.fnUntraced(function* (
       if (fn.regions.includes(region)) continue
       const outcome = outcomeOf(region)
       if (region.ownerLoop !== undefined && !loops.has(region.ownerLoop.ordinal))
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidLexicalOwner',
-            function: fn.id,
-            region: region.id,
-            detail: 'nested execution references a missing lexical loop owner',
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidLexicalOwner',
+          function: fn.id,
+          region: region.id,
+          detail: 'nested execution references a missing lexical loop owner',
+        })
       if (
         (outcome?._tag === 'Repeat' || outcome?._tag === 'Exit') &&
         !isAncestor(region.ownerLoop, outcome.loop)
       )
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidLoopTarget',
-            function: fn.id,
-            region: region.id,
-            detail: 'nested execution transfers to a non-ancestor loop',
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidLoopTarget',
+          function: fn.id,
+          region: region.id,
+          detail: 'nested execution transfers to a non-ancestor loop',
+        })
       if (outcome?._tag === 'Return') {
         const returned = fn.localTypes.at(outcome.value.ordinal)
         if (
@@ -3942,15 +3872,13 @@ const computeVerify = Effect.fnUntraced(function* (
             SilkType.runtimeKey(semanticType(returned)) !==
               SilkType.runtimeKey(semanticType(fn.result)))
         )
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'InvalidReturn',
-              function: fn.id,
-              region: region.id,
-              detail: 'nested execution return disagrees with the enclosing function contract',
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'InvalidReturn',
+            function: fn.id,
+            region: region.id,
+            detail: 'nested execution return disagrees with the enclosing function contract',
+          })
       }
     }
     for (const region of fn.regions) {
@@ -3965,15 +3893,13 @@ const computeVerify = Effect.fnUntraced(function* (
         ),
       )
       if (region.ownerLoop !== undefined && !loops.has(region.ownerLoop.ordinal)) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidLexicalOwner',
-            function: fn.id,
-            region: region.id,
-            detail: `owner loop loop${region.ownerLoop.ordinal} is missing`,
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidLexicalOwner',
+          function: fn.id,
+          region: region.id,
+          detail: `owner loop loop${region.ownerLoop.ordinal} is missing`,
+        })
       }
       const outcome = outcomeOf(region)
       if (outcome?._tag === 'Return') {
@@ -3984,69 +3910,59 @@ const computeVerify = Effect.fnUntraced(function* (
           SilkType.runtimeKey(semanticType(returned)) !==
             SilkType.runtimeKey(semanticType(fn.result))
         ) {
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'InvalidReturn',
-              function: fn.id,
-              region: region.id,
-              detail: `return local ${localText(outcome.value)} has ${SilkType.encode(semanticType(returned))}, expected ${SilkType.encode(semanticType(fn.result))}`,
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'InvalidReturn',
+            function: fn.id,
+            region: region.id,
+            detail: `return local ${localText(outcome.value)} has ${SilkType.encode(semanticType(returned))}, expected ${SilkType.encode(semanticType(fn.result))}`,
+          })
         }
       }
       if (
         (outcome?._tag === 'Repeat' || outcome?._tag === 'Exit') &&
         !isAncestor(region.ownerLoop, outcome.loop)
       ) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidLoopTarget',
-            function: fn.id,
-            region: region.id,
-            detail: `${outcome._tag.toLowerCase()} targets non-ancestor loop${outcome.loop.ordinal}`,
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidLoopTarget',
+          function: fn.id,
+          region: region.id,
+          detail: `${outcome._tag.toLowerCase()} targets non-ancestor loop${outcome.loop.ordinal}`,
+        })
       }
       for (const used of localUses(region)) {
         if (used.ordinal < 0 || used.ordinal >= fn.localTypes.length) {
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'UndeclaredLocal',
-              function: fn.id,
-              region: region.id,
-              detail: `references undeclared local %${used.ordinal}`,
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'UndeclaredLocal',
+            function: fn.id,
+            region: region.id,
+            detail: `references undeclared local %${used.ordinal}`,
+          })
         }
       }
       for (const rootOperation of operationsOf(region)) {
         if (cyclicOperation(rootOperation)) {
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'CyclicMatchOperation',
-              function: fn.id,
-              region: region.id,
-              detail: 'nested match operations contain a structural cycle',
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'CyclicMatchOperation',
+            function: fn.id,
+            region: region.id,
+            detail: 'nested match operations contain a structural cycle',
+          })
         }
       }
       const operations = operationsOf(region).flatMap(operationTree)
       for (const [index, operation] of operations.entries()) {
         const invalidString = (detail: string): void => {
-          violations.push(
-            Object.freeze({
-              _tag: 'Violation',
-              rule: 'InvalidStringOperation',
-              function: fn.id,
-              region: region.id,
-              detail,
-            }),
-          )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'InvalidStringOperation',
+            function: fn.id,
+            region: region.id,
+            detail,
+          })
         }
         const heldStringLoansValid = (
           heldLoans: ReadonlyArray<Tir.BorrowId>,
@@ -4191,15 +4107,13 @@ const computeVerify = Effect.fnUntraced(function* (
               operation.type._tag === 'bool'
           }
           if (!valid)
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEnumOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `${operation._tag} disagrees with its canonical enum identity, member, discriminant, or representation lane`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEnumOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `${operation._tag} disagrees with its canonical enum identity, member, discriminant, or representation lane`,
+            })
         }
         if (operation._tag === 'StaticView') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -4213,15 +4127,13 @@ const computeVerify = Effect.fnUntraced(function* (
             data === undefined ||
             data.bytes.length !== operation.length
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidSliceOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'static view disagrees with its immutable bytes, length, or destination',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidSliceOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'static view disagrees with its immutable bytes, length, or destination',
+            })
           }
         }
         if (operation._tag === 'Literal') {
@@ -4248,15 +4160,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(semanticType(destination), semantic) ||
             !validValue
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidIntegerOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `literal ${operation.value.toString()} disagrees with its destination or target range`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidIntegerOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `literal ${operation.value.toString()} disagrees with its destination or target range`,
+            })
           }
         }
         if (operation._tag === 'Binary') {
@@ -4296,15 +4206,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(semanticType(operation.type), expectedResult) ||
             !SilkType.equals(semanticType(destination), expectedResult)
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidIntegerOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `${operation.operator} has inconsistent operand or result types`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidIntegerOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `${operation.operator} has inconsistent operand or result types`,
+            })
           }
         }
         if (operation._tag === 'ConvertInteger') {
@@ -4320,15 +4228,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(semanticType(source), operation.sourceType._tag) ||
             !SilkType.equals(semanticType(destination), operation.type._tag)
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidIntegerOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'integer conversion has inconsistent source or destination types',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidIntegerOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'integer conversion has inconsistent source or destination types',
+            })
         }
         if (
           operation._tag === 'ConvertScalar' ||
@@ -4371,15 +4277,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !unary ||
             !transcendental
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidIntegerOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `${operation._tag} has inconsistent source or destination types`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidIntegerOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `${operation._tag} has inconsistent source or destination types`,
+            })
         }
         if (operation._tag === 'CheckedScalar') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -4416,15 +4320,13 @@ const computeVerify = Effect.fnUntraced(function* (
             absent.type.parameters.length !== 0 ||
             !SilkType.equals(absent.type.result, semanticType(operation.type))
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidIntegerOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'checked scalar operation has inconsistent operands or carrier result',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidIntegerOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'checked scalar operation has inconsistent operands or carrier result',
+            })
         }
         if (operation._tag === 'ValidateLayout' || operation._tag === 'RepeatLayout') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -4455,15 +4357,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(destination.type, operation.type.type) ||
             !sameMembers(operation.type.type.members, expectedMembers)
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidLayoutOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `${operation._tag} has inconsistent operands or validation result`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidLayoutOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `${operation._tag} has inconsistent operands or validation result`,
+            })
           }
         }
         if (operation._tag === 'Allocate') {
@@ -4485,16 +4385,14 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(expectedFailure, operation.failure) ||
             !SilkType.equals(semanticType(fn.result), operation.propagationType.type)
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidAllocationOperation',
-                function: fn.id,
-                region: region.id,
-                detail:
-                  'allocation does not preserve Layout, Allocation, or sealed storage-failure contracts',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidAllocationOperation',
+              function: fn.id,
+              region: region.id,
+              detail:
+                'allocation does not preserve Layout, Allocation, or sealed storage-failure contracts',
+            })
         }
         if (operation._tag === 'ForeignStaticLoad') {
           const record = self.foreignStatics.find((candidate) =>
@@ -4510,15 +4408,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(semanticType(destination), record.type) ||
             !foreignStaticInitializerValid(record)
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidForeignOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `Foreign static load ${operation.symbol} does not match its declaration inventory`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidForeignOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `Foreign static load ${operation.symbol} does not match its declaration inventory`,
+            })
           }
         }
         if (operation._tag === 'ForeignFunctionAddress') {
@@ -4577,15 +4473,13 @@ const computeVerify = Effect.fnUntraced(function* (
             destination?._tag !== 'ForeignFunction' ||
             !SilkType.equals(destination.type, operation.type.type)
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidForeignOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `Foreign function address ${operation.symbol} does not match its export inventory`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidForeignOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `Foreign function address ${operation.symbol} does not match its export inventory`,
+            })
           }
         }
         if (operation._tag === 'ForeignCall' || operation._tag === 'ForeignIndirectCall') {
@@ -4670,15 +4564,13 @@ const computeVerify = Effect.fnUntraced(function* (
             classKey(fn.localTypes.at(operation.destination.ordinal), 'Result') !== resultKey ||
             classKey(operation.type, 'Result') !== resultKey
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidForeignCall',
-                function: fn.id,
-                region: region.id,
-                detail: `Foreign call ${operation._tag === 'ForeignCall' ? operation.symbol : 'indirect'} does not match its classified C signature ${CAbi.signatureKey(operation.signature)}`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidForeignCall',
+              function: fn.id,
+              region: region.id,
+              detail: `Foreign call ${operation._tag === 'ForeignCall' ? operation.symbol : 'indirect'} does not match its classified C signature ${CAbi.signatureKey(operation.signature)}`,
+            })
           }
         }
         if (operation._tag === 'RawBufferFrom') {
@@ -4702,16 +4594,14 @@ const computeVerify = Effect.fnUntraced(function* (
             operation.stride !== expectedStride ||
             operation.elementAlignment !== elementLayout?.alignment
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidRawStorageOperation',
-                function: fn.id,
-                region: region.id,
-                detail:
-                  'RawBuffer construction lost allocation, count, element, or layout provenance',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidRawStorageOperation',
+              function: fn.id,
+              region: region.id,
+              detail:
+                'RawBuffer construction lost allocation, count, element, or layout provenance',
+            })
           }
         }
         if (operation._tag === 'SharedFromAllocation') {
@@ -4751,17 +4641,15 @@ const computeVerify = Effect.fnUntraced(function* (
             !LocalSharedControlBlock.equals(expected, operation.block) ||
             !LocalSharedControlBlock.equals(operation.allocationBlock, operation.block)
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidLocalSharedOperation',
-                localSharedReason: 'InitializationContract',
-                function: fn.id,
-                region: region.id,
-                provenance: operation.provenance,
-                detail: `Local-shared initialization lost allocation, element, target-layout, or control-block provenance (uses=${localUseCounts.get(operation.allocation.ordinal) ?? 0}/${localUseCounts.get(operation.value.ordinal) ?? 0})`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidLocalSharedOperation',
+              localSharedReason: 'InitializationContract',
+              function: fn.id,
+              region: region.id,
+              provenance: operation.provenance,
+              detail: `Local-shared initialization lost allocation, element, target-layout, or control-block provenance (uses=${localUseCounts.get(operation.allocation.ordinal) ?? 0}/${localUseCounts.get(operation.value.ordinal) ?? 0})`,
+            })
         }
         if (operation._tag === 'ExecutionFromAllocation') {
           const matchesSpan = (
@@ -4849,17 +4737,15 @@ const computeVerify = Effect.fnUntraced(function* (
             localUseCounts.get(operation.endpoint.ordinal) !== 1 ||
             localUseCounts.get(operation.callback.ordinal) !== 1
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidExecutionOperation',
-                function: fn.id,
-                region: region.id,
-                provenance: operation.provenance,
-                detail:
-                  'Execution initialization lost exact package, input type, target, or consuming ownership provenance',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidExecutionOperation',
+              function: fn.id,
+              region: region.id,
+              provenance: operation.provenance,
+              detail:
+                'Execution initialization lost exact package, input type, target, or consuming ownership provenance',
+            })
         }
         if (operation._tag === 'ExecutionDrive') {
           const execution = fn.localTypes.at(operation.execution.ordinal)
@@ -4889,7 +4775,7 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.isCallable(completeActual)
               ? undefined
               : SilkType.callable(
-                  Object.freeze([semanticType(branch), result]),
+                  [semanticType(branch), result],
                   SilkType.unit,
                   completeActual,
                   'Take',
@@ -4901,7 +4787,7 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.isCallable(suspendActual)
               ? undefined
               : SilkType.callable(
-                  Object.freeze([semanticType(branch), SilkType.execution(result)]),
+                  [semanticType(branch), SilkType.execution(result)],
                   SilkType.unit,
                   suspendActual,
                   'Take',
@@ -4964,17 +4850,15 @@ const computeVerify = Effect.fnUntraced(function* (
             localUseCounts.get(operation.onComplete.ordinal) !== 1 ||
             localUseCounts.get(operation.onSuspend.ordinal) !== 1
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidExecutionOperation',
-                function: fn.id,
-                region: region.id,
-                provenance: operation.provenance,
-                detail:
-                  'Execution drive lost its affine Execution, branch state, or exact take-once outcome contracts',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidExecutionOperation',
+              function: fn.id,
+              region: region.id,
+              provenance: operation.provenance,
+              detail:
+                'Execution drive lost its affine Execution, branch state, or exact take-once outcome contracts',
+            })
         }
         if (operation._tag === 'ExecutionNotifyInitial') {
           const executionType = fn.localTypes.at(operation.execution.ordinal)
@@ -4990,16 +4874,14 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(destination.type, operation.type.type) ||
             operation.executionAccess !== 'Exclusive'
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidExecutionOperation',
-                function: fn.id,
-                region: region.id,
-                provenance: operation.provenance,
-                detail: 'initial readiness requires one exclusive Execution reference',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidExecutionOperation',
+              function: fn.id,
+              region: region.id,
+              provenance: operation.provenance,
+              detail: 'initial readiness requires one exclusive Execution reference',
+            })
         }
         if (operation._tag === 'ExecutionWake') {
           const wake = fn.localTypes.at(operation.wake.ordinal)
@@ -5012,16 +4894,14 @@ const computeVerify = Effect.fnUntraced(function* (
             operation.wakeAccess !== 'Take' ||
             localUseCounts.get(operation.wake.ordinal) !== 1
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidExecutionOperation',
-                function: fn.id,
-                region: region.id,
-                provenance: operation.provenance,
-                detail: 'Wake signal lost its sole affine generation authority or unit result',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidExecutionOperation',
+              function: fn.id,
+              region: region.id,
+              provenance: operation.provenance,
+              detail: 'Wake signal lost its sole affine generation authority or unit result',
+            })
         }
         if (operation._tag === 'ExecutionPark') {
           const register = fn.localTypes.at(operation.register.ordinal)
@@ -5037,12 +4917,7 @@ const computeVerify = Effect.fnUntraced(function* (
             registerActual === undefined ||
             !SilkType.isCallable(registerActual)
               ? undefined
-              : SilkType.callable(
-                  Object.freeze([SilkType.wake]),
-                  semanticType(guard),
-                  registerActual,
-                  'Take',
-                )
+              : SilkType.callable([SilkType.wake], semanticType(guard), registerActual, 'Take')
           const callableCleanupValid = (
             local: Extract<Type, { readonly _tag: 'CallableValue' }>,
             cleanup: CleanupPlan.CleanupPlan,
@@ -5094,17 +4969,15 @@ const computeVerify = Effect.fnUntraced(function* (
             operation.registerAccess !== 'Take' ||
             localUseCounts.get(operation.register.ordinal) !== 1
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidExecutionOperation',
-                function: fn.id,
-                region: region.id,
-                provenance: operation.provenance,
-                detail:
-                  'Execution park lost its take-once Wake registration, retained guard, or unit result',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidExecutionOperation',
+              function: fn.id,
+              region: region.id,
+              provenance: operation.provenance,
+              detail:
+                'Execution park lost its take-once Wake registration, retained guard, or unit result',
+            })
         }
         if (operation._tag === 'SharedClone') {
           const selfType = fn.localTypes.at(operation.self.ordinal)
@@ -5131,17 +5004,15 @@ const computeVerify = Effect.fnUntraced(function* (
             expected?._tag !== 'LocalSharedControlBlockPlan' ||
             !LocalSharedControlBlock.equals(expected, operation.block)
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidLocalSharedOperation',
-                localSharedReason: 'CloneContract',
-                function: fn.id,
-                region: region.id,
-                provenance: operation.provenance,
-                detail: 'Local-shared clone lost its borrowed core, element, or target count plan',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidLocalSharedOperation',
+              localSharedReason: 'CloneContract',
+              function: fn.id,
+              region: region.id,
+              provenance: operation.provenance,
+              detail: 'Local-shared clone lost its borrowed core, element, or target count plan',
+            })
         }
         if (operation._tag === 'SharedWithMut') {
           const selfType = fn.localTypes.at(operation.self.ordinal)
@@ -5162,9 +5033,7 @@ const computeVerify = Effect.fnUntraced(function* (
             use?._tag !== 'CallableValue' || payload?._tag !== 'Reference'
               ? undefined
               : SilkType.callable(
-                  Object.freeze([
-                    SilkType.reference('Exclusive', operation.element, payload.type.lifetime),
-                  ]),
+                  [SilkType.reference('Exclusive', operation.element, payload.type.lifetime)],
                   semanticType(operation.type),
                   use.type,
                   'Take',
@@ -5172,19 +5041,12 @@ const computeVerify = Effect.fnUntraced(function* (
           const conflictContract =
             conflict?._tag !== 'CallableValue'
               ? undefined
-              : SilkType.callable(
-                  Object.freeze([]),
-                  semanticType(operation.type),
-                  conflict.type,
-                  'Take',
-                )
+              : SilkType.callable([], semanticType(operation.type), conflict.type, 'Take')
           const takeUse =
-            use?._tag === 'CallableValue'
-              ? Object.freeze({ ...use.type, mode: 'Take' as const })
-              : undefined
+            use?._tag === 'CallableValue' ? { ...use.type, mode: 'Take' as const } : undefined
           const takeConflict =
             conflict?._tag === 'CallableValue'
-              ? Object.freeze({ ...conflict.type, mode: 'Take' as const })
+              ? { ...conflict.type, mode: 'Take' as const }
               : undefined
           const retainsRestrictedLoan = (local: Type): boolean => {
             if (SilkType.containsBorrowWrapper(semanticType(local))) return true
@@ -5258,18 +5120,16 @@ const computeVerify = Effect.fnUntraced(function* (
             !LocalSharedControlBlock.equals(expected, operation.block) ||
             operation.retainedLoans.length !== 0
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidLocalSharedOperation',
-                localSharedReason: 'AccessContract',
-                function: fn.id,
-                region: region.id,
-                provenance: operation.provenance,
-                detail:
-                  'Local-shared access lost its core, take-once callback, result, cleanup, or target-layout contract',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidLocalSharedOperation',
+              localSharedReason: 'AccessContract',
+              function: fn.id,
+              region: region.id,
+              provenance: operation.provenance,
+              detail:
+                'Local-shared access lost its core, take-once callback, result, cleanup, or target-layout contract',
+            })
         }
         if (
           operation._tag === 'PointerNull' ||
@@ -5285,16 +5145,14 @@ const computeVerify = Effect.fnUntraced(function* (
         ) {
           const detail = pointerOperationViolation(self.layout, fn, operation)
           if (detail !== undefined)
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidPointerOperation',
-                function: fn.id,
-                region: region.id,
-                provenance: operation.provenance,
-                detail,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidPointerOperation',
+              function: fn.id,
+              region: region.id,
+              provenance: operation.provenance,
+              detail,
+            })
         }
         if (operation._tag === 'RawBufferCount') {
           const buffer = fn.localTypes.at(operation.buffer.ordinal)
@@ -5304,15 +5162,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.isRawBuffer(buffer.type.target) ||
             destination?._tag !== 'usize'
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidRawStorageOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'RawBuffer.count lost its borrowed buffer or usize result',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidRawStorageOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'RawBuffer.count lost its borrowed buffer or usize result',
+            })
         }
         if (operation._tag === 'RawBufferSlot') {
           const buffer = fn.localTypes.at(operation.buffer.ordinal)
@@ -5332,16 +5188,14 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(bufferElement, operation.element) ||
             !SilkType.equals(destination.type.arguments[1], operation.element)
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidRawStorageOperation',
-                function: fn.id,
-                region: region.id,
-                detail:
-                  'Slot projection lost its exclusive buffer, bounds operand, or element provenance',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidRawStorageOperation',
+              function: fn.id,
+              region: region.id,
+              detail:
+                'Slot projection lost its exclusive buffer, bounds operand, or element provenance',
+            })
         }
         if (operation._tag === 'RawBufferRead') {
           const buffer = fn.localTypes.at(operation.buffer.ordinal)
@@ -5361,16 +5215,14 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(semanticType(destination), operation.element) ||
             !isCopy(self.layout, operation.element)
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidRawStorageOperation',
-                function: fn.id,
-                region: region.id,
-                detail:
-                  'RawBuffer.read lost its shared buffer, bounds, Copy element, or result provenance',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidRawStorageOperation',
+              function: fn.id,
+              region: region.id,
+              detail:
+                'RawBuffer.read lost its shared buffer, bounds, Copy element, or result provenance',
+            })
         }
         if (operation._tag === 'SliceView') {
           const source = fn.localTypes.at(operation.slice.ordinal)
@@ -5392,16 +5244,14 @@ const computeVerify = Effect.fnUntraced(function* (
             operation.stride !== stride ||
             !heldStringLoansValid(operation.heldLoans)
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidRawStorageOperation',
-                function: fn.id,
-                region: region.id,
-                detail:
-                  'Slice view lost its shared source shape, bounds, element layout, or backing loans',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidRawStorageOperation',
+              function: fn.id,
+              region: region.id,
+              detail:
+                'Slice view lost its shared source shape, bounds, element layout, or backing loans',
+            })
           }
         }
         if (operation._tag === 'RawBufferView') {
@@ -5430,16 +5280,14 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(destination.type.element, operation.element) ||
             operation.stride !== expectedStride
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidRawStorageOperation',
-                function: fn.id,
-                region: region.id,
-                detail:
-                  'RawBuffer view lost its borrowed buffer, initialized range, element, access, or layout provenance',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidRawStorageOperation',
+              function: fn.id,
+              region: region.id,
+              detail:
+                'RawBuffer view lost its borrowed buffer, initialized range, element, access, or layout provenance',
+            })
           }
         }
         if (operation._tag === 'RawBufferCopy') {
@@ -5472,16 +5320,14 @@ const computeVerify = Effect.fnUntraced(function* (
             operation.stride !== expectedStride ||
             operation.retainsSource !== isCopy(self.layout, operation.element)
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidRawStorageOperation',
-                function: fn.id,
-                region: region.id,
-                detail:
-                  'RawBuffer copy lost its exclusive destination, shared source range, element, or layout provenance',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidRawStorageOperation',
+              function: fn.id,
+              region: region.id,
+              detail:
+                'RawBuffer copy lost its exclusive destination, shared source range, element, or layout provenance',
+            })
           }
         }
         if (operation._tag === 'RawBufferFill') {
@@ -5505,15 +5351,13 @@ const computeVerify = Effect.fnUntraced(function* (
             bufferElement === undefined ||
             !SilkType.equals(bufferElement, 'u8')
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidRawStorageOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'RawBuffer fill lost its exclusive byte buffer, range, or byte value',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidRawStorageOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'RawBuffer fill lost its exclusive byte buffer, range, or byte value',
+            })
           }
         }
         if (
@@ -5550,15 +5394,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !takeResult ||
             !writeValue
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidRawStorageOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `${operation._tag} lost its slot, element, value, or result provenance`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidRawStorageOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `${operation._tag} lost its slot, element, value, or result provenance`,
+            })
         }
         if (operation._tag === 'SliceLength') {
           const slice = fn.localTypes.at(operation.slice.ordinal)
@@ -5568,15 +5410,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.isSlice(semanticType(slice)) ||
             destination?._tag !== 'usize'
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidSliceOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'slice length requires one logical slice local and one usize destination',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidSliceOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'slice length requires one logical slice local and one usize destination',
+            })
           }
         }
         if (
@@ -5614,27 +5454,23 @@ const computeVerify = Effect.fnUntraced(function* (
             validRecovery = operation.right.recoveryOutcome === undefined
           }
           if (!validRecovery)
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'recovery scope is not the selected failure branch of its caught outcome',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEffectOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'recovery scope is not the selected failure branch of its caught outcome',
+            })
           if (
             branches.some((branch) => !executionCompletion(fn, branch, operation.destination).valid)
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidMatchJoin',
-                function: fn.id,
-                region: region.id,
-                detail: 'conditional execution has an unavailable or inconsistent normal result',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidMatchJoin',
+              function: fn.id,
+              region: region.id,
+              detail: 'conditional execution has an unavailable or inconsistent normal result',
+            })
         }
         if (operation._tag === 'Match') {
           let completes = false
@@ -5647,15 +5483,13 @@ const computeVerify = Effect.fnUntraced(function* (
                 caughtOutcomes.get(recovered.ordinal)?.failureValue.ordinal !==
                   operation.scrutinee.ordinal)
             )
-              violations.push(
-                Object.freeze({
-                  _tag: 'Violation',
-                  rule: 'InvalidEffectOperation',
-                  function: fn.id,
-                  region: region.id,
-                  detail: 'recovery scope does not select the matched caught failure',
-                }),
-              )
+              violations.push({
+                _tag: 'Violation',
+                rule: 'InvalidEffectOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'recovery scope does not select the matched caught failure',
+              })
             const guard =
               arm.guard === undefined
                 ? { completes: true, valid: true }
@@ -5664,26 +5498,22 @@ const computeVerify = Effect.fnUntraced(function* (
             if (selectable.has(arm.id.ordinal) && guard.completes && body.completes)
               completes = true
             if (!guard.valid || !body.valid)
-              violations.push(
-                Object.freeze({
-                  _tag: 'Violation',
-                  rule: 'InvalidMatchJoin',
-                  function: fn.id,
-                  region: region.id,
-                  detail: `arm #${arm.id.ordinal} has an unavailable normal result or executes continuation work after transfer`,
-                }),
-              )
-          }
-          if (completes !== (operation.destination !== undefined))
-            violations.push(
-              Object.freeze({
+              violations.push({
                 _tag: 'Violation',
                 rule: 'InvalidMatchJoin',
                 function: fn.id,
                 region: region.id,
-                detail: 'match join destination disagrees with its normally completing paths',
-              }),
-            )
+                detail: `arm #${arm.id.ordinal} has an unavailable normal result or executes continuation work after transfer`,
+              })
+          }
+          if (completes !== (operation.destination !== undefined))
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidMatchJoin',
+              function: fn.id,
+              region: region.id,
+              detail: 'match join destination disagrees with its normally completing paths',
+            })
           const source = fn.localTypes.at(operation.scrutinee.ordinal)
           const selectedSource = placeType(
             fn,
@@ -5725,15 +5555,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !callingShapeEquals(plannedScrutinee, operation.scrutineeShape) ||
             !callingShapeEquals(plannedResult, operation.resultShape)
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidMatchLayout',
-                function: fn.id,
-                region: region.id,
-                detail: 'match scrutinee or join disagrees with its locals or compiler layout',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidMatchLayout',
+              function: fn.id,
+              region: region.id,
+              detail: 'match scrutinee or join disagrees with its locals or compiler layout',
+            })
           }
 
           const coverage = Match.cover(
@@ -5798,15 +5626,13 @@ const computeVerify = Effect.fnUntraced(function* (
               )
             })
           if (!decisionsValid) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidMatchDecision',
-                function: fn.id,
-                region: region.id,
-                detail: 'match decisions disagree with canonical members or source coverage order',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidMatchDecision',
+              function: fn.id,
+              region: region.id,
+              detail: 'match decisions disagree with canonical members or source coverage order',
+            })
           }
 
           for (const arm of operation.arms) {
@@ -5865,15 +5691,13 @@ const computeVerify = Effect.fnUntraced(function* (
                 !samePlaceSelectors(expected, test.selectors) ||
                 !pathProven(expected, (arm.tests ?? []).slice(0, testOrdinal))
               ) {
-                violations.push(
-                  Object.freeze({
-                    _tag: 'Violation',
-                    rule: 'InvalidMatchDecision',
-                    function: fn.id,
-                    region: region.id,
-                    detail: 'nested pattern test disagrees with its canonical path or domain',
-                  }),
-                )
+                violations.push({
+                  _tag: 'Violation',
+                  rule: 'InvalidMatchDecision',
+                  function: fn.id,
+                  region: region.id,
+                  detail: 'nested pattern test disagrees with its canonical path or domain',
+                })
               }
             }
             for (const binding of [...arm.bindings, ...arm.cleanupBindings]) {
@@ -5915,30 +5739,26 @@ const computeVerify = Effect.fnUntraced(function* (
                 !sameRuntimeType(selected, semanticType(binding.type)) ||
                 ('access' in binding && binding.access !== operation.access)
               ) {
-                violations.push(
-                  Object.freeze({
-                    _tag: 'Violation',
-                    rule: 'InvalidMatchBinding',
-                    function: fn.id,
-                    region: region.id,
-                    detail: `arm #${arm.id.ordinal} has an invalid pattern path, type, or access`,
-                  }),
-                )
+                violations.push({
+                  _tag: 'Violation',
+                  rule: 'InvalidMatchBinding',
+                  function: fn.id,
+                  region: region.id,
+                  detail: `arm #${arm.id.ordinal} has an invalid pattern path, type, or access`,
+                })
               }
             }
             if (
               arm.guard?.execution.result !== undefined &&
               fn.localTypes.at(arm.guard.execution.result.ordinal)?._tag !== 'bool'
             ) {
-              violations.push(
-                Object.freeze({
-                  _tag: 'Violation',
-                  rule: 'InvalidMatchGuard',
-                  function: fn.id,
-                  region: region.id,
-                  detail: `arm #${arm.id.ordinal} guard does not produce bool`,
-                }),
-              )
+              violations.push({
+                _tag: 'Violation',
+                rule: 'InvalidMatchGuard',
+                function: fn.id,
+                region: region.id,
+                detail: `arm #${arm.id.ordinal} guard does not produce bool`,
+              })
             }
             const resultType =
               arm.selected.execution.result === undefined
@@ -5951,15 +5771,13 @@ const computeVerify = Effect.fnUntraced(function* (
                 resultType._tag !== 'Bottom' &&
                 !sameRuntimeType(semanticType(resultType), semanticType(operation.type)))
             ) {
-              violations.push(
-                Object.freeze({
-                  _tag: 'Violation',
-                  rule: 'InvalidMatchJoin',
-                  function: fn.id,
-                  region: region.id,
-                  detail: `arm #${arm.id.ordinal} result does not match the join destination`,
-                }),
-              )
+              violations.push({
+                _tag: 'Violation',
+                rule: 'InvalidMatchJoin',
+                function: fn.id,
+                region: region.id,
+                detail: `arm #${arm.id.ordinal} result does not match the join destination`,
+              })
             }
             const cleanupValid =
               arm.selected.access === operation.access &&
@@ -6012,15 +5830,13 @@ const computeVerify = Effect.fnUntraced(function* (
                   })
                 : arm.selected.cleanup.length === 0)
             if (!cleanupValid) {
-              violations.push(
-                Object.freeze({
-                  _tag: 'Violation',
-                  rule: 'InvalidMatchOwnership',
-                  function: fn.id,
-                  region: region.id,
-                  detail: `arm #${arm.id.ordinal} has invalid selection ownership or cleanup`,
-                }),
-              )
+              violations.push({
+                _tag: 'Violation',
+                rule: 'InvalidMatchOwnership',
+                function: fn.id,
+                region: region.id,
+                detail: `arm #${arm.id.ordinal} has invalid selection ownership or cleanup`,
+              })
             }
           }
         }
@@ -6068,15 +5884,13 @@ const computeVerify = Effect.fnUntraced(function* (
               )
             })()
           if (!valid) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidAggregateOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'union conversion disagrees with its locals, mapping, or layout shapes',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidAggregateOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'union conversion disagrees with its locals, mapping, or layout shapes',
+            })
           }
         }
         if (operation._tag === 'Drop') {
@@ -6192,24 +6006,22 @@ const computeVerify = Effect.fnUntraced(function* (
             !storedAggregateCleanupValid ||
             !localSharedCleanupValid
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule:
-                  localSharedElement === undefined
-                    ? 'InvalidAggregateOperation'
-                    : 'InvalidLocalSharedOperation',
-                ...(localSharedElement === undefined
-                  ? {}
-                  : {
-                      localSharedReason: 'CleanupContract' as const,
-                      provenance: operation.provenance,
-                    }),
-                function: fn.id,
-                region: region.id,
-                detail: 'drop cleanup disagrees with its local type or canonical union cases',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule:
+                localSharedElement === undefined
+                  ? 'InvalidAggregateOperation'
+                  : 'InvalidLocalSharedOperation',
+              ...(localSharedElement === undefined
+                ? {}
+                : {
+                    localSharedReason: 'CleanupContract' as const,
+                    provenance: operation.provenance,
+                  }),
+              function: fn.id,
+              region: region.id,
+              detail: 'drop cleanup disagrees with its local type or canonical union cases',
+            })
           }
         }
         if (operation._tag === 'Construct') {
@@ -6263,15 +6075,13 @@ const computeVerify = Effect.fnUntraced(function* (
               )
             })
           if (!valid) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidAggregateOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `construction of ${typeText(operation.type)} does not match its canonical fields`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidAggregateOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `construction of ${typeText(operation.type)} does not match its canonical fields`,
+            })
           }
         }
         if (operation._tag === 'ConstructUnionVariant') {
@@ -6336,15 +6146,13 @@ const computeVerify = Effect.fnUntraced(function* (
               )
             })
           if (!valid) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidAggregateOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `construction of ${typeText(operation.type)}.${operation.variant.name} does not match its canonical variant layout`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidAggregateOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `construction of ${typeText(operation.type)}.${operation.variant.name} does not match its canonical variant layout`,
+            })
           }
         }
         if (operation._tag === 'ConstructArray') {
@@ -6362,15 +6170,13 @@ const computeVerify = Effect.fnUntraced(function* (
               )
             })
           if (!valid) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidAggregateOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `construction of ${typeText(operation.type)} does not match its canonical element count or type`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidAggregateOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `construction of ${typeText(operation.type)} does not match its canonical element count or type`,
+            })
           }
         }
         if (operation._tag === 'Project') {
@@ -6384,15 +6190,13 @@ const computeVerify = Effect.fnUntraced(function* (
                 )
               : undefined
           if (field === undefined || !sameRuntimeType(field.type, semanticType(operation.type))) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidAggregateOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `projection field #${operation.field.ordinal} does not match its source type`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidAggregateOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `projection field #${operation.field.ordinal} does not match its source type`,
+            })
           }
         }
         if (operation._tag === 'ReadPlace' || operation._tag === 'CheckPlace') {
@@ -6528,20 +6332,16 @@ const computeVerify = Effect.fnUntraced(function* (
               !callableViewProjection &&
               !effectViewProjection)
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule:
-                  sliceSelector === undefined
-                    ? 'InvalidAggregateOperation'
-                    : 'InvalidSliceOperation',
-                function: fn.id,
-                region: region.id,
-                detail: !consumingReadValid
-                  ? 'consuming borrowed ReadPlace is not followed by a same-place replacement through exclusive access'
-                  : `${operation._tag} does not match its root, selectors, or type`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule:
+                sliceSelector === undefined ? 'InvalidAggregateOperation' : 'InvalidSliceOperation',
+              function: fn.id,
+              region: region.id,
+              detail: !consumingReadValid
+                ? 'consuming borrowed ReadPlace is not followed by a same-place replacement through exclusive access'
+                : `${operation._tag} does not match its root, selectors, or type`,
+            })
           }
         }
         if (operation._tag === 'WritePlace') {
@@ -6573,16 +6373,13 @@ const computeVerify = Effect.fnUntraced(function* (
               rootSemantic.access !== 'Exclusive') ||
             (sliceSelector !== undefined && sliceSelector.access !== 'Exclusive')
           ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidWrite',
-                function: fn.id,
-                region: region.id,
-                detail:
-                  'write lacks a matching precheck or has inconsistent root/source/place types',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidWrite',
+              function: fn.id,
+              region: region.id,
+              detail: 'write lacks a matching precheck or has inconsistent root/source/place types',
+            })
           }
         }
         if (operation._tag === 'Call') {
@@ -6622,15 +6419,13 @@ const computeVerify = Effect.fnUntraced(function* (
                 return `${ordinal}:${actual === undefined ? 'missing' : SilkType.encode(semanticType(actual))}->${expected === undefined ? 'missing' : SilkType.encode(semanticType(expected))}`
               })
               .join(', ')
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidCallShape',
-                function: fn.id,
-                region: region.id,
-                detail: `call ${targetText(operation.target)} does not match its logical contract (${argumentsDetail || 'no arguments'}; result=${SilkType.encode(semanticType(operation.type))}->${target === undefined ? 'missing' : SilkType.encode(semanticType(target.result))})`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidCallShape',
+              function: fn.id,
+              region: region.id,
+              detail: `call ${targetText(operation.target)} does not match its logical contract (${argumentsDetail || 'no arguments'}; result=${SilkType.encode(semanticType(operation.type))}->${target === undefined ? 'missing' : SilkType.encode(semanticType(target.result))})`,
+            })
           }
         }
         if (operation._tag === 'MakeCallable') {
@@ -6687,15 +6482,13 @@ const computeVerify = Effect.fnUntraced(function* (
                 Tir.sameCallableTarget(environment.callable.target, operation.target) &&
                 environment.callable.mode === operation.type.type.mode)
           if (!valid) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidCallableOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'callable construction disagrees with its identity, slots, or layout',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidCallableOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'callable construction disagrees with its identity, slots, or layout',
+            })
           }
         }
         if (operation._tag === 'ApplyCallable') {
@@ -6767,15 +6560,13 @@ const computeVerify = Effect.fnUntraced(function* (
             argumentsValid &&
             (environmentForm || directForm)
           if (!valid) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidCallableOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `callable application disagrees with its mode, arguments, realization, or result (destination=${destination !== undefined && SilkType.equals(semanticType(destination), semanticType(operation.type))}, mode=${operation.access}/${operation.callableType.mode}:${operation.access === operation.callableType.mode}, source=${source?._tag === 'CallableValue' ? source.type.mode : 'none'}, types=${operation.typeArguments.every(SilkType.isRuntimeConcreteGenericArgument)}, arguments=${argumentsValid}, environment=${environmentForm}, direct=${directForm}, captures=${directCapturesValid})`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidCallableOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `callable application disagrees with its mode, arguments, realization, or result (destination=${destination !== undefined && SilkType.equals(semanticType(destination), semanticType(operation.type))}, mode=${operation.access}/${operation.callableType.mode}:${operation.access === operation.callableType.mode}, source=${source?._tag === 'CallableValue' ? source.type.mode : 'none'}, types=${operation.typeArguments.every(SilkType.isRuntimeConcreteGenericArgument)}, arguments=${argumentsValid}, environment=${environmentForm}, direct=${directForm}, captures=${directCapturesValid})`,
+            })
           }
         }
         if (operation._tag === 'PackEffectOutcome') {
@@ -6793,15 +6584,13 @@ const computeVerify = Effect.fnUntraced(function* (
             (source._tag !== 'Bottom' &&
               SilkType.runtimeKey(semanticType(source)) !== SilkType.runtimeKey(payload))
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'effect outcome tag, payload, or destination type is inconsistent',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEffectOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'effect outcome tag, payload, or destination type is inconsistent',
+            })
         }
         if (operation._tag === 'PackEffectFailureUnion') {
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -6833,15 +6622,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(source.type, operation.sourceType.type) ||
             !mappingsValid
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'effect failure-union mappings do not preserve E members',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEffectOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'effect failure-union mappings do not preserve E members',
+            })
         }
         if (operation._tag === 'PropagateEffectFailure') {
           const source = fn.localTypes.at(operation.source.ordinal)
@@ -6849,7 +6636,7 @@ const computeVerify = Effect.fnUntraced(function* (
           const semanticSource = semanticType(operation.sourceType)
           const sourceMembers = SilkType.isUnion(semanticSource)
             ? semanticSource.members
-            : Object.freeze([semanticSource])
+            : [semanticSource]
           const propagationShape = Layout.callingShape(self.layout, operation.propagationType.type)
           const mappingsValid =
             operation.tagMappings.length === sourceMembers.length &&
@@ -6889,15 +6676,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.isNever(operation.type.type) ||
             !mappingsValid
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'failure propagation does not preserve canonical outcome contracts',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEffectOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'failure propagation does not preserve canonical outcome contracts',
+            })
         }
         if (operation._tag === 'UnpackEffectSuccess') {
           const source = fn.localTypes.at(operation.source.ordinal)
@@ -6908,15 +6693,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(source.type.success, semanticType(destination)) ||
             !SilkType.equals(semanticType(operation.type), semanticType(destination))
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'effect success projection does not match its outcome contract',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEffectOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'effect success projection does not match its outcome contract',
+            })
         }
         if (operation._tag === 'UnpackEffectComposite') {
           const source = fn.localTypes.at(operation.source.ordinal)
@@ -6933,15 +6716,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(selected.type, operation.type.type) ||
             !Tir.sameExecutableSite(selected.site, operation.type.site)
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'Effect choice projection does not preserve its selected exact alternative',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEffectOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'Effect choice projection does not preserve its selected exact alternative',
+            })
         }
         if (operation._tag === 'PackEffectComposite') {
           const source = fn.localTypes.at(operation.source.ordinal)
@@ -6955,15 +6736,13 @@ const computeVerify = Effect.fnUntraced(function* (
             !SilkType.equals(source.type, selected.type) ||
             !Tir.sameExecutableSite(source.site, selected.site)
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'Effect composite packing does not preserve its selected exact alternative',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEffectOperation',
+              function: fn.id,
+              region: region.id,
+              detail: 'Effect composite packing does not preserve its selected exact alternative',
+            })
         }
         if (operation._tag === 'RunEffect') {
           const target = self.functions.find((candidate) =>
@@ -6982,15 +6761,13 @@ const computeVerify = Effect.fnUntraced(function* (
           else if (!runPropagationValid(self.layout, fn, operation))
             detail = 'run propagation does not preserve canonical outcome contracts'
           if (detail !== undefined)
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEffectOperation',
+              function: fn.id,
+              region: region.id,
+              detail,
+            })
         }
         if (operation._tag === 'RunEffectValue') {
           const effect = fn.localTypes.at(operation.effect.ordinal)
@@ -7053,7 +6830,7 @@ const computeVerify = Effect.fnUntraced(function* (
                   const selectedBase = base?.declaration ?? operation.runner
                   const selectedArguments = base?.typeArguments ?? operation.runnerTypeArguments
                   const selectedStaticArguments =
-                    base?.staticArguments ?? operation.runnerStaticArguments ?? Object.freeze([])
+                    base?.staticArguments ?? operation.runnerStaticArguments ?? []
                   const expectedBase =
                     stored?.realization.runner ??
                     Tir.effectRunnerId(
@@ -7173,15 +6950,13 @@ const computeVerify = Effect.fnUntraced(function* (
             staticRunnerValid &&
             propagationValid
           if (!valid)
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `Effect value run disagrees with its static runner, exact rows, access, outcome, or propagation contract (target=${targetText(operation.runner)}, effect=${effectValue !== undefined}, runner=${runner !== undefined}, suspension-runner=${suspensionRunner !== undefined}, stored-contract=${storedContractValid}, static-runner=${staticRunnerValid}, propagation=${propagationValid})`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEffectOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `Effect value run disagrees with its static runner, exact rows, access, outcome, or propagation contract (target=${targetText(operation.runner)}, effect=${effectValue !== undefined}, runner=${runner !== undefined}, suspension-runner=${suspensionRunner !== undefined}, stored-contract=${storedContractValid}, static-runner=${staticRunnerValid}, propagation=${propagationValid})`,
+            })
         }
         if (operation._tag === 'RunEffectComposite') {
           const effect = fn.localTypes.at(operation.effect.ordinal)
@@ -7266,16 +7041,14 @@ const computeVerify = Effect.fnUntraced(function* (
             !alternativesValid ||
             !runPropagationValid(self.layout, fn, operation)
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail:
-                  'Effect composite run disagrees with its alternatives, joined outcome, or propagation contract',
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEffectOperation',
+              function: fn.id,
+              region: region.id,
+              detail:
+                'Effect composite run disagrees with its alternatives, joined outcome, or propagation contract',
+            })
         }
         if (operation._tag === 'RunStaticEffect') {
           const outcome = fn.localTypes.at(operation.outcome.ordinal)
@@ -7322,31 +7095,29 @@ const computeVerify = Effect.fnUntraced(function* (
             !parametersValid ||
             !propagationValid
           )
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidNormalization',
-                function: fn.id,
-                region: region.id,
-                detail: `direct static Effect run disagrees: ${[
-                  runnerResultValid ? undefined : 'runner',
-                  outcomeValid ? undefined : 'outcome',
-                  destinationValid ? undefined : 'destination',
-                  parametersValid
-                    ? undefined
-                    : `parameters (${inputs
-                        .map((input, ordinal) => {
-                          const actual = fn.localTypes.at(input.ordinal)
-                          const expected = runner?.localTypes.at(ordinal)
-                          return `${actual === undefined ? '<missing>' : SilkType.encode(semanticType(actual))} -> ${expected === undefined ? '<missing>' : SilkType.encode(semanticType(expected))}`
-                        })
-                        .join(', ')})`,
-                  propagationValid ? undefined : 'propagation',
-                ]
-                  .filter((part): part is string => part !== undefined)
-                  .join(', ')}`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidNormalization',
+              function: fn.id,
+              region: region.id,
+              detail: `direct static Effect run disagrees: ${[
+                runnerResultValid ? undefined : 'runner',
+                outcomeValid ? undefined : 'outcome',
+                destinationValid ? undefined : 'destination',
+                parametersValid
+                  ? undefined
+                  : `parameters (${inputs
+                      .map((input, ordinal) => {
+                        const actual = fn.localTypes.at(input.ordinal)
+                        const expected = runner?.localTypes.at(ordinal)
+                        return `${actual === undefined ? '<missing>' : SilkType.encode(semanticType(actual))} -> ${expected === undefined ? '<missing>' : SilkType.encode(semanticType(expected))}`
+                      })
+                      .join(', ')})`,
+                propagationValid ? undefined : 'propagation',
+              ]
+                .filter((part): part is string => part !== undefined)
+                .join(', ')}`,
+            })
         }
         if (operation._tag === 'CatchEffect') {
           const runner = self.functions.find((candidate) =>
@@ -7402,15 +7173,13 @@ const computeVerify = Effect.fnUntraced(function* (
               : 'failure-shape',
           ].filter((disagreement): disagreement is string => disagreement !== undefined)
           if (disagreements.length > 0) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEffectOperation',
-                function: fn.id,
-                region: region.id,
-                detail: `effect result runner, channel data, or calling shapes disagree: ${disagreements.join(', ')}`,
-              }),
-            )
+            violations.push({
+              _tag: 'Violation',
+              rule: 'InvalidEffectOperation',
+              function: fn.id,
+              region: region.id,
+              detail: `effect result runner, channel data, or calling shapes disagree: ${disagreements.join(', ')}`,
+            })
           }
         }
       }
@@ -7457,17 +7226,15 @@ const computeVerify = Effect.fnUntraced(function* (
       const local = fn?.localTypes.at(verdict.local.ordinal)
       const synchronous = verdict._tag === 'Rejected' || verdict.guards.includes('Synchronous')
       if (fn === undefined || region === undefined || local === undefined || !synchronous) {
-        violations.push(
-          Object.freeze({
-            _tag: 'Violation',
-            rule: 'InvalidNormalization',
-            ...(fn === undefined ? {} : { function: fn.id }),
-            ...(region === undefined ? {} : { region: region.id }),
-            detail: 'normalization verdict has dangling identities or lacks its synchronous proof',
-          }),
-        )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidNormalization',
+          ...(fn === undefined ? {} : { function: fn.id }),
+          ...(region === undefined ? {} : { region: region.id }),
+          detail: 'normalization verdict has dangling identities or lacks its synchronous proof',
+        })
       }
     }
   })
-  return Object.freeze(violations)
+  return violations
 })

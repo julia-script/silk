@@ -31,22 +31,22 @@ export const pack = <A>(fields: ReadonlyArray<Input<A>>): Packed<A> => {
   let alignment = 1
   const placed = fields.map((field) => {
     const offset = alignUp(cursor, field.alignment)
-    const result = Object.freeze({
+    const result = {
       value: field.value,
       offset,
       size: field.size,
       alignment: field.alignment,
       padding: offset - cursor,
-    })
+    }
     cursor = offset + field.size
     alignment = Math.max(alignment, field.alignment)
     return result
   })
   const size = alignUp(cursor, alignment)
-  return Object.freeze({
-    fields: Object.freeze(placed),
+  return {
+    fields: placed,
     size,
     alignment,
     tailPadding: size - cursor,
-  })
+  }
 }

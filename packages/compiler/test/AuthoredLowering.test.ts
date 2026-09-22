@@ -216,7 +216,6 @@ it.effect('lowers every syntax category into one published source-free module', 
     while (pending.length > 0) {
       const value = pending.pop()
       if (value === null || typeof value !== 'object') continue
-      assert.isTrue(Object.isFrozen(value))
       assert.isFalse('span' in value)
       if ('_tag' in value)
         assert.notInclude(

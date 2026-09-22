@@ -15,7 +15,31 @@ these files on every run and invokes the compiler's TypeScript sources directly.
 The final executable and link plan live in the ignored `dist/` directory.
 `saveTemps: true` retains intermediate files in the system temporary directory;
 the link plan records their paths. Set it to `false` for automatic cleanup.
-Compilation caching is disabled so every run visits the compiler pipeline.
+Compilation caching defaults to off so every run visits the compiler pipeline.
+
+## Cache switch
+
+From `packages/compiler`, select the mode for each launch:
+
+```sh
+SILK_SCRATCHPAD_CACHE=false bun run ./scratchpad/compile.ts
+SILK_SCRATCHPAD_CACHE=true bun run ./scratchpad/compile.ts
+```
+
+The same environment variable works with the pnpm command and debugger. You can
+also change `Config.withDefault(false)` beside `SILK_SCRATCHPAD_CACHE` near the top
+of `compile.ts` to choose the default. Each run prints its cache mode.
+
+The switch controls both checked-unit semantic persistence and backend/final
+artifact caching. Enabled runs share the local `dist/cache/` directory across
+processes. Disabled runs neither read nor publish those caches, and leave existing
+entries intact. Delete `dist/cache/` when you want an empty cache. Enabled runs
+still prepare current sources and headers and validate cached results.
+
+After editing compiler TypeScript, run `pnpm toolchain:generate` in
+`packages/compiler` before a cached launch (or rerun `scratchpad:prepare`). Cache
+identity uses the generated compiler fingerprint; uncached debugging does not
+reuse results from that fingerprint.
 
 ## Jaeger tracing
 

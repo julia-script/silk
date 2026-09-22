@@ -36,17 +36,14 @@ export const optimizationFor = (
 /** Lowers logical code-generation choices into deterministic Clang arguments. */
 export const compilationArguments = (
   profile: CompilationProfile.CompilationProfile,
-): ReadonlyArray<string> =>
-  Object.freeze([
-    profile.optimization === 'none' ? '-O0' : '-O2',
-    ...(profile.debug ? ['-g'] : []),
-    ...(profile.target.kind === 'Native' && profile.codeModel === 'large'
-      ? ['-mcmodel=large']
-      : []),
-    ...(profile.target.operatingSystem === 'darwin'
-      ? [`-mmacosx-version-min=${profile.deployment ?? '11.0.0'}`]
-      : []),
-  ])
+): ReadonlyArray<string> => [
+  profile.optimization === 'none' ? '-O0' : '-O2',
+  ...(profile.debug ? ['-g'] : []),
+  ...(profile.target.kind === 'Native' && profile.codeModel === 'large' ? ['-mcmodel=large'] : []),
+  ...(profile.target.operatingSystem === 'darwin'
+    ? [`-mmacosx-version-min=${profile.deployment ?? '11.0.0'}`]
+    : []),
+]
 
 /** Plans the pinned Clang `-c` invocation that turns bitcode into a target object. */
 export const objectCommand = (
@@ -54,23 +51,22 @@ export const objectCommand = (
   profile: CompilationProfile.CompilationProfile,
   bitcodePath: string,
   objectPath: string,
-): PlannedCommand =>
-  Object.freeze({
-    _tag: 'PlannedCommand',
-    target: profile.target,
-    command: clang,
-    arguments: Object.freeze([
-      `--target=${profile.target.id}`,
-      '-c',
-      '-x',
-      'ir',
-      bitcodePath,
-      profile.relocation === 'pic' ? '-fPIC' : '-fno-pic',
-      ...compilationArguments(profile),
-      '-o',
-      objectPath,
-    ]),
-  })
+): PlannedCommand => ({
+  _tag: 'PlannedCommand',
+  target: profile.target,
+  command: clang,
+  arguments: [
+    `--target=${profile.target.id}`,
+    '-c',
+    '-x',
+    'ir',
+    bitcodePath,
+    profile.relocation === 'pic' ? '-fPIC' : '-fno-pic',
+    ...compilationArguments(profile),
+    '-o',
+    objectPath,
+  ],
+})
 
 export type NativeArtifactKind = Exclude<ArtifactKind.ArtifactKind, 'WebAssemblyModule'>
 
@@ -95,8 +91,7 @@ const unsupported = (
   target: Target.Target,
   input: NativeLinkInput.NativeLinkInput,
   reason: UnsupportedNativePlan['reason'],
-): UnsupportedNativePlan =>
-  Object.freeze({ _tag: 'UnsupportedNativePlan', artifactKind, target, input, reason })
+): UnsupportedNativePlan => ({ _tag: 'UnsupportedNativePlan', artifactKind, target, input, reason })
 
 const clangInputArguments = (
   artifactKind: 'NativeExecutable' | 'NativeSharedLibrary',
@@ -145,11 +140,11 @@ export const nativeCommand = (
     for (const input of inputs)
       if (input._tag !== 'Object' && input._tag !== 'StaticArchive')
         return unsupported(artifactKind, target, input, 'StaticArchiveInput')
-    return Object.freeze({
+    return {
       _tag: 'PlannedCommand',
       target,
       command: tools.clang,
-      arguments: Object.freeze([
+      arguments: [
         `--target=${target.id}`,
         '-r',
         '-nostdlib',
@@ -159,8 +154,8 @@ export const nativeCommand = (
         ),
         '-o',
         destination,
-      ]),
-    })
+      ],
+    }
   }
   if (artifactKind === 'NativeStaticLibrary') {
     const members = [...generatedObjects]
@@ -169,12 +164,12 @@ export const nativeCommand = (
         return unsupported(artifactKind, target, input, 'StaticArchiveInput')
       members.push(input.path)
     }
-    return Object.freeze({
+    return {
       _tag: 'PlannedCommand',
       target,
       command: tools.llvmAr,
-      arguments: Object.freeze(['rcsD', destination, ...members]),
-    })
+      arguments: ['rcsD', destination, ...members],
+    }
   }
   let sharedArguments: ReadonlyArray<string> = []
   if (artifactKind === 'NativeSharedLibrary')
@@ -199,12 +194,12 @@ export const nativeCommand = (
     arguments_.push(...encoded)
   }
   arguments_.push('-o', destination)
-  return Object.freeze({
+  return {
     _tag: 'PlannedCommand',
     target,
     command: tools.clang,
-    arguments: Object.freeze(arguments_),
-  })
+    arguments: arguments_,
+  }
 }
 
 /** Plans the pinned Clang invocation that compiles one runtime translation unit. */
@@ -213,24 +208,23 @@ export const cObjectCommand = (
   target: Target.Target,
   sourcePath: string,
   objectPath: string,
-): PlannedCommand =>
-  Object.freeze({
-    _tag: 'PlannedCommand',
-    target,
-    command: clang,
-    arguments: Object.freeze([
-      `--target=${target.id}`,
-      '-c',
-      '-x',
-      'c',
-      sourcePath,
-      '-O2',
-      '-fPIC',
-      '-fvisibility=hidden',
-      '-o',
-      objectPath,
-    ]),
-  })
+): PlannedCommand => ({
+  _tag: 'PlannedCommand',
+  target,
+  command: clang,
+  arguments: [
+    `--target=${target.id}`,
+    '-c',
+    '-x',
+    'c',
+    sourcePath,
+    '-O2',
+    '-fPIC',
+    '-fvisibility=hidden',
+    '-o',
+    objectPath,
+  ],
+})
 
 /** Plans standalone LLVM-bitcode to WebAssembly finalization through pinned Clang. */
 export const wasmCommand = (
@@ -239,23 +233,22 @@ export const wasmCommand = (
   objectPath: string,
   runtimeObjectPath: string,
   destination: string,
-): PlannedCommand =>
-  Object.freeze({
-    _tag: 'PlannedCommand',
-    target: profile.target,
-    command: clang,
-    arguments: Object.freeze([
-      `--target=${profile.target.id}`,
-      '-nostdlib',
-      objectPath,
-      runtimeObjectPath,
-      ...compilationArguments(profile),
-      '-Wl,--no-entry',
-      '-Wl,--export-dynamic',
-      '-o',
-      destination,
-    ]),
-  })
+): PlannedCommand => ({
+  _tag: 'PlannedCommand',
+  target: profile.target,
+  command: clang,
+  arguments: [
+    `--target=${profile.target.id}`,
+    '-nostdlib',
+    objectPath,
+    runtimeObjectPath,
+    ...compilationArguments(profile),
+    '-Wl,--no-entry',
+    '-Wl,--export-dynamic',
+    '-o',
+    destination,
+  ],
+})
 
 /*
  * This is the sole owner of feature-test macros for the generated translation unit. Keep it

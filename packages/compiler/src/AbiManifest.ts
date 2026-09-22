@@ -52,26 +52,24 @@ const compareEntries = (left: Entry, right: Entry): number =>
 const functionEntry = (
   direction: 'export' | 'import',
   fn: Backend.ForeignExport | Backend.ForeignImport,
-): FunctionEntry =>
-  Object.freeze({
-    kind: 'function',
-    symbol: fn.symbol,
-    abi: 'C',
-    direction,
-    parameters: Object.freeze([...fn.parameters]),
-    result: fn.result,
-    contract: fn.contract,
-    variadic: fn.variadic,
-  })
+): FunctionEntry => ({
+  kind: 'function',
+  symbol: fn.symbol,
+  abi: 'C',
+  direction,
+  parameters: [...fn.parameters],
+  result: fn.result,
+  contract: fn.contract,
+  variadic: fn.variadic,
+})
 
-const dataEntry = (data: Backend.ForeignStatic): DataEntry =>
-  Object.freeze({
-    kind: 'data',
-    symbol: data.symbol,
-    abi: 'C',
-    direction: data.direction === 'Export' ? 'export' : 'import',
-    type: data.type,
-  })
+const dataEntry = (data: Backend.ForeignStatic): DataEntry => ({
+  kind: 'data',
+  symbol: data.symbol,
+  abi: 'C',
+  direction: data.direction === 'Export' ? 'export' : 'import',
+  type: data.type,
+})
 
 /** Creates a versioned manifest from one target-qualified verified ABI inventory. */
 export const make = (
@@ -90,12 +88,12 @@ export const make = (
   ]
   exports.sort(compareEntries)
   imports.sort(compareEntries)
-  return Object.freeze({
+  return {
     silkForeignAbi: 4,
     target: target.id,
-    exports: Object.freeze(exports),
-    imports: Object.freeze(imports),
-  })
+    exports: exports,
+    imports: imports,
+  }
 }
 
 /** Renders stable two-space JSON with one trailing newline. */
@@ -132,7 +130,7 @@ const inspectEntry = (input: unknown, direction: 'import' | 'export'): Entry | u
     CAbi.isTypeText(input.type) &&
     input.type !== 'void'
   )
-    return Object.freeze({ ...common, kind: 'data', type: input.type })
+    return { ...common, kind: 'data', type: input.type }
   if (
     input.kind !== 'function' ||
     !exact(input, [
@@ -170,14 +168,14 @@ const inspectEntry = (input: unknown, direction: 'import' | 'export'): Entry | u
     return undefined
   return contract === undefined
     ? undefined
-    : Object.freeze({
+    : {
         ...common,
         kind: 'function',
         variadic: input.variadic,
-        parameters: Object.freeze(parameters),
+        parameters: parameters,
         result: input.result,
         contract,
-      })
+      }
 }
 
 /** Decodes only the behavioral ABI schema; obsolete or malformed interfaces diagnose at their file. */
@@ -220,15 +218,15 @@ export const decode = Effect.fn('AbiManifest.decode')(function* (
     }
     entries.sort(compareEntries)
   }
-  return Object.freeze({
-    manifest: Object.freeze({
+  return {
+    manifest: {
       silkForeignAbi: 4,
       target: selected.target.id,
-      exports: Object.freeze(exports),
-      imports: Object.freeze(imports),
-    }),
+      exports: exports,
+      imports: imports,
+    },
     span,
-  })
+  }
 })
 
 const entryKey = (self: Entry): string =>

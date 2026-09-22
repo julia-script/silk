@@ -240,8 +240,6 @@ it.effect(
         kind: 'boolean',
         value: false,
       })
-      assert.strictEqual(Object.isFrozen(disabled.parameters), true)
-      assert.strictEqual(Object.isFrozen(disabled.parameters[0]?.value), true)
       assert.notInclude(disabled.identity, profileOrigin.source)
     }),
 )
@@ -392,5 +390,4 @@ it('keeps native link inputs structured, immutable, ordered, and injectively enc
     undefined,
   ])
   assert.strictEqual(new Set(inputs.map(NativeLinkInput.encode)).size, inputs.length)
-  assert.strictEqual(Object.isFrozen(inputs[0]), true)
 })

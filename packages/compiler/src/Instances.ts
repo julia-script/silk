@@ -303,12 +303,10 @@ export const requirementBindings = (
   if (cached !== undefined) return cached
   // Discovery revisits one immutable residual body under different ancestor contexts. Its
   // binding sites are structural; witness selection still runs with each caller's inputs.
-  const bindings = Object.freeze(
-    fn.statements.flatMap((statement) =>
-      Tir.statementExpressions(statement).flatMap((expression) =>
-        Tir.expressionTree(expression).flatMap((candidate) =>
-          candidate._tag === 'EffectBindRequirement' ? [candidate] : [],
-        ),
+  const bindings = fn.statements.flatMap((statement) =>
+    Tir.statementExpressions(statement).flatMap((expression) =>
+      Tir.expressionTree(expression).flatMap((candidate) =>
+        candidate._tag === 'EffectBindRequirement' ? [candidate] : [],
       ),
     ),
   )
@@ -361,36 +359,35 @@ const forwardedRequirementBinding = (
 }
 
 /** Produces empty discovery when frontend errors prevent reachability analysis. */
-export const invalid = (rootModule: string): Discovery =>
-  Object.freeze({
-    _tag: 'InstanceDiscovery',
-    retention: Object.freeze([]),
-    rootModule,
-    generatedAggregates: new Map(),
-    instances: Object.freeze([]),
-    unavailableOwnership: Object.freeze([]),
-    callables: Object.freeze([]),
-    effects: Object.freeze([]),
-    calls: Object.freeze([]),
-    intrinsics: Object.freeze([]),
-    foreignCalls: Object.freeze([]),
-    foreignExports: Object.freeze([]),
-    constants: Object.freeze([]),
-    suspension: Object.freeze([]),
-    nonParkingObligations: Object.freeze([]),
-    contextFreeTerminalObservations: Object.freeze([]),
-    observingExecutions: Object.freeze([]),
-    residualizationDiagnostics: Object.freeze([]),
-    specializationFailures: Object.freeze([]),
-    violations: Object.freeze([]),
-    counters: Object.freeze({
-      _tag: 'InstanceDiscoveryCounters',
-      residualBodies: Residualization.noWork,
-      residualOwnership: ResidualOwnership.counters(ResidualOwnership.make()),
-    }),
-    residualBodies: Object.freeze([]),
-    residualOwnership: Object.freeze([]),
-  })
+export const invalid = (rootModule: string): Discovery => ({
+  _tag: 'InstanceDiscovery',
+  retention: [],
+  rootModule,
+  generatedAggregates: new Map(),
+  instances: [],
+  unavailableOwnership: [],
+  callables: [],
+  effects: [],
+  calls: [],
+  intrinsics: [],
+  foreignCalls: [],
+  foreignExports: [],
+  constants: [],
+  suspension: [],
+  nonParkingObligations: [],
+  contextFreeTerminalObservations: [],
+  observingExecutions: [],
+  residualizationDiagnostics: [],
+  specializationFailures: [],
+  violations: [],
+  counters: {
+    _tag: 'InstanceDiscoveryCounters',
+    residualBodies: Residualization.noWork,
+    residualOwnership: ResidualOwnership.counters(ResidualOwnership.make()),
+  },
+  residualBodies: [],
+  residualOwnership: [],
+})
 
 /**
  * Closes a partial section's binder-owned channels before the type becomes instance identity.
@@ -444,15 +441,15 @@ const keyOf = (
       throw new RangeError('Instance key type arguments do not match declaration parameters')
     }
     const { substitution, compatibility } = selected
-    return Object.freeze({
+    return {
       _tag: 'InstanceKey',
       declaration,
-      typeArguments: Object.freeze(Array.from(typeArguments)),
-      evidence: Object.freeze([...evidence]),
-      staticArguments: Object.freeze([...staticArguments]),
+      typeArguments: Array.from(typeArguments),
+      evidence: [...evidence],
+      staticArguments: [...staticArguments],
       contractRow:
         contract._tag === 'Contract'
-          ? Object.freeze([
+          ? [
               ...contract.parameters.map((type) =>
                 Type.runtimeKey(Type.substitute(type, substitution, compatibility)),
               ),
@@ -471,9 +468,9 @@ const keyOf = (
                 (constraint) =>
                   `constraint:${Type.runtimeConstraintKey(Constraint.substitute(constraint, substitution))}`,
               ),
-            ])
-          : Object.freeze([]),
-    })
+            ]
+          : [],
+    }
   })()
 
 const keyTextCache = new WeakMap<InstanceKey, string>()
@@ -508,7 +505,7 @@ const concreteConstraintEvidence = (
 ): ReadonlyArray<ConcreteEvidence> | undefined => {
   if (wanted._tag !== 'ProviderSelectionConstraint') {
     const proof = Constraint.proveStructural(wanted)
-    return proof === undefined ? undefined : Object.freeze([proof])
+    return proof === undefined ? undefined : [proof]
   }
   const selected = RowAlgebra.concretize(Type.requirementRowPolicy(), wanted.selected)
   const source = RowAlgebra.concretize(Type.requirementRowPolicy(), wanted.source)
@@ -521,16 +518,14 @@ const concreteConstraintEvidence = (
   )
     return undefined
   const solved = ProviderSelection.solve({
-    relations: Object.freeze([
-      Object.freeze<ProviderSelection.Relation>({ wanted, origins: [origin] }),
-    ]),
+    relations: [{ wanted, origins: [origin] } as ProviderSelection.Relation],
     selected: wanted.selected,
     responsible: origin,
     originKey: SourceSpan.key,
-    oracle: Object.freeze({
+    oracle: {
       match: (provider: Type.Type, capability: Type.Nominal) =>
         ConformanceProof.providerMatch(index, provider, capability),
-    }),
+    },
   })
   return solved._tag === 'Selected' ? solved.evidence : undefined
 }
@@ -563,9 +558,7 @@ const specializeEvidence = (
       !RowAlgebra.isKnownSubset(Type.failureRowPolicy(), selected, source)
     )
       return undefined
-    return Object.freeze([
-      Object.freeze<ConcreteEvidence>({ _tag: 'FailureSubset', selected, source }),
-    ])
+    return [{ _tag: 'FailureSubset', selected, source } as ConcreteEvidence]
   }
   if (evidence._tag === 'RequirementSubset')
     return concreteConstraintEvidence(
@@ -589,37 +582,30 @@ const tirEvidence = (
   readonly evidence: Constraint.ConstraintEvidence
   readonly origin: SourceSpan.SourceSpan
 }> =>
-  Object.freeze(
-    view.function.statements
-      .flatMap(Tir.statementExpressions)
-      .flatMap(Tir.expressionTree)
-      .flatMap((expression) => {
-        let evidence: ReadonlyArray<Constraint.ConstraintEvidence> = Object.freeze([])
-        if (expression._tag === 'EffectBindRequirement') {
-          evidence =
-            BodyView.selectedEvidence(view, expression.provider.evidence)?.constraints ??
-            Object.freeze([])
-        } else if (expression._tag === 'EffectCatch') {
-          evidence =
-            BodyView.selectedEvidence(view, expression.evidence)?.constraints ?? Object.freeze([])
-        }
-        return evidence.map((proof) => Object.freeze({ evidence: proof, origin: expression.span }))
-      }),
-  )
+  view.function.statements
+    .flatMap(Tir.statementExpressions)
+    .flatMap(Tir.expressionTree)
+    .flatMap((expression) => {
+      let evidence: ReadonlyArray<Constraint.ConstraintEvidence> = []
+      if (expression._tag === 'EffectBindRequirement') {
+        evidence = BodyView.selectedEvidence(view, expression.provider.evidence)?.constraints ?? []
+      } else if (expression._tag === 'EffectCatch') {
+        evidence = BodyView.selectedEvidence(view, expression.evidence)?.constraints ?? []
+      }
+      return evidence.map((proof) => ({ evidence: proof, origin: expression.span }))
+    })
 
 const tirSymbolicConformances = (
   fn: Tir.TirFunction,
 ): ReadonlyArray<ConformanceProof.SymbolicConformanceSelection> =>
-  Object.freeze(
-    fn.statements
-      .flatMap(Tir.statementExpressions)
-      .flatMap(Tir.expressionTree)
-      .flatMap((expression) =>
-        expression._tag === 'Call' || expression._tag === 'EffectConstruct'
-          ? expression.symbolicConformances
-          : [],
-      ),
-  )
+  fn.statements
+    .flatMap(Tir.statementExpressions)
+    .flatMap(Tir.expressionTree)
+    .flatMap((expression) =>
+      expression._tag === 'Call' || expression._tag === 'EffectConstruct'
+        ? expression.symbolicConformances
+        : [],
+    )
 
 export const specialize = (
   view: BodyView.BodyView,
@@ -690,28 +676,26 @@ export const specialize = (
     )
       return undefined
   }
-  const evidence = Object.freeze(
-    [
-      ...new Map(concreteEvidence.map((proof) => [Constraint.evidenceKey(proof), proof])).values(),
-    ].sort((left, right) => {
-      const leftKey = Constraint.evidenceKey(left)
-      const rightKey = Constraint.evidenceKey(right)
-      if (leftKey < rightKey) return -1
-      if (leftKey > rightKey) return 1
-      return 0
-    }),
-  )
-  return Object.freeze({
+  const evidence = [
+    ...new Map(concreteEvidence.map((proof) => [Constraint.evidenceKey(proof), proof])).values(),
+  ].sort((left, right) => {
+    const leftKey = Constraint.evidenceKey(left)
+    const rightKey = Constraint.evidenceKey(right)
+    if (leftKey < rightKey) return -1
+    if (leftKey > rightKey) return 1
+    return 0
+  })
+  return {
     _tag: 'ConcreteSpecialization',
     ...(compatibility === undefined ? {} : { compatibility }),
     [concreteSpecializationBrand]: true as const,
-    parameters: Object.freeze(parameters),
+    parameters: parameters,
     result,
     ...(failureRow === undefined ? {} : { failureRow }),
     ...(requirementRow === undefined ? {} : { requirementRow }),
-    constraints: Object.freeze(constraints),
+    constraints: constraints,
     evidence,
-  })
+  }
 }
 
 /** Returns the exact branded provider proof attached to one specialized TIR binding. */
@@ -720,20 +704,20 @@ export const requirementSelection = (
   provider: Extract<Tir.Expression, { readonly _tag: 'EffectBindRequirement' }>['provider'],
 ): Extract<ConcreteEvidence, { readonly _tag: 'RequirementSelection' }> | undefined => {
   const wantedKeys = new Set(
-    (
-      BodyView.selectedEvidence(instance.view, provider.evidence)?.constraints ?? Object.freeze([])
-    ).flatMap((proof) => {
-      let wanted: Constraint.Constraint | undefined
-      if (proof._tag === 'Assumed') {
-        wanted = Constraint.substitute(
-          Constraint.substitute(proof.wanted, proof.substitution),
-          instance.substitution,
-        )
-      } else if (proof._tag === 'RequirementSelection') {
-        wanted = Constraint.substitute(proof.wanted, instance.substitution)
-      }
-      return wanted?._tag === 'ProviderSelectionConstraint' ? [Constraint.key(wanted)] : []
-    }),
+    (BodyView.selectedEvidence(instance.view, provider.evidence)?.constraints ?? []).flatMap(
+      (proof) => {
+        let wanted: Constraint.Constraint | undefined
+        if (proof._tag === 'Assumed') {
+          wanted = Constraint.substitute(
+            Constraint.substitute(proof.wanted, proof.substitution),
+            instance.substitution,
+          )
+        } else if (proof._tag === 'RequirementSelection') {
+          wanted = Constraint.substitute(proof.wanted, instance.substitution)
+        }
+        return wanted?._tag === 'ProviderSelectionConstraint' ? [Constraint.key(wanted)] : []
+      },
+    ),
   )
   return instance.specialization.evidence.find(
     (proof): proof is Extract<ConcreteEvidence, { readonly _tag: 'RequirementSelection' }> =>
@@ -762,12 +746,10 @@ export const matchingSpecialization = (
     }
     // Keep every match in discovery order: callers must still detect ambiguous targets.
     // Index by the immutable instance array so a new discovery frontier gets a fresh index.
-    index = new Map(
-      [...groups].map(([identity, instances]) => [identity, Object.freeze(instances)]),
-    )
+    index = new Map([...groups].map(([identity, instances]) => [identity, instances]))
     specializationIndexCache.set(self.instances, index)
   }
-  return index.get(Specialization.runtimeKey(specialization)) ?? Object.freeze([])
+  return index.get(Specialization.runtimeKey(specialization)) ?? []
 }
 
 export const effectIdentity = (owner: InstanceKey, site: Tir.EffectSiteId): string =>
@@ -824,7 +806,7 @@ const executableParameters = (
       if (Type.isCallable(specialized)) callables.push(ordinal)
     }
   }
-  const result = { effects: Object.freeze(effects), callables: Object.freeze(callables) }
+  const result = { effects: effects, callables: callables }
   if (cache === undefined) {
     cache = new WeakMap()
     executableParameterCache.set(fn, cache)
@@ -930,12 +912,12 @@ export const callableEnvironmentIdentity = (
   self: CallableInstance,
 ): Type.CallableEnvironmentIdentity =>
   Tir.callableEnvironmentIdentity(self.site, {
-    declaration: Object.freeze({
+    declaration: {
       module: self.owner.declaration.module,
       name: self.owner.declaration.name,
-    }),
+    },
     typeArguments: self.owner.typeArguments,
-    staticArgumentKeys: Object.freeze(self.owner.staticArguments.map(StaticValue.key)),
+    staticArgumentKeys: self.owner.staticArguments.map(StaticValue.key),
   })
 
 const {
@@ -1099,50 +1081,48 @@ const exportRoots = (
   target: Target.Target,
   registry: SemanticContext.Registry,
 ): ReadonlyArray<ForeignExport> =>
-  Object.freeze(
-    [...index.modules]
-      .sort((left, right) => {
-        if (left.module < right.module) return -1
-        if (left.module > right.module) return 1
-        return 0
-      })
-      .flatMap((module) =>
-        module.declarations.flatMap((fact): ReadonlyArray<ForeignExport> => {
-          if (
-            fact.foreignExport === undefined ||
-            fact.canonical._tag !== 'Canonical' ||
-            fact.name._tag !== 'Present' ||
-            fact.returnType._tag !== 'Resolved'
-          )
-            return []
-          const parameters = fact.parameters.flatMap((parameter) =>
-            parameter.declaredType._tag === 'Resolved' ? [parameter.declaredType.type] : [],
-          )
-          if (parameters.length !== fact.parameters.length) return []
-          return [
-            Object.freeze({
-              _tag: 'ForeignExport',
-              symbol: fact.foreignExport.symbol,
-              type: Type.foreignFunction(
-                parameters,
-                fact.returnType.type,
-                fact.foreignExport.contract,
-                DeclarationFacts.executableLifetimes(fact),
-              ),
-              signature: ExecutableOrigin.foreignSignature(fact, target),
-              key: keyOf(
-                fact.canonical.id,
-                Tir.contractOf(fact),
-                fact.typeParameters.map((parameter) => parameter.type),
-                fact.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
-              ),
-              declaration: fact.canonical.id,
-              declarationSpan: registry.spanOf(fact.name.anchor),
-            }),
-          ]
-        }),
-      ),
-  )
+  [...index.modules]
+    .sort((left, right) => {
+      if (left.module < right.module) return -1
+      if (left.module > right.module) return 1
+      return 0
+    })
+    .flatMap((module) =>
+      module.declarations.flatMap((fact): ReadonlyArray<ForeignExport> => {
+        if (
+          fact.foreignExport === undefined ||
+          fact.canonical._tag !== 'Canonical' ||
+          fact.name._tag !== 'Present' ||
+          fact.returnType._tag !== 'Resolved'
+        )
+          return []
+        const parameters = fact.parameters.flatMap((parameter) =>
+          parameter.declaredType._tag === 'Resolved' ? [parameter.declaredType.type] : [],
+        )
+        if (parameters.length !== fact.parameters.length) return []
+        return [
+          {
+            _tag: 'ForeignExport',
+            symbol: fact.foreignExport.symbol,
+            type: Type.foreignFunction(
+              parameters,
+              fact.returnType.type,
+              fact.foreignExport.contract,
+              DeclarationFacts.executableLifetimes(fact),
+            ),
+            signature: ExecutableOrigin.foreignSignature(fact, target),
+            key: keyOf(
+              fact.canonical.id,
+              Tir.contractOf(fact),
+              fact.typeParameters.map((parameter) => parameter.type),
+              fact.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
+            ),
+            declaration: fact.canonical.id,
+            declarationSpan: registry.spanOf(fact.name.anchor),
+          },
+        ]
+      }),
+    )
 
 /**
  * Discovers the reachable instances from the artifact's foreign exports and explicit retention roots. The worklist records an
@@ -1218,11 +1198,11 @@ export const discover = (
     } else retention.push(keyOf(declaration.canonical.id, Tir.contractOf(declaration)))
   }
   if (rootDiagnostics.length > 0)
-    return Object.freeze({
+    return {
       ...invalid(rootModule),
       foreignExports,
-      residualizationDiagnostics: Object.freeze(rootDiagnostics),
-    })
+      residualizationDiagnostics: rootDiagnostics,
+    }
   const residualization = Residualization.make(
     completion.profile,
     results,
@@ -1266,7 +1246,7 @@ export const discover = (
   const selectedConstants: Array<SelectedConstant> = []
   for (const module of index.modules) {
     const moduleDiagnostics = Diagnostic.publishAll(
-      results.get(module.module)?.diagnostics ?? Object.freeze([]),
+      results.get(module.module)?.diagnostics ?? [],
       registry,
     )
     for (const declaration of module.constants) {
@@ -1290,13 +1270,11 @@ export const discover = (
           diagnostic,
         )
       } else if (declaration.canonical._tag === 'Canonical') {
-        selectedConstants.push(
-          Object.freeze({
-            _tag: 'SelectedConstant',
-            declaration: declaration.canonical.id,
-            value: selected.value,
-          }),
-        )
+        selectedConstants.push({
+          _tag: 'SelectedConstant',
+          declaration: declaration.canonical.id,
+          value: selected.value,
+        })
       }
     }
   }
@@ -1501,12 +1479,9 @@ export const discover = (
     measure.roots.some(
       (root) => sameRuntimeType(candidate, root) || isStrictCleanupSubterm(candidate, root),
     )
-  const cleanupMeasureOf = (roots: ReadonlyArray<Type.Type>): CleanupMeasure =>
-    Object.freeze({
-      roots: Object.freeze([
-        ...new Map(roots.map((root) => [Type.runtimeKey(root), root])).values(),
-      ]),
-    })
+  const cleanupMeasureOf = (roots: ReadonlyArray<Type.Type>): CleanupMeasure => ({
+    roots: [...new Map(roots.map((root) => [Type.runtimeKey(root), root])).values()],
+  })
   const cleanupTransition = (
     measure: CleanupMeasure | undefined,
     target: InstanceKey,
@@ -1588,11 +1563,10 @@ export const discover = (
     (ancestor === undefined ||
       sameRuntimeNonTypeArguments(ancestor, target) ||
       sameRuntimeNonCallableArguments(ancestor, target))
-  const rootItem = (key: InstanceKey): WorkItem =>
-    Object.freeze({
-      key,
-      ancestors: withAncestor(histories.initial, Object.freeze({ key })),
-    })
+  const rootItem = (key: InstanceKey): WorkItem => ({
+    key,
+    ancestors: withAncestor(histories.initial, { key }),
+  })
   const roots: Array<WorkItem> = retention.map(rootItem)
   // Retain exactly the export implementations admitted by the selected target's C contract.
   for (const record of foreignExports)
@@ -1672,7 +1646,7 @@ export const discover = (
         ? item.ancestors
         : AncestorHistory.union(histories, prior.ancestors, item.ancestors)
     if (prior?.ancestors === ancestors) return false
-    scheduledContexts.set(context, Object.freeze({ ...(prior ?? item), ancestors }))
+    scheduledContexts.set(context, { ...(prior ?? item), ancestors })
     if (!queuedContexts.has(context)) {
       queuedContexts.add(context)
       pending.push(context)
@@ -1697,8 +1671,8 @@ export const discover = (
       const type = Type.substitute(expression.type, substitution)
       types.set(Type.key(type), type)
     }
-    return Object.freeze(
-      [...types.values()].flatMap((type) => hookCalls(CleanupPlan.cleanupPlan(index, type), index)),
+    return [...types.values()].flatMap((type) =>
+      hookCalls(CleanupPlan.cleanupPlan(index, type), index),
     )
   }
   /** Finds concrete provider-owner roots whose cleanup plans select the target. */
@@ -1715,12 +1689,212 @@ export const discover = (
           fn.contract,
           fn.declaration.typeParameters.map((parameter) => parameter.type),
           call.typeArguments,
-          call.staticArguments ?? Object.freeze([]),
-          call.evidence ?? Object.freeze([]),
+          call.staticArguments ?? [],
+          call.evidence ?? [],
         )
         return keyText(candidate) === keyText(target)
       }),
     )
+  /**
+   * Residualization, specialization and call targets of one key depend on the key alone; a bucket
+   * revisited for a new ancestor history reuses them. Recorded callables are collected per visit,
+   * since resolving them reads what earlier visits recorded.
+   */
+  interface Analyzed {
+    readonly fn: Tir.TirFunction
+    readonly view: BodyView.BodyView
+    readonly substitution: Type.Substitution
+    readonly calls: ReadonlyMap<string, CallTarget>
+    readonly identityOfCall: (call: CallTarget) => string
+    readonly ordinaryIdentities: ReadonlySet<string>
+    readonly cleanupRoots: ReadonlyMap<string, ReadonlyArray<Type.Type>>
+  }
+  const analyzedKeys = new Map<string, Analyzed | undefined>()
+  const analyze = (key: InstanceKey): Analyzed | undefined => {
+    const text = keyText(key)
+    if (analyzedKeys.has(text)) return analyzedKeys.get(text)
+    const result = analyzeKey(key)
+    analyzedKeys.set(text, result)
+    return result
+  }
+  const analyzeKey = (key: InstanceKey): Analyzed | undefined => {
+    const template = functionByKey(results, key)
+    if (template === undefined) return undefined
+    const application = {
+      declaration: key.declaration,
+      typeArguments: key.typeArguments,
+      evidence: key.evidence,
+      contractRow: key.contractRow,
+      staticArguments: key.staticArguments,
+    }
+    const residual = trace(
+      'Instances.residualize',
+      () => Residualization.residualize(residualization, application),
+      { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
+    )
+    if (residual._tag === 'StaticFailure') {
+      report(key, Evaluation.diagnostic(residual.failure, target.id))
+      return undefined
+    }
+    const selectedCompileError = residual.diagnostics.findIndex(
+      (diagnostic) => diagnostic.code === Diagnostic.selectedCompileErrorCode,
+    )
+    const residualDiagnostics = (
+      selectedCompileError < 0
+        ? residual.diagnostics
+        : residual.diagnostics.slice(0, selectedCompileError + 1)
+    ).map((diagnostic) => report(key, diagnostic))
+    const residualError = residualDiagnostics.find((diagnostic) => diagnostic.severity === 'error')
+    if (residualError !== undefined) {
+      preparedUnavailableOwnership.set(keyText(key), {
+        key,
+        artifact: residual.artifact,
+        function: residual.function,
+        causes: residual.results.causes,
+        ...(residual.results.lifetimes === undefined
+          ? {}
+          : { lifetimes: residual.results.lifetimes }),
+        diagnostic: residualError,
+      })
+      return undefined
+    }
+    const fn = residual.function
+    const view = BodyView.make(residual)
+    const parameters = template.declaration.typeParameters.map((parameter) => parameter.type)
+    const selected = TypeInference.selectedSubstitution(
+      parameters,
+      key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
+    )
+    const substitution = selected?.substitution
+    // A key whose arguments no longer fit the declaration's binders is as unreachable as one
+    // that cannot be made concrete; both are reported rather than silently dropped.
+    const specialization =
+      substitution === undefined
+        ? undefined
+        : trace(
+            'Instances.specialize',
+            () => specialize(view, substitution, index, registry, selected?.compatibility),
+            {
+              'function.module': key.declaration.module,
+              'function.name': key.declaration.name,
+            },
+          )
+    if (substitution === undefined || specialization === undefined) {
+      specializationFailures.set(keyText(key), {
+        _tag: 'NonConcreteSpecialization',
+        key,
+        span: registry.spanOf(fn.declaration.anchor),
+      })
+      return undefined
+    }
+    if (!prepared.has(keyText(key))) {
+      const resultCallable = resultCallableIdentity(fn, key, results, index)
+      const resultEffect = resultEffectIdentity(fn, key, results, index)
+      prepared.set(keyText(key), {
+        ...(residual.results.lifetimes === undefined
+          ? {}
+          : { lifetimes: residual.results.lifetimes }),
+        instance: {
+          _tag: 'Instance',
+          key,
+          function: fn,
+          view,
+          substitution,
+          specialization,
+          ...(resultCallable === undefined ? {} : { resultCallable }),
+          ...(resultEffect === undefined ? {} : { resultEffect }),
+        },
+      })
+    }
+    const collected = trace(
+      'Instances.collectCallTargets',
+      () => {
+        const cleanupHooks = cleanupPrepassTargets(fn, substitution)
+        const calls = new Map<string, CallTarget>()
+        const directCalls = directCallInstances(fn, key, substitution, results, index)
+        const callableTargets = callableCallTargets(fn, key, substitution, results, index)
+        for (const call of directCalls) {
+          recordedCalls.set(
+            `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}\u0005${call.node?.ordinal ?? -1}\u0005${keyText(call.target)}`,
+            call,
+          )
+        }
+        const cleanupTargets = [...slotDropHookTargets(fn, index, substitution), ...cleanupHooks]
+        const identityOfCall = Specialization.key
+        const ordinaryTargets: ReadonlyArray<CallTarget> = [
+          ...bodyCallTargets(view, index, substitution),
+          ...interfaceWitnessTargets(fn, index, substitution),
+          ...requirementBindingCallTargets(fn, substitution, index),
+          ...directCalls.map((call) => ({
+            declaration: call.target.declaration,
+            typeArguments: call.target.typeArguments,
+            evidence: call.target.evidence,
+            staticArguments: call.target.staticArguments,
+            ...(call.staticArgumentOrigins === undefined
+              ? {}
+              : { staticArgumentOrigins: call.staticArgumentOrigins }),
+          })),
+          ...forwardedRequirementCallTargets(directCalls, results, index),
+          ...callableTargets,
+          ...forwardedRequirementTargets(callableTargets, results, index),
+        ]
+        return { calls, cleanupTargets, identityOfCall, ordinaryTargets }
+      },
+      { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
+    )
+    const { calls, cleanupTargets, identityOfCall, ordinaryTargets } = collected
+    const ordinaryIdentities = new Set(ordinaryTargets.map(identityOfCall))
+    const cleanupRoots = new Map<string, Array<Type.Type>>()
+    for (const cleanup of cleanupTargets) {
+      if (cleanup.cleanupRoot === undefined) continue
+      const identity = identityOfCall(cleanup)
+      const roots = cleanupRoots.get(identity) ?? []
+      roots.push(cleanup.cleanupRoot)
+      cleanupRoots.set(identity, roots)
+    }
+    const reachableCalls: ReadonlyArray<CallTarget> = [...ordinaryTargets, ...cleanupTargets]
+    for (const call of reachableCalls) {
+      const identity = identityOfCall(call)
+      const existing = calls.get(identity)
+      // An ordinary edge must keep the recursion guard even when the same target is also reached
+      // through a proved dependency or conditional witness root. Conflicting provider evidence is
+      // equally unsafe: descent is granted only where this path has one unambiguous measure.
+      if (existing === undefined) {
+        calls.set(identity, call)
+        continue
+      }
+      const existingOrdinary = existing.structuralProvider === undefined
+      const callOrdinary = call.structuralProvider === undefined
+      if (existingOrdinary) continue
+      if (callOrdinary) {
+        calls.set(identity, {
+          declaration: call.declaration,
+          typeArguments: call.typeArguments,
+          ...(call.evidence === undefined ? {} : { evidence: call.evidence }),
+          ...(call.staticArguments === undefined ? {} : { staticArguments: call.staticArguments }),
+          ...(call.staticArgumentOrigins === undefined
+            ? {}
+            : { staticArgumentOrigins: call.staticArgumentOrigins }),
+        })
+        continue
+      }
+      if (
+        existing.structuralProvider !== undefined &&
+        call.structuralProvider !== undefined &&
+        !Type.equals(existing.structuralProvider, call.structuralProvider)
+      )
+        calls.set(identity, {
+          declaration: call.declaration,
+          typeArguments: call.typeArguments,
+          ...(call.evidence === undefined ? {} : { evidence: call.evidence }),
+          ...(call.staticArguments === undefined ? {} : { staticArguments: call.staticArguments }),
+          ...(call.staticArgumentOrigins === undefined
+            ? {}
+            : { staticArgumentOrigins: call.staticArgumentOrigins }),
+        })
+    }
+    return { fn, view, substitution, calls, identityOfCall, ordinaryIdentities, cleanupRoots }
+  }
   trace('Instances.expandWorklist', () => {
     while (true) {
       for (let cursor = 0; cursor < pending.length; cursor += 1) {
@@ -1733,213 +1907,19 @@ export const discover = (
         const ownerContexts = recordedContexts.get(keyText(key)) ?? new Map<string, WorkItem>()
         ownerContexts.set(context, item)
         recordedContexts.set(keyText(key), ownerContexts)
-        const template = functionByKey(results, key)
-        if (template === undefined) continue
-        const application = Object.freeze({
-          declaration: key.declaration,
-          typeArguments: key.typeArguments,
-          evidence: key.evidence,
-          contractRow: key.contractRow,
-          staticArguments: key.staticArguments,
-        })
-        const residual = trace(
-          'Instances.residualize',
-          () => Residualization.residualize(residualization, application),
-          { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
-        )
-        if (residual._tag === 'StaticFailure') {
-          report(key, Evaluation.diagnostic(residual.failure, target.id))
-          continue
-        }
-        const selectedCompileError = residual.diagnostics.findIndex(
-          (diagnostic) => diagnostic.code === Diagnostic.selectedCompileErrorCode,
-        )
-        const residualDiagnostics = (
-          selectedCompileError < 0
-            ? residual.diagnostics
-            : residual.diagnostics.slice(0, selectedCompileError + 1)
-        ).map((diagnostic) => report(key, diagnostic))
-        const residualError = residualDiagnostics.find(
-          (diagnostic) => diagnostic.severity === 'error',
-        )
-        if (residualError !== undefined) {
-          preparedUnavailableOwnership.set(
-            keyText(key),
-            Object.freeze({
-              key,
-              artifact: residual.artifact,
-              function: residual.function,
-              causes: residual.results.causes,
-              ...(residual.results.lifetimes === undefined
-                ? {}
-                : { lifetimes: residual.results.lifetimes }),
-              diagnostic: residualError,
-            }),
-          )
-          continue
-        }
-        const fn = residual.function
-        const view = BodyView.make(residual)
-        const parameters = template.declaration.typeParameters.map((parameter) => parameter.type)
-        const selected = TypeInference.selectedSubstitution(
-          parameters,
-          key.typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
-        )
-        const substitution = selected?.substitution
-        // A key whose arguments no longer fit the declaration's binders is as unreachable as one
-        // that cannot be made concrete; both are reported rather than silently dropped.
-        const specialization =
-          substitution === undefined
-            ? undefined
-            : trace(
-                'Instances.specialize',
-                () => specialize(view, substitution, index, registry, selected?.compatibility),
-                {
-                  'function.module': key.declaration.module,
-                  'function.name': key.declaration.name,
-                },
-              )
-        if (substitution === undefined || specialization === undefined) {
-          specializationFailures.set(
-            keyText(key),
-            Object.freeze({
-              _tag: 'NonConcreteSpecialization',
-              key,
-              span: registry.spanOf(fn.declaration.anchor),
-            }),
-          )
-          continue
-        }
-        if (!prepared.has(keyText(key))) {
-          const resultCallable = resultCallableIdentity(fn, key, results, index)
-          const resultEffect = resultEffectIdentity(fn, key, results, index)
-          prepared.set(
-            keyText(key),
-            Object.freeze({
-              ...(residual.results.lifetimes === undefined
-                ? {}
-                : { lifetimes: residual.results.lifetimes }),
-              instance: Object.freeze({
-                _tag: 'Instance',
-                key,
-                function: fn,
-                view,
-                substitution,
-                specialization,
-                ...(resultCallable === undefined ? {} : { resultCallable }),
-                ...(resultEffect === undefined ? {} : { resultEffect }),
-              }),
-            }),
-          )
-        }
-        const { calls, cleanupTargets, identityOfCall, ordinaryTargets } = trace(
-          'Instances.collectCallTargets',
-          () => {
-            for (const callable of concreteCallables(
-              fn,
-              key,
-              substitution,
-              results,
-              index,
-              resolveRecordedCallable,
-            )) {
-              recordedCallables.set(callableIdentity(callable), callable)
-            }
-            const cleanupHooks = cleanupPrepassTargets(fn, substitution)
-            const calls = new Map<string, CallTarget>()
-            const directCalls = directCallInstances(fn, key, substitution, results, index)
-            const callableTargets = callableCallTargets(fn, key, substitution, results, index)
-            for (const call of directCalls) {
-              recordedCalls.set(
-                `${keyText(call.owner)}\u0005${call.span.sourceId}:${call.span.start}:${call.span.end}\u0005${call.node?.ordinal ?? -1}\u0005${keyText(call.target)}`,
-                call,
-              )
-            }
-            const cleanupTargets = [
-              ...slotDropHookTargets(fn, index, substitution),
-              ...cleanupHooks,
-            ]
-            const identityOfCall = Specialization.key
-            const ordinaryTargets: ReadonlyArray<CallTarget> = [
-              ...bodyCallTargets(view, index, substitution),
-              ...interfaceWitnessTargets(fn, index, substitution),
-              ...requirementBindingCallTargets(fn, substitution, index),
-              ...directCalls.map((call) => ({
-                declaration: call.target.declaration,
-                typeArguments: call.target.typeArguments,
-                evidence: call.target.evidence,
-                staticArguments: call.target.staticArguments,
-                ...(call.staticArgumentOrigins === undefined
-                  ? {}
-                  : { staticArgumentOrigins: call.staticArgumentOrigins }),
-              })),
-              ...forwardedRequirementCallTargets(directCalls, results, index),
-              ...callableTargets,
-              ...forwardedRequirementTargets(callableTargets, results, index),
-            ]
-            return { calls, cleanupTargets, identityOfCall, ordinaryTargets }
-          },
-          { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
-        )
-        const ordinaryIdentities = new Set(ordinaryTargets.map(identityOfCall))
-        const cleanupRoots = new Map<string, Array<Type.Type>>()
-        for (const cleanup of cleanupTargets) {
-          if (cleanup.cleanupRoot === undefined) continue
-          const identity = identityOfCall(cleanup)
-          const roots = cleanupRoots.get(identity) ?? []
-          roots.push(cleanup.cleanupRoot)
-          cleanupRoots.set(identity, roots)
-        }
-        const reachableCalls: ReadonlyArray<CallTarget> = [...ordinaryTargets, ...cleanupTargets]
-        for (const call of reachableCalls) {
-          const identity = identityOfCall(call)
-          const existing = calls.get(identity)
-          // An ordinary edge must keep the recursion guard even when the same target is also reached
-          // through a proved dependency or conditional witness root. Conflicting provider evidence is
-          // equally unsafe: descent is granted only where this path has one unambiguous measure.
-          if (existing === undefined) {
-            calls.set(identity, call)
-            continue
-          }
-          const existingOrdinary = existing.structuralProvider === undefined
-          const callOrdinary = call.structuralProvider === undefined
-          if (existingOrdinary) continue
-          if (callOrdinary) {
-            calls.set(
-              identity,
-              Object.freeze({
-                declaration: call.declaration,
-                typeArguments: call.typeArguments,
-                ...(call.evidence === undefined ? {} : { evidence: call.evidence }),
-                ...(call.staticArguments === undefined
-                  ? {}
-                  : { staticArguments: call.staticArguments }),
-                ...(call.staticArgumentOrigins === undefined
-                  ? {}
-                  : { staticArgumentOrigins: call.staticArgumentOrigins }),
-              }),
-            )
-            continue
-          }
-          if (
-            existing.structuralProvider !== undefined &&
-            call.structuralProvider !== undefined &&
-            !Type.equals(existing.structuralProvider, call.structuralProvider)
-          )
-            calls.set(
-              identity,
-              Object.freeze({
-                declaration: call.declaration,
-                typeArguments: call.typeArguments,
-                ...(call.evidence === undefined ? {} : { evidence: call.evidence }),
-                ...(call.staticArguments === undefined
-                  ? {}
-                  : { staticArguments: call.staticArguments }),
-                ...(call.staticArgumentOrigins === undefined
-                  ? {}
-                  : { staticArgumentOrigins: call.staticArgumentOrigins }),
-              }),
-            )
+        const analyzed = analyze(key)
+        if (analyzed === undefined) continue
+        const { fn, substitution, calls, identityOfCall, ordinaryIdentities, cleanupRoots } =
+          analyzed
+        for (const callable of concreteCallables(
+          fn,
+          key,
+          substitution,
+          results,
+          index,
+          resolveRecordedCallable,
+        )) {
+          recordedCallables.set(callableIdentity(callable), callable)
         }
         for (const call of calls.values()) {
           const identity = identityOfCall(call)
@@ -1957,8 +1937,8 @@ export const discover = (
             targetFunction.contract,
             targetFunction.declaration.typeParameters.map((parameter) => parameter.type),
             targetArguments,
-            call.staticArguments ?? Object.freeze([]),
-            call.evidence ?? Object.freeze([]),
+            call.staticArguments ?? [],
+            call.evidence ?? [],
           )
           for (const [value, branchHistory] of AncestorHistory.partition(
             histories,
@@ -1973,9 +1953,7 @@ export const discover = (
             const cleanup = cleanupTransition(
               item.cleanupMeasure,
               targetKey,
-              ordinaryIdentities.has(identity)
-                ? Object.freeze([])
-                : (cleanupRoots.get(identity) ?? []),
+              ordinaryIdentities.has(identity) ? [] : (cleanupRoots.get(identity) ?? []),
             )
             const terminalCallableSpecialization =
               ancestor !== undefined && sameRuntimeNonCallableArguments(ancestor.key, targetKey)
@@ -1994,40 +1972,31 @@ export const discover = (
               const violationKey = `${keyText(key)}\u0000${keyText(targetKey)}`
               if (!violationKeys.has(violationKey)) {
                 violationKeys.add(violationKey)
-                violations.push(
-                  Object.freeze({ _tag: 'PolymorphicRecursion', caller: key, target: targetKey }),
-                )
+                violations.push({ _tag: 'PolymorphicRecursion', caller: key, target: targetKey })
               }
               continue
             }
-            schedule(
-              Object.freeze({
+            schedule({
+              key: targetKey,
+              ...(call.staticArgumentOrigins === undefined
+                ? {}
+                : { staticArgumentOrigins: call.staticArgumentOrigins, selectedBy: key }),
+              ancestors: withAncestor(branchHistory, {
                 key: targetKey,
-                ...(call.staticArgumentOrigins === undefined
+                ...(call.structuralProvider === undefined
                   ? {}
-                  : { staticArgumentOrigins: call.staticArgumentOrigins, selectedBy: key }),
-                ancestors: withAncestor(
-                  branchHistory,
-                  Object.freeze({
-                    key: targetKey,
-                    ...(call.structuralProvider === undefined
-                      ? {}
-                      : { structuralProvider: call.structuralProvider }),
-                  }),
-                ),
-                ...(cleanupSpecialization && cleanup !== undefined
-                  ? { cleanupMeasure: cleanup }
-                  : {}),
+                  : { structuralProvider: call.structuralProvider }),
               }),
-            )
+              ...(cleanupSpecialization && cleanup !== undefined
+                ? { cleanupMeasure: cleanup }
+                : {}),
+            })
           }
         }
       }
       pending.length = 0
 
-      const currentInstances = Object.freeze(
-        [...prepared.values()].map((candidate) => candidate.instance),
-      )
+      const currentInstances = [...prepared.values()].map((candidate) => candidate.instance)
       const currentGraph = trace('Instances.rebuildSuspensionGraph', () =>
         suspensionGraph(currentInstances, results, index, [...recordedCallables.values()]),
       )
@@ -2040,7 +2009,7 @@ export const discover = (
             : resultEffectIdentity(target, provided.target, results, index)
         providerCalls.set(
           `${keyText(provided.owner)}\u0005${provided.span.sourceId}:${provided.span.start}:${provided.span.end}\u0005${keyText(provided.target)}`,
-          Object.freeze({
+          {
             _tag: 'CallInstance',
             owner: provided.owner,
             span: provided.span,
@@ -2050,7 +2019,7 @@ export const discover = (
               ? {}
               : { staticArgumentOrigins: provided.staticArgumentOrigins }),
             ...(resultEffect === undefined ? {} : { resultEffect }),
-          }),
+          },
         )
       }
       let scheduledProvided = false
@@ -2085,17 +2054,15 @@ export const discover = (
               const violationKey = `${keyText(provided.owner)}\u0000${keyText(provided.target)}`
               if (!violationKeys.has(violationKey)) {
                 violationKeys.add(violationKey)
-                violations.push(
-                  Object.freeze({
-                    _tag: 'PolymorphicRecursion',
-                    caller: provided.owner,
-                    target: provided.target,
-                  }),
-                )
+                violations.push({
+                  _tag: 'PolymorphicRecursion',
+                  caller: provided.owner,
+                  target: provided.target,
+                })
               }
               continue
             }
-            const item = Object.freeze({
+            const item = {
               key: provided.target,
               ...(provided.staticArgumentOrigins === undefined
                 ? {}
@@ -2103,11 +2070,11 @@ export const discover = (
                     staticArgumentOrigins: provided.staticArgumentOrigins,
                     selectedBy: provided.owner,
                   }),
-              ancestors: withAncestor(branchHistory, Object.freeze({ key: provided.target })),
+              ancestors: withAncestor(branchHistory, { key: provided.target }),
               ...(cleanupSpecialization && cleanup !== undefined
                 ? { cleanupMeasure: cleanup }
                 : {}),
-            })
+            }
             if (schedule(item)) scheduledProvided = true
           }
         }
@@ -2123,9 +2090,10 @@ export const discover = (
     const written = writtenSelections(key)
     for (const located of written.length === 0
       ? [diagnostic]
-      : written.map((origins) =>
-          Object.freeze({ ...diagnostic, span: Location.substitute(diagnostic.span, origins) }),
-        )) {
+      : written.map((origins) => ({
+          ...diagnostic,
+          span: Location.substitute(diagnostic.span, origins),
+        }))) {
       const published = Diagnostic.publish(located, registry)
       residualizationDiagnostics.set(
         `${published.code}:${published.span.sourceId}:${published.span.start}:${published.span.end}`,
@@ -2137,90 +2105,86 @@ export const discover = (
   // every instance is prepared.
   const preparedInstances = [...prepared.values()].map((candidate) => candidate.instance)
   const instances = trace('Instances.finalizeInstances', () => {
-    const instances = Object.freeze(
-      [...prepared.values()].map(({ instance, lifetimes }) => {
-        const checked = trace(
-          'Instances.checkOwnership',
-          () =>
-            ResidualOwnership.check(
-              residualOwnership,
-              Ownership.input(
-                instance.function,
-                instance.view.artifact,
-                lifetimes,
-                index,
-                accessBoundaryPlan,
-                contextOf(instance.function),
-                instance.view.causes,
-              ),
-              Residualization.selectionReason(residualization, instance.key) === undefined
-                ? 'UnchangedBody'
-                : 'SelectedStaticBody',
-            ),
-          {
-            'function.module': instance.key.declaration.module,
-            'function.name': instance.key.declaration.name,
-          },
-        )
-        for (const diagnostic of checked.diagnostics)
-          residualizationDiagnostics.set(
-            `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
-            diagnostic,
-          )
-        return Object.freeze({
-          ...instance,
-          effectSuccesses: trace('Instances.resolveEffectSuccesses', () =>
-            effectSuccesses(
+    const instances = [...prepared.values()].map(({ instance, lifetimes }) => {
+      const checked = trace(
+        'Instances.checkOwnership',
+        () =>
+          ResidualOwnership.check(
+            residualOwnership,
+            Ownership.input(
               instance.function,
-              instance.key,
-              instance.substitution,
-              results,
+              instance.view.artifact,
+              lifetimes,
               index,
-              preparedInstances,
+              accessBoundaryPlan,
+              contextOf(instance.function),
+              instance.view.causes,
             ),
+            Residualization.selectionReason(residualization, instance.key) === undefined
+              ? 'UnchangedBody'
+              : 'SelectedStaticBody',
           ),
-          ownership: checked.ownership,
-        })
-      }),
-    )
+        {
+          'function.module': instance.key.declaration.module,
+          'function.name': instance.key.declaration.name,
+        },
+      )
+      for (const diagnostic of checked.diagnostics)
+        residualizationDiagnostics.set(
+          `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
+          diagnostic,
+        )
+      return {
+        ...instance,
+        effectSuccesses: trace('Instances.resolveEffectSuccesses', () =>
+          effectSuccesses(
+            instance.function,
+            instance.key,
+            instance.substitution,
+            results,
+            index,
+            preparedInstances,
+          ),
+        ),
+        ownership: checked.ownership,
+      }
+    })
     return instances
   })
   const unavailableOwnership = trace('Instances.checkUnavailableOwnership', () => {
-    const unavailableOwnership = Object.freeze(
-      [...preparedUnavailableOwnership.values()].map((candidate) => {
-        const checked = ResidualOwnership.check(
-          residualOwnership,
-          Ownership.input(
-            candidate.function,
-            candidate.artifact,
-            candidate.lifetimes,
-            index,
-            accessBoundaryPlan,
-            contextOf(candidate.function),
-            candidate.causes,
-          ),
-          Residualization.selectionReason(residualization, candidate.key) === undefined
-            ? 'UnchangedBody'
-            : 'SelectedStaticBody',
+    const unavailableOwnership = [...preparedUnavailableOwnership.values()].map((candidate) => {
+      const checked = ResidualOwnership.check(
+        residualOwnership,
+        Ownership.input(
+          candidate.function,
+          candidate.artifact,
+          candidate.lifetimes,
+          index,
+          accessBoundaryPlan,
+          contextOf(candidate.function),
+          candidate.causes,
+        ),
+        Residualization.selectionReason(residualization, candidate.key) === undefined
+          ? 'UnchangedBody'
+          : 'SelectedStaticBody',
+      )
+      for (const diagnostic of checked.diagnostics)
+        residualizationDiagnostics.set(
+          `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
+          diagnostic,
         )
-        for (const diagnostic of checked.diagnostics)
-          residualizationDiagnostics.set(
-            `${diagnostic.code}:${diagnostic.span.sourceId}:${diagnostic.span.start}:${diagnostic.span.end}`,
-            diagnostic,
-          )
-        return Object.freeze({
-          _tag: 'UnavailableResidualOwnership' as const,
-          key: candidate.key,
-          ownership: Object.freeze({
-            ...checked.ownership,
-            verdict: Object.freeze({
-              _tag: 'Unavailable' as const,
-              cause: Diagnostic.identity(candidate.diagnostic),
-            }),
-          }),
-        })
-      }),
-    )
+      return {
+        _tag: 'UnavailableResidualOwnership' as const,
+        key: candidate.key,
+        ownership: {
+          ...checked.ownership,
+          verdict: {
+            _tag: 'Unavailable' as const,
+            cause: Diagnostic.identity(candidate.diagnostic),
+          },
+        },
+      }
+    })
     return unavailableOwnership
   })
   const finalGraph = trace('Instances.buildFinalSuspensionGraph', () =>
@@ -2233,54 +2197,46 @@ export const discover = (
     ExecutableOrigin.observingExecutions(finalGraph),
   )
   const effects = trace('Instances.realizeEffects', () =>
-    concreteEffects(
-      instances,
-      summaries,
-      results,
-      index,
-      Object.freeze([...recordedCallables.values()]),
-    ),
+    concreteEffects(instances, summaries, results, index, [...recordedCallables.values()]),
   )
   const knownExecutionNodes = new Set([
     ...instances.map((instance) => instanceNode(instance.key)),
     ...effects.map((effect) => effectNode(effect.identity)),
     ...finalGraph.permitted.keys(),
   ])
-  const unavailableSummary: SuspensionMode.Summary = Object.freeze({
+  const unavailableSummary: SuspensionMode.Summary = {
     _tag: 'SuspensionModeSummary',
     availability: 'Unavailable',
-    modes: Object.freeze([]),
-    causes: Object.freeze([]),
-  })
+    modes: [],
+    causes: [],
+  }
   const summaryOfNode = (node: string): SuspensionMode.Summary =>
     summaries.get(node) ?? SuspensionMode.direct
   const nonParkingSummaryOfNode = (node: string): SuspensionMode.Summary =>
     knownExecutionNodes.has(node)
       ? (summaries.get(node) ?? SuspensionMode.direct)
       : unavailableSummary
-  const callInstances = Object.freeze([...recordedCalls.values(), ...providerCalls.values()])
-  return Object.freeze({
+  const callInstances = [...recordedCalls.values(), ...providerCalls.values()]
+  return {
     _tag: 'InstanceDiscovery',
-    retention: Object.freeze(retention),
+    retention: retention,
     rootModule,
     generatedAggregates: Residualization.generatedAggregates(residualization),
     instances,
     unavailableOwnership,
-    callables: Object.freeze([...recordedCallables.values()]),
+    callables: [...recordedCallables.values()],
     effects,
     calls: callInstances,
     intrinsics: ExecutableOrigin.reachableIntrinsics(instances, index),
     foreignCalls: ExecutableOrigin.reachableForeignCalls(instances, index, registry, target),
     foreignExports,
-    constants: Object.freeze(selectedConstants),
+    constants: selectedConstants,
     contextFreeTerminalObservations: finalGraph.contextFreeTerminalObservations,
-    observingExecutions: Object.freeze(
-      instances
-        .filter((instance) => observing.has(instanceNode(instance.key)))
-        .map((instance) => instance.key)
-        .sort(compareInstanceKeys),
-    ),
-    suspension: Object.freeze([
+    observingExecutions: instances
+      .filter((instance) => observing.has(instanceNode(instance.key)))
+      .map((instance) => instance.key)
+      .sort(compareInstanceKeys),
+    suspension: [
       ...instances
         .slice()
         .sort((left, right) => compareInstanceKeys(left.key, right.key))
@@ -2290,41 +2246,38 @@ export const discover = (
             instance.resultEffect === undefined
               ? SuspensionMode.direct
               : summaryOfNode(effectNode(instance.resultEffect))
-          return Object.freeze([
-            Object.freeze({
+          return [
+            {
               _tag: 'SuspensionFact',
-              subject: Object.freeze({ _tag: 'Instance', key: instance.key }),
+              subject: { _tag: 'Instance', key: instance.key },
               summary: SuspensionMode.join([execution, result]),
-            }),
-            Object.freeze({
+            },
+            {
               _tag: 'SuspensionFact',
-              subject: Object.freeze({ _tag: 'Execution', key: instance.key }),
+              subject: { _tag: 'Execution', key: instance.key },
               summary: execution,
-            }),
-          ])
+            },
+          ]
         }),
-      ...[...finalGraph.effectIdentities].sort().map((identity): SuspensionFact =>
-        Object.freeze({
-          _tag: 'SuspensionFact',
-          subject: Object.freeze({ _tag: 'Effect', identity }),
-          summary: summaryOfNode(effectNode(identity)),
-        }),
-      ),
-    ]),
-    nonParkingObligations: Object.freeze(
-      finalGraph.nonParkingObligations.map((obligation) =>
-        Object.freeze({ span: obligation.span, summary: nonParkingSummaryOfNode(obligation.node) }),
-      ),
-    ),
-    residualizationDiagnostics: Object.freeze([...residualizationDiagnostics.values()]),
-    specializationFailures: Object.freeze([...specializationFailures.values()]),
-    violations: Object.freeze(violations),
-    counters: Object.freeze({
+      ...[...finalGraph.effectIdentities].sort().map((identity): SuspensionFact => ({
+        _tag: 'SuspensionFact',
+        subject: { _tag: 'Effect', identity },
+        summary: summaryOfNode(effectNode(identity)),
+      })),
+    ],
+    nonParkingObligations: finalGraph.nonParkingObligations.map((obligation) => ({
+      span: obligation.span,
+      summary: nonParkingSummaryOfNode(obligation.node),
+    })),
+    residualizationDiagnostics: [...residualizationDiagnostics.values()],
+    specializationFailures: [...specializationFailures.values()],
+    violations: violations,
+    counters: {
       _tag: 'InstanceDiscoveryCounters',
       residualBodies: Residualization.counters(residualization),
       residualOwnership: ResidualOwnership.counters(residualOwnership),
-    }),
+    },
     residualBodies: Residualization.observations(residualization),
     residualOwnership: ResidualOwnership.observations(residualOwnership),
-  })
+  }
 }

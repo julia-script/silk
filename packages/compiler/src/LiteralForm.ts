@@ -32,8 +32,7 @@ const make = (
   delimiterWidth: DelimiterWidth,
   escapePolicy: EscapePolicy,
   tokenKind: LiteralForm['tokenKind'],
-): LiteralForm =>
-  Object.freeze({ category, modifier, delimiter, delimiterWidth, escapePolicy, tokenKind })
+): LiteralForm => ({ category, modifier, delimiter, delimiterWidth, escapePolicy, tokenKind })
 
 /**
  * Every committed form, ordered by longest introduction first. Consumers that generate matching
@@ -42,7 +41,7 @@ const make = (
  * The character form is unambiguous against every other entry, because no other form opens on
  * `'`, so its position carries no precedence meaning.
  */
-export const forms: ReadonlyArray<LiteralForm> = Object.freeze([
+export const forms: ReadonlyArray<LiteralForm> = [
   make('Bytes', 'b', quote, 3, 'Escaped', 'ByteStringLiteral'),
   make('Text', 'r', quote, 3, 'Raw', 'TextLiteral'),
   make('Text', '', quote, 3, 'Escaped', 'TextLiteral'),
@@ -50,7 +49,7 @@ export const forms: ReadonlyArray<LiteralForm> = Object.freeze([
   make('Text', 'r', quote, 1, 'Raw', 'TextLiteral'),
   make('Text', '', quote, 1, 'Escaped', 'TextLiteral'),
   make('Character', '', apostrophe, 1, 'Escaped', 'CharLiteral'),
-])
+]
 
 /** Byte storage accepted from source files, tests, and generated tooling. */
 export type ByteSequence = ReadonlyArray<number> | Uint8Array
@@ -95,7 +94,7 @@ export const recognizeUnknown = (
   const modifier = String.fromCharCode(...bytes.slice(index, cursor))
   if (forms.some((form) => form.modifier === modifier)) return undefined
   const delimiterWidth = bytes[cursor + 1] === quote && bytes[cursor + 2] === quote ? 3 : 1
-  return Object.freeze({ modifier, modifierWidth: cursor - index, delimiterWidth })
+  return { modifier, modifierWidth: cursor - index, delimiterWidth }
 }
 
 /** The deterministic boundary selected for a recognized or reserved introduction. */
@@ -118,14 +117,14 @@ export const scanBoundary = (
   let index = contentStart
   while (index < bytes.length) {
     if (delimiterWidth === 1 && (bytes[index] === 0x0a || bytes[index] === 0x0d)) {
-      return Object.freeze({ end: index, terminated: false })
+      return { end: index, terminated: false }
     }
     if (bytes[index] === delimiter) {
       if (
         delimiterWidth === 1 ||
         (bytes[index + 1] === delimiter && bytes[index + 2] === delimiter)
       ) {
-        return Object.freeze({ end: index + delimiterWidth, terminated: true })
+        return { end: index + delimiterWidth, terminated: true }
       }
       index += 1
       continue
@@ -140,7 +139,7 @@ export const scanBoundary = (
     }
     index += 1
   }
-  return Object.freeze({ end: bytes.length, terminated: false })
+  return { end: bytes.length, terminated: false }
 }
 
 export { scalarCount } from './internal/Escape.js'

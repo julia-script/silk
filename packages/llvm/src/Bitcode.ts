@@ -129,7 +129,7 @@ const buildGlobalOrder = (state: BuilderState.Snapshot): GlobalOrder => {
   }
   // This byte array is owned by one encoding and only read by the string-table writer.
   // Freezing multi-megabyte symbol tables dominated encode time in compiler replays.
-  return { entries: Object.freeze(entries), valueIndex, strtab, bytes }
+  return { entries: entries, valueIndex, strtab, bytes }
 }
 
 /** @internal */
@@ -144,7 +144,7 @@ const alignmentCode = (alignment: GlobalDescription.Common['alignment']): number
   return exponent + 1
 }
 
-const linkageCode: Readonly<Record<GlobalDescription.Linkage, number>> = Object.freeze({
+const linkageCode: Readonly<Record<GlobalDescription.Linkage, number>> = {
   external: 0,
   weak: 1,
   appending: 2,
@@ -156,35 +156,33 @@ const linkageCode: Readonly<Record<GlobalDescription.Linkage, number>> = Object.
   weak_odr: 10,
   linkonce_odr: 11,
   available_externally: 12,
-})
+}
 
-const visibilityCode: Readonly<Record<GlobalDescription.Visibility, number>> = Object.freeze({
+const visibilityCode: Readonly<Record<GlobalDescription.Visibility, number>> = {
   default: 0,
   hidden: 1,
   protected: 2,
-})
+}
 
-const dllCode: Readonly<Record<GlobalDescription.DllStorage, number>> = Object.freeze({
+const dllCode: Readonly<Record<GlobalDescription.DllStorage, number>> = {
   default: 0,
   dllimport: 1,
   dllexport: 2,
-})
+}
 
-const unnamedCode: Readonly<Record<GlobalDescription.UnnamedAddress, number>> = Object.freeze({
+const unnamedCode: Readonly<Record<GlobalDescription.UnnamedAddress, number>> = {
   none: 0,
   unnamed_addr: 1,
   local_unnamed_addr: 2,
-})
+}
 
-const threadLocalCode: Readonly<Record<GlobalDescription.ThreadLocalModel, number>> = Object.freeze(
-  {
-    none: 0,
-    generaldynamic: 1,
-    localdynamic: 2,
-    initialexec: 3,
-    localexec: 4,
-  },
-)
+const threadLocalCode: Readonly<Record<GlobalDescription.ThreadLocalModel, number>> = {
+  none: 0,
+  generaldynamic: 1,
+  localdynamic: 2,
+  initialexec: 3,
+  localexec: 4,
+}
 
 /** @internal */
 const sectionIndices = (

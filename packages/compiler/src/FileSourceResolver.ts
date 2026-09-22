@@ -16,11 +16,9 @@ export interface FileSourceResolver {
 
 /** Creates a resolver configuration from an already normalized absolute source root. */
 export const make = (root: string, toolchainRoot?: string): FileSourceResolver =>
-  Object.freeze(
-    toolchainRoot === undefined
-      ? { _tag: 'FileSourceResolver', root }
-      : { _tag: 'FileSourceResolver', root, toolchainRoot },
-  )
+  toolchainRoot === undefined
+    ? { _tag: 'FileSourceResolver', root }
+    : { _tag: 'FileSourceResolver', root, toolchainRoot }
 
 /** Maps one canonical module exactly to `<source-root>/<module>.silk`. */
 export const sourcePath = (self: FileSourceResolver, module: string, path: Path.Path): string =>

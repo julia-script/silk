@@ -99,16 +99,13 @@ const mergeObligations = <SymbolicMember>(
   const merged = new Map<string, MemberWellFormed<SymbolicMember>>()
   for (const obligation of obligations) {
     const existing = merged.get(obligation.key)
-    merged.set(
-      obligation.key,
-      Object.freeze({
-        key: obligation.key,
-        member: existing?.member ?? obligation.member,
-        origins: canonicalOrigins([...(existing?.origins ?? []), ...obligation.origins]),
-      }),
-    )
+    merged.set(obligation.key, {
+      key: obligation.key,
+      member: existing?.member ?? obligation.member,
+      origins: canonicalOrigins([...(existing?.origins ?? []), ...obligation.origins]),
+    })
   }
-  return Object.freeze([...merged.values()].sort((left, right) => compareText(left.key, right.key)))
+  return [...merged.values()].sort((left, right) => compareText(left.key, right.key))
 }
 
 /** Selects one deterministic primary and ordered secondary locations for an obligation failure. */
@@ -120,10 +117,10 @@ export const diagnosticLocations = <SymbolicMember>(
   const primary = responsible ?? origins.at(0)
   if (primary === undefined) return undefined
   const primaryKey = SourceSpan.key(primary)
-  return Object.freeze({
+  return {
     primary,
-    secondary: Object.freeze(origins.filter((origin) => SourceSpan.key(origin) !== primaryKey)),
-  })
+    secondary: origins.filter((origin) => SourceSpan.key(origin) !== primaryKey),
+  }
 }
 
 const expressionKey = <Member, RowParameter, SymbolicMember, MemberParameter>(
@@ -152,31 +149,32 @@ const expressionKey = <Member, RowParameter, SymbolicMember, MemberParameter>(
 
 const concreteExpression = <Member>(
   row: FiniteRow.FiniteRow<Member>,
-): { readonly _tag: 'Concrete'; readonly row: FiniteRow.FiniteRow<Member> } =>
-  Object.freeze({ _tag: 'Concrete', row })
+): { readonly _tag: 'Concrete'; readonly row: FiniteRow.FiniteRow<Member> } => ({
+  _tag: 'Concrete',
+  row,
+})
 
 /** Constructs a concrete row. */
 export const concrete = <Member, RowParameter, SymbolicMember, MemberParameter>(
   policy: Policy<Member, RowParameter, SymbolicMember, MemberParameter>,
   members: Iterable<Member>,
-): Row<Member, RowParameter, SymbolicMember> =>
-  Object.freeze({
-    expression: concreteExpression(FiniteRow.make(policy.finite, members)),
-    memberWellFormed: Object.freeze([]),
-  })
+): Row<Member, RowParameter, SymbolicMember> => ({
+  expression: concreteExpression(FiniteRow.make(policy.finite, members)),
+  memberWellFormed: [],
+})
 
 /** Constructs one open whole-row parameter. */
 export const parameter = <Member, RowParameter, SymbolicMember>(
   rowParameter: RowParameter,
 ): Row<Member, RowParameter, SymbolicMember> => {
-  const expression: Expression<Member, RowParameter, SymbolicMember> = Object.freeze({
+  const expression: Expression<Member, RowParameter, SymbolicMember> = {
     _tag: 'RowParameter',
     parameter: rowParameter,
-  })
-  return Object.freeze({
+  }
+  return {
     expression,
-    memberWellFormed: Object.freeze([]),
-  })
+    memberWellFormed: [],
+  }
 }
 
 /** Lifts one open domain member and retains its singleton-domain validation obligation. */
@@ -186,16 +184,14 @@ export const singleton = <Member, RowParameter, SymbolicMember, MemberParameter>
   origin: SourceSpan.SourceSpan,
 ): Row<Member, RowParameter, SymbolicMember> => {
   const key = policy.memberWellFormedKey(member)
-  const expression: Expression<Member, RowParameter, SymbolicMember> = Object.freeze({
+  const expression: Expression<Member, RowParameter, SymbolicMember> = {
     _tag: 'Singleton',
     member,
-  })
-  return Object.freeze({
+  }
+  return {
     expression,
-    memberWellFormed: Object.freeze([
-      Object.freeze({ key, member, origins: Object.freeze([origin]) }),
-    ]),
-  })
+    memberWellFormed: [{ key, member, origins: [origin] }],
+  }
 }
 
 const normalizeUnionExpression = <Member, RowParameter, SymbolicMember, MemberParameter>(
@@ -224,7 +220,7 @@ const normalizeUnionExpression = <Member, RowParameter, SymbolicMember, MemberPa
   if (canonical.length === 0) return concreteExpression(FiniteRow.empty<Member>())
   const only = canonical.at(0)
   if (canonical.length === 1 && only !== undefined) return only
-  return Object.freeze({ _tag: 'Union', operands: Object.freeze(canonical) })
+  return { _tag: 'Union', operands: canonical }
 }
 
 /** Associative, commutative, idempotent symbolic union. */
@@ -232,11 +228,10 @@ export const union = <Member, RowParameter, SymbolicMember, MemberParameter>(
   policy: Policy<Member, RowParameter, SymbolicMember, MemberParameter>,
   left: Row<Member, RowParameter, SymbolicMember>,
   right: Row<Member, RowParameter, SymbolicMember>,
-): Row<Member, RowParameter, SymbolicMember> =>
-  Object.freeze({
-    expression: normalizeUnionExpression(policy, [left.expression, right.expression]),
-    memberWellFormed: mergeObligations([...left.memberWellFormed, ...right.memberWellFormed]),
-  })
+): Row<Member, RowParameter, SymbolicMember> => ({
+  expression: normalizeUnionExpression(policy, [left.expression, right.expression]),
+  memberWellFormed: mergeObligations([...left.memberWellFormed, ...right.memberWellFormed]),
+})
 
 /** Forward-only symbolic difference. It never binds either operand. */
 export const without = <Member, RowParameter, SymbolicMember, MemberParameter>(
@@ -248,14 +243,14 @@ export const without = <Member, RowParameter, SymbolicMember, MemberParameter>(
   const sourceKey = expressionKey(policy, source.expression)
   const selectedKey = expressionKey(policy, selected.expression)
   if (sourceKey === selectedKey)
-    return Object.freeze({
+    return {
       expression: concreteExpression(FiniteRow.empty<Member>()),
       memberWellFormed: obligations,
-    })
+    }
   if (source.expression._tag === 'Concrete' && source.expression.row.members.length === 0)
-    return Object.freeze({ expression: source.expression, memberWellFormed: obligations })
+    return { expression: source.expression, memberWellFormed: obligations }
   if (selected.expression._tag === 'Concrete' && selected.expression.row.members.length === 0)
-    return Object.freeze({ expression: source.expression, memberWellFormed: obligations })
+    return { expression: source.expression, memberWellFormed: obligations }
   if (source.expression._tag === 'Concrete' && selected.expression._tag === 'Concrete') {
     const differenceKey = policy.finite.differenceKey ?? policy.finite.collisionKey
     const selectedMembers = selected.expression.row.members
@@ -274,33 +269,33 @@ export const without = <Member, RowParameter, SymbolicMember, MemberParameter>(
         ),
     )
     if (stable)
-      return Object.freeze({
+      return {
         expression: concreteExpression(
           FiniteRow.difference(policy.finite, source.expression.row, selected.expression.row),
         ),
         memberWellFormed: obligations,
-      })
+      }
   }
   if (policy.allowsSetCancellation && source.expression._tag === 'Union') {
     const remaining = source.expression.operands.filter(
       (operand) => expressionKey(policy, operand) !== selectedKey,
     )
     if (remaining.length !== source.expression.operands.length) {
-      const remainder: Row<Member, RowParameter, SymbolicMember> = Object.freeze({
+      const remainder: Row<Member, RowParameter, SymbolicMember> = {
         expression: normalizeUnionExpression(policy, remaining),
         memberWellFormed: source.memberWellFormed,
-      })
+      }
       return without(policy, remainder, selected)
     }
   }
-  return Object.freeze({
-    expression: Object.freeze({
+  return {
+    expression: {
       _tag: 'Without',
       source: source.expression,
       selected: selected.expression,
-    }),
+    },
     memberWellFormed: obligations,
-  })
+  }
 }
 
 /** Span-independent definitional identity, including retained validation obligations. */
@@ -439,18 +434,14 @@ export const parameters = <Member, RowParameter, SymbolicMember, MemberParameter
   for (const obligation of self.memberWellFormed)
     for (const parameter of policy.symbolicMemberParameters(obligation.member))
       members.set(policy.memberParameterKey(parameter), parameter)
-  return Object.freeze({
-    rows: Object.freeze(
-      [...rows.values()].sort((left, right) =>
-        compareText(policy.rowParameterKey(left), policy.rowParameterKey(right)),
-      ),
+  return {
+    rows: [...rows.values()].sort((left, right) =>
+      compareText(policy.rowParameterKey(left), policy.rowParameterKey(right)),
     ),
-    members: Object.freeze(
-      [...members.values()].sort((left, right) =>
-        compareText(policy.memberParameterKey(left), policy.memberParameterKey(right)),
-      ),
+    members: [...members.values()].sort((left, right) =>
+      compareText(policy.memberParameterKey(left), policy.memberParameterKey(right)),
     ),
-  })
+  }
 }
 
 /** Occurs check for a whole-row parameter, including retained obligations. */
@@ -533,7 +524,7 @@ export const mapConcreteMembers = <Member, RowParameter, SymbolicMember, MemberP
         return concrete(policy, expression.row.members.map(map))
       case 'RowParameter':
       case 'Singleton':
-        return Object.freeze({ expression, memberWellFormed: Object.freeze([]) })
+        return { expression, memberWellFormed: [] }
       case 'Union': {
         let result = concrete<Member, RowParameter, SymbolicMember, MemberParameter>(policy, [])
         for (const operand of expression.operands) result = union(policy, result, visit(operand))
@@ -544,10 +535,10 @@ export const mapConcreteMembers = <Member, RowParameter, SymbolicMember, MemberP
     }
   }
   const mapped = visit(self.expression)
-  return Object.freeze({
+  return {
     expression: mapped.expression,
     memberWellFormed: self.memberWellFormed,
-  })
+  }
 }
 
 /** Applies independent row/member substitutions and renormalizes every concrete collision. */
@@ -562,33 +553,37 @@ export const substitute = <Member, RowParameter, SymbolicMember, MemberParameter
   ): Row<Member, RowParameter, SymbolicMember> => {
     switch (expression._tag) {
       case 'Concrete':
-        return Object.freeze({ expression, memberWellFormed: Object.freeze([]) })
+        return { expression, memberWellFormed: [] }
       case 'RowParameter':
         return (
-          substitution.row(expression.parameter) ??
-          Object.freeze({ expression, memberWellFormed: Object.freeze([]) })
+          substitution.row(expression.parameter) ?? {
+            expression,
+            memberWellFormed: [],
+          }
         )
       case 'Singleton': {
         const result = substitution.member(expression.member)
         if (result._tag === 'Concrete') return concrete(policy, [result.member])
         if (result._tag === 'ConcreteRow') return concrete(policy, result.members)
         if (result._tag === 'Row')
-          return Object.freeze({
+          return {
             expression: result.row.expression,
-            memberWellFormed: Object.freeze([]),
-          })
+            memberWellFormed: [],
+          }
         if (result._tag === 'Residual') {
-          const residualExpression: Expression<Member, RowParameter, SymbolicMember> =
-            Object.freeze({ _tag: 'Singleton', member: result.member })
-          return Object.freeze({
+          const residualExpression: Expression<Member, RowParameter, SymbolicMember> = {
+            _tag: 'Singleton',
+            member: result.member,
+          }
+          return {
             expression: residualExpression,
-            memberWellFormed: Object.freeze([]),
-          })
+            memberWellFormed: [],
+          }
         }
-        return Object.freeze({
+        return {
           expression: concreteExpression(FiniteRow.empty<Member>()),
-          memberWellFormed: Object.freeze([]),
-        })
+          memberWellFormed: [],
+        }
       }
       case 'Union': {
         let result = concrete<Member, RowParameter, SymbolicMember, MemberParameter>(policy, [])
@@ -610,47 +605,38 @@ export const substitute = <Member, RowParameter, SymbolicMember, MemberParameter
   for (const obligation of self.memberWellFormed) {
     const result = substitution.member(obligation.member)
     if (result._tag === 'InvalidSingleton') {
-      invalid.set(
-        obligation.key,
-        Object.freeze({
-          key: obligation.key,
-          reason: result.reason,
-          origins: obligation.origins,
-        }),
-      )
+      invalid.set(obligation.key, {
+        key: obligation.key,
+        reason: result.reason,
+        origins: obligation.origins,
+      })
       continue
     }
     if (result._tag === 'Residual')
-      obligations.push(
-        Object.freeze({
-          key: policy.memberWellFormedKey(result.member),
-          member: result.member,
-          origins: obligation.origins,
-        }),
-      )
+      obligations.push({
+        key: policy.memberWellFormedKey(result.member),
+        member: result.member,
+        origins: obligation.origins,
+      })
     if (result._tag === 'Row')
       obligations.push(
-        ...result.row.memberWellFormed.map((mapped) =>
-          Object.freeze({
-            key: mapped.key,
-            member: mapped.member,
-            origins: obligation.origins,
-          }),
-        ),
+        ...result.row.memberWellFormed.map((mapped) => ({
+          key: mapped.key,
+          member: mapped.member,
+          origins: obligation.origins,
+        })),
       )
   }
   if (invalid.size > 0)
-    return Object.freeze({
+    return {
       _tag: 'InvalidMembers',
-      invalid: Object.freeze(
-        [...invalid.values()].sort((left, right) => compareText(left.key, right.key)),
-      ),
-    })
-  substituted = Object.freeze({
+      invalid: [...invalid.values()].sort((left, right) => compareText(left.key, right.key)),
+    }
+  substituted = {
     expression: substituted.expression,
     memberWellFormed: mergeObligations(obligations),
-  })
-  return Object.freeze({ _tag: 'Substituted', row: substituted })
+  }
+  return { _tag: 'Substituted', row: substituted }
 }
 
 /** Exposes a finite row only when no symbolic expression or validation obligation remains. */
@@ -659,14 +645,14 @@ export const concretize = <Member, RowParameter, SymbolicMember, MemberParameter
   self: Row<Member, RowParameter, SymbolicMember>,
 ): Concretization<Member> => {
   if (self.expression._tag === 'Concrete' && self.memberWellFormed.length === 0)
-    return Object.freeze({ _tag: 'Concrete', row: self.expression.row })
-  return Object.freeze({
+    return { _tag: 'Concrete', row: self.expression.row }
+  return {
     _tag: 'Residual',
-    keys: Object.freeze([
+    keys: [
       expressionKey(policy, self.expression),
       ...self.memberWellFormed.map((obligation) => obligation.key),
-    ]),
-  })
+    ],
+  }
 }
 
 /** Deterministic structural presentation for diagnostics and semantic surfaces. */

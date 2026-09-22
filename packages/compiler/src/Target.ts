@@ -72,7 +72,7 @@ export type Selection =
   | { readonly _tag: 'Resolved'; readonly target: Target }
   | { readonly _tag: 'Unavailable'; readonly error: TargetError }
 
-const primitive = (size: Primitive['size']): Primitive => Object.freeze({ size, alignment: size })
+const primitive = (size: Primitive['size']): Primitive => ({ size, alignment: size })
 
 const make = (
   id: Id,
@@ -83,37 +83,36 @@ const make = (
   pointerSize: 4 | 8,
   defaultCpu: string,
   supportedFeatures: ReadonlyArray<string>,
-): Target =>
-  Object.freeze({
-    _tag: 'Target',
-    revision: 1,
-    id,
-    kind: objectFormat === 'wasm' ? 'WebAssembly' : 'Native',
-    architecture,
-    operatingSystem,
-    abi,
-    objectFormat,
-    pointerSize,
-    pointerAlignment: pointerSize,
-    endianness: 'little',
-    primitives: Object.freeze({
-      bool: primitive(4),
-      cBool: primitive(1),
-      i8: primitive(1),
-      i16: primitive(2),
-      i32: primitive(4),
-      i64: primitive(8),
-      f32: primitive(4),
-      f64: primitive(8),
-      cLong: primitive(pointerSize),
-    }),
-    stackAlignment: 16,
-    dataAddressSpace: 0,
-    toolchainClass: abi === 'apple' ? 'darwin' : abi,
-    defaultCpu,
-    supportedCpus: Object.freeze([defaultCpu]),
-    supportedFeatures: Object.freeze([...supportedFeatures].sort()),
-  })
+): Target => ({
+  _tag: 'Target',
+  revision: 1,
+  id,
+  kind: objectFormat === 'wasm' ? 'WebAssembly' : 'Native',
+  architecture,
+  operatingSystem,
+  abi,
+  objectFormat,
+  pointerSize,
+  pointerAlignment: pointerSize,
+  endianness: 'little',
+  primitives: {
+    bool: primitive(4),
+    cBool: primitive(1),
+    i8: primitive(1),
+    i16: primitive(2),
+    i32: primitive(4),
+    i64: primitive(8),
+    f32: primitive(4),
+    f64: primitive(8),
+    cLong: primitive(pointerSize),
+  },
+  stackAlignment: 16,
+  dataAddressSpace: 0,
+  toolchainClass: abi === 'apple' ? 'darwin' : abi,
+  defaultCpu,
+  supportedCpus: [defaultCpu],
+  supportedFeatures: [...supportedFeatures].sort(),
+})
 
 const armFeatures = ['crc', 'crypto', 'fp-armv8', 'lse', 'neon']
 export const aarch64AppleDarwin = make(
@@ -158,15 +157,15 @@ export const wasm32UnknownUnknown = make(
 )
 
 /** Every canonical target in deterministic identity order. */
-export const all: ReadonlyArray<Target> = Object.freeze([
+export const all: ReadonlyArray<Target> = [
   aarch64AppleDarwin,
   aarch64UnknownLinuxGnu,
   wasm32UnknownUnknown,
   x8664UnknownLinuxGnu,
-])
+]
 
 /** The three targets required to host the stage-2 bootstrap compiler. */
-export const native: ReadonlyArray<Target> = Object.freeze(all.filter(isNative))
+export const native: ReadonlyArray<Target> = all.filter(isNative)
 
 /** Whether a target can host the native bootstrap compiler. */
 export function isNative(self: Target): boolean {
@@ -177,15 +176,14 @@ const unavailable = (
   operation: TargetError['operation'],
   requested: string,
   subject: 'target' | 'host',
-): Selection =>
-  Object.freeze({
-    _tag: 'Unavailable',
-    error: new TargetError({
-      operation,
-      requested,
-      message: `Unsupported bootstrap ${subject} ${requested}`,
-    }),
-  })
+): Selection => ({
+  _tag: 'Unavailable',
+  error: new TargetError({
+    operation,
+    requested,
+    message: `Unsupported bootstrap ${subject} ${requested}`,
+  }),
+})
 
 /** Selects an explicit target or the supplied host as immutable queryable data. */
 export const select = (
@@ -197,7 +195,7 @@ export const select = (
     const found = all.find((candidate) => candidate.id === requested)
     return found === undefined
       ? unavailable('Target.resolve', requested, 'target')
-      : Object.freeze({ _tag: 'Resolved', target: found })
+      : { _tag: 'Resolved', target: found }
   }
   if (hostPlatform === undefined || hostArch === undefined) {
     return unavailable('Target.host', 'unspecified-host', 'host')
@@ -210,7 +208,7 @@ export const select = (
   const found = native.find((candidate) => candidate.id === hostId)
   return found === undefined
     ? unavailable('Target.host', hostId, 'host')
-    : Object.freeze({ _tag: 'Resolved', target: found })
+    : { _tag: 'Resolved', target: found }
 }
 
 /** Looks up a canonical target without introducing a fallback. */
@@ -253,7 +251,7 @@ export const unavailableInventory = (
     operation: 'Target.validateInventory',
     requested: self.id,
     message: `Target ${self.id} does not support ${operations.join(', ')}`,
-    unavailableOperations: Object.freeze([...operations]),
+    unavailableOperations: [...operations],
   })
 
 /** Reports an artifact kind that cannot be produced for the selected target family. */

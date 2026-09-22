@@ -183,16 +183,14 @@ export const unused = (
         binding._tag === 'ImportedMember' ? context.spanOf(binding.member.anchor) : undefined,
         imported.bindings,
       )
-      result.push(
-        Object.freeze({
-          _tag: 'UnusedImportBinding',
-          spelling: binding.spelling,
-          span: authored,
-          declarationSpan: declaration.span,
-          ...(change === undefined ? {} : { change }),
-        }),
-      )
+      result.push({
+        _tag: 'UnusedImportBinding',
+        spelling: binding.spelling,
+        span: authored,
+        declarationSpan: declaration.span,
+        ...(change === undefined ? {} : { change }),
+      })
     }
   }
-  return Object.freeze(result.sort((left, right) => left.span.start - right.span.start))
+  return result.sort((left, right) => left.span.start - right.span.start)
 }

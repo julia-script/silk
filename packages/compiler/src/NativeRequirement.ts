@@ -134,18 +134,18 @@ const inspect = (
           return yield* Result.fail(invalid('native requirement alternatives'))
         names.push(name)
       }
-      alternatives = Object.freeze([...new Set(names)].sort(Canonical.compare))
+      alternatives = [...new Set(names)].sort(Canonical.compare)
     }
-    return Object.freeze({
+    return {
       kind,
       name: input.name,
       ...(linkage === undefined ? {} : { linkage }),
       ...(minimumDeployment === undefined ? {} : { minimumDeployment }),
       ...(maximumDeployment === undefined ? {} : { maximumDeployment }),
       ...(alternatives === undefined ? {} : { alternatives }),
-      scope: Object.freeze({ ...scope }),
+      scope: { ...scope },
       origin: ConfigurationOrigin.snapshot(origin),
-    })
+    }
   })
 
 /** Decodes a logical native requirement at a public Effect boundary. */
@@ -214,11 +214,9 @@ export const merge = Effect.fn('NativeRequirement.merge')(function* (
     const first = entries[0]
     if (first === undefined) continue
     const unique = new Map(entries.map((entry) => [contributionKey(entry), entry]))
-    const contributions = Object.freeze(
-      [...unique]
-        .sort(([left], [right]) => Canonical.compare(left, right))
-        .map(([, entry]) => entry),
-    )
+    const contributions = [...unique]
+      .sort(([left], [right]) => Canonical.compare(left, right))
+      .map(([, entry]) => entry)
     const linkages = new Set(
       entries.flatMap((entry) => (entry.linkage === undefined ? [] : [entry.linkage])),
     )
@@ -258,17 +256,15 @@ export const merge = Effect.fn('NativeRequirement.merge')(function* (
       continue
     }
     const linkage = [...linkages][0]
-    merged.push(
-      Object.freeze({
-        kind: first.kind,
-        name: first.name,
-        ...(linkage === undefined ? {} : { linkage }),
-        ...(minimumDeployment === undefined ? {} : { minimumDeployment }),
-        ...(maximumDeployment === undefined ? {} : { maximumDeployment }),
-        ...(alternatives === undefined ? {} : { alternatives: Object.freeze([...alternatives]) }),
-        contributions,
-      }),
-    )
+    merged.push({
+      kind: first.kind,
+      name: first.name,
+      ...(linkage === undefined ? {} : { linkage }),
+      ...(minimumDeployment === undefined ? {} : { minimumDeployment }),
+      ...(maximumDeployment === undefined ? {} : { maximumDeployment }),
+      ...(alternatives === undefined ? {} : { alternatives: [...alternatives] }),
+      contributions,
+    })
   }
   if (conflicts.length > 0)
     return yield* ConfigurationError.make(
@@ -278,7 +274,7 @@ export const merge = Effect.fn('NativeRequirement.merge')(function* (
       conflicts.map((entry) => entry.origin),
       conflictKeys,
     )
-  return Object.freeze(merged)
+  return merged
 })
 
 /** The exact text one authored literal denotes; computed operands carry no configuration text. */
@@ -298,8 +294,11 @@ export const analyze = (
 } => {
   const diagnostics: Array<Diagnostic.Located> = []
   const clauseSpan = context.spanOf(clause.anchor)
-  const at = (span: SourceSpan.SourceSpan): ConfigurationOrigin.ConfigurationOrigin =>
-    Object.freeze({ source: clauseSpan.sourceId, provenance: 'literal', span })
+  const at = (span: SourceSpan.SourceSpan): ConfigurationOrigin.ConfigurationOrigin => ({
+    source: clauseSpan.sourceId,
+    provenance: 'literal',
+    span,
+  })
   const reject = (subject: string, anchor: AuthoredHir.Anchor): void => {
     const span = context.spanOf(anchor)
     diagnostics.push(
@@ -337,13 +336,13 @@ export const analyze = (
       properties.set(name, text)
     }
   }
-  if (diagnostics.length > 0) return { diagnostics: Object.freeze(diagnostics) }
+  if (diagnostics.length > 0) return { diagnostics: diagnostics }
   const result = inspect(Object.fromEntries(properties), scope, at(clauseSpan))
   if (Result.isFailure(result))
     return {
-      diagnostics: Object.freeze([
+      diagnostics: [
         Diagnostic.invalidAuthoredConfiguration(result.failure, Location.at(clause.anchor)),
-      ]),
+      ],
     }
-  return { requirement: result.success, diagnostics: Object.freeze([]) }
+  return { requirement: result.success, diagnostics: [] }
 }

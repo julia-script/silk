@@ -14,4 +14,4 @@ export const make = (
   module: string,
   elaboration: Elaboration.Result,
   ownership: Ownership.ModuleOwnership,
-): ModuleSemantics => Object.freeze({ _tag: 'ModuleSemantics', module, elaboration, ownership })
+): ModuleSemantics => ({ _tag: 'ModuleSemantics', module, elaboration, ownership })

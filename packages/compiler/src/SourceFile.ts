@@ -21,10 +21,10 @@ export const make = (
   const source: SourceFile = {
     [SourceFileTypeId]: SourceFileTypeId,
     id,
-    bytes: Object.freeze(Array.from(bytes)),
+    bytes: Array.from(bytes),
     origin,
   }
-  return Object.freeze(source)
+  return source
 }
 
 /** Returns the caller-provided logical source identity. */

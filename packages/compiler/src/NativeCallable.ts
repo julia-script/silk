@@ -38,7 +38,7 @@ export const capturedArguments = Effect.fnUntraced(function* (
     if (field.representation !== 'Borrow') {
       groups.push({
         parameterOrdinal: field.parameterOrdinal,
-        values: Object.freeze(values.slice(cursor, cursor + lanes.length)),
+        values: values.slice(cursor, cursor + lanes.length),
       })
       cursor += lanes.length
       continue
@@ -46,7 +46,7 @@ export const capturedArguments = Effect.fnUntraced(function* (
     const base = values.at(cursor++)
     if (base === undefined) throw new RangeError('Callable borrowed environment lost its pointer')
     if (borrowed) {
-      groups.push({ parameterOrdinal: field.parameterOrdinal, values: Object.freeze([base]) })
+      groups.push({ parameterOrdinal: field.parameterOrdinal, values: [base] })
       continue
     }
     const captured = yield* NativePlace.loadLanes(
@@ -54,9 +54,9 @@ export const capturedArguments = Effect.fnUntraced(function* (
       context,
       `${tag}_capture${field.ordinal}`,
     )
-    groups.push({ parameterOrdinal: field.parameterOrdinal, values: Object.freeze(captured) })
+    groups.push({ parameterOrdinal: field.parameterOrdinal, values: captured })
   }
-  return Object.freeze(groups)
+  return groups
 })
 
 /** Keeps captured values in their canonical places until the selected callee needs ABI lanes. */

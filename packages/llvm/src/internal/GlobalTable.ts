@@ -54,5 +54,5 @@ export const freeze = (
   aliasHandles: Table.freeze(table.aliases).handles,
   functions: Table.freeze(table.functions).descriptions,
   functionHandles: Table.freeze(table.functions).handles,
-  attachments: Object.freeze(table.attachments.map((a) => Object.freeze([...a]))),
+  attachments: table.attachments.map((a) => [...a]),
 })

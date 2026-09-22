@@ -88,16 +88,18 @@ const unavailable = (
   target: Target.Target,
   specialization: Specialization,
   reason: Unavailable['reason'],
-): Unavailable =>
-  Object.freeze({
-    _tag: 'ExecutionPackageUnavailable',
-    target: target.id,
-    specialization,
-    reason,
-  })
+): Unavailable => ({
+  _tag: 'ExecutionPackageUnavailable',
+  target: target.id,
+  specialization,
+  reason,
+})
 
-const component = (role: Component['role'], size: number, alignment: number): Component =>
-  Object.freeze({ role, size, alignment })
+const component = (role: Component['role'], size: number, alignment: number): Component => ({
+  role,
+  size,
+  alignment,
+})
 
 /** Canonical exact specialization key; physical offsets never participate in source identity. */
 export const specializationKey = (self: Specialization): string =>
@@ -133,7 +135,7 @@ export const planWithin = (
   const readinessStorage = SuspensionMode.has(specialization.suspension, 'ExternalPark')
   const initialContinuationSegment = specialization.suspension.modes.length > 0
   const endpointIsZeroSized = layouts.endpoint.size === 0 && layouts.callback.size === 0
-  const components: ReadonlyArray<Component> = Object.freeze([
+  const components: ReadonlyArray<Component> = [
     component('OwnerRecord', word * 2, word),
     // Allocation is a self-contained six-word reclaim ticket in the current bootstrap ABI.
     component('AllocationAuthority', word * 6, word),
@@ -151,7 +153,7 @@ export const planWithin = (
     ...(initialContinuationSegment
       ? [component('InitialContinuationSegment', word * ContinuationTransfer.headerWords, word)]
       : []),
-  ])
+  ]
 
   let cursor = 0
   let alignment = 1
@@ -174,7 +176,7 @@ export const planWithin = (
     readinessStorage ? 'wake' : 'no-wake',
     initialContinuationSegment ? 'segment' : 'no-segment',
   ].join(':')
-  return Object.freeze({
+  return {
     _tag: 'ExecutionPackagePlan',
     target: target.id,
     specialization,
@@ -184,7 +186,7 @@ export const planWithin = (
     readinessStorage,
     initialContinuationSegment,
     provenance,
-  })
+  }
 }
 
 /** Plans one package against the selected target's representable address range. */
@@ -223,14 +225,12 @@ export const validateInitialization = (
   plan_: Plan,
   allocation: AllocationProvenance,
 ): InitializationVerdict => {
-  if (allocation.target !== plan_.target)
-    return Object.freeze({ _tag: 'Rejected', reason: 'Target' })
-  if (allocation.size !== plan_.size) return Object.freeze({ _tag: 'Rejected', reason: 'Size' })
-  if (allocation.alignment !== plan_.alignment)
-    return Object.freeze({ _tag: 'Rejected', reason: 'Alignment' })
+  if (allocation.target !== plan_.target) return { _tag: 'Rejected', reason: 'Target' }
+  if (allocation.size !== plan_.size) return { _tag: 'Rejected', reason: 'Size' }
+  if (allocation.alignment !== plan_.alignment) return { _tag: 'Rejected', reason: 'Alignment' }
   if (allocation.package !== plan_.provenance)
-    return Object.freeze({ _tag: 'Rejected', reason: 'PackageProvenance' })
-  return Object.freeze({ _tag: 'Accepted', state: 'Initial' })
+    return { _tag: 'Rejected', reason: 'PackageProvenance' }
+  return { _tag: 'Accepted', state: 'Initial' }
 }
 
 /** Exact hidden cleanup metadata retained at the purpose-bound erasure seam. */
@@ -244,9 +244,8 @@ export interface CleanupMetadata {
 export const encode = (self: Plan): string =>
   `execution-package ${self.provenance} target=${self.target} size=${self.size} alignment=${self.alignment} body=${Type.encode(self.specialization.body)} endpoint=${Type.encode(self.specialization.endpoint)} callback=${Type.encode(self.specialization.callback)} suspension=${SuspensionMode.encode(self.specialization.suspension)} readiness=${self.readinessStorage ? 'stored' : 'omitted'} segment=${self.initialContinuationSegment ? 'initial' : 'none'}`
 
-export const empty = (): Module =>
-  Object.freeze({
-    _tag: 'ExecutionPackageModule',
-    plans: Object.freeze([]),
-    unavailable: Object.freeze([]),
-  })
+export const empty = (): Module => ({
+  _tag: 'ExecutionPackageModule',
+  plans: [],
+  unavailable: [],
+})

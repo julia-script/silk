@@ -56,10 +56,10 @@ export type ParameterKind =
 export type SealedStaticProperty = 'Intrinsic.Detached' | 'Intrinsic.NonParking'
 
 /** Canonical witness-free obligation order used by syntax, keys, and serialized surfaces. */
-export const sealedStaticPropertyOrder: ReadonlyArray<SealedStaticProperty> = Object.freeze([
+export const sealedStaticPropertyOrder: ReadonlyArray<SealedStaticProperty> = [
   'Intrinsic.Detached',
   'Intrinsic.NonParking',
-])
+]
 
 export interface Parameter {
   readonly _tag: 'TypeParameter'
@@ -265,7 +265,7 @@ export interface CallableIdentityArgument {
   readonly environment?: CallableEnvironmentIdentity
 }
 
-const nonScalarBuiltinOperations = Object.freeze([
+const nonScalarBuiltinOperations = [
   'LayoutOf',
   'SharedLayout',
   'SharedFromAllocation',
@@ -319,7 +319,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'SliceView',
   'StringByteLength',
   'StringEqualsExact',
-] as const)
+] as const
 
 /** The closed operation vocabulary shared by semantic callable identities and TIR targets. */
 export type BuiltinOperation = Scalar.OperationCode | (typeof nonScalarBuiltinOperations)[number]
@@ -502,120 +502,107 @@ export type UnionNormalization =
   | { readonly _tag: 'InvalidMembers'; readonly members: ReadonlyArray<Type> }
 
 /** The canonical lowercase string identity used by source and every compiler phase. */
-export const string = (lifetime: Lifetime.Lifetime): String =>
-  Object.freeze({ _tag: 'StringType', lifetime })
+export const string = (lifetime: Lifetime.Lifetime): String => ({ _tag: 'StringType', lifetime })
 
 /** Constructs one immutable canonical nominal type. */
 export const nominal = (
   module: string,
   name: string,
   arguments_: ReadonlyArray<GenericArgument> = [],
-): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module,
-    name,
-    arguments: Object.freeze(Array.from(arguments_)),
-  })
+): Nominal => ({
+  _tag: 'NominalType',
+  module,
+  name,
+  arguments: Array.from(arguments_),
+})
 
-const sealedSharedCore = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module: 'Intrinsic',
-    name: 'SharedCore',
-    arguments: Object.freeze(Array.from(arguments_)),
-    sealed: 'Intrinsic.SharedCore',
-  })
+const sealedSharedCore = (arguments_: ReadonlyArray<GenericArgument>): Nominal => ({
+  _tag: 'NominalType',
+  module: 'Intrinsic',
+  name: 'SharedCore',
+  arguments: Array.from(arguments_),
+  sealed: 'Intrinsic.SharedCore',
+})
 
-const sealedExecution = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module: 'Intrinsic',
-    name: 'Execution',
-    arguments: Object.freeze(Array.from(arguments_)),
-    sealed: 'Intrinsic.Execution',
-  })
+const sealedExecution = (arguments_: ReadonlyArray<GenericArgument>): Nominal => ({
+  _tag: 'NominalType',
+  module: 'Intrinsic',
+  name: 'Execution',
+  arguments: Array.from(arguments_),
+  sealed: 'Intrinsic.Execution',
+})
 
-const sealedWake = (): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module: 'Intrinsic',
-    name: 'Wake',
-    arguments: Object.freeze([]),
-    sealed: 'Intrinsic.Wake',
-  })
+const sealedWake = (): Nominal => ({
+  _tag: 'NominalType',
+  module: 'Intrinsic',
+  name: 'Wake',
+  arguments: [],
+  sealed: 'Intrinsic.Wake',
+})
 
-const sealedStorageFailure = (): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module: 'Intrinsic',
-    name: 'StorageFailure',
-    arguments: Object.freeze([]),
-    sealed: 'Intrinsic.StorageFailure',
-  })
+const sealedStorageFailure = (): Nominal => ({
+  _tag: 'NominalType',
+  module: 'Intrinsic',
+  name: 'StorageFailure',
+  arguments: [],
+  sealed: 'Intrinsic.StorageFailure',
+})
 
-const sealedTypeDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module: 'Intrinsic',
-    name: 'Type',
-    arguments: Object.freeze(Array.from(arguments_)),
-    sealed: 'Intrinsic.Type',
-  })
+const sealedTypeDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal => ({
+  _tag: 'NominalType',
+  module: 'Intrinsic',
+  name: 'Type',
+  arguments: Array.from(arguments_),
+  sealed: 'Intrinsic.Type',
+})
 
-const sealedFieldsDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module: 'Intrinsic',
-    name: 'Fields',
-    arguments: Object.freeze(Array.from(arguments_)),
-    sealed: 'Intrinsic.Fields',
-  })
+const sealedFieldsDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal => ({
+  _tag: 'NominalType',
+  module: 'Intrinsic',
+  name: 'Fields',
+  arguments: Array.from(arguments_),
+  sealed: 'Intrinsic.Fields',
+})
 
-const sealedFieldDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module: 'Intrinsic',
-    name: 'Field',
-    arguments: Object.freeze(Array.from(arguments_)),
-    sealed: 'Intrinsic.Field',
-  })
+const sealedFieldDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal => ({
+  _tag: 'NominalType',
+  module: 'Intrinsic',
+  name: 'Field',
+  arguments: Array.from(arguments_),
+  sealed: 'Intrinsic.Field',
+})
 
-const sealedStaticSequence = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module: 'Intrinsic',
-    name: 'StaticSequence',
-    arguments: Object.freeze(Array.from(arguments_)),
-    sealed: 'Intrinsic.StaticSequence',
-  })
+const sealedStaticSequence = (arguments_: ReadonlyArray<GenericArgument>): Nominal => ({
+  _tag: 'NominalType',
+  module: 'Intrinsic',
+  name: 'StaticSequence',
+  arguments: Array.from(arguments_),
+  sealed: 'Intrinsic.StaticSequence',
+})
 
-const sealedTestDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module: 'Intrinsic',
-    name: 'Test',
-    arguments: Object.freeze(Array.from(arguments_)),
-    sealed: 'Intrinsic.Test',
-  })
+const sealedTestDescriptor = (arguments_: ReadonlyArray<GenericArgument>): Nominal => ({
+  _tag: 'NominalType',
+  module: 'Intrinsic',
+  name: 'Test',
+  arguments: Array.from(arguments_),
+  sealed: 'Intrinsic.Test',
+})
 
-const sealedTestCatalog = (): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module: 'Intrinsic',
-    name: 'Tests',
-    arguments: Object.freeze([]),
-    sealed: 'Intrinsic.Tests',
-  })
+const sealedTestCatalog = (): Nominal => ({
+  _tag: 'NominalType',
+  module: 'Intrinsic',
+  name: 'Tests',
+  arguments: [],
+  sealed: 'Intrinsic.Tests',
+})
 
-const sealedTestInfo = (): Nominal =>
-  Object.freeze({
-    _tag: 'NominalType',
-    module: 'Intrinsic',
-    name: 'TestInfo',
-    arguments: Object.freeze([]),
-    sealed: 'Intrinsic.TestInfo',
-  })
+const sealedTestInfo = (): Nominal => ({
+  _tag: 'NominalType',
+  module: 'Intrinsic',
+  name: 'TestInfo',
+  arguments: [],
+  sealed: 'Intrinsic.TestInfo',
+})
 
 /** Replaces one nominal's arguments while preserving compiler-minted sealed provenance. */
 export const specializeNominal = (
@@ -883,34 +870,39 @@ export const parameter = (
   name: string,
   kind: ParameterKind = 'Value',
   representationBound?: RepresentationBound,
-  staticProperties: ReadonlyArray<SealedStaticProperty> = Object.freeze([]),
-): Parameter =>
-  Object.freeze({
-    _tag: 'TypeParameter',
-    owner: Object.freeze({ module: owner.module, name: owner.name }),
-    ordinal,
-    name,
-    kind,
-    staticProperties: Object.freeze(
-      sealedStaticPropertyOrder.filter((property) => staticProperties.includes(property)),
-    ),
-    ...(representationBound === undefined ? {} : { representationBound }),
-  })
+  staticProperties: ReadonlyArray<SealedStaticProperty> = [],
+): Parameter => ({
+  _tag: 'TypeParameter',
+  owner: { module: owner.module, name: owner.name },
+  ordinal,
+  name,
+  kind,
+  staticProperties: sealedStaticPropertyOrder.filter((property) =>
+    staticProperties.includes(property),
+  ),
+  ...(representationBound === undefined ? {} : { representationBound }),
+})
 
 /** Constructs one immutable canonical fixed-array type. */
-export const fixedArray = (element: Type, length: number): FixedArray =>
-  Object.freeze({ _tag: 'FixedArrayType', element, length })
+export const fixedArray = (element: Type, length: number): FixedArray => ({
+  _tag: 'FixedArrayType',
+  element,
+  length,
+})
 
 /** Constructs one canonical lexical slice type. */
-export const slice = (access: Slice['access'], element: Type, lifetime: Lifetime.Lifetime): Slice =>
-  Object.freeze({ _tag: 'SliceType', access, element, lifetime })
+export const slice = (
+  access: Slice['access'],
+  element: Type,
+  lifetime: Lifetime.Lifetime,
+): Slice => ({ _tag: 'SliceType', access, element, lifetime })
 
 /** Constructs one canonical lexical whole-value reference. */
 export const reference = (
   access: Reference['access'],
   target: Type,
   lifetime: Lifetime.Lifetime,
-): Reference => Object.freeze({ _tag: 'ReferenceType', access, target, lifetime })
+): Reference => ({ _tag: 'ReferenceType', access, target, lifetime })
 
 /** Constructs one canonical raw pointer type. */
 export const pointer = ({
@@ -920,16 +912,15 @@ export const pointer = ({
   extent,
   alignment,
   addressSpace,
-}: Omit<Pointer, '_tag'>): Pointer =>
-  Object.freeze({
-    _tag: 'PointerType',
-    mutable,
-    pointee,
-    nullable,
-    extent,
-    alignment,
-    addressSpace,
-  })
+}: Omit<Pointer, '_tag'>): Pointer => ({
+  _tag: 'PointerType',
+  mutable,
+  pointee,
+  nullable,
+  extent,
+  alignment,
+  addressSpace,
+})
 
 /** True for the explicit minimum alignments admitted by the native data-pointer contract. */
 export const isPointerAlignment = (value: number): boolean =>
@@ -966,48 +957,47 @@ export const callable = (
   mode: CallableMode = 'Shared',
   schema?: CallableSchema,
   unsafe = false,
-): Callable =>
-  Object.freeze({
-    _tag: 'CallableType',
-    environment: lifetimes.environment,
-    lifetimeBinders: Object.freeze([...lifetimes.lifetimeBinders]),
-    lifetimeBounds: Lifetime.assumptions(lifetimes.lifetimeBounds ?? []).bounds,
-    // A well-formed borrowed input supplies validity of its stored parameters for that borrow.
-    typeOutlives: normalizeTypeOutlives([
-      ...(lifetimes.typeOutlives ?? []),
-      ...parameters_.flatMap((parameter) => {
-        if (isReference(parameter))
-          return storageParameters(parameter.target).map((type) => ({
-            type,
-            lifetime: parameter.lifetime,
-          }))
-        if (isSlice(parameter))
-          return storageParameters(parameter.element).map((type) => ({
-            type,
-            lifetime: parameter.lifetime,
-          }))
-        return []
+): Callable => ({
+  _tag: 'CallableType',
+  environment: lifetimes.environment,
+  lifetimeBinders: [...lifetimes.lifetimeBinders],
+  lifetimeBounds: Lifetime.assumptions(lifetimes.lifetimeBounds ?? []).bounds,
+  // A well-formed borrowed input supplies validity of its stored parameters for that borrow.
+  typeOutlives: normalizeTypeOutlives([
+    ...(lifetimes.typeOutlives ?? []),
+    ...parameters_.flatMap((parameter) => {
+      if (isReference(parameter))
+        return storageParameters(parameter.target).map((type) => ({
+          type,
+          lifetime: parameter.lifetime,
+        }))
+      if (isSlice(parameter))
+        return storageParameters(parameter.element).map((type) => ({
+          type,
+          lifetime: parameter.lifetime,
+        }))
+      return []
+    }),
+  ]),
+  unsafe,
+  parameters: Array.from(parameters_),
+  result,
+  mode,
+  ...(schema === undefined
+    ? {}
+    : {
+        schema: {
+          ...schema,
+          binders: Array.from(schema.binders),
+          constraints: Array.from(schema.constraints),
+          evidence: Array.from(schema.evidence),
+          substitution: new Map(schema.substitution),
+          constraintKeys: Array.from(schema.constraintKeys),
+          evidenceKeys: Array.from(schema.evidenceKeys),
+          origins: Array.from(schema.origins),
+        },
       }),
-    ]),
-    unsafe,
-    parameters: Object.freeze(Array.from(parameters_)),
-    result,
-    mode,
-    ...(schema === undefined
-      ? {}
-      : {
-          schema: Object.freeze({
-            ...schema,
-            binders: Object.freeze(Array.from(schema.binders)),
-            constraints: Object.freeze(Array.from(schema.constraints)),
-            evidence: Object.freeze(Array.from(schema.evidence)),
-            substitution: new Map(schema.substitution),
-            constraintKeys: Object.freeze(Array.from(schema.constraintKeys)),
-            evidenceKeys: Object.freeze(Array.from(schema.evidenceKeys)),
-            origins: Object.freeze(Array.from(schema.origins)),
-          }),
-        }),
-  })
+})
 
 /** Constructs one immutable C ABI function-pointer type. */
 export const foreignFunction = (
@@ -1015,19 +1005,18 @@ export const foreignFunction = (
   result: Type,
   contract: ForeignContract.ForeignContract = ForeignContract.conservative,
   lifetimes: ExecutableLifetimes = { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
-): ForeignFunction =>
-  Object.freeze({
-    _tag: 'ForeignFunctionType',
-    environment: lifetimes.environment,
-    lifetimeBinders: Object.freeze([...lifetimes.lifetimeBinders]),
-    lifetimeBounds: Lifetime.assumptions(lifetimes.lifetimeBounds ?? []).bounds,
-    typeOutlives: normalizeTypeOutlives(lifetimes.typeOutlives ?? []),
-    nullable: false,
-    contract,
-    abi: 'C',
-    parameters: Object.freeze(Array.from(parameters_)),
-    result,
-  })
+): ForeignFunction => ({
+  _tag: 'ForeignFunctionType',
+  environment: lifetimes.environment,
+  lifetimeBinders: [...lifetimes.lifetimeBinders],
+  lifetimeBounds: Lifetime.assumptions(lifetimes.lifetimeBounds ?? []).bounds,
+  typeOutlives: normalizeTypeOutlives(lifetimes.typeOutlives ?? []),
+  nullable: false,
+  contract,
+  abi: 'C',
+  parameters: Array.from(parameters_),
+  result,
+})
 
 const implicitRowOrigin: SourceSpan.SourceSpan = (() => {
   const span = SourceSpan.fromOffsets('$implicit-row', 0, 0)
@@ -1079,11 +1068,9 @@ export const effect = (
     RequirementRow.policy<Nominal | Parameter>(key),
     concreteRequirements,
   )
-  const normalizedRequirementParameters = Object.freeze(
-    [
-      ...new Map(requirementParameters.map((parameter_) => [key(parameter_), parameter_])).values(),
-    ].sort(compare),
-  )
+  const normalizedRequirementParameters = [
+    ...new Map(requirementParameters.map((parameter_) => [key(parameter_), parameter_])).values(),
+  ].sort(compare)
   const failureRow = symbolicFailures.reduce<FailureRow>(
     (row, failure) =>
       RowAlgebra.union(
@@ -1117,17 +1104,17 @@ export const effect = (
       ),
     parameterizedRequirementRow,
   )
-  return Object.freeze({
+  return {
     _tag: 'EffectType',
     environment: lifetimes.environment,
-    lifetimeBinders: Object.freeze([...lifetimes.lifetimeBinders]),
+    lifetimeBinders: [...lifetimes.lifetimeBinders],
     lifetimeBounds: Lifetime.assumptions(lifetimes.lifetimeBounds ?? []).bounds,
     typeOutlives: normalizeTypeOutlives(lifetimes.typeOutlives ?? []),
     success,
     failureRow,
     requirementRow,
     access,
-  })
+  }
 }
 
 /** Symbolic failure-row domain policy. */
@@ -1137,21 +1124,21 @@ export function failureRowPolicy(): RowAlgebra.Policy<
   FailureMemberShape,
   Parameter
 > {
-  return Object.freeze({
-    finite: Object.freeze({
+  return {
+    finite: {
       collisionKey: key,
       memberKey: key,
       merge: (left: Type) => left,
-    }),
+    },
     concreteMemberMaySpecialize: typeMaySpecialize,
     rowParameterKey: key,
     symbolicMemberKey: (member: FailureMemberShape) => key(member.parameter),
-    symbolicMemberParameters: (member: FailureMemberShape) => Object.freeze([member.parameter]),
+    symbolicMemberParameters: (member: FailureMemberShape) => [member.parameter],
     memberParameterKey: key,
     memberWellFormedKey: (member: FailureMemberShape) =>
       Canonical.record('FailureMemberWellFormed', [key(member.parameter)]),
     allowsSetCancellation: true,
-  })
+  }
 }
 
 /** Symbolic requirement-row domain policy with fixed access and role. */
@@ -1161,7 +1148,7 @@ export function requirementRowPolicy(): RowAlgebra.Policy<
   RequirementMemberShape,
   Parameter
 > {
-  return Object.freeze({
+  return {
     finite: RequirementRow.policy<Nominal | Parameter>(key),
     concreteMemberMaySpecialize: (member: Requirement) => typeMaySpecialize(member.capability),
     concreteMembersAreDisjoint: (left: Requirement, right: Requirement) =>
@@ -1177,8 +1164,7 @@ export function requirementRowPolicy(): RowAlgebra.Policy<
         RequirementRow.roleKey(member.role),
         key(member.capability),
       ]),
-    symbolicMemberParameters: (member: RequirementMemberShape) =>
-      Object.freeze([member.capability]),
+    symbolicMemberParameters: (member: RequirementMemberShape) => [member.capability],
     memberParameterKey: key,
     memberWellFormedKey: (member: RequirementMemberShape) =>
       Canonical.record('RequirementMemberWellFormed', [
@@ -1187,17 +1173,18 @@ export function requirementRowPolicy(): RowAlgebra.Policy<
         key(member.capability),
       ]),
     allowsSetCancellation: false,
-  })
+  }
 }
 
-export const failureMemberShape = (parameter_: Parameter): FailureMemberShape =>
-  Object.freeze({ parameter: parameter_ })
+export const failureMemberShape = (parameter_: Parameter): FailureMemberShape => ({
+  parameter: parameter_,
+})
 
 export const requirementMemberShape = (
   capability: Parameter,
   access: Requirement['access'],
   role: RequirementRow.Role,
-): RequirementMemberShape => Object.freeze({ capability, access, role })
+): RequirementMemberShape => ({ capability, access, role })
 
 /** Constructs an Effect directly from symbolic channel rows. */
 export const effectWithRows = (
@@ -1218,7 +1205,7 @@ export const effectWithRows = (
     concreteRequirements._tag === 'Concrete' ? concreteRequirements.row.members : [],
     requirementParameters,
   )
-  return Object.freeze({ ...base, failureRow, requirementRow })
+  return { ...base, failureRow, requirementRow }
 }
 
 /** Constructs one normalized concrete requirement-row generic argument. */
@@ -1240,10 +1227,10 @@ export const requirementRowArgument = (
 
 /** Constructs one requirement-row argument without flattening computed row expressions. */
 export const requirementRowArgumentFromRow = (row: RequirementsRow): RequirementRowArgument => {
-  return Object.freeze({
+  return {
     _tag: 'RequirementRowArgument',
     row,
-  })
+  }
 }
 
 /** Concrete members projected from one symbolic failure row. */
@@ -1324,20 +1311,19 @@ export const requirementRowParameters = (
 export const effectIdentityArgument = (
   identity: string,
   owner?: ExecutableSpecializationOwner,
-): EffectIdentityArgument =>
-  Object.freeze({
-    _tag: 'EffectIdentityArgument',
-    identity,
-    ...(owner === undefined
-      ? {}
-      : {
-          owner: Object.freeze({
-            declaration: Object.freeze({ ...owner.declaration }),
-            typeArguments: Object.freeze(Array.from(owner.typeArguments)),
-            staticArgumentKeys: Object.freeze(Array.from(owner.staticArgumentKeys)),
-          }),
-        }),
-  })
+): EffectIdentityArgument => ({
+  _tag: 'EffectIdentityArgument',
+  identity,
+  ...(owner === undefined
+    ? {}
+    : {
+        owner: {
+          declaration: { ...owner.declaration },
+          typeArguments: Array.from(owner.typeArguments),
+          staticArgumentKeys: Array.from(owner.staticArgumentKeys),
+        },
+      }),
+})
 
 /** Constructs the stable structural site of one callable capture environment. */
 export const callableEnvironmentSite = (
@@ -1346,92 +1332,87 @@ export const callableEnvironmentSite = (
   ordinal: number,
 ): CallableEnvironmentSite =>
   declaration === undefined
-    ? Object.freeze({
+    ? {
         _tag: 'RecoveredCallableEnvironmentSite',
         functionOrdinal,
         ordinal,
-      })
-    : Object.freeze({
+      }
+    : {
         _tag: 'DeclaredCallableEnvironmentSite',
-        declaration: Object.freeze({ ...declaration }),
+        declaration: { ...declaration },
         ordinal,
-      })
+      }
 
 /** Constructs the complete specialization identity of one callable capture environment. */
 export const callableEnvironmentIdentity = (
   site: CallableEnvironmentSite,
   owner: CallableEnvironmentIdentity['owner'],
-): CallableEnvironmentIdentity =>
-  Object.freeze({
-    _tag: 'CallableEnvironmentIdentity',
-    site,
-    owner: Object.freeze({
-      declaration: Object.freeze({ ...owner.declaration }),
-      typeArguments: Object.freeze(Array.from(owner.typeArguments)),
-      staticArgumentKeys: Object.freeze(Array.from(owner.staticArgumentKeys)),
-    }),
-  })
+): CallableEnvironmentIdentity => ({
+  _tag: 'CallableEnvironmentIdentity',
+  site,
+  owner: {
+    declaration: { ...owner.declaration },
+    typeArguments: Array.from(owner.typeArguments),
+    staticArgumentKeys: Array.from(owner.staticArgumentKeys),
+  },
+})
 
 export const callableIdentityArgument = (
   identity: string,
   target: CallableIdentityArgument['target'],
   typeArguments: ReadonlyArray<GenericArgument> = [],
   environment?: CallableEnvironmentIdentity,
-): CallableIdentityArgument =>
-  Object.freeze({
-    _tag: 'CallableIdentityArgument',
-    identity: environment === undefined ? identity : callableEnvironmentKey(environment),
-    target: Object.freeze(target),
-    typeArguments: Object.freeze(Array.from(typeArguments)),
-    ...(environment === undefined ? {} : { environment }),
-  })
+): CallableIdentityArgument => ({
+  _tag: 'CallableIdentityArgument',
+  identity: environment === undefined ? identity : callableEnvironmentKey(environment),
+  target: target,
+  typeArguments: Array.from(typeArguments),
+  ...(environment === undefined ? {} : { environment }),
+})
 
 /** Constructs an open representation argument owned by one representation parameter. */
 export const representationParameterArgument = (
   parameter_: Parameter,
-): RepresentationParameterArgument =>
-  Object.freeze({ _tag: 'RepresentationParameterArgument', parameter: parameter_ })
+): RepresentationParameterArgument => ({
+  _tag: 'RepresentationParameterArgument',
+  parameter: parameter_,
+})
 
 /** Constructs one opaque family instance from canonical producer and enclosing arguments. */
 export const opaqueRepresentationArgument = (
   family: OpaqueFamilyKey,
   contract: RepresentationBound,
   arguments_: ReadonlyArray<GenericArgument>,
-): OpaqueRepresentationArgument =>
-  Object.freeze({
-    _tag: 'OpaqueRepresentationArgument',
-    family: Object.freeze({
-      _tag: 'OpaqueFamilyKey',
-      producer: Object.freeze({ ...family.producer }),
-      binderOrdinal: family.binderOrdinal,
-    }),
-    contract,
-    arguments: Object.freeze(Array.from(arguments_)),
-  })
+): OpaqueRepresentationArgument => ({
+  _tag: 'OpaqueRepresentationArgument',
+  family: {
+    _tag: 'OpaqueFamilyKey',
+    producer: { ...family.producer },
+    binderOrdinal: family.binderOrdinal,
+  },
+  contract,
+  arguments: Array.from(arguments_),
+})
 
 /** Constructs one exact representation argument without mixing its identity with a use bound. */
 export const exactRepresentationArgument = (
   identity: EffectIdentityArgument | CallableIdentityArgument,
   contract: RepresentationBound,
-): ExactRepresentationArgument =>
-  Object.freeze({ _tag: 'ExactRepresentationArgument', identity, contract })
+): ExactRepresentationArgument => ({ _tag: 'ExactRepresentationArgument', identity, contract })
 
 /** Constructs one canonical finite Effect representation from exact alternatives. */
 export const compositeEffectRepresentationArgument = (
   contract: Effect,
   alternatives: ReadonlyArray<ExactRepresentationArgument>,
-): CompositeEffectRepresentationArgument =>
-  Object.freeze({
-    _tag: 'CompositeEffectRepresentationArgument',
-    contract,
-    alternatives: Object.freeze(
-      [
-        ...new Map(
-          alternatives.map((alternative) => [genericArgumentKey(alternative), alternative]),
-        ).values(),
-      ].sort((left, right) => genericArgumentKey(left).localeCompare(genericArgumentKey(right))),
-    ),
-  })
+): CompositeEffectRepresentationArgument => ({
+  _tag: 'CompositeEffectRepresentationArgument',
+  contract,
+  alternatives: [
+    ...new Map(
+      alternatives.map((alternative) => [genericArgumentKey(alternative), alternative]),
+    ).values(),
+  ].sort((left, right) => genericArgumentKey(left).localeCompare(genericArgumentKey(right))),
+})
 
 /** Reifies one declaration parameter as an open generic argument of the same kind. */
 export const parameterArgument = (self: Parameter): GenericArgument => {
@@ -1534,7 +1515,7 @@ export const representationAdmissibility = (
   context?: TypeCompatibility.Context,
 ): RepresentationAdmissibility => {
   if (contract._tag !== requiredBound._tag)
-    return Object.freeze({ _tag: 'Unavailable', reason: 'representation kind mismatch' })
+    return { _tag: 'Unavailable', reason: 'representation kind mismatch' }
   let structuralContract: RepresentationBound | undefined
   let requiredAccess: CallableMode | Effect['access']
   let actualAccess: CallableMode | Effect['access']
@@ -1561,15 +1542,15 @@ export const representationAdmissibility = (
     requiredAccess = requiredBound.access
     actualAccess = contract.access
   } else {
-    return Object.freeze({ _tag: 'Unavailable', reason: 'representation kind mismatch' })
+    return { _tag: 'Unavailable', reason: 'representation kind mismatch' }
   }
   return structuralContract !== undefined &&
     TypeCompatibility.isCompatible(
       TypeCompatibility.check(structuralContract, requiredBound, context),
     ) &&
     compareAccess(requiredAccess, actualAccess)
-    ? Object.freeze({ _tag: 'Admitted' })
-    : Object.freeze({ _tag: 'Unavailable', reason: 'representation contract mismatch' })
+    ? { _tag: 'Admitted' }
+    : { _tag: 'Unavailable', reason: 'representation contract mismatch' }
 }
 
 /** Constructs a represented callable or Effect value at one required use bound. */
@@ -1582,25 +1563,24 @@ export const represented = (
   const admissibility = representationAdmissibility(contract, requiredBound, compatibility)
   let resolvedAdmissibility: RepresentationAdmissibility = admissibility
   if (argument._tag === 'RepresentationParameterArgument' && admissibility._tag === 'Admitted') {
-    resolvedAdmissibility = Object.freeze({ _tag: 'Open' })
+    resolvedAdmissibility = { _tag: 'Open' }
   }
-  return Object.freeze({
+  return {
     _tag: 'RepresentedType',
     contract,
-    representation: Object.freeze({
+    representation: {
       requiredBound,
       argument,
       admissibility: resolvedAdmissibility,
-    }),
-  })
+    },
+  }
 }
 
 /** Constructs a kinded recovery placeholder for damaged or unresolved generic syntax. */
 export const unavailableGenericArgument = (
   expectedKind: ParameterKind,
   reason: string,
-): UnavailableGenericArgument =>
-  Object.freeze({ _tag: 'UnavailableGenericArgument', expectedKind, reason })
+): UnavailableGenericArgument => ({ _tag: 'UnavailableGenericArgument', expectedKind, reason })
 
 export const isRequirementRowArgument = (self: GenericArgument): self is RequirementRowArgument =>
   typeof self !== 'string' && self._tag === 'RequirementRowArgument'
@@ -1884,24 +1864,23 @@ export const union = (inputs: ReadonlyArray<Type>): UnionNormalization => {
     members.push(input)
   }
   for (const input of inputs) visit(input)
-  if (invalid.length > 0)
-    return Object.freeze({ _tag: 'InvalidMembers', members: Object.freeze(invalid) })
+  if (invalid.length > 0) return { _tag: 'InvalidMembers', members: invalid }
   const normalized = FiniteRow.make<Type>(
     { collisionKey: key, memberKey: key, merge: (left) => left },
     members,
   ).members
-  if (normalized.length === 0) return Object.freeze({ _tag: 'Normalized', type: 'never' })
+  if (normalized.length === 0) return { _tag: 'Normalized', type: 'never' }
   const singleton = normalized.at(0)
   if (normalized.length === 1 && singleton !== undefined)
-    return Object.freeze({ _tag: 'Normalized', type: singleton })
-  return Object.freeze({
+    return { _tag: 'Normalized', type: singleton }
+  return {
     _tag: 'Normalized',
-    type: Object.freeze({
+    type: {
       _tag: 'StructuralUnionType',
       members: normalized,
       [structuralUnionBrand]: true as const,
-    }),
-  })
+    },
+  }
 }
 
 /** Tests whether a semantic type is one of the executable built-in scalars. */
@@ -1983,14 +1962,6 @@ const hasTypeDiscriminant = (self: unknown): self is Type =>
     typeof self._tag === 'string' &&
     semanticTypeTags.has(self._tag))
 
-const isDeeplyFrozen = (self: unknown, visited: WeakSet<object>): boolean => {
-  if (typeof self !== 'object' || self === null) return true
-  if (!Object.isFrozen(self)) return false
-  if (visited.has(self)) return true
-  visited.add(self)
-  return Object.values(self).every((value) => isDeeplyFrozen(value, visited))
-}
-
 const keyCache = new WeakMap<Exclude<Type, string>, string>()
 
 /** Returns the canonical deterministic key used for equality and ordering. */
@@ -2007,11 +1978,10 @@ export const key = (self: Type): string => {
 /**
  * Admits one immutable semantic type from untyped compiler data.
  *
- * Object-shaped types must already be canonical frozen values, and complete key traversal must
- * succeed. This keeps malformed lookalikes from crossing static-value admission.
+ * Object-shaped types must be canonical values whose complete key traversal succeeds. This keeps malformed lookalikes from crossing static-value admission.
  */
 export const fromUnknown = (self: unknown): Type | undefined => {
-  if (!hasTypeDiscriminant(self) || !isDeeplyFrozen(self, new WeakSet())) return undefined
+  if (!hasTypeDiscriminant(self)) return undefined
   try {
     key(self)
     return self
@@ -2095,7 +2065,7 @@ const genericArgumentRepresentationDivergence = (
   if (isRepresentationArgument(left) || isRepresentationArgument(right)) {
     if (!isRepresentationArgument(left) || !isRepresentationArgument(right)) return undefined
     if (equalsGenericArgument(left, right)) return undefined
-    return Object.freeze({ left, right })
+    return { left, right }
   }
   if (isRequirementRowArgument(left) && isRequirementRowArgument(right)) {
     for (
@@ -2392,19 +2362,17 @@ const opaqueEvidenceInGenericArguments = (
   family: OpaqueFamilyKey,
 ): ReadonlyArray<RepresentationArgument> => {
   if (isOpaqueRepresentationArgument(expected) && equalsOpaqueFamily(expected.family, family))
-    return isRepresentationArgument(actual) ? Object.freeze([actual]) : Object.freeze([])
+    return isRepresentationArgument(actual) ? [actual] : []
   if (isTypeArgument(actual) && isTypeArgument(expected))
     return opaqueRepresentationEvidence(actual, expected, family)
   if (isRequirementRowArgument(actual) && isRequirementRowArgument(expected))
-    return Object.freeze(
-      requirementMembers(expected).flatMap((requirement, ordinal) => {
-        const supplied = requirementMembers(actual).at(ordinal)
-        return supplied === undefined
-          ? []
-          : opaqueRepresentationEvidence(supplied.capability, requirement.capability, family)
-      }),
-    )
-  return Object.freeze([])
+    return requirementMembers(expected).flatMap((requirement, ordinal) => {
+      const supplied = requirementMembers(actual).at(ordinal)
+      return supplied === undefined
+        ? []
+        : opaqueRepresentationEvidence(supplied.capability, requirement.capability, family)
+    })
+  return []
 }
 
 /**
@@ -2421,21 +2389,17 @@ export const opaqueRepresentationEvidence = (
     isOpaqueRepresentationArgument(expected.representation.argument) &&
     equalsOpaqueFamily(expected.representation.argument.family, family)
   )
-    return isRepresented(actual)
-      ? Object.freeze([actual.representation.argument])
-      : Object.freeze([])
+    return isRepresented(actual) ? [actual.representation.argument] : []
   if (isRepresented(actual)) return opaqueRepresentationEvidence(actual.contract, expected, family)
   if (isRepresented(expected))
     return opaqueRepresentationEvidence(actual, expected.contract, family)
   if (isNominal(actual) && isNominal(expected))
-    return Object.freeze(
-      expected.arguments.flatMap((argument, ordinal) => {
-        const supplied = actual.arguments.at(ordinal)
-        return supplied === undefined
-          ? []
-          : opaqueEvidenceInGenericArguments(supplied, argument, family)
-      }),
-    )
+    return expected.arguments.flatMap((argument, ordinal) => {
+      const supplied = actual.arguments.at(ordinal)
+      return supplied === undefined
+        ? []
+        : opaqueEvidenceInGenericArguments(supplied, argument, family)
+    })
   if (isFixedArray(actual) && isFixedArray(expected))
     return opaqueRepresentationEvidence(actual.element, expected.element, family)
   if (isSlice(actual) && isSlice(expected))
@@ -2445,7 +2409,7 @@ export const opaqueRepresentationEvidence = (
   if (isPointer(actual) && isPointer(expected))
     return opaqueRepresentationEvidence(actual.pointee, expected.pointee, family)
   if (isForeignFunction(actual) && isForeignFunction(expected))
-    return Object.freeze([
+    return [
       ...expected.parameters.flatMap((parameter, ordinal) => {
         const supplied = actual.parameters.at(ordinal)
         return supplied === undefined
@@ -2453,9 +2417,9 @@ export const opaqueRepresentationEvidence = (
           : opaqueRepresentationEvidence(supplied, parameter, family)
       }),
       ...opaqueRepresentationEvidence(actual.result, expected.result, family),
-    ])
+    ]
   if (isCallable(actual) && isCallable(expected))
-    return Object.freeze([
+    return [
       ...expected.parameters.flatMap((parameter_, ordinal) => {
         const supplied = actual.parameters.at(ordinal)
         return supplied === undefined
@@ -2463,9 +2427,9 @@ export const opaqueRepresentationEvidence = (
           : opaqueRepresentationEvidence(supplied, parameter_, family)
       }),
       ...opaqueRepresentationEvidence(actual.result, expected.result, family),
-    ])
+    ]
   if (isEffect(actual) && isEffect(expected))
-    return Object.freeze([
+    return [
       ...opaqueRepresentationEvidence(actual.success, expected.success, family),
       ...failureMembers(expected).flatMap((failure, ordinal) => {
         const supplied = failureMembers(actual).at(ordinal)
@@ -2477,15 +2441,13 @@ export const opaqueRepresentationEvidence = (
           ? []
           : opaqueRepresentationEvidence(supplied.capability, requirement.capability, family)
       }),
-    ])
+    ]
   if (isUnion(actual) && isUnion(expected))
-    return Object.freeze(
-      expected.members.flatMap((member, ordinal) => {
-        const supplied = actual.members.at(ordinal)
-        return supplied === undefined ? [] : opaqueRepresentationEvidence(supplied, member, family)
-      }),
-    )
-  return Object.freeze([])
+    return expected.members.flatMap((member, ordinal) => {
+      const supplied = actual.members.at(ordinal)
+      return supplied === undefined ? [] : opaqueRepresentationEvidence(supplied, member, family)
+    })
+  return []
 }
 
 interface FoldVisitor<A> {
@@ -2722,7 +2684,7 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
     }
   }
   visitType(self)
-  return Object.freeze(found)
+  return found
 }
 
 const typeMaySpecialize = (self: Type): boolean =>
@@ -2873,10 +2835,10 @@ export const exactRepresentationDeclarations = (
       isExactRepresentationArgument(argument) &&
       isCallableIdentityArgument(argument.identity) &&
       argument.identity.target._tag === 'Declaration'
-        ? Object.freeze({
+        ? {
             module: argument.identity.target.module,
             name: argument.identity.target.name,
-          })
+          }
         : undefined,
   })
 
@@ -2911,7 +2873,7 @@ export const parameters = (self: Type): ReadonlyArray<Parameter> => {
         found.set(key(argument.parameter), argument.parameter)
     },
   })
-  return Object.freeze([...found.values()].sort(compare))
+  return [...found.values()].sort(compare)
 }
 
 /** Tests whether a type contains no open generic parameters. */
@@ -2994,38 +2956,30 @@ const runtimeAvailableConstraintUnder = (
 ): boolean => {
   switch (constraint._tag) {
     case 'NominalMemberConstraint':
-      return runtimeAvailableConstraint(
-        Object.freeze({
-          ...constraint,
-          selected: substitute(constraint.selected, substitution),
-          source: substituteFailureRow(constraint.source, substitution),
-        }),
-      )
+      return runtimeAvailableConstraint({
+        ...constraint,
+        selected: substitute(constraint.selected, substitution),
+        source: substituteFailureRow(constraint.source, substitution),
+      })
     case 'FailureSubsetConstraint':
-      return runtimeAvailableConstraint(
-        Object.freeze({
-          ...constraint,
-          selected: substituteFailureRow(constraint.selected, substitution),
-          source: substituteFailureRow(constraint.source, substitution),
-        }),
-      )
+      return runtimeAvailableConstraint({
+        ...constraint,
+        selected: substituteFailureRow(constraint.selected, substitution),
+        source: substituteFailureRow(constraint.source, substitution),
+      })
     case 'RequirementSubsetConstraint':
-      return runtimeAvailableConstraint(
-        Object.freeze({
-          ...constraint,
-          selected: substituteRequirementsRow(constraint.selected, substitution),
-          source: substituteRequirementsRow(constraint.source, substitution),
-        }),
-      )
+      return runtimeAvailableConstraint({
+        ...constraint,
+        selected: substituteRequirementsRow(constraint.selected, substitution),
+        source: substituteRequirementsRow(constraint.source, substitution),
+      })
     case 'ProviderSelectionConstraint':
-      return runtimeAvailableConstraint(
-        Object.freeze({
-          ...constraint,
-          provider: substitute(constraint.provider, substitution),
-          selected: substituteRequirementsRow(constraint.selected, substitution),
-          source: substituteRequirementsRow(constraint.source, substitution),
-        }),
-      )
+      return runtimeAvailableConstraint({
+        ...constraint,
+        provider: substitute(constraint.provider, substitution),
+        selected: substituteRequirementsRow(constraint.selected, substitution),
+        source: substituteRequirementsRow(constraint.source, substitution),
+      })
   }
 }
 
@@ -3235,14 +3189,14 @@ export const specializeFailureRow = (
     },
     member: (member) => {
       const replacement = substitution.get(key(member.parameter))
-      if (replacement === undefined) return Object.freeze({ _tag: 'Residual', member })
+      if (replacement === undefined) return { _tag: 'Residual', member }
       if (isTypeArgument(replacement) && isParameter(replacement) && replacement.kind === 'Value')
-        return Object.freeze({
+        return {
           _tag: 'Residual',
           member: failureMemberShape(replacement),
-        })
+        }
       if (isTypeArgument(replacement) && !isUnion(replacement) && !isNever(replacement))
-        return Object.freeze({ _tag: 'Concrete', member: replacement })
+        return { _tag: 'Concrete', member: replacement }
       if (isTypeArgument(replacement) && isUnion(replacement)) {
         const row = replacement.members.reduce<FailureRow>(
           (current, failure) =>
@@ -3259,14 +3213,14 @@ export const specializeFailureRow = (
             ),
           RowAlgebra.concrete(failureRowPolicy(), []),
         )
-        return Object.freeze({ _tag: 'Row', row })
+        return { _tag: 'Row', row }
       }
       if (isTypeArgument(replacement) && isNever(replacement))
-        return Object.freeze({ _tag: 'ConcreteRow', members: Object.freeze([]) })
-      return Object.freeze({
+        return { _tag: 'ConcreteRow', members: [] }
+      return {
         _tag: 'InvalidSingleton',
         reason: `failure member ${member.parameter.name} did not specialize to an ordinary type`,
-      })
+      }
     },
   })
   return result
@@ -3290,7 +3244,7 @@ export const specializeRequirementsRow = (
   const concrete = RowAlgebra.mapConcreteMembers(requirementRowPolicy(), self, (requirement) => {
     const capability = substitute(requirement.capability, substitution, compatibility)
     return isNominal(capability) || isParameter(capability)
-      ? Object.freeze({ ...requirement, capability })
+      ? { ...requirement, capability }
       : requirement
   })
   const result = RowAlgebra.substitute(requirementRowPolicy(), concrete, {
@@ -3301,25 +3255,25 @@ export const specializeRequirementsRow = (
     },
     member: (member) => {
       const replacement = substitution.get(key(member.capability))
-      if (replacement === undefined) return Object.freeze({ _tag: 'Residual', member })
+      if (replacement === undefined) return { _tag: 'Residual', member }
       if (isTypeArgument(replacement) && isNominal(replacement))
-        return Object.freeze({
+        return {
           _tag: 'Concrete',
-          member: Object.freeze({
+          member: {
             capability: replacement,
             access: member.access,
             role: member.role,
-          }),
-        })
+          },
+        }
       if (isTypeArgument(replacement) && isParameter(replacement) && replacement.kind === 'Value')
-        return Object.freeze({
+        return {
           _tag: 'Residual',
           member: requirementMemberShape(replacement, member.access, member.role),
-        })
-      return Object.freeze({
+        }
+      return {
         _tag: 'InvalidSingleton',
         reason: `requirement capability ${member.capability.name} did not specialize to one nominal`,
-      })
+      }
     },
   })
   return result
@@ -3397,7 +3351,7 @@ export const substitute = (
       self.mode,
       self.schema === undefined
         ? undefined
-        : Object.freeze({
+        : {
             ...self.schema,
             substitution: new Map([
               ...[...self.schema.substitution.entries()].map(
@@ -3412,7 +3366,7 @@ export const substitute = (
                 return replacement === undefined ? [] : ([[key(binder), replacement]] as const)
               }),
             ]),
-          }),
+          },
       self.unsafe,
     )
   if (isEffect(self)) {
@@ -3475,9 +3429,7 @@ export const substituteGenericArgument = (
     if (bound === undefined) return self
     const applied = substitute(bound, substitution, compatibility)
     if (!isCallable(applied) && !isEffect(applied)) return self
-    return representationParameterArgument(
-      Object.freeze({ ...self.parameter, representationBound: applied }),
-    )
+    return representationParameterArgument({ ...self.parameter, representationBound: applied })
   }
   if (isOpaqueRepresentationArgument(self)) {
     const contract = substitute(self.contract, substitution, compatibility)
@@ -3586,11 +3538,11 @@ export function specializeExecutableOwner(
   ): ExecutableSpecializationOwner =>
     sameExecutableOwnerDeclaration(current, owner)
       ? owner
-      : Object.freeze({
+      : {
           declaration: current.declaration,
-          typeArguments: Object.freeze(current.typeArguments.map(specializeArgument)),
+          typeArguments: current.typeArguments.map(specializeArgument),
           staticArgumentKeys: current.staticArgumentKeys,
-        })
+        }
   const specializeArgument = (argument: GenericArgument): GenericArgument => {
     if (Lifetime.isLifetime(argument)) return argument
     if (isUnavailableGenericArgument(argument) || isRepresentationParameterArgument(argument))
@@ -3649,13 +3601,13 @@ export function specializeExecutableOwner(
       return requirementRowArgumentFromRow(
         RowAlgebra.mapConcreteMembers(requirementRowPolicy(), argument.row, (requirement) => {
           const capability = specializeType(requirement.capability)
-          return Object.freeze({
+          return {
             ...requirement,
             capability:
               isNominal(capability) || isParameter(capability)
                 ? capability
                 : requirement.capability,
-          })
+          }
         }),
       )
     return specializeType(argument)
@@ -3710,13 +3662,13 @@ export function specializeExecutableOwner(
           type.requirementRow,
           (requirement) => {
             const capability = specializeType(requirement.capability)
-            return Object.freeze({
+            return {
               ...requirement,
               capability:
                 isNominal(capability) || isParameter(capability)
                   ? capability
                   : requirement.capability,
-            })
+            }
           },
         ),
       )
@@ -3740,19 +3692,18 @@ export function specializeExecutableOwner(
 }
 
 /** Collects every free semantic lifetime without conflating it with a value type parameter. */
-export const freeLifetimes = (self: Type): ReadonlyArray<Lifetime.Lifetime> =>
-  Object.freeze([
-    ...new Map(
-      fold(self, {
-        argument: (argument, inBinderScope) =>
-          Lifetime.isLifetime(argument) &&
-          argument._tag !== 'IntersectionLifetime' &&
-          !inBinderScope(Lifetime.key(argument))
-            ? argument
-            : undefined,
-      }).map((lifetime) => [Lifetime.key(lifetime), lifetime]),
-    ).values(),
-  ])
+export const freeLifetimes = (self: Type): ReadonlyArray<Lifetime.Lifetime> => [
+  ...new Map(
+    fold(self, {
+      argument: (argument, inBinderScope) =>
+        Lifetime.isLifetime(argument) &&
+        argument._tag !== 'IntersectionLifetime' &&
+        !inBinderScope(Lifetime.key(argument))
+          ? argument
+          : undefined,
+    }).map((lifetime) => [Lifetime.key(lifetime), lifetime]),
+  ).values(),
+]
 
 /** Facts guaranteed when an executable value is formed, independent of its invocation binders. */
 export const executableFormationRequirements = (
@@ -3793,35 +3744,34 @@ const representationStorageLifetime = (
     : representationArgumentContract(argument)?.environment
 
 /** Collects retained data validity, keeping executable environments independent of their outcomes. */
-export const storageLifetimes = (self: Type): ReadonlyArray<Lifetime.Lifetime> =>
-  Object.freeze([
-    ...new Map(
-      fold(self, {
-        type: (type) => {
-          if (isCallable(type) || isEffect(type)) return type.environment
-          if (isRepresented(type))
-            return isRepresentationParameterArgument(type.representation.argument) &&
-              type.representation.argument.parameter.staticProperties.includes('Intrinsic.Detached')
-              ? Lifetime.staticLifetime
-              : type.contract.environment
-          if (isParameter(type) && type.representationBound !== undefined)
-            return type.staticProperties.includes('Intrinsic.Detached')
-              ? Lifetime.staticLifetime
-              : type.representationBound.environment
-          return undefined
-        },
-        argument: (argument) => {
-          if (Lifetime.isLifetime(argument)) return argument
-          if (isRepresentationArgument(argument)) return representationStorageLifetime(argument)
-          return undefined
-        },
-        descendArgument: (argument) =>
-          !isRepresentationArgument(argument) && !isHiddenIdentityArgument(argument),
-        descend: (type) =>
-          !isCallable(type) && !isEffect(type) && !isRepresented(type) && !isForeignFunction(type),
-      }).map((lifetime) => [Lifetime.key(lifetime), lifetime]),
-    ).values(),
-  ])
+export const storageLifetimes = (self: Type): ReadonlyArray<Lifetime.Lifetime> => [
+  ...new Map(
+    fold(self, {
+      type: (type) => {
+        if (isCallable(type) || isEffect(type)) return type.environment
+        if (isRepresented(type))
+          return isRepresentationParameterArgument(type.representation.argument) &&
+            type.representation.argument.parameter.staticProperties.includes('Intrinsic.Detached')
+            ? Lifetime.staticLifetime
+            : type.contract.environment
+        if (isParameter(type) && type.representationBound !== undefined)
+          return type.staticProperties.includes('Intrinsic.Detached')
+            ? Lifetime.staticLifetime
+            : type.representationBound.environment
+        return undefined
+      },
+      argument: (argument) => {
+        if (Lifetime.isLifetime(argument)) return argument
+        if (isRepresentationArgument(argument)) return representationStorageLifetime(argument)
+        return undefined
+      },
+      descendArgument: (argument) =>
+        !isRepresentationArgument(argument) && !isHiddenIdentityArgument(argument),
+      descend: (type) =>
+        !isCallable(type) && !isEffect(type) && !isRepresented(type) && !isForeignFunction(type),
+    }).map((lifetime) => [Lifetime.key(lifetime), lifetime]),
+  ).values(),
+]
 
 /** Lists retained type nodes while keeping executable invocation contracts outside storage. */
 export const storageTypes = (self: Type): ReadonlyArray<Type> =>
@@ -3834,31 +3784,29 @@ export const storageTypes = (self: Type): ReadonlyArray<Type> =>
   })
 
 /** Collects unknown stored type parameters, excluding hypothetical executable signatures. */
-export const storageParameters = (self: Type): ReadonlyArray<Parameter> =>
-  Object.freeze([
-    ...new Map(
-      fold(self, {
-        type: (type) =>
-          isParameter(type) && type.kind === 'Value' && type.representationBound === undefined
-            ? type
-            : undefined,
-        descendArgument: (argument) =>
-          !isRepresentationArgument(argument) && !isHiddenIdentityArgument(argument),
-        descend: (type) =>
-          !isCallable(type) && !isEffect(type) && !isRepresented(type) && !isForeignFunction(type),
-      }).map((parameter) => [key(parameter), parameter]),
-    ).values(),
-  ])
+export const storageParameters = (self: Type): ReadonlyArray<Parameter> => [
+  ...new Map(
+    fold(self, {
+      type: (type) =>
+        isParameter(type) && type.kind === 'Value' && type.representationBound === undefined
+          ? type
+          : undefined,
+      descendArgument: (argument) =>
+        !isRepresentationArgument(argument) && !isHiddenIdentityArgument(argument),
+      descend: (type) =>
+        !isCallable(type) && !isEffect(type) && !isRepresented(type) && !isForeignFunction(type),
+    }).map((parameter) => [key(parameter), parameter]),
+  ).values(),
+]
 
 /** Collects all distinct region identities, including locally quantified lifetime binders. */
-export const lifetimes = (self: Type): ReadonlyArray<Lifetime.Lifetime> =>
-  Object.freeze([
-    ...new Map(
-      fold(self, {
-        argument: (argument) => (Lifetime.isLifetime(argument) ? argument : undefined),
-      }).map((lifetime) => [Lifetime.key(lifetime), lifetime]),
-    ).values(),
-  ])
+export const lifetimes = (self: Type): ReadonlyArray<Lifetime.Lifetime> => [
+  ...new Map(
+    fold(self, {
+      argument: (argument) => (Lifetime.isLifetime(argument) ? argument : undefined),
+    }).map((lifetime) => [Lifetime.key(lifetime), lifetime]),
+  ).values(),
+]
 
 /** Substitutes semantic regions using the same canonical keys as generic argument substitution. */
 export const substituteLifetimes = (
@@ -3882,18 +3830,16 @@ export const substituteLifetime = (
 export const normalizeTypeOutlives = (
   bounds: ReadonlyArray<TypeOutlives>,
 ): ReadonlyArray<TypeOutlives> =>
-  Object.freeze(
-    [
-      ...new Map(
-        bounds.map((bound) => [
-          Canonical.record('TypeOutlives', [key(bound.type), Lifetime.key(bound.lifetime)]),
-          Object.freeze({ ...bound }),
-        ]),
-      ).entries(),
-    ]
-      .sort(([left], [right]) => compareText(left, right))
-      .map(([, bound]) => bound),
-  )
+  [
+    ...new Map(
+      bounds.map((bound) => [
+        Canonical.record('TypeOutlives', [key(bound.type), Lifetime.key(bound.lifetime)]),
+        { ...bound },
+      ]),
+    ).entries(),
+  ]
+    .sort(([left], [right]) => compareText(left, right))
+    .map(([, bound]) => bound)
 
 export const typeOutlivesKey = (bounds: ReadonlyArray<TypeOutlives>): string =>
   Canonical.array(
@@ -3935,19 +3881,18 @@ const substituteExecutableLifetimes = (
   self: ExecutableLifetimes,
   substitution: Substitution,
   compatibility?: TypeCompatibility.Context,
-): ExecutableLifetimes =>
-  Object.freeze({
-    environment: substituteLifetime(self.environment, substitution),
-    lifetimeBinders: self.lifetimeBinders,
-    typeOutlives: (self.typeOutlives ?? []).map((bound) => ({
-      type: substitute(bound.type, substitution, compatibility),
-      lifetime: substituteLifetime(bound.lifetime, substitution),
-    })),
-    lifetimeBounds: (self.lifetimeBounds ?? []).map((bound) => ({
-      longer: substituteLifetime(bound.longer, substitution),
-      shorter: substituteLifetime(bound.shorter, substitution),
-    })),
-  })
+): ExecutableLifetimes => ({
+  environment: substituteLifetime(self.environment, substitution),
+  lifetimeBinders: self.lifetimeBinders,
+  typeOutlives: (self.typeOutlives ?? []).map((bound) => ({
+    type: substitute(bound.type, substitution, compatibility),
+    lifetime: substituteLifetime(bound.lifetime, substitution),
+  })),
+  lifetimeBounds: (self.lifetimeBounds ?? []).map((bound) => ({
+    longer: substituteLifetime(bound.longer, substitution),
+    shorter: substituteLifetime(bound.shorter, substitution),
+  })),
+})
 
 export const runtimeArgumentKeys = (self: ReadonlyArray<GenericArgument>): ReadonlyArray<string> =>
   self.flatMap((argument) =>

@@ -47,15 +47,12 @@ export type AdmissionCategory =
 export type Phase = 'Runtime' | 'StaticOnly' | 'Mixed'
 
 /** Canonical deterministic order for residual runtime targets. */
-export const runtimeTargets: ReadonlyArray<Target.Id> = Object.freeze(
-  Target.all.map((target) => target.id),
-)
+export const runtimeTargets: ReadonlyArray<Target.Id> = Target.all.map((target) => target.id)
 
 /** Normalizes an availability set to the compiler-owned target order. */
 export const normalizeRuntimeTargets = (
   targets: ReadonlyArray<Target.Id>,
-): ReadonlyArray<Target.Id> =>
-  Object.freeze(runtimeTargets.filter((target) => targets.includes(target)))
+): ReadonlyArray<Target.Id> => runtimeTargets.filter((target) => targets.includes(target))
 
 /** The elaboration rule selected by an intrinsic operation identity. */
 export type Rule =
@@ -128,17 +125,23 @@ export interface Actor {
   readonly operations: ReadonlyArray<Operation>
 }
 
-const actorId = (name: string): ActorId => Object.freeze({ _tag: 'IntrinsicActorId', name })
+const actorId = (name: string): ActorId => ({ _tag: 'IntrinsicActorId', name })
 
-const operationId = (actor: string, name: string): OperationId =>
-  Object.freeze({ _tag: 'IntrinsicOperationId', actor, name })
+const operationId = (actor: string, name: string): OperationId => ({
+  _tag: 'IntrinsicOperationId',
+  actor,
+  name,
+})
 
-const typeParameter = (name: string): TypeParameter => Object.freeze({ name })
+const typeParameter = (name: string): TypeParameter => ({ name })
 
-const valueParameter = (name: string, type: string): ValueParameter => Object.freeze({ name, type })
+const valueParameter = (name: string, type: string): ValueParameter => ({ name, type })
 
-const staticValueParameter = (name: string, type: string): ValueParameter =>
-  Object.freeze({ name, type, phase: 'Static' })
+const staticValueParameter = (name: string, type: string): ValueParameter => ({
+  name,
+  type,
+  phase: 'Static',
+})
 
 const upperInitial = (value: string): string =>
   `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`
@@ -276,13 +279,13 @@ const builtin = (options: {
         break
     }
   }
-  return Object.freeze({
+  return {
     _tag: 'IntrinsicOperation',
     id: operationId('Intrinsic', spelling),
     spelling,
-    typeParameters: Object.freeze((options.typeParameters ?? []).map(typeParameter)),
-    parameters: Object.freeze(Array.from(options.parameters)),
-    callParameters: Object.freeze(Array.from(options.callParameters ?? options.semanticParameters)),
+    typeParameters: (options.typeParameters ?? []).map(typeParameter),
+    parameters: Array.from(options.parameters),
+    callParameters: Array.from(options.callParameters ?? options.semanticParameters),
     result: options.result,
     unsafe: options.unsafe ?? false,
     phase: 'Runtime',
@@ -291,14 +294,14 @@ const builtin = (options: {
     targets: normalizeRuntimeTargets(options.targets ?? runtimeTargets),
     ...(invariant === undefined ? {} : { invariant }),
 
-    rule: Object.freeze({
+    rule: {
       _tag: 'BuiltinRule',
       operation: options.operation,
-      typeParameters: Object.freeze(Array.from(options.semanticTypeParameters ?? [])),
-      parameters: Object.freeze(Array.from(options.semanticParameters)),
+      typeParameters: Array.from(options.semanticTypeParameters ?? []),
+      parameters: Array.from(options.semanticParameters),
       result: options.semanticResult,
-    }),
-  })
+    },
+  }
 }
 
 export const isBuiltinOperation = (operation: Operation): operation is BuiltinOperation =>
@@ -315,39 +318,38 @@ const contractEffect = (options: {
   readonly targets?: ReadonlyArray<Target.Id>
 }): Operation => {
   const spelling = intrinsicSpelling('Effect', options.name)
-  return Object.freeze({
+  return {
     _tag: 'IntrinsicOperation',
     id: operationId('Intrinsic', spelling),
     spelling,
-    typeParameters: Object.freeze(options.typeParameters.map(typeParameter)),
-    parameters: Object.freeze(Array.from(options.parameters)),
+    typeParameters: options.typeParameters.map(typeParameter),
+    parameters: Array.from(options.parameters),
     result: options.result,
     unsafe: false,
     phase: 'Runtime',
     admission: admission('Effect'),
     consumer: consumer('Effect', options.name),
     targets: normalizeRuntimeTargets(options.targets ?? runtimeTargets),
-    rule: Object.freeze({
+    rule: {
       _tag: 'ContractRule',
       contract: options.contract,
       post: options.post,
       ...(options.providerMode === undefined ? {} : { providerMode: options.providerMode }),
-    }),
-  })
+    },
+  }
 }
 
 const actor = (
   spelling: string,
   kind: Actor['kind'],
   operations: ReadonlyArray<Operation>,
-): Actor =>
-  Object.freeze({
-    _tag: 'IntrinsicActor',
-    id: actorId(spelling),
-    spelling,
-    kind,
-    operations: Object.freeze(Array.from(operations)),
-  })
+): Actor => ({
+  _tag: 'IntrinsicActor',
+  id: actorId(spelling),
+  spelling,
+  kind,
+  operations: Array.from(operations),
+})
 
 // Intrinsic headers quantify their borrowed inputs and retained environments. A call
 // instantiates these declaration-owned regions before validating its selected contract.
@@ -355,9 +357,9 @@ const contractLifetime = (name: string): Lifetime.Bound =>
   Lifetime.bound({ module: 'Intrinsic', name }, 0, 'call')
 
 const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 0, 'T')
-const rawTypeParameters = Object.freeze([rawElement])
+const rawTypeParameters = [rawElement]
 const pointerElement = Type.parameter({ module: 'Intrinsic', name: '$Pointer' }, 0, 'T')
-const pointerTypeParameters = Object.freeze([pointerElement])
+const pointerTypeParameters = [pointerElement]
 const pointerSource = Type.parameter({ module: 'Intrinsic', name: '$PointerQualifiers' }, 0, 'From')
 const pointerDestination = Type.parameter(
   { module: 'Intrinsic', name: '$PointerQualifiers' },
@@ -366,18 +368,18 @@ const pointerDestination = Type.parameter(
 )
 const sharedElement = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 0, 'T')
 const sharedResult = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 1, 'A')
-const sharedTypeParameters = Object.freeze([sharedElement])
-const sharedLifecycleTypeParameters = Object.freeze([sharedElement, sharedResult])
+const sharedTypeParameters = [sharedElement]
+const sharedLifecycleTypeParameters = [sharedElement, sharedResult]
 const sharedAccessLifetime = Lifetime.bound(
   { module: 'Intrinsic', name: 'SharedWithMut.use' },
   0,
   'access',
 )
-const executionPackageOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionPackage' })
+const executionPackageOwner = { module: 'Intrinsic', name: '$ExecutionPackage' }
 const executionResult = Type.parameter(executionPackageOwner, 0, 'A')
 const executionBodyBound = Type.effect(
   executionResult,
-  Object.freeze([]),
+  [],
   { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
   'Take',
 )
@@ -387,19 +389,14 @@ const executionBody = Type.parameter(
   'F',
   'EffectRepresentation',
   executionBodyBound,
-  Object.freeze(['Intrinsic.Detached']),
+  ['Intrinsic.Detached'],
 )
-const executionEndpoint = Type.parameter(
-  executionPackageOwner,
-  2,
-  'O',
-  'Value',
-  undefined,
-  Object.freeze(['Intrinsic.Detached']),
-)
+const executionEndpoint = Type.parameter(executionPackageOwner, 2, 'O', 'Value', undefined, [
+  'Intrinsic.Detached',
+])
 const executionReadyLifetime = contractLifetime('executionReadyBound')
 const executionReadyBound = Type.callable(
-  Object.freeze([Type.reference('Shared', executionEndpoint, executionReadyLifetime)]),
+  [Type.reference('Shared', executionEndpoint, executionReadyLifetime)],
   Type.unit,
   { environment: Lifetime.staticLifetime, lifetimeBinders: [executionReadyLifetime] },
   'Shared',
@@ -410,14 +407,14 @@ const executionReady = Type.parameter(
   'R',
   'CallableRepresentation',
   executionReadyBound,
-  Object.freeze(['Intrinsic.Detached', 'Intrinsic.NonParking']),
+  ['Intrinsic.Detached', 'Intrinsic.NonParking'],
 )
-const executionPackageTypeParameters = Object.freeze([
+const executionPackageTypeParameters = [
   executionResult,
   executionBody,
   executionEndpoint,
   executionReady,
-])
+]
 const representedExecutionBody = Type.represented(
   executionBodyBound,
   executionBodyBound,
@@ -428,11 +425,11 @@ const representedExecutionReady = Type.represented(
   executionReadyBound,
   Type.representationParameterArgument(executionReady),
 )
-const executionDriveOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionDrive' })
+const executionDriveOwner = { module: 'Intrinsic', name: '$ExecutionDrive' }
 const drivenResult = Type.parameter(executionDriveOwner, 0, 'A')
 const driveBranch = Type.parameter(executionDriveOwner, 1, 'D')
 const completionBound = Type.callable(
-  Object.freeze([driveBranch, drivenResult]),
+  [driveBranch, drivenResult],
   Type.unit,
   { environment: contractLifetime('completionBound'), lifetimeBinders: [] },
   'Take',
@@ -443,10 +440,10 @@ const completionCallback = Type.parameter(
   'C',
   'CallableRepresentation',
   completionBound,
-  Object.freeze(['Intrinsic.NonParking']),
+  ['Intrinsic.NonParking'],
 )
 const suspensionBound = Type.callable(
-  Object.freeze([driveBranch, Type.execution(drivenResult)]),
+  [driveBranch, Type.execution(drivenResult)],
   Type.unit,
   { environment: contractLifetime('suspensionBound'), lifetimeBinders: [] },
   'Take',
@@ -457,15 +454,15 @@ const suspensionCallback = Type.parameter(
   'S',
   'CallableRepresentation',
   suspensionBound,
-  Object.freeze(['Intrinsic.NonParking']),
+  ['Intrinsic.NonParking'],
 )
-const executionDriveTypeParameters = Object.freeze([
+const executionDriveTypeParameters = [
   drivenResult,
   driveBranch,
   completionCallback,
   suspensionCallback,
-])
-const executionNotifyOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionNotifyInitial' })
+]
+const executionNotifyOwner = { module: 'Intrinsic', name: '$ExecutionNotifyInitial' }
 const notifiedResult = Type.parameter(executionNotifyOwner, 0, 'A')
 const representedCompletion = Type.represented(
   completionBound,
@@ -477,10 +474,10 @@ const representedSuspension = Type.represented(
   suspensionBound,
   Type.representationParameterArgument(suspensionCallback),
 )
-const parkingOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionPark' })
+const parkingOwner = { module: 'Intrinsic', name: '$ExecutionPark' }
 const registrationGuard = Type.parameter(parkingOwner, 0, 'G')
 const registrationBound = Type.callable(
-  Object.freeze([Type.wake]),
+  [Type.wake],
   registrationGuard,
   { environment: contractLifetime('registrationBound'), lifetimeBinders: [] },
   'Take',
@@ -491,29 +488,29 @@ const registrationCallback = Type.parameter(
   'F',
   'CallableRepresentation',
   registrationBound,
-  Object.freeze(['Intrinsic.NonParking']),
+  ['Intrinsic.NonParking'],
 )
-const parkingTypeParameters = Object.freeze([registrationGuard, registrationCallback])
+const parkingTypeParameters = [registrationGuard, registrationCallback]
 const representedRegistration = Type.represented(
   registrationBound,
   registrationBound,
   Type.representationParameterArgument(registrationCallback),
 )
-const suspensionOwner = Object.freeze({ module: 'silk/core', name: '$EffectSuspend' })
-const observationOwner = Object.freeze({ module: 'Intrinsic', name: '$ObserveDiagnostics' })
+const suspensionOwner = { module: 'silk/core', name: '$EffectSuspend' }
+const observationOwner = { module: 'Intrinsic', name: '$ObserveDiagnostics' }
 const observationState = Type.parameter(observationOwner, 0, 'S')
 const observationSuccess = Type.parameter(observationOwner, 1, 'A')
 const observationRequirement = Type.parameter(observationOwner, 2, 'R', 'RequirementRow')
 const observationBorrow = contractLifetime('observationState')
 const observationCallbackBound = Type.callable(
-  Object.freeze([
+  [
     Type.reference('Exclusive', observationState, observationBorrow),
     'u8',
     'usize',
     'usize',
     Type.string(Lifetime.staticLifetime),
     Type.string(Lifetime.staticLifetime),
-  ]),
+  ],
   'usize',
   { environment: Lifetime.staticLifetime, lifetimeBinders: [observationBorrow] },
   'Shared',
@@ -524,7 +521,7 @@ const observationCallback = Type.parameter(
   'F',
   'CallableRepresentation',
   observationCallbackBound,
-  Object.freeze(['Intrinsic.NonParking']),
+  ['Intrinsic.NonParking'],
 )
 const observedEffect = Type.effectWithRows(
   observationSuccess,
@@ -538,24 +535,20 @@ const observedEffect = Type.effectWithRows(
 const suspensionSuccess = Type.parameter(suspensionOwner, 0, 'A')
 const suspensionFailure = Type.parameter(suspensionOwner, 1, 'E')
 const suspensionRequirement = Type.parameter(suspensionOwner, 2, 'R', 'RequirementRow')
-const suspensionTypeParameters = Object.freeze([
-  suspensionSuccess,
-  suspensionFailure,
-  suspensionRequirement,
-])
-const bindingOwner = Object.freeze({ module: 'silk/core', name: '$BindRequirement' })
+const suspensionTypeParameters = [suspensionSuccess, suspensionFailure, suspensionRequirement]
+const bindingOwner = { module: 'silk/core', name: '$BindRequirement' }
 const bindingSelected = Type.parameter(bindingOwner, 0, 'S', 'RequirementRow')
 const bindingSuccess = Type.parameter(bindingOwner, 1, 'A')
 const bindingProvider = Type.parameter(bindingOwner, 2, 'P')
 const bindingFailure = Type.parameter(bindingOwner, 3, 'E')
 const bindingRequirements = Type.parameter(bindingOwner, 4, 'R', 'RequirementRow')
-const bindingTypeParameters = Object.freeze([
+const bindingTypeParameters = [
   bindingSelected,
   bindingSuccess,
   bindingProvider,
   bindingFailure,
   bindingRequirements,
-])
+]
 const intrinsicContractOrigin = (() => {
   const span = SourceSpan.fromOffsets('$intrinsic-contract', 0, 0)
   if (span === undefined) throw new RangeError('intrinsic contract span is invalid')
@@ -590,8 +583,8 @@ const bindingContract = (mode: Constraint.ProviderMode): CallableContract.Callab
         : [{ longer: contractLifetime('provider'), shorter: contractLifetime('bindingContract') }],
     functionKind: 'Effect',
     binders: bindingTypeParameters,
-    parameters: Object.freeze([
-      Object.freeze({
+    parameters: [
+      {
         type: Type.effectWithRows(
           bindingSuccess,
           bindingFailureRow,
@@ -600,9 +593,9 @@ const bindingContract = (mode: Constraint.ProviderMode): CallableContract.Callab
           bindingRequirementRow,
         ),
         mode: 'Take' as const,
-      }),
-      Object.freeze({ type: provider, mode }),
-    ]),
+      },
+      { type: provider, mode },
+    ],
     result: Type.effectWithRows(
       bindingSuccess,
       bindingFailureRow,
@@ -610,17 +603,17 @@ const bindingContract = (mode: Constraint.ProviderMode): CallableContract.Callab
       'Shared',
       RowAlgebra.without(Type.requirementRowPolicy(), bindingRequirementRow, bindingSelectedRow),
     ),
-    constraints: Object.freeze([
+    constraints: [
       Constraint.providerSelection(
         mode,
         bindingProvider,
         bindingSelectedRow,
         bindingRequirementRow,
       ),
-    ]),
+    ],
   })
 }
-const finalizationOwner = Object.freeze({ module: 'Intrinsic', name: '$FinalizeEffect' })
+const finalizationOwner = { module: 'Intrinsic', name: '$FinalizeEffect' }
 const finalizationSuccess = Type.parameter(finalizationOwner, 0, 'A')
 const finalizationFailure = Type.parameter(finalizationOwner, 1, 'E')
 const finalizationProtectedRequirements = Type.parameter(
@@ -654,10 +647,10 @@ const finalizationEnvironment = {
   environment: contractLifetime('finalizeEffect'),
   lifetimeBinders: [],
 }
-const nonParkingFinalizationOwner = Object.freeze({
+const nonParkingFinalizationOwner = {
   module: 'Intrinsic',
   name: '$FinalizeEffectNonParking',
-})
+}
 const nonParkingFinalizationSuccess = Type.parameter(nonParkingFinalizationOwner, 0, 'A')
 const nonParkingFinalizationFailure = Type.parameter(nonParkingFinalizationOwner, 1, 'E')
 const nonParkingFinalizationProtectedRequirements = Type.parameter(
@@ -691,10 +684,10 @@ const nonParkingFinalizationEnvironment = {
   environment: contractLifetime('finalizeEffectNonParking'),
   lifetimeBinders: [],
 }
-const nonParkingResourceOwner = Object.freeze({
+const nonParkingResourceOwner = {
   module: 'Intrinsic',
   name: '$UseReleaseNonParking',
-})
+}
 const nonParkingResource = Type.parameter(nonParkingResourceOwner, 0, 'Resource')
 const nonParkingResourceSuccess = Type.parameter(nonParkingResourceOwner, 1, 'A')
 const nonParkingResourceFailure = Type.parameter(nonParkingResourceOwner, 2, 'E')
@@ -732,7 +725,7 @@ const nonParkingResourceAccess = Lifetime.bound(
   'access',
 )
 const nonParkingResourceUse = Type.callable(
-  Object.freeze([Type.reference('Exclusive', nonParkingResource, nonParkingResourceAccess)]),
+  [Type.reference('Exclusive', nonParkingResource, nonParkingResourceAccess)],
   Type.effectWithRows(
     nonParkingResourceSuccess,
     nonParkingResourceFailureRow,
@@ -747,7 +740,7 @@ const nonParkingResourceUse = Type.callable(
   'Take',
 )
 const nonParkingResourceRelease = Type.callable(
-  Object.freeze([Type.reference('Exclusive', nonParkingResource, nonParkingResourceAccess)]),
+  [Type.reference('Exclusive', nonParkingResource, nonParkingResourceAccess)],
   Type.effectWithRows(
     Type.unit,
     RowAlgebra.concrete(Type.failureRowPolicy(), []),
@@ -761,7 +754,7 @@ const nonParkingResourceRelease = Type.callable(
   { environment: nonParkingResourceEnvironment, lifetimeBinders: [nonParkingResourceAccess] },
   'Take',
 )
-const catchOwner = Object.freeze({ module: 'silk/core', name: '$CatchFailure' })
+const catchOwner = { module: 'silk/core', name: '$CatchFailure' }
 const catchSelected = Type.parameter(catchOwner, 0, 'S')
 const catchSuccess = Type.parameter(catchOwner, 1, 'A')
 const catchHandlerSuccess = Type.parameter(catchOwner, 2, 'B')
@@ -769,7 +762,7 @@ const catchProtectedFailure = Type.parameter(catchOwner, 3, 'E')
 const catchHandlerFailure = Type.parameter(catchOwner, 4, 'F')
 const catchProtectedRequirements = Type.parameter(catchOwner, 5, 'R', 'RequirementRow')
 const catchHandlerRequirements = Type.parameter(catchOwner, 6, 'Q', 'RequirementRow')
-const catchTypeParameters = Object.freeze([
+const catchTypeParameters = [
   catchSelected,
   catchSuccess,
   catchHandlerSuccess,
@@ -777,7 +770,7 @@ const catchTypeParameters = Object.freeze([
   catchHandlerFailure,
   catchProtectedRequirements,
   catchHandlerRequirements,
-])
+]
 const catchProtectedFailureRow = RowAlgebra.singleton(
   Type.failureRowPolicy(),
   Type.failureMemberShape(catchProtectedFailure),
@@ -821,8 +814,8 @@ const catchContract = CallableContract.make({
   lifetimeBinders: [],
   functionKind: 'Effect',
   binders: catchTypeParameters,
-  parameters: Object.freeze([
-    Object.freeze({
+  parameters: [
+    {
       type: Type.effectWithRows(
         catchSuccess,
         catchProtectedFailureRow,
@@ -831,10 +824,10 @@ const catchContract = CallableContract.make({
         catchProtectedRequirementRow,
       ),
       mode: 'Take' as const,
-    }),
-    Object.freeze({
+    },
+    {
       type: Type.callable(
-        Object.freeze([catchSelected]),
+        [catchSelected],
         Type.effectWithRows(
           catchHandlerSuccess,
           catchHandlerFailureRow,
@@ -846,8 +839,8 @@ const catchContract = CallableContract.make({
         'Take',
       ),
       mode: 'Take' as const,
-    }),
-  ]),
+    },
+  ],
   result: Type.effectWithRows(
     catchJoinedSuccess.type,
     RowAlgebra.union(
@@ -863,9 +856,7 @@ const catchContract = CallableContract.make({
       catchHandlerRequirementRow,
     ),
   ),
-  constraints: Object.freeze([
-    Constraint.failureSubset(catchSelectedRow, catchProtectedFailureRow),
-  ]),
+  constraints: [Constraint.failureSubset(catchSelectedRow, catchProtectedFailureRow)],
 })
 const byteSlice = Type.slice('Shared', 'u8', contractLifetime('byteSlice'))
 const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Operation => {
@@ -886,66 +877,62 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
       break
   }
   const checked = operation.result === 'OptionSelf' || operation.result === 'OptionTarget'
-  const carrierOwner = Object.freeze({
+  const carrierOwner = {
     module: 'Intrinsic',
     name: `$${scalar.spelling}.${operation.spelling}`,
-  })
+  }
   const carrierResult = Type.parameter(carrierOwner, 0, 'R')
   const result = checked ? 'R' : concreteResult
   const semanticResult = checked ? carrierResult : concreteResult
-  const parameterNames =
-    operation.arity === 1 ? Object.freeze(['value']) : Object.freeze(['left', 'right'])
-  const semanticParameters =
-    operation.parameters ?? Object.freeze(parameterNames.map(() => scalar.spelling))
+  const parameterNames = operation.arity === 1 ? ['value'] : ['left', 'right']
+  const semanticParameters = operation.parameters ?? parameterNames.map(() => scalar.spelling)
   const borrowed = operation.code === 'LessThan'
   const contractParameters = borrowed
-    ? Object.freeze(
-        semanticParameters.map((type) =>
-          Type.reference('Shared', type, contractLifetime('contractParameters')),
-        ),
+    ? semanticParameters.map((type) =>
+        Type.reference('Shared', type, contractLifetime('contractParameters')),
       )
     : semanticParameters
   const carrierParameters = checked
-    ? Object.freeze([
+    ? [
         valueParameter('present', `once fn(${concreteResult}) -> R`),
         valueParameter('absent', 'once fn() -> R'),
-      ])
-    : Object.freeze([])
+      ]
+    : []
   const semanticCarrierParameters = checked
-    ? Object.freeze([
+    ? [
         Type.callable(
-          Object.freeze([concreteResult]),
+          [concreteResult],
           carrierResult,
           { environment: contractLifetime('semanticCarrierParameters'), lifetimeBinders: [] },
           'Take',
         ),
         Type.callable(
-          Object.freeze([]),
+          [],
           carrierResult,
           { environment: contractLifetime('semanticCarrierParameters'), lifetimeBinders: [] },
           'Take',
         ),
-      ])
-    : Object.freeze([])
+      ]
+    : []
   return builtin({
     actor: scalar.spelling,
     name: operation.spelling,
     operation: operation.code,
     ...(checked
       ? {
-          typeParameters: Object.freeze(['R']),
-          semanticTypeParameters: Object.freeze([carrierResult]),
+          typeParameters: ['R'],
+          semanticTypeParameters: [carrierResult],
         }
       : {}),
-    parameters: Object.freeze([
+    parameters: [
       ...parameterNames.map((name, ordinal) => {
         const type = semanticParameters.at(ordinal) ?? scalar.spelling
         return valueParameter(name, borrowed ? `&${type}` : type)
       }),
       ...carrierParameters,
-    ]),
-    semanticParameters: Object.freeze([...semanticParameters, ...semanticCarrierParameters]),
-    callParameters: Object.freeze([...contractParameters, ...semanticCarrierParameters]),
+    ],
+    semanticParameters: [...semanticParameters, ...semanticCarrierParameters],
+    callParameters: [...contractParameters, ...semanticCarrierParameters],
     result,
     semanticResult,
   })
@@ -954,27 +941,27 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
 const scalarOperations = (scalar: Scalar.Scalar): ReadonlyArray<Operation> =>
   scalar.operations.map((operation) => scalarOperation(scalar, operation))
 
-const stringOperations = Object.freeze([
-  Object.freeze({
+const stringOperations = [
+  {
     ...builtin({
       actor: 'string',
       name: 'fromUtf8Unchecked',
       operation: 'StringFromUtf8Unchecked',
-      parameters: Object.freeze([valueParameter('bytes', '&[u8]')]),
-      semanticParameters: Object.freeze([byteSlice]),
+      parameters: [valueParameter('bytes', '&[u8]')],
+      semanticParameters: [byteSlice],
       result: 'string',
       semanticResult: Type.string(byteSlice.lifetime),
       unsafe: true,
     }),
     invariant:
       'bytes remain live and immutable for the returned view lifetime and contain complete valid UTF-8',
-  }),
+  },
   builtin({
     actor: 'string',
     name: 'utf8Bytes',
     operation: 'StringUtf8Bytes',
-    parameters: Object.freeze([valueParameter('value', 'string')]),
-    semanticParameters: Object.freeze([Type.string(byteSlice.lifetime)]),
+    parameters: [valueParameter('value', 'string')],
+    semanticParameters: [Type.string(byteSlice.lifetime)],
     result: '&[u8]',
     semanticResult: byteSlice,
   }),
@@ -982,8 +969,8 @@ const stringOperations = Object.freeze([
     actor: 'string',
     name: 'byteLength',
     operation: 'StringByteLength',
-    parameters: Object.freeze([valueParameter('value', 'string')]),
-    semanticParameters: Object.freeze([Type.string(contractLifetime('byteLength'))]),
+    parameters: [valueParameter('value', 'string')],
+    semanticParameters: [Type.string(contractLifetime('byteLength'))],
     result: 'usize',
     semanticResult: 'usize',
   }),
@@ -991,80 +978,71 @@ const stringOperations = Object.freeze([
     actor: 'string',
     name: 'equalsExact',
     operation: 'StringEqualsExact',
-    parameters: Object.freeze([
-      valueParameter('left', 'string'),
-      valueParameter('right', 'string'),
-    ]),
-    semanticParameters: Object.freeze([
+    parameters: [valueParameter('left', 'string'), valueParameter('right', 'string')],
+    semanticParameters: [
       Type.string(contractLifetime('equalsExact')),
       Type.string(contractLifetime('equalsExact')),
-    ]),
+    ],
     result: 'bool',
     semanticResult: 'bool',
   }),
-])
+]
 
-const stringActor = actor('string', 'Type', Object.freeze([]))
+const stringActor = actor('string', 'Type', [])
 
-const profileOperations: ReadonlyArray<Operation> = Object.freeze(
-  [
-    ...[
-      'targetArchitecture',
-      'targetOperatingSystem',
-      'targetAbi',
-      'targetObjectFormat',
-      'targetEndianness',
-    ].map((name) => ({
-      name,
-      result: "string<'static>",
-      type: Type.string(Lifetime.staticLifetime),
-      arguments: [],
-    })),
-    ...['targetPointerBits', 'targetPointerAlignment'].map((name) => ({
-      name,
-      result: 'u32',
-      type: 'u32' as const,
-      arguments: [],
-    })),
-    {
-      name: 'profileText',
-      result: "string<'static>",
-      type: Type.string(Lifetime.staticLifetime),
-      arguments: ['key'],
-    },
-    { name: 'profileFlag', result: 'bool', type: 'bool' as const, arguments: ['key'] },
-    { name: 'profileContains', result: 'bool', type: 'bool' as const, arguments: ['key', 'value'] },
-  ].map((operation): Operation =>
-    Object.freeze({
-      _tag: 'IntrinsicOperation',
-      id: operationId('Intrinsic', operation.name),
-      spelling: operation.name,
-      typeParameters: Object.freeze([]),
-      parameters: Object.freeze(
-        operation.arguments.map((name) => valueParameter(name, "string<'static>")),
-      ),
-      result: operation.result,
-      unsafe: false,
-      phase: 'StaticOnly',
-      admission: 'Language',
-      consumer: `silk/target.${operation.name}`,
-      targets: Object.freeze([]),
-      rule: Object.freeze({
-        _tag: 'StaticOnlyRule',
-        contract: CallableContract.make({
-          environment: Lifetime.staticLifetime,
-          lifetimeBinders: [],
-          functionKind: 'Function',
-          parameters: operation.arguments.map(() => ({
-            type: Type.string(Lifetime.staticLifetime),
-            mode: 'Value',
-          })),
-          result: operation.type,
-        }),
-      }),
+const profileOperations: ReadonlyArray<Operation> = [
+  ...[
+    'targetArchitecture',
+    'targetOperatingSystem',
+    'targetAbi',
+    'targetObjectFormat',
+    'targetEndianness',
+  ].map((name) => ({
+    name,
+    result: "string<'static>",
+    type: Type.string(Lifetime.staticLifetime),
+    arguments: [],
+  })),
+  ...['targetPointerBits', 'targetPointerAlignment'].map((name) => ({
+    name,
+    result: 'u32',
+    type: 'u32' as const,
+    arguments: [],
+  })),
+  {
+    name: 'profileText',
+    result: "string<'static>",
+    type: Type.string(Lifetime.staticLifetime),
+    arguments: ['key'],
+  },
+  { name: 'profileFlag', result: 'bool', type: 'bool' as const, arguments: ['key'] },
+  { name: 'profileContains', result: 'bool', type: 'bool' as const, arguments: ['key', 'value'] },
+].map((operation): Operation => ({
+  _tag: 'IntrinsicOperation',
+  id: operationId('Intrinsic', operation.name),
+  spelling: operation.name,
+  typeParameters: [],
+  parameters: operation.arguments.map((name) => valueParameter(name, "string<'static>")),
+  result: operation.result,
+  unsafe: false,
+  phase: 'StaticOnly',
+  admission: 'Language',
+  consumer: `silk/target.${operation.name}`,
+  targets: [],
+  rule: {
+    _tag: 'StaticOnlyRule',
+    contract: CallableContract.make({
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+      functionKind: 'Function',
+      parameters: operation.arguments.map(() => ({
+        type: Type.string(Lifetime.staticLifetime),
+        mode: 'Value',
+      })),
+      result: operation.type,
     }),
-  ),
-)
+  },
+}))
 
 const staticTextOperation = (
   name: string,
@@ -1072,70 +1050,67 @@ const staticTextOperation = (
   semanticParameters: ReadonlyArray<Type.Type>,
   result: string,
   semanticResult: Type.Type,
-): Operation =>
-  Object.freeze({
-    _tag: 'IntrinsicOperation',
-    id: operationId('Intrinsic', name),
-    spelling: name,
-    typeParameters: Object.freeze([]),
-    parameters,
-    result,
-    unsafe: false,
-    phase: 'StaticOnly',
-    admission: 'Language',
-    consumer: `silk/static_text.${name.replace('staticText', '').replace(/^./, (value) => value.toLowerCase())}`,
-    targets: Object.freeze([]),
-    rule: Object.freeze({
-      _tag: 'StaticOnlyRule',
-      contract: CallableContract.make({
-        environment: Lifetime.staticLifetime,
-        lifetimeBinders: [],
-        functionKind: 'Function',
-        parameters: semanticParameters.map((type) =>
-          Object.freeze({ type, mode: 'Value' as const }),
-        ),
-        result: semanticResult,
-      }),
+): Operation => ({
+  _tag: 'IntrinsicOperation',
+  id: operationId('Intrinsic', name),
+  spelling: name,
+  typeParameters: [],
+  parameters,
+  result,
+  unsafe: false,
+  phase: 'StaticOnly',
+  admission: 'Language',
+  consumer: `silk/static_text.${name.replace('staticText', '').replace(/^./, (value) => value.toLowerCase())}`,
+  targets: [],
+  rule: {
+    _tag: 'StaticOnlyRule',
+    contract: CallableContract.make({
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+      functionKind: 'Function',
+      parameters: semanticParameters.map((type) => ({ type, mode: 'Value' as const })),
+      result: semanticResult,
     }),
-  })
+  },
+})
 
-const staticTextOperations = Object.freeze([
+const staticTextOperations = [
   staticTextOperation(
     'staticTextByteLength',
-    Object.freeze([valueParameter('value', 'string')]),
-    Object.freeze([Type.string(contractLifetime('staticTextOperations'))]),
+    [valueParameter('value', 'string')],
+    [Type.string(contractLifetime('staticTextOperations'))],
     'usize',
     'usize',
   ),
   staticTextOperation(
     'staticTextByteAt',
-    Object.freeze([valueParameter('value', 'string'), valueParameter('index', 'usize')]),
-    Object.freeze([Type.string(contractLifetime('staticTextOperations')), 'usize']),
+    [valueParameter('value', 'string'), valueParameter('index', 'usize')],
+    [Type.string(contractLifetime('staticTextOperations')), 'usize'],
     'u8',
     'u8',
   ),
   staticTextOperation(
     'staticTextConcat',
-    Object.freeze([valueParameter('left', 'string'), valueParameter('right', 'string')]),
-    Object.freeze([
+    [valueParameter('left', 'string'), valueParameter('right', 'string')],
+    [
       Type.string(contractLifetime('staticTextOperations')),
       Type.string(contractLifetime('staticTextOperations')),
-    ]),
+    ],
     'string',
     Type.string(Lifetime.staticLifetime),
   ),
   staticTextOperation(
     'staticTextSlice',
-    Object.freeze([
+    [
       valueParameter('value', 'string'),
       valueParameter('start', 'usize'),
       valueParameter('end', 'usize'),
-    ]),
-    Object.freeze([Type.string(contractLifetime('staticTextOperations')), 'usize', 'usize']),
+    ],
+    [Type.string(contractLifetime('staticTextOperations')), 'usize', 'usize'],
     'string',
     Type.string(Lifetime.staticLifetime),
   ),
-])
+]
 
 const staticGenericOperation = (input: {
   readonly name: string
@@ -1145,35 +1120,30 @@ const staticGenericOperation = (input: {
   readonly result: string
   readonly semanticResult: Type.Type
   readonly consumer: string
-}): Operation =>
-  Object.freeze({
-    _tag: 'IntrinsicOperation',
-    id: operationId('Intrinsic', input.name),
-    spelling: input.name,
-    typeParameters: Object.freeze(
-      input.typeParameters.map((parameter) => typeParameter(parameter.name)),
-    ),
-    parameters: input.parameters,
-    result: input.result,
-    unsafe: false,
-    phase: 'StaticOnly',
-    admission: 'Language',
-    consumer: input.consumer,
-    targets: Object.freeze([]),
-    rule: Object.freeze({
-      _tag: 'StaticOnlyRule',
-      contract: CallableContract.make({
-        environment: Lifetime.staticLifetime,
-        lifetimeBinders: [],
-        functionKind: 'Function',
-        binders: input.typeParameters,
-        parameters: input.semanticParameters.map((type) =>
-          Object.freeze({ type, mode: 'Value' as const }),
-        ),
-        result: input.semanticResult,
-      }),
+}): Operation => ({
+  _tag: 'IntrinsicOperation',
+  id: operationId('Intrinsic', input.name),
+  spelling: input.name,
+  typeParameters: input.typeParameters.map((parameter) => typeParameter(parameter.name)),
+  parameters: input.parameters,
+  result: input.result,
+  unsafe: false,
+  phase: 'StaticOnly',
+  admission: 'Language',
+  consumer: input.consumer,
+  targets: [],
+  rule: {
+    _tag: 'StaticOnlyRule',
+    contract: CallableContract.make({
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+      functionKind: 'Function',
+      binders: input.typeParameters,
+      parameters: input.semanticParameters.map((type) => ({ type, mode: 'Value' as const })),
+      result: input.semanticResult,
     }),
-  })
+  },
+})
 
 const reflectionOwner = Type.parameter({ module: 'Intrinsic', name: 'reflect' }, 0, 'Owner')
 const reflectionValue = Type.parameter({ module: 'Intrinsic', name: 'reflect' }, 1, 'Value')
@@ -1186,228 +1156,226 @@ const sequenceElement = Type.parameter(
 )
 const testCallable = Type.parameter({ module: 'Intrinsic', name: 'test' }, 0, 'F')
 
-const reflectionOperations = Object.freeze([
+const reflectionOperations = [
   staticGenericOperation({
     name: 'reflectType',
-    typeParameters: Object.freeze([reflectionOwner]),
-    parameters: Object.freeze([]),
-    semanticParameters: Object.freeze([]),
+    typeParameters: [reflectionOwner],
+    parameters: [],
+    semanticParameters: [],
     result: 'Type<Owner>',
     semanticResult: Type.typeDescriptor(reflectionOwner),
     consumer: 'silk/reflect.type',
   }),
   staticGenericOperation({
     name: 'reflectFields',
-    typeParameters: Object.freeze([reflectionOwner]),
-    parameters: Object.freeze([]),
-    semanticParameters: Object.freeze([]),
+    typeParameters: [reflectionOwner],
+    parameters: [],
+    semanticParameters: [],
     result: 'Fields<Owner>',
     semanticResult: Type.fieldsDescriptor(reflectionOwner),
     consumer: 'silk/reflect.fields',
   }),
   staticGenericOperation({
     name: 'reflectTypeKind',
-    typeParameters: Object.freeze([reflectionOwner]),
-    parameters: Object.freeze([valueParameter('descriptor', 'Type<Owner>')]),
-    semanticParameters: Object.freeze([Type.typeDescriptor(reflectionOwner)]),
+    typeParameters: [reflectionOwner],
+    parameters: [valueParameter('descriptor', 'Type<Owner>')],
+    semanticParameters: [Type.typeDescriptor(reflectionOwner)],
     result: 'u8',
     semanticResult: 'u8',
     consumer: 'silk/reflect.typeKind',
   }),
   staticGenericOperation({
     name: 'reflectFieldKind',
-    typeParameters: Object.freeze([reflectionOwner, reflectionValue]),
-    parameters: Object.freeze([valueParameter('field', 'Field<Owner, Value>')]),
-    semanticParameters: Object.freeze([Type.fieldDescriptor(reflectionOwner, reflectionValue)]),
+    typeParameters: [reflectionOwner, reflectionValue],
+    parameters: [valueParameter('field', 'Field<Owner, Value>')],
+    semanticParameters: [Type.fieldDescriptor(reflectionOwner, reflectionValue)],
     result: 'u8',
     semanticResult: 'u8',
     consumer: 'silk/reflect.fieldKind',
   }),
   staticGenericOperation({
     name: 'reflectFieldLabel',
-    typeParameters: Object.freeze([reflectionOwner, reflectionValue]),
-    parameters: Object.freeze([valueParameter('field', 'Field<Owner, Value>')]),
-    semanticParameters: Object.freeze([Type.fieldDescriptor(reflectionOwner, reflectionValue)]),
+    typeParameters: [reflectionOwner, reflectionValue],
+    parameters: [valueParameter('field', 'Field<Owner, Value>')],
+    semanticParameters: [Type.fieldDescriptor(reflectionOwner, reflectionValue)],
     result: 'string',
     semanticResult: Type.string(contractLifetime('reflectFieldLabel')),
     consumer: 'silk/reflect.fieldLabel',
   }),
   staticGenericOperation({
     name: 'reflectFieldOrdinal',
-    typeParameters: Object.freeze([reflectionOwner, reflectionValue]),
-    parameters: Object.freeze([valueParameter('field', 'Field<Owner, Value>')]),
-    semanticParameters: Object.freeze([Type.fieldDescriptor(reflectionOwner, reflectionValue)]),
+    typeParameters: [reflectionOwner, reflectionValue],
+    parameters: [valueParameter('field', 'Field<Owner, Value>')],
+    semanticParameters: [Type.fieldDescriptor(reflectionOwner, reflectionValue)],
     result: 'usize',
     semanticResult: 'usize',
     consumer: 'silk/reflect.fieldOrdinal',
   }),
-])
+]
 
-const borrowFieldOperation: Operation = Object.freeze({
+const borrowFieldOperation: Operation = {
   _tag: 'IntrinsicOperation',
   id: operationId('Intrinsic', 'borrowField'),
   spelling: 'borrowField',
-  typeParameters: Object.freeze([typeParameter('Owner'), typeParameter('Value')]),
-  parameters: Object.freeze([
+  typeParameters: [typeParameter('Owner'), typeParameter('Value')],
+  parameters: [
     valueParameter('owner', '&Owner'),
     staticValueParameter('field', 'Field<Owner, Value>'),
-  ]),
+  ],
   result: '&Value',
   unsafe: false,
   phase: 'Mixed',
   admission: 'Language',
   consumer: 'silk/reflect.borrowField',
-  targets: Object.freeze([]),
+  targets: [],
 
-  rule: Object.freeze({
+  rule: {
     _tag: 'MixedFieldProjectionRule',
     contract: CallableContract.make({
       environment: Lifetime.staticLifetime,
       lifetimeBinders: [],
       functionKind: 'Function',
-      binders: Object.freeze([projectionOwner, projectionValue]),
-      parameters: Object.freeze([
-        Object.freeze({
+      binders: [projectionOwner, projectionValue],
+      parameters: [
+        {
           type: Type.reference('Shared', projectionOwner, contractLifetime('borrowFieldOperation')),
           mode: 'Value',
-        }),
-        Object.freeze({
+        },
+        {
           type: Type.fieldDescriptor(projectionOwner, projectionValue),
           mode: 'Value',
-        }),
-      ]),
+        },
+      ],
       result: Type.reference('Shared', projectionValue, contractLifetime('borrowFieldOperation')),
     }),
     runtimeOwnerParameter: 0,
     staticDescriptorParameter: 1,
-  }),
-})
+  },
+}
 
-const testOperations: ReadonlyArray<Operation> = Object.freeze([
-  Object.freeze({
+const testOperations: ReadonlyArray<Operation> = [
+  {
     _tag: 'IntrinsicOperation',
     id: operationId('Intrinsic', 'tests'),
     spelling: 'tests',
-    typeParameters: Object.freeze([]),
-    parameters: Object.freeze([]),
+    typeParameters: [],
+    parameters: [],
     result: 'Tests',
     unsafe: false,
     phase: 'StaticOnly',
     admission: 'Language',
     consumer: 'language:test-discovery',
-    targets: Object.freeze([]),
-    rule: Object.freeze({
+    targets: [],
+    rule: {
       _tag: 'StaticOnlyRule',
       contract: CallableContract.make({
         environment: Lifetime.staticLifetime,
         lifetimeBinders: [],
         functionKind: 'Function',
-        parameters: Object.freeze([]),
+        parameters: [],
         result: Type.testCatalog,
       }),
-    }),
-  }),
+    },
+  },
   staticGenericOperation({
     name: 'testInfo',
-    typeParameters: Object.freeze([testCallable]),
-    parameters: Object.freeze([valueParameter('descriptor', 'Test<F>')]),
-    semanticParameters: Object.freeze([Type.testDescriptor(testCallable)]),
+    typeParameters: [testCallable],
+    parameters: [valueParameter('descriptor', 'Test<F>')],
+    semanticParameters: [Type.testDescriptor(testCallable)],
     result: 'TestInfo',
     semanticResult: Type.testInfo,
     consumer: 'language:test-discovery',
   }),
-  Object.freeze({
+  {
     _tag: 'IntrinsicOperation',
     id: operationId('Intrinsic', 'testFunction'),
     spelling: 'testFunction',
-    typeParameters: Object.freeze([typeParameter('F')]),
-    parameters: Object.freeze([staticValueParameter('descriptor', 'Test<F>')]),
+    typeParameters: [typeParameter('F')],
+    parameters: [staticValueParameter('descriptor', 'Test<F>')],
     result: 'F',
     unsafe: false,
     phase: 'Mixed',
     admission: 'Language',
     consumer: 'language:test-discovery',
-    targets: Object.freeze([]),
-    rule: Object.freeze({
+    targets: [],
+    rule: {
       _tag: 'MixedTestFunctionRule',
       contract: CallableContract.make({
         environment: Lifetime.staticLifetime,
         lifetimeBinders: [],
         functionKind: 'Function',
-        binders: Object.freeze([testCallable]),
-        parameters: Object.freeze([
-          Object.freeze({ type: Type.testDescriptor(testCallable), mode: 'Value' as const }),
-        ]),
+        binders: [testCallable],
+        parameters: [{ type: Type.testDescriptor(testCallable), mode: 'Value' as const }],
         result: testCallable,
       }),
       staticDescriptorParameter: 0,
-    }),
-  }),
-])
+    },
+  },
+]
 
-const staticSequenceOperations = Object.freeze([
+const staticSequenceOperations = [
   staticGenericOperation({
     name: 'staticSequenceEmpty',
-    typeParameters: Object.freeze([sequenceElement]),
-    parameters: Object.freeze([]),
-    semanticParameters: Object.freeze([]),
+    typeParameters: [sequenceElement],
+    parameters: [],
+    semanticParameters: [],
     result: 'StaticSequence<Element>',
     semanticResult: Type.staticSequence(sequenceElement),
     consumer: 'silk/static_sequence.empty',
   }),
   staticGenericOperation({
     name: 'staticSequenceAppend',
-    typeParameters: Object.freeze([sequenceElement]),
-    parameters: Object.freeze([
+    typeParameters: [sequenceElement],
+    parameters: [
       valueParameter('self', 'StaticSequence<Element>'),
       valueParameter('value', 'Element'),
-    ]),
-    semanticParameters: Object.freeze([Type.staticSequence(sequenceElement), sequenceElement]),
+    ],
+    semanticParameters: [Type.staticSequence(sequenceElement), sequenceElement],
     result: 'StaticSequence<Element>',
     semanticResult: Type.staticSequence(sequenceElement),
     consumer: 'silk/static_sequence.append',
   }),
   staticGenericOperation({
     name: 'staticSequenceConcat',
-    typeParameters: Object.freeze([sequenceElement]),
-    parameters: Object.freeze([
+    typeParameters: [sequenceElement],
+    parameters: [
       valueParameter('left', 'StaticSequence<Element>'),
       valueParameter('right', 'StaticSequence<Element>'),
-    ]),
-    semanticParameters: Object.freeze([
+    ],
+    semanticParameters: [
       Type.staticSequence(sequenceElement),
       Type.staticSequence(sequenceElement),
-    ]),
+    ],
     result: 'StaticSequence<Element>',
     semanticResult: Type.staticSequence(sequenceElement),
     consumer: 'silk/static_sequence.concat',
   }),
   staticGenericOperation({
     name: 'staticSequenceLength',
-    typeParameters: Object.freeze([sequenceElement]),
-    parameters: Object.freeze([valueParameter('self', 'StaticSequence<Element>')]),
-    semanticParameters: Object.freeze([Type.staticSequence(sequenceElement)]),
+    typeParameters: [sequenceElement],
+    parameters: [valueParameter('self', 'StaticSequence<Element>')],
+    semanticParameters: [Type.staticSequence(sequenceElement)],
     result: 'usize',
     semanticResult: 'usize',
     consumer: 'silk/static_sequence.length',
   }),
   staticGenericOperation({
     name: 'staticSequenceAt',
-    typeParameters: Object.freeze([sequenceElement]),
-    parameters: Object.freeze([
+    typeParameters: [sequenceElement],
+    parameters: [
       valueParameter('self', 'StaticSequence<Element>'),
       valueParameter('index', 'usize'),
-    ]),
-    semanticParameters: Object.freeze([Type.staticSequence(sequenceElement), 'usize']),
+    ],
+    semanticParameters: [Type.staticSequence(sequenceElement), 'usize'],
     result: 'Element',
     semanticResult: sequenceElement,
     consumer: 'silk/static_sequence.at',
   }),
-])
+]
 
 const assemblyResult = Type.parameter({ module: 'Intrinsic', name: 'assembly' }, 0, 'Result')
 const assemblyInputs = Type.parameter({ module: 'Intrinsic', name: 'assembly' }, 1, 'Inputs')
-const assemblyParameters = Object.freeze([
+const assemblyParameters = [
   Type.string(Lifetime.staticLifetime),
   Type.string(Lifetime.staticLifetime),
   Type.string(Lifetime.staticLifetime),
@@ -1415,13 +1383,13 @@ const assemblyParameters = Object.freeze([
   'bool',
   'bool',
   assemblyInputs,
-] satisfies ReadonlyArray<Type.Type>)
-const assemblyOperation: BuiltinOperation = Object.freeze({
+] satisfies ReadonlyArray<Type.Type>
+const assemblyOperation: BuiltinOperation = {
   _tag: 'IntrinsicOperation',
   id: operationId('Intrinsic', 'assembly'),
   spelling: 'assembly',
-  typeParameters: Object.freeze([typeParameter('Result')]),
-  parameters: Object.freeze([
+  typeParameters: [typeParameter('Result')],
+  parameters: [
     staticValueParameter('template', 'string'),
     staticValueParameter('constraints', 'string'),
     staticValueParameter('clobbers', 'string'),
@@ -1429,7 +1397,7 @@ const assemblyOperation: BuiltinOperation = Object.freeze({
     staticValueParameter('sideEffects', 'bool'),
     staticValueParameter('noReturn', 'bool'),
     valueParameter('inputs', 'Inputs'),
-  ]),
+  ],
   callParameters: assemblyParameters,
   result: 'Result',
   unsafe: true,
@@ -1439,678 +1407,690 @@ const assemblyOperation: BuiltinOperation = Object.freeze({
   invariant:
     'caller proves machine effects, register and stack preservation, pointer validity, and absence of unwinding',
   targets: normalizeRuntimeTargets(['aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu']),
-  rule: Object.freeze({
+  rule: {
     _tag: 'BuiltinRule',
     operation: 'NativeAssembly',
-    typeParameters: Object.freeze([assemblyResult]),
+    typeParameters: [assemblyResult],
     parameters: assemblyParameters,
     result: assemblyResult,
-  }),
-})
+  },
+}
 
-const enumValueOperation: Operation = Object.freeze({
+const enumValueOperation: Operation = {
   _tag: 'IntrinsicOperation',
   id: operationId('Intrinsic', 'enumValue'),
   spelling: 'enumValue',
-  typeParameters: Object.freeze([]),
-  parameters: Object.freeze([valueParameter('value', '<owning enum>')]),
+  typeParameters: [],
+  parameters: [valueParameter('value', '<owning enum>')],
   result: '<owning enum representation>',
   unsafe: false,
   phase: 'Runtime',
   admission: 'Representation',
   consumer: 'language:scalar-enum-value',
   targets: runtimeTargets,
-  rule: Object.freeze({ _tag: 'EnumValueRule' }),
-})
+  rule: { _tag: 'EnumValueRule' },
+}
 
-const replaceOperation: Operation = Object.freeze({
+const replaceOperation: Operation = {
   _tag: 'IntrinsicOperation',
   id: operationId('Intrinsic', 'replace'),
   spelling: 'replace',
-  typeParameters: Object.freeze([typeParameter('T')]),
-  parameters: Object.freeze([valueParameter('place', '&mut T'), valueParameter('value', 'T')]),
+  typeParameters: [typeParameter('T')],
+  parameters: [valueParameter('place', '&mut T'), valueParameter('value', 'T')],
   result: 'T',
   unsafe: false,
   phase: 'Runtime',
   admission: admission('Place'),
   consumer: consumer('Place', 'replace'),
   targets: runtimeTargets,
-  rule: Object.freeze({ _tag: 'PlaceRule', operation: 'Replace' }),
-})
+  rule: { _tag: 'PlaceRule', operation: 'Replace' },
+}
 
-const intrinsicOperations = Object.freeze([
+const intrinsicOperations = [
   ...Scalar.all().flatMap(scalarOperations),
   ...stringOperations,
   builtin({
     actor: 'Slice',
     name: 'view',
     operation: 'SliceView',
-    typeParameters: Object.freeze(['T']),
+    typeParameters: ['T'],
     semanticTypeParameters: rawTypeParameters,
-    parameters: Object.freeze([
+    parameters: [
       valueParameter('values', '&[T]'),
       valueParameter('offset', 'usize'),
       valueParameter('length', 'usize'),
-    ]),
-    semanticParameters: Object.freeze([
+    ],
+    semanticParameters: [
       Type.slice('Shared', rawElement, contractLifetime('sliceView')),
       'usize',
       'usize',
-    ]),
+    ],
     result: '&[T]',
     semanticResult: Type.slice('Shared', rawElement, contractLifetime('sliceView')),
   }),
-  ...Object.freeze([
-    builtin({
-      actor: 'Layout',
-      name: 'of',
-      operation: 'LayoutOf',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([]),
-      semanticParameters: Object.freeze([]),
-      result: 'Layout',
-      semanticResult: Type.layout,
-    }),
-  ]),
-  ...Object.freeze([
-    builtin({
-      actor: 'Execution',
-      name: 'layout',
-      operation: 'ExecutionLayout',
-      typeParameters: Object.freeze(['A', 'F', 'O', 'R']),
-      semanticTypeParameters: executionPackageTypeParameters,
-      parameters: Object.freeze([]),
-      semanticParameters: Object.freeze([]),
-      result: 'Layout',
-      semanticResult: Type.layout,
-    }),
-    builtin({
-      actor: 'Execution',
-      name: 'fromAllocation',
-      operation: 'ExecutionFromAllocation',
-      typeParameters: Object.freeze(['A', 'F', 'O', 'R']),
-      semanticTypeParameters: executionPackageTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('allocation', 'Allocation'),
-        valueParameter('body', 'F'),
-        valueParameter('readyState', 'O'),
-        valueParameter('onReady', 'R'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.allocation,
-        representedExecutionBody,
-        executionEndpoint,
-        representedExecutionReady,
-      ]),
-      result: 'Execution<A>',
-      semanticResult: Type.execution(executionResult),
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Execution',
-      name: 'drive',
-      operation: 'ExecutionDrive',
-      typeParameters: Object.freeze(['A', 'D', 'C', 'S']),
-      semanticTypeParameters: executionDriveTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('execution', 'Execution<A>'),
-        valueParameter('branchState', 'D'),
-        valueParameter('onComplete', 'C'),
-        valueParameter('onSuspend', 'S'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.execution(drivenResult),
-        driveBranch,
-        representedCompletion,
-        representedSuspension,
-      ]),
-      result: 'Effect<()>',
-      semanticResult: Type.effect(
-        Type.unit,
-        Object.freeze([]),
-        { environment: contractLifetime('drive'), lifetimeBinders: [] },
+  builtin({
+    actor: 'Layout',
+    name: 'of',
+    operation: 'LayoutOf',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [],
+    semanticParameters: [],
+    result: 'Layout',
+    semanticResult: Type.layout,
+  }),
+  builtin({
+    actor: 'Execution',
+    name: 'layout',
+    operation: 'ExecutionLayout',
+    typeParameters: ['A', 'F', 'O', 'R'],
+    semanticTypeParameters: executionPackageTypeParameters,
+    parameters: [],
+    semanticParameters: [],
+    result: 'Layout',
+    semanticResult: Type.layout,
+  }),
+  builtin({
+    actor: 'Execution',
+    name: 'fromAllocation',
+    operation: 'ExecutionFromAllocation',
+    typeParameters: ['A', 'F', 'O', 'R'],
+    semanticTypeParameters: executionPackageTypeParameters,
+    parameters: [
+      valueParameter('allocation', 'Allocation'),
+      valueParameter('body', 'F'),
+      valueParameter('readyState', 'O'),
+      valueParameter('onReady', 'R'),
+    ],
+    semanticParameters: [
+      Type.allocation,
+      representedExecutionBody,
+      executionEndpoint,
+      representedExecutionReady,
+    ],
+    result: 'Execution<A>',
+    semanticResult: Type.execution(executionResult),
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Execution',
+    name: 'drive',
+    operation: 'ExecutionDrive',
+    typeParameters: ['A', 'D', 'C', 'S'],
+    semanticTypeParameters: executionDriveTypeParameters,
+    parameters: [
+      valueParameter('execution', 'Execution<A>'),
+      valueParameter('branchState', 'D'),
+      valueParameter('onComplete', 'C'),
+      valueParameter('onSuspend', 'S'),
+    ],
+    semanticParameters: [
+      Type.execution(drivenResult),
+      driveBranch,
+      representedCompletion,
+      representedSuspension,
+    ],
+    result: 'Effect<()>',
+    semanticResult: Type.effect(
+      Type.unit,
+      [],
+      { environment: contractLifetime('drive'), lifetimeBinders: [] },
+      'Take',
+    ),
+  }),
+  builtin({
+    actor: 'Execution',
+    name: 'notifyInitial',
+    operation: 'ExecutionNotifyInitial',
+    typeParameters: ['A'],
+    semanticTypeParameters: [notifiedResult],
+    parameters: [valueParameter('execution', '&mut Execution<A>')],
+    semanticParameters: [
+      Type.reference(
+        'Exclusive',
+        Type.execution(notifiedResult),
+        contractLifetime('notifyInitial'),
+      ),
+    ],
+    result: '()',
+    semanticResult: Type.unit,
+  }),
+  builtin({
+    actor: 'Wake',
+    name: 'signal',
+    operation: 'ExecutionWake',
+    parameters: [valueParameter('wake', 'Wake')],
+    semanticParameters: [Type.wake],
+    result: '()',
+    semanticResult: Type.unit,
+  }),
+  builtin({
+    actor: 'Parking',
+    name: 'park',
+    operation: 'ExecutionPark',
+    typeParameters: ['G', 'F'],
+    semanticTypeParameters: parkingTypeParameters,
+    parameters: [valueParameter('register', 'F')],
+    semanticParameters: [representedRegistration],
+    result: 'Effect<()>',
+    semanticResult: Type.effect(
+      Type.unit,
+      [],
+      { environment: contractLifetime('park'), lifetimeBinders: [] },
+      'Take',
+    ),
+  }),
+  builtin({
+    actor: 'Shared',
+    name: 'layout',
+    operation: 'SharedLayout',
+    typeParameters: ['T'],
+    semanticTypeParameters: sharedTypeParameters,
+    parameters: [],
+    semanticParameters: [],
+    result: 'Layout',
+    semanticResult: Type.layout,
+  }),
+  builtin({
+    actor: 'Shared',
+    name: 'fromAllocation',
+    operation: 'SharedFromAllocation',
+    typeParameters: ['T'],
+    semanticTypeParameters: sharedTypeParameters,
+    parameters: [valueParameter('allocation', 'Allocation'), valueParameter('value', 'T')],
+    semanticParameters: [Type.allocation, sharedElement],
+    result: 'SharedCore<T>',
+    semanticResult: Type.sharedCore(sharedElement),
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Shared',
+    name: 'clone',
+    operation: 'SharedClone',
+    typeParameters: ['T'],
+    semanticTypeParameters: sharedTypeParameters,
+    parameters: [valueParameter('self', '&SharedCore<T>')],
+    semanticParameters: [
+      Type.reference('Shared', Type.sharedCore(sharedElement), contractLifetime('clone')),
+    ],
+    result: 'SharedCore<T>',
+    semanticResult: Type.sharedCore(sharedElement),
+  }),
+  builtin({
+    actor: 'Shared',
+    name: 'withMut',
+    operation: 'SharedWithMut',
+    typeParameters: ['T', 'A'],
+    semanticTypeParameters: sharedLifecycleTypeParameters,
+    parameters: [
+      valueParameter('self', '&SharedCore<T>'),
+      valueParameter('use', 'once fn(&mut T) -> A'),
+      valueParameter('onConflict', 'once fn() -> A'),
+    ],
+    semanticParameters: [
+      Type.reference('Shared', Type.sharedCore(sharedElement), contractLifetime('withMut')),
+      Type.callable(
+        [Type.reference('Exclusive', sharedElement, sharedAccessLifetime)],
+        sharedResult,
+        { environment: contractLifetime('withMut'), lifetimeBinders: [sharedAccessLifetime] },
         'Take',
       ),
-    }),
-    builtin({
-      actor: 'Execution',
-      name: 'notifyInitial',
-      operation: 'ExecutionNotifyInitial',
-      typeParameters: Object.freeze(['A']),
-      semanticTypeParameters: Object.freeze([notifiedResult]),
-      parameters: Object.freeze([valueParameter('execution', '&mut Execution<A>')]),
-      semanticParameters: Object.freeze([
-        Type.reference(
-          'Exclusive',
-          Type.execution(notifiedResult),
-          contractLifetime('notifyInitial'),
-        ),
-      ]),
-      result: '()',
-      semanticResult: Type.unit,
-    }),
-    builtin({
-      actor: 'Wake',
-      name: 'signal',
-      operation: 'ExecutionWake',
-      parameters: Object.freeze([valueParameter('wake', 'Wake')]),
-      semanticParameters: Object.freeze([Type.wake]),
-      result: '()',
-      semanticResult: Type.unit,
-    }),
-    builtin({
-      actor: 'Parking',
-      name: 'park',
-      operation: 'ExecutionPark',
-      typeParameters: Object.freeze(['G', 'F']),
-      semanticTypeParameters: parkingTypeParameters,
-      parameters: Object.freeze([valueParameter('register', 'F')]),
-      semanticParameters: Object.freeze([representedRegistration]),
-      result: 'Effect<()>',
-      semanticResult: Type.effect(
-        Type.unit,
-        Object.freeze([]),
-        { environment: contractLifetime('park'), lifetimeBinders: [] },
+      Type.callable(
+        [],
+        sharedResult,
+        { environment: contractLifetime('withMut'), lifetimeBinders: [] },
         'Take',
       ),
-    }),
-  ]),
-  ...Object.freeze([
-    builtin({
-      actor: 'Shared',
-      name: 'layout',
-      operation: 'SharedLayout',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: sharedTypeParameters,
-      parameters: Object.freeze([]),
-      semanticParameters: Object.freeze([]),
-      result: 'Layout',
-      semanticResult: Type.layout,
-    }),
-    builtin({
-      actor: 'Shared',
-      name: 'fromAllocation',
-      operation: 'SharedFromAllocation',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: sharedTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('allocation', 'Allocation'),
-        valueParameter('value', 'T'),
-      ]),
-      semanticParameters: Object.freeze([Type.allocation, sharedElement]),
-      result: 'SharedCore<T>',
-      semanticResult: Type.sharedCore(sharedElement),
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Shared',
-      name: 'clone',
-      operation: 'SharedClone',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: sharedTypeParameters,
-      parameters: Object.freeze([valueParameter('self', '&SharedCore<T>')]),
-      semanticParameters: Object.freeze([
-        Type.reference('Shared', Type.sharedCore(sharedElement), contractLifetime('clone')),
-      ]),
-      result: 'SharedCore<T>',
-      semanticResult: Type.sharedCore(sharedElement),
-    }),
-    builtin({
-      actor: 'Shared',
-      name: 'withMut',
-      operation: 'SharedWithMut',
-      typeParameters: Object.freeze(['T', 'A']),
-      semanticTypeParameters: sharedLifecycleTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('self', '&SharedCore<T>'),
-        valueParameter('use', 'once fn(&mut T) -> A'),
-        valueParameter('onConflict', 'once fn() -> A'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.reference('Shared', Type.sharedCore(sharedElement), contractLifetime('withMut')),
-        Type.callable(
-          Object.freeze([Type.reference('Exclusive', sharedElement, sharedAccessLifetime)]),
-          sharedResult,
-          { environment: contractLifetime('withMut'), lifetimeBinders: [sharedAccessLifetime] },
-          'Take',
-        ),
-        Type.callable(
-          Object.freeze([]),
-          sharedResult,
-          { environment: contractLifetime('withMut'), lifetimeBinders: [] },
-          'Take',
-        ),
-      ]),
-      result: 'A',
-      semanticResult: sharedResult,
-    }),
-  ]),
-  ...Object.freeze([
-    builtin({
-      actor: 'Storage',
-      name: 'acquire',
-      operation: 'StorageAcquire',
-      parameters: Object.freeze([valueParameter('layout', 'Layout')]),
-      semanticParameters: Object.freeze([Type.layout]),
-      result: 'Effect<Allocation ! Intrinsic.StorageFailure>',
-      semanticResult: Type.effect(
-        Type.allocation,
-        Object.freeze([Type.storageFailure]),
-        { environment: contractLifetime('acquire'), lifetimeBinders: [] },
-        undefined,
-        Object.freeze([]),
-      ),
-    }),
-  ]),
-  ...Object.freeze([
-    builtin({
-      actor: 'RawBuffer',
-      name: 'from',
-      operation: 'RawBufferFrom',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('allocation', 'Allocation'),
-        valueParameter('count', 'usize'),
-      ]),
-      semanticParameters: Object.freeze([Type.allocation, 'usize']),
-      result: 'RawBuffer<T>',
-      semanticResult: Type.rawBuffer(rawElement),
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'RawBuffer',
-      name: 'view',
-      operation: 'RawBufferView',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('buffer', '&RawBuffer<T>'),
-        valueParameter('offset', 'usize'),
-        valueParameter('length', 'usize'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.reference('Shared', Type.rawBuffer(rawElement), contractLifetime('view')),
-        'usize',
-        'usize',
-      ]),
-      result: '&[T]',
-      semanticResult: Type.slice('Shared', rawElement, contractLifetime('view')),
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'RawBuffer',
-      name: 'viewMut',
-      operation: 'RawBufferViewMut',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('buffer', '&mut RawBuffer<T>'),
-        valueParameter('offset', 'usize'),
-        valueParameter('length', 'usize'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.reference('Exclusive', Type.rawBuffer(rawElement), contractLifetime('viewMut')),
-        'usize',
-        'usize',
-      ]),
-      result: '&mut [T]',
-      semanticResult: Type.slice('Exclusive', rawElement, contractLifetime('viewMut')),
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'RawBuffer',
-      name: 'slot',
-      operation: 'RawBufferSlot',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('buffer', '&mut RawBuffer<T>'),
-        valueParameter('index', 'usize'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.reference('Exclusive', Type.rawBuffer(rawElement), contractLifetime('slot')),
-        'usize',
-      ]),
-      result: 'Slot<T>',
-      semanticResult: Type.slot(rawElement, contractLifetime('slot')),
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'RawBuffer',
-      name: 'count',
-      operation: 'RawBufferCount',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([valueParameter('buffer', '&RawBuffer<T>')]),
-      semanticParameters: Object.freeze([
-        Type.reference('Shared', Type.rawBuffer(rawElement), contractLifetime('count')),
-      ]),
-      result: 'usize',
-      semanticResult: 'usize',
-    }),
-    builtin({
-      actor: 'RawBuffer',
-      name: 'read',
-      operation: 'RawBufferRead',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('buffer', '&RawBuffer<T>'),
-        valueParameter('index', 'usize'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.reference('Shared', Type.rawBuffer(rawElement), contractLifetime('read')),
-        'usize',
-      ]),
-      result: 'T',
-      semanticResult: rawElement,
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'RawBuffer',
-      name: 'copy',
-      operation: 'RawBufferCopy',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('destination', '&mut RawBuffer<T>'),
-        valueParameter('destinationOffset', 'usize'),
-        valueParameter('source', '&[T]'),
-        valueParameter('length', 'usize'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.reference('Exclusive', Type.rawBuffer(rawElement), contractLifetime('copy')),
-        'usize',
-        Type.slice('Shared', rawElement, contractLifetime('copy')),
-        'usize',
-      ]),
-      result: '()',
-      semanticResult: Type.unit,
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'RawBuffer',
-      name: 'fill',
-      operation: 'RawBufferFill',
-      parameters: Object.freeze([
-        valueParameter('buffer', '&mut RawBuffer<u8>'),
-        valueParameter('offset', 'usize'),
-        valueParameter('length', 'usize'),
-        valueParameter('value', 'u8'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.reference('Exclusive', Type.rawBuffer('u8'), contractLifetime('fill')),
-        'usize',
-        'usize',
-        'u8',
-      ]),
-      result: '()',
-      semanticResult: Type.unit,
-      unsafe: true,
-    }),
-  ]),
-  ...Object.freeze([
-    builtin({
-      actor: 'Pointer',
-      name: 'bytes',
-      operation: 'PointerBytes',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([valueParameter('pointer', '?*const T')]),
-      semanticParameters: Object.freeze([
-        Type.pointer({
-          mutable: false,
-          pointee: rawElement,
-          nullable: true,
-          extent: 'Single',
-          alignment: 'Natural',
-          addressSpace: 0,
-        }),
-      ]),
-      result: '?[*]const u8',
-      semanticResult: Type.pointer({
+    ],
+    result: 'A',
+    semanticResult: sharedResult,
+  }),
+  builtin({
+    actor: 'Storage',
+    name: 'acquire',
+    operation: 'StorageAcquire',
+    parameters: [valueParameter('layout', 'Layout')],
+    semanticParameters: [Type.layout],
+    result: 'Effect<Allocation ! Intrinsic.StorageFailure>',
+    semanticResult: Type.effect(
+      Type.allocation,
+      [Type.storageFailure],
+      { environment: contractLifetime('acquire'), lifetimeBinders: [] },
+      undefined,
+      [],
+    ),
+  }),
+  builtin({
+    actor: 'RawBuffer',
+    name: 'from',
+    operation: 'RawBufferFrom',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [valueParameter('allocation', 'Allocation'), valueParameter('count', 'usize')],
+    semanticParameters: [Type.allocation, 'usize'],
+    result: 'RawBuffer<T>',
+    semanticResult: Type.rawBuffer(rawElement),
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'RawBuffer',
+    name: 'view',
+    operation: 'RawBufferView',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [
+      valueParameter('buffer', '&RawBuffer<T>'),
+      valueParameter('offset', 'usize'),
+      valueParameter('length', 'usize'),
+    ],
+    semanticParameters: [
+      Type.reference('Shared', Type.rawBuffer(rawElement), contractLifetime('view')),
+      'usize',
+      'usize',
+    ],
+    result: '&[T]',
+    semanticResult: Type.slice('Shared', rawElement, contractLifetime('view')),
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'RawBuffer',
+    name: 'viewMut',
+    operation: 'RawBufferViewMut',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [
+      valueParameter('buffer', '&mut RawBuffer<T>'),
+      valueParameter('offset', 'usize'),
+      valueParameter('length', 'usize'),
+    ],
+    semanticParameters: [
+      Type.reference('Exclusive', Type.rawBuffer(rawElement), contractLifetime('viewMut')),
+      'usize',
+      'usize',
+    ],
+    result: '&mut [T]',
+    semanticResult: Type.slice('Exclusive', rawElement, contractLifetime('viewMut')),
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'RawBuffer',
+    name: 'slot',
+    operation: 'RawBufferSlot',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [valueParameter('buffer', '&mut RawBuffer<T>'), valueParameter('index', 'usize')],
+    semanticParameters: [
+      Type.reference('Exclusive', Type.rawBuffer(rawElement), contractLifetime('slot')),
+      'usize',
+    ],
+    result: 'Slot<T>',
+    semanticResult: Type.slot(rawElement, contractLifetime('slot')),
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'RawBuffer',
+    name: 'count',
+    operation: 'RawBufferCount',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [valueParameter('buffer', '&RawBuffer<T>')],
+    semanticParameters: [
+      Type.reference('Shared', Type.rawBuffer(rawElement), contractLifetime('count')),
+    ],
+    result: 'usize',
+    semanticResult: 'usize',
+  }),
+  builtin({
+    actor: 'RawBuffer',
+    name: 'read',
+    operation: 'RawBufferRead',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [valueParameter('buffer', '&RawBuffer<T>'), valueParameter('index', 'usize')],
+    semanticParameters: [
+      Type.reference('Shared', Type.rawBuffer(rawElement), contractLifetime('read')),
+      'usize',
+    ],
+    result: 'T',
+    semanticResult: rawElement,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'RawBuffer',
+    name: 'copy',
+    operation: 'RawBufferCopy',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [
+      valueParameter('destination', '&mut RawBuffer<T>'),
+      valueParameter('destinationOffset', 'usize'),
+      valueParameter('source', '&[T]'),
+      valueParameter('length', 'usize'),
+    ],
+    semanticParameters: [
+      Type.reference('Exclusive', Type.rawBuffer(rawElement), contractLifetime('copy')),
+      'usize',
+      Type.slice('Shared', rawElement, contractLifetime('copy')),
+      'usize',
+    ],
+    result: '()',
+    semanticResult: Type.unit,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'RawBuffer',
+    name: 'fill',
+    operation: 'RawBufferFill',
+    parameters: [
+      valueParameter('buffer', '&mut RawBuffer<u8>'),
+      valueParameter('offset', 'usize'),
+      valueParameter('length', 'usize'),
+      valueParameter('value', 'u8'),
+    ],
+    semanticParameters: [
+      Type.reference('Exclusive', Type.rawBuffer('u8'), contractLifetime('fill')),
+      'usize',
+      'usize',
+      'u8',
+    ],
+    result: '()',
+    semanticResult: Type.unit,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'bytes',
+    operation: 'PointerBytes',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [valueParameter('pointer', '?*const T')],
+    semanticParameters: [
+      Type.pointer({
         mutable: false,
-        pointee: 'u8',
-        nullable: true,
-        extent: 'Many',
-        alignment: 'Natural',
-        addressSpace: 0,
-      }),
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Pointer',
-      name: 'requalify',
-      operation: 'PointerRequalify',
-      typeParameters: Object.freeze(['From', 'To']),
-      semanticTypeParameters: Object.freeze([pointerSource, pointerDestination]),
-      parameters: Object.freeze([valueParameter('pointer', 'From')]),
-      semanticParameters: Object.freeze([pointerSource]),
-      result: 'To',
-      semanticResult: pointerDestination,
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Pointer',
-      name: 'reinterpret',
-      operation: 'PointerReinterpret',
-      typeParameters: Object.freeze(['From', 'To']),
-      semanticTypeParameters: Object.freeze([pointerSource, pointerDestination]),
-      parameters: Object.freeze([valueParameter('pointer', 'From')]),
-      semanticParameters: Object.freeze([pointerSource]),
-      result: 'To',
-      semanticResult: pointerDestination,
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Slot',
-      name: 'address',
-      operation: 'SlotAddress',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([valueParameter('slot', 'Slot<T>')]),
-      semanticParameters: Object.freeze([Type.slot(rawElement, contractLifetime('slotAccess'))]),
-      result: '*mut T',
-      semanticResult: Type.pointer({
-        mutable: true,
         pointee: rawElement,
-        nullable: false,
-        extent: 'Single',
-        alignment: 'Natural',
-        addressSpace: 0,
-      }),
-    }),
-    builtin({
-      actor: 'Pointer',
-      name: 'readUnaligned',
-      operation: 'PointerReadUnaligned',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: pointerTypeParameters,
-      parameters: Object.freeze([valueParameter('pointer', '*const align(1) T')]),
-      semanticParameters: Object.freeze([
-        Type.pointer({
-          mutable: false,
-          pointee: pointerElement,
-          nullable: false,
-          extent: 'Single',
-          alignment: 1,
-          addressSpace: 0,
-        }),
-      ]),
-      result: 'T',
-      semanticResult: pointerElement,
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Pointer',
-      name: 'writeUnaligned',
-      operation: 'PointerWriteUnaligned',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: pointerTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('pointer', '*mut align(1) T'),
-        valueParameter('value', 'T'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.pointer({
-          mutable: true,
-          pointee: pointerElement,
-          nullable: false,
-          extent: 'Single',
-          alignment: 1,
-          addressSpace: 0,
-        }),
-        pointerElement,
-      ]),
-      result: '()',
-      semanticResult: Type.unit,
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Pointer',
-      name: 'null',
-      operation: 'PointerNull',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: pointerTypeParameters,
-      parameters: Object.freeze([]),
-      semanticParameters: Object.freeze([]),
-      result: '?*mut T',
-      semanticResult: Type.pointer({
-        mutable: true,
-        pointee: pointerElement,
         nullable: true,
         extent: 'Single',
         alignment: 'Natural',
         addressSpace: 0,
       }),
+    ],
+    result: '?[*]const u8',
+    semanticResult: Type.pointer({
+      mutable: false,
+      pointee: 'u8',
+      nullable: true,
+      extent: 'Many',
+      alignment: 'Natural',
+      addressSpace: 0,
     }),
-    builtin({
-      actor: 'Pointer',
-      name: 'isNull',
-      operation: 'PointerIsNull',
-      typeParameters: Object.freeze(['P']),
-      semanticTypeParameters: Object.freeze([pointerSource]),
-      parameters: Object.freeze([valueParameter('pointer', 'P')]),
-      semanticParameters: Object.freeze([pointerSource]),
-      result: 'bool',
-      semanticResult: 'bool',
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'requalify',
+    operation: 'PointerRequalify',
+    typeParameters: ['From', 'To'],
+    semanticTypeParameters: [pointerSource, pointerDestination],
+    parameters: [valueParameter('pointer', 'From')],
+    semanticParameters: [pointerSource],
+    result: 'To',
+    semanticResult: pointerDestination,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'reinterpret',
+    operation: 'PointerReinterpret',
+    typeParameters: ['From', 'To'],
+    semanticTypeParameters: [pointerSource, pointerDestination],
+    parameters: [valueParameter('pointer', 'From')],
+    semanticParameters: [pointerSource],
+    result: 'To',
+    semanticResult: pointerDestination,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Slot',
+    name: 'address',
+    operation: 'SlotAddress',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [valueParameter('slot', 'Slot<T>')],
+    semanticParameters: [Type.slot(rawElement, contractLifetime('slotAccess'))],
+    result: '*mut T',
+    semanticResult: Type.pointer({
+      mutable: true,
+      pointee: rawElement,
+      nullable: false,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
     }),
-    builtin({
-      actor: 'Pointer',
-      name: 'address',
-      operation: 'PointerAddress',
-      typeParameters: Object.freeze(['P']),
-      semanticTypeParameters: Object.freeze([pointerSource]),
-      parameters: Object.freeze([valueParameter('pointer', 'P')]),
-      semanticParameters: Object.freeze([pointerSource]),
-      result: 'usize',
-      semanticResult: 'usize',
-    }),
-    builtin({
-      actor: 'Pointer',
-      name: 'fromRef',
-      operation: 'PointerFromRef',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: pointerTypeParameters,
-      parameters: Object.freeze([valueParameter('value', '&T')]),
-      semanticParameters: Object.freeze([
-        Type.reference('Shared', pointerElement, contractLifetime('fromRef')),
-      ]),
-      result: '*const T',
-      semanticResult: Type.pointer({
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'readUnaligned',
+    operation: 'PointerReadUnaligned',
+    typeParameters: ['T'],
+    semanticTypeParameters: pointerTypeParameters,
+    parameters: [valueParameter('pointer', '*const align(1) T')],
+    semanticParameters: [
+      Type.pointer({
         mutable: false,
         pointee: pointerElement,
         nullable: false,
         extent: 'Single',
-        alignment: 'Natural',
+        alignment: 1,
         addressSpace: 0,
       }),
-    }),
-    builtin({
-      actor: 'Pointer',
-      name: 'fromMutRef',
-      operation: 'PointerFromMutRef',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: pointerTypeParameters,
-      parameters: Object.freeze([valueParameter('value', '&mut T')]),
-      semanticParameters: Object.freeze([
-        Type.reference('Exclusive', pointerElement, contractLifetime('fromMutRef')),
-      ]),
-      result: '*mut T',
-      semanticResult: Type.pointer({
+    ],
+    result: 'T',
+    semanticResult: pointerElement,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'writeUnaligned',
+    operation: 'PointerWriteUnaligned',
+    typeParameters: ['T'],
+    semanticTypeParameters: pointerTypeParameters,
+    parameters: [valueParameter('pointer', '*mut align(1) T'), valueParameter('value', 'T')],
+    semanticParameters: [
+      Type.pointer({
         mutable: true,
         pointee: pointerElement,
         nullable: false,
         extent: 'Single',
-        alignment: 'Natural',
+        alignment: 1,
         addressSpace: 0,
       }),
+      pointerElement,
+    ],
+    result: '()',
+    semanticResult: Type.unit,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'null',
+    operation: 'PointerNull',
+    typeParameters: ['T'],
+    semanticTypeParameters: pointerTypeParameters,
+    parameters: [],
+    semanticParameters: [],
+    result: '?*mut T',
+    semanticResult: Type.pointer({
+      mutable: true,
+      pointee: pointerElement,
+      nullable: true,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
     }),
-    builtin({
-      actor: 'Pointer',
-      name: 'fromSlice',
-      operation: 'PointerFromSlice',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: pointerTypeParameters,
-      parameters: Object.freeze([valueParameter('values', '&[T]')]),
-      semanticParameters: Object.freeze([
-        Type.slice('Shared', pointerElement, contractLifetime('fromSlice')),
-      ]),
-      result: '?[*]const T',
-      semanticResult: Type.pointer({
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'isNull',
+    operation: 'PointerIsNull',
+    typeParameters: ['P'],
+    semanticTypeParameters: [pointerSource],
+    parameters: [valueParameter('pointer', 'P')],
+    semanticParameters: [pointerSource],
+    result: 'bool',
+    semanticResult: 'bool',
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'address',
+    operation: 'PointerAddress',
+    typeParameters: ['P'],
+    semanticTypeParameters: [pointerSource],
+    parameters: [valueParameter('pointer', 'P')],
+    semanticParameters: [pointerSource],
+    result: 'usize',
+    semanticResult: 'usize',
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'fromRef',
+    operation: 'PointerFromRef',
+    typeParameters: ['T'],
+    semanticTypeParameters: pointerTypeParameters,
+    parameters: [valueParameter('value', '&T')],
+    semanticParameters: [Type.reference('Shared', pointerElement, contractLifetime('fromRef'))],
+    result: '*const T',
+    semanticResult: Type.pointer({
+      mutable: false,
+      pointee: pointerElement,
+      nullable: false,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
+    }),
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'fromMutRef',
+    operation: 'PointerFromMutRef',
+    typeParameters: ['T'],
+    semanticTypeParameters: pointerTypeParameters,
+    parameters: [valueParameter('value', '&mut T')],
+    semanticParameters: [
+      Type.reference('Exclusive', pointerElement, contractLifetime('fromMutRef')),
+    ],
+    result: '*mut T',
+    semanticResult: Type.pointer({
+      mutable: true,
+      pointee: pointerElement,
+      nullable: false,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
+    }),
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'fromSlice',
+    operation: 'PointerFromSlice',
+    typeParameters: ['T'],
+    semanticTypeParameters: pointerTypeParameters,
+    parameters: [valueParameter('values', '&[T]')],
+    semanticParameters: [Type.slice('Shared', pointerElement, contractLifetime('fromSlice'))],
+    result: '?[*]const T',
+    semanticResult: Type.pointer({
+      mutable: false,
+      pointee: pointerElement,
+      nullable: true,
+      extent: 'Many',
+      alignment: 'Natural',
+      addressSpace: 0,
+    }),
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'fromMutSlice',
+    operation: 'PointerFromMutSlice',
+    typeParameters: ['T'],
+    semanticTypeParameters: pointerTypeParameters,
+    parameters: [valueParameter('values', '&mut [T]')],
+    semanticParameters: [Type.slice('Exclusive', pointerElement, contractLifetime('fromMutSlice'))],
+    result: '?[*]mut T',
+    semanticResult: Type.pointer({
+      mutable: true,
+      pointee: pointerElement,
+      nullable: true,
+      extent: 'Many',
+      alignment: 'Natural',
+      addressSpace: 0,
+    }),
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'at',
+    operation: 'PointerAt',
+    typeParameters: ['T'],
+    semanticTypeParameters: pointerTypeParameters,
+    parameters: [valueParameter('pointer', '[*]const T'), valueParameter('count', 'usize')],
+    semanticParameters: [
+      Type.pointer({
         mutable: false,
         pointee: pointerElement,
-        nullable: true,
+        nullable: false,
         extent: 'Many',
         alignment: 'Natural',
         addressSpace: 0,
       }),
+      'usize',
+    ],
+    result: '*const T',
+    semanticResult: Type.pointer({
+      mutable: false,
+      pointee: pointerElement,
+      nullable: false,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
     }),
-    builtin({
-      actor: 'Pointer',
-      name: 'fromMutSlice',
-      operation: 'PointerFromMutSlice',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: pointerTypeParameters,
-      parameters: Object.freeze([valueParameter('values', '&mut [T]')]),
-      semanticParameters: Object.freeze([
-        Type.slice('Exclusive', pointerElement, contractLifetime('fromMutSlice')),
-      ]),
-      result: '?[*]mut T',
-      semanticResult: Type.pointer({
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'atMut',
+    operation: 'PointerAtMut',
+    typeParameters: ['T'],
+    semanticTypeParameters: pointerTypeParameters,
+    parameters: [valueParameter('pointer', '[*]mut T'), valueParameter('count', 'usize')],
+    semanticParameters: [
+      Type.pointer({
         mutable: true,
         pointee: pointerElement,
-        nullable: true,
+        nullable: false,
         extent: 'Many',
         alignment: 'Natural',
         addressSpace: 0,
       }),
+      'usize',
+    ],
+    result: '*mut T',
+    semanticResult: Type.pointer({
+      mutable: true,
+      pointee: pointerElement,
+      nullable: false,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
     }),
-    builtin({
-      actor: 'Pointer',
-      name: 'at',
-      operation: 'PointerAt',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: pointerTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('pointer', '[*]const T'),
-        valueParameter('count', 'usize'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.pointer({
-          mutable: false,
-          pointee: pointerElement,
-          nullable: false,
-          extent: 'Many',
-          alignment: 'Natural',
-          addressSpace: 0,
-        }),
-        'usize',
-      ]),
-      result: '*const T',
-      semanticResult: Type.pointer({
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'read',
+    operation: 'PointerRead',
+    typeParameters: ['T'],
+    semanticTypeParameters: pointerTypeParameters,
+    parameters: [valueParameter('pointer', '*const T')],
+    semanticParameters: [
+      Type.pointer({
         mutable: false,
         pointee: pointerElement,
         nullable: false,
@@ -2118,31 +2098,20 @@ const intrinsicOperations = Object.freeze([
         alignment: 'Natural',
         addressSpace: 0,
       }),
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Pointer',
-      name: 'atMut',
-      operation: 'PointerAtMut',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: pointerTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('pointer', '[*]mut T'),
-        valueParameter('count', 'usize'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.pointer({
-          mutable: true,
-          pointee: pointerElement,
-          nullable: false,
-          extent: 'Many',
-          alignment: 'Natural',
-          addressSpace: 0,
-        }),
-        'usize',
-      ]),
-      result: '*mut T',
-      semanticResult: Type.pointer({
+    ],
+    result: 'T',
+    semanticResult: pointerElement,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Pointer',
+    name: 'write',
+    operation: 'PointerWrite',
+    typeParameters: ['T'],
+    semanticTypeParameters: pointerTypeParameters,
+    parameters: [valueParameter('pointer', '*mut T'), valueParameter('value', 'T')],
+    semanticParameters: [
+      Type.pointer({
         mutable: true,
         pointee: pointerElement,
         nullable: false,
@@ -2150,350 +2119,296 @@ const intrinsicOperations = Object.freeze([
         alignment: 'Natural',
         addressSpace: 0,
       }),
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Pointer',
-      name: 'read',
-      operation: 'PointerRead',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: pointerTypeParameters,
-      parameters: Object.freeze([valueParameter('pointer', '*const T')]),
-      semanticParameters: Object.freeze([
-        Type.pointer({
-          mutable: false,
-          pointee: pointerElement,
-          nullable: false,
-          extent: 'Single',
-          alignment: 'Natural',
-          addressSpace: 0,
-        }),
-      ]),
-      result: 'T',
-      semanticResult: pointerElement,
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Pointer',
-      name: 'write',
-      operation: 'PointerWrite',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: pointerTypeParameters,
-      parameters: Object.freeze([
-        valueParameter('pointer', '*mut T'),
-        valueParameter('value', 'T'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.pointer({
-          mutable: true,
-          pointee: pointerElement,
-          nullable: false,
-          extent: 'Single',
-          alignment: 'Natural',
-          addressSpace: 0,
-        }),
-        pointerElement,
-      ]),
-      result: '()',
-      semanticResult: Type.unit,
-      unsafe: true,
-    }),
-  ]),
-  ...Object.freeze([
-    builtin({
-      actor: 'Slot',
-      name: 'write',
-      operation: 'SlotWrite',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([valueParameter('slot', 'Slot<T>'), valueParameter('value', 'T')]),
-      semanticParameters: Object.freeze([
-        Type.slot(rawElement, contractLifetime('slotAccess')),
-        rawElement,
-      ]),
-      result: '()',
-      semanticResult: Type.unit,
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Slot',
-      name: 'take',
-      operation: 'SlotTake',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([valueParameter('slot', 'Slot<T>')]),
-      semanticParameters: Object.freeze([Type.slot(rawElement, contractLifetime('slotAccess'))]),
-      result: 'T',
-      semanticResult: rawElement,
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Slot',
-      name: 'copy',
-      operation: 'SlotCopy',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([valueParameter('slot', 'Slot<T>')]),
-      semanticParameters: Object.freeze([Type.slot(rawElement, contractLifetime('slotAccess'))]),
-      result: 'T',
-      semanticResult: rawElement,
-      unsafe: true,
-    }),
-    builtin({
-      actor: 'Slot',
-      name: 'drop',
-      operation: 'SlotDrop',
-      typeParameters: Object.freeze(['T']),
-      semanticTypeParameters: rawTypeParameters,
-      parameters: Object.freeze([valueParameter('slot', 'Slot<T>')]),
-      semanticParameters: Object.freeze([Type.slot(rawElement, contractLifetime('slotAccess'))]),
-      result: '()',
-      semanticResult: Type.unit,
-      unsafe: true,
-    }),
-  ]),
-  ...Object.freeze([
-    builtin({
-      actor: 'Effect',
-      name: 'finalizeEffect',
-      operation: 'EffectFinalize',
-      typeParameters: Object.freeze(['A', 'E', '?R', '?S']),
-      semanticTypeParameters: Object.freeze([
-        finalizationSuccess,
-        finalizationFailure,
-        finalizationProtectedRequirements,
-        finalizationFinalizerRequirements,
-      ]),
-      parameters: Object.freeze([
-        valueParameter('protected', 'once Effect<A ! E ? R>'),
-        valueParameter('finalizer', 'once Effect<() ? S>'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.effectWithRows(
-          finalizationSuccess,
-          finalizationFailureRow,
-          finalizationEnvironment,
-          'Take',
-          finalizationProtectedRow,
-        ),
-        Type.effectWithRows(
-          Type.unit,
-          RowAlgebra.concrete(Type.failureRowPolicy(), []),
-          finalizationEnvironment,
-          'Take',
-          finalizationFinalizerRow,
-        ),
-      ]),
-      result: 'once Effect<A ! E ? R | S>',
-      semanticResult: Type.effectWithRows(
+      pointerElement,
+    ],
+    result: '()',
+    semanticResult: Type.unit,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Slot',
+    name: 'write',
+    operation: 'SlotWrite',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [valueParameter('slot', 'Slot<T>'), valueParameter('value', 'T')],
+    semanticParameters: [Type.slot(rawElement, contractLifetime('slotAccess')), rawElement],
+    result: '()',
+    semanticResult: Type.unit,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Slot',
+    name: 'take',
+    operation: 'SlotTake',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [valueParameter('slot', 'Slot<T>')],
+    semanticParameters: [Type.slot(rawElement, contractLifetime('slotAccess'))],
+    result: 'T',
+    semanticResult: rawElement,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Slot',
+    name: 'copy',
+    operation: 'SlotCopy',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [valueParameter('slot', 'Slot<T>')],
+    semanticParameters: [Type.slot(rawElement, contractLifetime('slotAccess'))],
+    result: 'T',
+    semanticResult: rawElement,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Slot',
+    name: 'drop',
+    operation: 'SlotDrop',
+    typeParameters: ['T'],
+    semanticTypeParameters: rawTypeParameters,
+    parameters: [valueParameter('slot', 'Slot<T>')],
+    semanticParameters: [Type.slot(rawElement, contractLifetime('slotAccess'))],
+    result: '()',
+    semanticResult: Type.unit,
+    unsafe: true,
+  }),
+  builtin({
+    actor: 'Effect',
+    name: 'finalizeEffect',
+    operation: 'EffectFinalize',
+    typeParameters: ['A', 'E', '?R', '?S'],
+    semanticTypeParameters: [
+      finalizationSuccess,
+      finalizationFailure,
+      finalizationProtectedRequirements,
+      finalizationFinalizerRequirements,
+    ],
+    parameters: [
+      valueParameter('protected', 'once Effect<A ! E ? R>'),
+      valueParameter('finalizer', 'once Effect<() ? S>'),
+    ],
+    semanticParameters: [
+      Type.effectWithRows(
         finalizationSuccess,
         finalizationFailureRow,
         finalizationEnvironment,
         'Take',
-        RowAlgebra.union(
-          Type.requirementRowPolicy(),
-          finalizationProtectedRow,
-          finalizationFinalizerRow,
-        ),
+        finalizationProtectedRow,
       ),
-    }),
-    builtin({
-      actor: 'Effect',
-      name: 'finalizeEffectNonParking',
-      operation: 'EffectFinalizeNonParking',
-      typeParameters: Object.freeze(['A', 'E', '?R', '?S']),
-      semanticTypeParameters: Object.freeze([
-        nonParkingFinalizationSuccess,
-        nonParkingFinalizationFailure,
-        nonParkingFinalizationProtectedRequirements,
-        nonParkingFinalizationFinalizerRequirements,
-      ]),
-      parameters: Object.freeze([
-        valueParameter('protected', 'once Effect<A ! E ? R>'),
-        valueParameter('finalizer', 'once Effect<() ? S>'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.effectWithRows(
-          nonParkingFinalizationSuccess,
-          nonParkingFinalizationFailureRow,
-          nonParkingFinalizationEnvironment,
-          'Take',
-          nonParkingFinalizationProtectedRow,
-        ),
-        Type.effectWithRows(
-          Type.unit,
-          RowAlgebra.concrete(Type.failureRowPolicy(), []),
-          nonParkingFinalizationEnvironment,
-          'Take',
-          nonParkingFinalizationFinalizerRow,
-        ),
-      ]),
-      result: 'once Effect<A ! E ? R | S>',
-      semanticResult: Type.effectWithRows(
+      Type.effectWithRows(
+        Type.unit,
+        RowAlgebra.concrete(Type.failureRowPolicy(), []),
+        finalizationEnvironment,
+        'Take',
+        finalizationFinalizerRow,
+      ),
+    ],
+    result: 'once Effect<A ! E ? R | S>',
+    semanticResult: Type.effectWithRows(
+      finalizationSuccess,
+      finalizationFailureRow,
+      finalizationEnvironment,
+      'Take',
+      RowAlgebra.union(
+        Type.requirementRowPolicy(),
+        finalizationProtectedRow,
+        finalizationFinalizerRow,
+      ),
+    ),
+  }),
+  builtin({
+    actor: 'Effect',
+    name: 'finalizeEffectNonParking',
+    operation: 'EffectFinalizeNonParking',
+    typeParameters: ['A', 'E', '?R', '?S'],
+    semanticTypeParameters: [
+      nonParkingFinalizationSuccess,
+      nonParkingFinalizationFailure,
+      nonParkingFinalizationProtectedRequirements,
+      nonParkingFinalizationFinalizerRequirements,
+    ],
+    parameters: [
+      valueParameter('protected', 'once Effect<A ! E ? R>'),
+      valueParameter('finalizer', 'once Effect<() ? S>'),
+    ],
+    semanticParameters: [
+      Type.effectWithRows(
         nonParkingFinalizationSuccess,
         nonParkingFinalizationFailureRow,
         nonParkingFinalizationEnvironment,
         'Take',
-        RowAlgebra.union(
-          Type.requirementRowPolicy(),
-          nonParkingFinalizationProtectedRow,
-          nonParkingFinalizationFinalizerRow,
-        ),
+        nonParkingFinalizationProtectedRow,
       ),
-    }),
-    builtin({
-      actor: 'Effect',
-      name: 'useReleaseNonParking',
-      operation: 'EffectUseReleaseNonParking',
-      typeParameters: Object.freeze(['Resource', 'A', 'E', '?R', '?S']),
-      semanticTypeParameters: Object.freeze([
-        nonParkingResource,
-        nonParkingResourceSuccess,
-        nonParkingResourceFailure,
-        nonParkingResourceUseRequirements,
-        nonParkingResourceReleaseRequirements,
-      ]),
-      parameters: Object.freeze([
-        valueParameter('resource', 'Resource'),
-        valueParameter(
-          'use',
-          "for<'scope> once fn<'env>(&'scope mut Resource) -> once Effect<'scope & 'env; A ! E ? R>",
-        ),
-        valueParameter(
-          'release',
-          "for<'scope> once fn<'env>(&'scope mut Resource) -> once Effect<'scope & 'env; () ? S>",
-        ),
-      ]),
-      semanticParameters: Object.freeze([
-        nonParkingResource,
-        nonParkingResourceUse,
-        nonParkingResourceRelease,
-      ]),
-      result: 'once Effect<A ! E ? R | S>',
-      semanticResult: Type.effectWithRows(
-        nonParkingResourceSuccess,
-        nonParkingResourceFailureRow,
-        { environment: nonParkingResourceEnvironment, lifetimeBinders: [] },
+      Type.effectWithRows(
+        Type.unit,
+        RowAlgebra.concrete(Type.failureRowPolicy(), []),
+        nonParkingFinalizationEnvironment,
         'Take',
-        RowAlgebra.union(
-          Type.requirementRowPolicy(),
-          nonParkingResourceUseRow,
-          nonParkingResourceReleaseRow,
-        ),
+        nonParkingFinalizationFinalizerRow,
       ),
-    }),
-    builtin({
-      actor: 'Effect',
-      name: 'observeDiagnostics',
-      operation: 'EffectObserveDiagnostics',
-      typeParameters: Object.freeze(['S', 'A', '?R', 'F']),
-      semanticTypeParameters: Object.freeze([
-        observationState,
-        observationSuccess,
-        observationRequirement,
-        observationCallback,
-      ]),
-      parameters: Object.freeze([
-        valueParameter('state', 'S'),
-        valueParameter('observer', 'F'),
-        valueParameter('protected', 'once Effect<A ? R>'),
-      ]),
-      semanticParameters: Object.freeze([
-        observationState,
-        Type.represented(
-          observationCallbackBound,
-          observationCallbackBound,
-          Type.representationParameterArgument(observationCallback),
-        ),
-        observedEffect,
-      ]),
-      result: 'once Effect<A ? R>',
-      semanticResult: observedEffect,
-    }),
-    builtin({
-      actor: 'Effect',
-      name: 'observeUnhandled',
-      operation: 'EffectObserveUnhandled',
-      typeParameters: Object.freeze([]),
-      semanticTypeParameters: Object.freeze([]),
-      parameters: Object.freeze([]),
-      semanticParameters: Object.freeze([]),
-      result: 'usize',
-      semanticResult: 'usize',
-    }),
-    builtin({
-      actor: 'Effect',
-      name: 'suspendEffect',
-      operation: 'EffectSuspend',
-      typeParameters: Object.freeze(['A', 'E', '?R']),
-      semanticTypeParameters: suspensionTypeParameters,
-      parameters: Object.freeze([valueParameter('deferred', 'once Effect<A ! E ? R>')]),
-      semanticParameters: Object.freeze([
-        Type.effectWithRows(
-          suspensionSuccess,
-          suspensionFailureRow,
-          { environment: contractLifetime('suspendEffect'), lifetimeBinders: [] },
-          'Take',
-          suspensionRequirementRow,
-        ),
-      ]),
-      result: 'Effect<A ! E ? R>',
-      semanticResult: Type.effectWithRows(
+    ],
+    result: 'once Effect<A ! E ? R | S>',
+    semanticResult: Type.effectWithRows(
+      nonParkingFinalizationSuccess,
+      nonParkingFinalizationFailureRow,
+      nonParkingFinalizationEnvironment,
+      'Take',
+      RowAlgebra.union(
+        Type.requirementRowPolicy(),
+        nonParkingFinalizationProtectedRow,
+        nonParkingFinalizationFinalizerRow,
+      ),
+    ),
+  }),
+  builtin({
+    actor: 'Effect',
+    name: 'useReleaseNonParking',
+    operation: 'EffectUseReleaseNonParking',
+    typeParameters: ['Resource', 'A', 'E', '?R', '?S'],
+    semanticTypeParameters: [
+      nonParkingResource,
+      nonParkingResourceSuccess,
+      nonParkingResourceFailure,
+      nonParkingResourceUseRequirements,
+      nonParkingResourceReleaseRequirements,
+    ],
+    parameters: [
+      valueParameter('resource', 'Resource'),
+      valueParameter(
+        'use',
+        "for<'scope> once fn<'env>(&'scope mut Resource) -> once Effect<'scope & 'env; A ! E ? R>",
+      ),
+      valueParameter(
+        'release',
+        "for<'scope> once fn<'env>(&'scope mut Resource) -> once Effect<'scope & 'env; () ? S>",
+      ),
+    ],
+    semanticParameters: [nonParkingResource, nonParkingResourceUse, nonParkingResourceRelease],
+    result: 'once Effect<A ! E ? R | S>',
+    semanticResult: Type.effectWithRows(
+      nonParkingResourceSuccess,
+      nonParkingResourceFailureRow,
+      { environment: nonParkingResourceEnvironment, lifetimeBinders: [] },
+      'Take',
+      RowAlgebra.union(
+        Type.requirementRowPolicy(),
+        nonParkingResourceUseRow,
+        nonParkingResourceReleaseRow,
+      ),
+    ),
+  }),
+  builtin({
+    actor: 'Effect',
+    name: 'observeDiagnostics',
+    operation: 'EffectObserveDiagnostics',
+    typeParameters: ['S', 'A', '?R', 'F'],
+    semanticTypeParameters: [
+      observationState,
+      observationSuccess,
+      observationRequirement,
+      observationCallback,
+    ],
+    parameters: [
+      valueParameter('state', 'S'),
+      valueParameter('observer', 'F'),
+      valueParameter('protected', 'once Effect<A ? R>'),
+    ],
+    semanticParameters: [
+      observationState,
+      Type.represented(
+        observationCallbackBound,
+        observationCallbackBound,
+        Type.representationParameterArgument(observationCallback),
+      ),
+      observedEffect,
+    ],
+    result: 'once Effect<A ? R>',
+    semanticResult: observedEffect,
+  }),
+  builtin({
+    actor: 'Effect',
+    name: 'observeUnhandled',
+    operation: 'EffectObserveUnhandled',
+    typeParameters: [],
+    semanticTypeParameters: [],
+    parameters: [],
+    semanticParameters: [],
+    result: 'usize',
+    semanticResult: 'usize',
+  }),
+  builtin({
+    actor: 'Effect',
+    name: 'suspendEffect',
+    operation: 'EffectSuspend',
+    typeParameters: ['A', 'E', '?R'],
+    semanticTypeParameters: suspensionTypeParameters,
+    parameters: [valueParameter('deferred', 'once Effect<A ! E ? R>')],
+    semanticParameters: [
+      Type.effectWithRows(
         suspensionSuccess,
         suspensionFailureRow,
         { environment: contractLifetime('suspendEffect'), lifetimeBinders: [] },
         'Take',
         suspensionRequirementRow,
       ),
-    }),
-    contractEffect({
-      name: 'bindRequirement',
-      post: 'BindRequirement',
-      providerMode: 'Shared',
-      typeParameters: Object.freeze(['?S', 'A', 'P', 'E', '?R']),
-      parameters: Object.freeze([
-        valueParameter('protected', 'once Effect<A ! E ? R>'),
-        valueParameter('provider', '&P'),
-      ]),
-      result: 'Effect<A ! E ? Without<R, S>>',
-      contract: bindingContract('Shared'),
-    }),
-    contractEffect({
-      name: 'bindRequirementMut',
-      post: 'BindRequirement',
-      providerMode: 'Exclusive',
-      typeParameters: Object.freeze(['?S', 'A', 'P', 'E', '?R']),
-      parameters: Object.freeze([
-        valueParameter('protected', 'once Effect<A ! E ? R>'),
-        valueParameter('provider', '&mut P'),
-      ]),
-      result: 'Effect<A ! E ? Without<R, S>>',
-      contract: bindingContract('Exclusive'),
-    }),
-    contractEffect({
-      name: 'bindRequirementOwned',
-      post: 'BindRequirement',
-      providerMode: 'Take',
-      typeParameters: Object.freeze(['?S', 'A', 'P', 'E', '?R']),
-      parameters: Object.freeze([
-        valueParameter('protected', 'once Effect<A ! E ? R>'),
-        valueParameter('provider', 'P'),
-      ]),
-      result: 'Effect<A ! E ? Without<R, S>>',
-      contract: bindingContract('Take'),
-    }),
-    contractEffect({
-      name: 'catchFailure',
-      post: 'CatchFailure',
-      typeParameters: Object.freeze(['S', 'A', 'B', 'E', 'F', '?R', '?Q']),
-      parameters: Object.freeze([
-        valueParameter('protected', 'once Effect<A ! E ? R>'),
-        valueParameter('handler', 'once fn(S) -> once Effect<B ! F ? Q>'),
-      ]),
-      result: 'Effect<A | B ! Without<E, S> | F ? R | Q>',
-      contract: catchContract,
-    }),
-  ]),
+    ],
+    result: 'Effect<A ! E ? R>',
+    semanticResult: Type.effectWithRows(
+      suspensionSuccess,
+      suspensionFailureRow,
+      { environment: contractLifetime('suspendEffect'), lifetimeBinders: [] },
+      'Take',
+      suspensionRequirementRow,
+    ),
+  }),
+  contractEffect({
+    name: 'bindRequirement',
+    post: 'BindRequirement',
+    providerMode: 'Shared',
+    typeParameters: ['?S', 'A', 'P', 'E', '?R'],
+    parameters: [
+      valueParameter('protected', 'once Effect<A ! E ? R>'),
+      valueParameter('provider', '&P'),
+    ],
+    result: 'Effect<A ! E ? Without<R, S>>',
+    contract: bindingContract('Shared'),
+  }),
+  contractEffect({
+    name: 'bindRequirementMut',
+    post: 'BindRequirement',
+    providerMode: 'Exclusive',
+    typeParameters: ['?S', 'A', 'P', 'E', '?R'],
+    parameters: [
+      valueParameter('protected', 'once Effect<A ! E ? R>'),
+      valueParameter('provider', '&mut P'),
+    ],
+    result: 'Effect<A ! E ? Without<R, S>>',
+    contract: bindingContract('Exclusive'),
+  }),
+  contractEffect({
+    name: 'bindRequirementOwned',
+    post: 'BindRequirement',
+    providerMode: 'Take',
+    typeParameters: ['?S', 'A', 'P', 'E', '?R'],
+    parameters: [
+      valueParameter('protected', 'once Effect<A ! E ? R>'),
+      valueParameter('provider', 'P'),
+    ],
+    result: 'Effect<A ! E ? Without<R, S>>',
+    contract: bindingContract('Take'),
+  }),
+  contractEffect({
+    name: 'catchFailure',
+    post: 'CatchFailure',
+    typeParameters: ['S', 'A', 'B', 'E', 'F', '?R', '?Q'],
+    parameters: [
+      valueParameter('protected', 'once Effect<A ! E ? R>'),
+      valueParameter('handler', 'once fn(S) -> once Effect<B ! F ? Q>'),
+    ],
+    result: 'Effect<A | B ! Without<E, S> | F ? R | Q>',
+    contract: catchContract,
+  }),
   ...profileOperations,
   ...staticTextOperations,
   ...reflectionOperations,
@@ -2503,12 +2418,9 @@ const intrinsicOperations = Object.freeze([
   assemblyOperation,
   enumValueOperation,
   replaceOperation,
-])
+]
 
-const operations = Object.freeze([
-  stringActor,
-  actor('Intrinsic', 'Namespace', intrinsicOperations),
-])
+const operations = [stringActor, actor('Intrinsic', 'Namespace', intrinsicOperations)]
 
 const actorsBySpelling: ReadonlyMap<string, Actor> = new Map(
   operations.map((actor_): readonly [string, Actor] => [actor_.spelling, actor_]),
@@ -2573,88 +2485,83 @@ export interface InventoryEntry {
 
 /** Publishes the closed intrinsic inventory used by verification and release review. */
 export const inventory = (): ReadonlyArray<InventoryEntry> =>
-  Object.freeze(
-    intrinsicOperations.map((operation) => {
-      if (operation.admission === undefined || operation.consumer === undefined)
-        throw new RangeError(`Intrinsic ${operation.spelling} is missing admission metadata`)
-      if (operation.phase === 'Runtime' && operation.targets.length === 0)
-        throw new RangeError(`Runtime intrinsic ${operation.spelling} has no execution target`)
-      if (operation.phase === 'StaticOnly' && operation.targets.length !== 0)
-        throw new RangeError(`Non-runtime intrinsic ${operation.spelling} has a runtime target`)
-      const staticParameters = operation.parameters.flatMap((parameter, ordinal) =>
-        parameter.phase === 'Static' ? [ordinal] : [],
-      )
+  intrinsicOperations.map((operation) => {
+    if (operation.admission === undefined || operation.consumer === undefined)
+      throw new RangeError(`Intrinsic ${operation.spelling} is missing admission metadata`)
+    if (operation.phase === 'Runtime' && operation.targets.length === 0)
+      throw new RangeError(`Runtime intrinsic ${operation.spelling} has no execution target`)
+    if (operation.phase === 'StaticOnly' && operation.targets.length !== 0)
+      throw new RangeError(`Non-runtime intrinsic ${operation.spelling} has a runtime target`)
+    const staticParameters = operation.parameters.flatMap((parameter, ordinal) =>
+      parameter.phase === 'Static' ? [ordinal] : [],
+    )
+    if (
+      operation.phase === 'Mixed' &&
+      operation.rule._tag === 'BuiltinRule' &&
+      operation.rule.operation === 'NativeAssembly'
+    ) {
       if (
-        operation.phase === 'Mixed' &&
-        operation.rule._tag === 'BuiltinRule' &&
-        operation.rule.operation === 'NativeAssembly'
-      ) {
-        if (
-          staticParameters.length !== 6 ||
-          staticParameters.some((ordinal, index) => ordinal !== index) ||
-          operation.parameters.length !== 7
-        )
-          throw new RangeError('Assembly metadata lanes are invalid')
-      } else if (
-        operation.phase === 'Mixed' &&
-        operation.rule._tag === 'MixedFieldProjectionRule'
-      ) {
-        if (
-          operation.rule._tag !== 'MixedFieldProjectionRule' ||
-          staticParameters.length !== 1 ||
-          staticParameters.at(0) !== operation.rule.staticDescriptorParameter ||
-          operation.parameters.at(operation.rule.runtimeOwnerParameter)?.phase === 'Static'
-        )
-          throw new RangeError(`Mixed intrinsic ${operation.spelling} has an invalid calling shape`)
-      } else if (operation.phase === 'Mixed') {
-        if (
-          operation.rule._tag !== 'MixedTestFunctionRule' ||
-          staticParameters.length !== 1 ||
-          staticParameters.at(0) !== operation.rule.staticDescriptorParameter
-        )
-          throw new RangeError(`Mixed intrinsic ${operation.spelling} has an invalid calling shape`)
-      } else if (staticParameters.length !== 0) {
-        throw new RangeError(`Whole-phase intrinsic ${operation.spelling} declares a static lane`)
-      }
-      const normalizedTargets = normalizeRuntimeTargets(operation.targets)
-      if (
-        normalizedTargets.length !== operation.targets.length ||
-        normalizedTargets.some((target, index) => operation.targets.at(index) !== target)
+        staticParameters.length !== 6 ||
+        staticParameters.some((ordinal, index) => ordinal !== index) ||
+        operation.parameters.length !== 7
       )
-        throw new RangeError(`Intrinsic ${operation.spelling} has non-normalized target metadata`)
-      let identity: string | undefined
-      switch (operation.rule._tag) {
-        case 'BuiltinRule':
-          identity = operation.rule.operation
-          break
-        case 'ContractRule':
-          identity = `${operation.rule._tag}.${operation.rule.post}`
-          break
-        case 'EnumValueRule':
-          identity = operation.rule._tag
-          break
-        case 'StaticOnlyRule':
-        case 'MixedFieldProjectionRule':
-        case 'MixedTestFunctionRule':
-          identity = undefined
-          break
-        default:
-          identity = `${operation.rule._tag}.${operation.rule.operation}`
-          break
-      }
-      return Object.freeze({
-        operation: `Intrinsic.${operation.spelling}`,
-        signature: signature(operation),
-        unsafe: operation.unsafe,
-        phase: operation.phase,
-        ...(operation.invariant === undefined ? {} : { invariant: operation.invariant }),
-        admission: operation.admission,
-        consumer: operation.consumer,
-        ...(identity === undefined ? {} : { tir: identity, mir: identity }),
-        targets: operation.targets,
-      })
-    }),
-  )
+        throw new RangeError('Assembly metadata lanes are invalid')
+    } else if (operation.phase === 'Mixed' && operation.rule._tag === 'MixedFieldProjectionRule') {
+      if (
+        operation.rule._tag !== 'MixedFieldProjectionRule' ||
+        staticParameters.length !== 1 ||
+        staticParameters.at(0) !== operation.rule.staticDescriptorParameter ||
+        operation.parameters.at(operation.rule.runtimeOwnerParameter)?.phase === 'Static'
+      )
+        throw new RangeError(`Mixed intrinsic ${operation.spelling} has an invalid calling shape`)
+    } else if (operation.phase === 'Mixed') {
+      if (
+        operation.rule._tag !== 'MixedTestFunctionRule' ||
+        staticParameters.length !== 1 ||
+        staticParameters.at(0) !== operation.rule.staticDescriptorParameter
+      )
+        throw new RangeError(`Mixed intrinsic ${operation.spelling} has an invalid calling shape`)
+    } else if (staticParameters.length !== 0) {
+      throw new RangeError(`Whole-phase intrinsic ${operation.spelling} declares a static lane`)
+    }
+    const normalizedTargets = normalizeRuntimeTargets(operation.targets)
+    if (
+      normalizedTargets.length !== operation.targets.length ||
+      normalizedTargets.some((target, index) => operation.targets.at(index) !== target)
+    )
+      throw new RangeError(`Intrinsic ${operation.spelling} has non-normalized target metadata`)
+    let identity: string | undefined
+    switch (operation.rule._tag) {
+      case 'BuiltinRule':
+        identity = operation.rule.operation
+        break
+      case 'ContractRule':
+        identity = `${operation.rule._tag}.${operation.rule.post}`
+        break
+      case 'EnumValueRule':
+        identity = operation.rule._tag
+        break
+      case 'StaticOnlyRule':
+      case 'MixedFieldProjectionRule':
+      case 'MixedTestFunctionRule':
+        identity = undefined
+        break
+      default:
+        identity = `${operation.rule._tag}.${operation.rule.operation}`
+        break
+    }
+    return {
+      operation: `Intrinsic.${operation.spelling}`,
+      signature: signature(operation),
+      unsafe: operation.unsafe,
+      phase: operation.phase,
+      ...(operation.invariant === undefined ? {} : { invariant: operation.invariant }),
+      admission: operation.admission,
+      consumer: operation.consumer,
+      ...(identity === undefined ? {} : { tir: identity, mir: identity }),
+      targets: operation.targets,
+    }
+  })
 
 /** Renders the source-like signature shared by hover and completion detail. */
 export const signature = (self: Operation): string => {

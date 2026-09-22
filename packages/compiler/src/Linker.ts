@@ -60,15 +60,15 @@ export const link = Effect.fn('Linker.link')(function* (
       request.cache.key,
       artifact.bytes,
     )
-  return Object.freeze({
+  return {
     _tag: 'LinkedArtifact',
     artifact,
-    metadata: Object.freeze({
+    metadata: {
       _tag: 'LinkMetadata',
       scope: request.scope.name,
       planIdentity: request.plan.identity,
       ...(request.cache._tag === 'ReadWrite' ? { cacheKey: request.cache.key } : {}),
       reused: reusable,
-    }),
-  })
+    },
+  }
 })

@@ -201,22 +201,21 @@ export interface AdmissionOptions {
   readonly pointerBits: 32 | 64
 }
 
-const unitValue: UnitValue = Object.freeze({ _tag: 'UnitValue' })
+const unitValue: UnitValue = { _tag: 'UnitValue' }
 
 /** The canonical static unit value. */
 export const unit = (): UnitValue => unitValue
 
 /** Constructs one canonical static Boolean. */
-export const boolean = (value: boolean): BooleanValue =>
-  Object.freeze({ _tag: 'BooleanValue', value })
+export const boolean = (value: boolean): BooleanValue => ({ _tag: 'BooleanValue', value })
 
 const rejected = (
   reason: RejectionReason,
   detail: string,
-  path: ReadonlyArray<number> = Object.freeze([]),
-): Admission => Object.freeze({ _tag: 'Rejected', reason, path: Object.freeze([...path]), detail })
+  path: ReadonlyArray<number> = [],
+): Admission => ({ _tag: 'Rejected', reason, path: [...path], detail })
 
-const admitted = (value: Value): Admission => Object.freeze({ _tag: 'Admitted', value })
+const admitted = (value: Value): Admission => ({ _tag: 'Admitted', value })
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -229,11 +228,11 @@ const canonicalId = (value: unknown): DeclarationFacts.CanonicalId | undefined =
     typeof value.name !== 'string'
   )
     return undefined
-  return Object.freeze({
+  return {
     _tag: 'CanonicalDeclarationId',
     module: value.module,
     name: value.name,
-  })
+  }
 }
 
 const declarationId = (value: unknown): DeclarationFacts.DeclarationId | undefined => {
@@ -246,7 +245,7 @@ const declarationId = (value: unknown): DeclarationFacts.DeclarationId | undefin
     value.ordinal < 0
   )
     return undefined
-  return Object.freeze({ _tag: 'DeclarationId', sourceId: value.sourceId, ordinal: value.ordinal })
+  return { _tag: 'DeclarationId', sourceId: value.sourceId, ordinal: value.ordinal }
 }
 
 const fieldId = (value: unknown): DeclarationFacts.FieldId | undefined => {
@@ -264,7 +263,7 @@ const fieldId = (value: unknown): DeclarationFacts.FieldId | undefined => {
       const declaration = declarationId(value.owner.declaration)
       return declaration === undefined
         ? undefined
-        : Object.freeze({ _tag: 'StructFieldOwnerId' as const, declaration })
+        : { _tag: 'StructFieldOwnerId' as const, declaration }
     }
     if (value.owner._tag !== 'UnionVariantFieldOwnerId' || !isRecord(value.owner.variant))
       return undefined
@@ -275,14 +274,12 @@ const fieldId = (value: unknown): DeclarationFacts.FieldId | undefined => {
       !Number.isSafeInteger(ordinal) ||
       ordinal < 0
       ? undefined
-      : Object.freeze({
+      : {
           _tag: 'UnionVariantFieldOwnerId' as const,
-          variant: Object.freeze({ _tag: 'UnionVariantId' as const, union, ordinal }),
-        })
+          variant: { _tag: 'UnionVariantId' as const, union, ordinal },
+        }
   })()
-  return owner === undefined
-    ? undefined
-    : Object.freeze({ _tag: 'FieldId', owner, ordinal: value.ordinal })
+  return owner === undefined ? undefined : { _tag: 'FieldId', owner, ordinal: value.ordinal }
 }
 
 const isEnumRepresentation = (value: unknown): value is Scalar.EnumRepresentationSpelling =>
@@ -306,21 +303,19 @@ const integerValue = (
   const range = Scalar.range(scalar, pointerBits)
   return value < range.minimum || value > range.maximum
     ? rejected('InvalidInteger', `${value.toString()} is outside ${type}`)
-    : admitted(Object.freeze({ _tag: 'IntegerValue', type, value }))
+    : admitted({ _tag: 'IntegerValue', type, value })
 }
 
 const floatValue = (type: Scalar.FloatSpelling, bits: bigint): Admission => {
   const width = type === 'f32' ? 32 : 64
   if (bits < 0n || bits >= 1n << BigInt(width))
     return rejected('InvalidFloat', `bits are outside ${type}`)
-  const value = Object.freeze({ width, bits })
-  return admitted(
-    Object.freeze({
-      _tag: 'FloatValue',
-      type,
-      bits: FloatingPoint.isNotANumber(value) ? FloatingPoint.canonicalNaN(width) : bits,
-    }),
-  )
+  const value: FloatingPoint.Bits = { width, bits }
+  return admitted({
+    _tag: 'FloatValue',
+    type,
+    bits: FloatingPoint.isNotANumber(value) ? FloatingPoint.canonicalNaN(width) : bits,
+  })
 }
 
 const offset = (value: unknown): value is number =>
@@ -328,7 +323,7 @@ const offset = (value: unknown): value is number =>
 
 const textRange = (value: unknown): Provenance.Range | undefined =>
   isRecord(value) && offset(value.start) && offset(value.end) && value.start <= value.end
-    ? Object.freeze({ start: value.start, end: value.end })
+    ? { start: value.start, end: value.end }
     : undefined
 
 const textSource = (value: unknown): Provenance.Source | undefined => {
@@ -337,19 +332,19 @@ const textSource = (value: unknown): Provenance.Source | undefined => {
   if (range === undefined) return undefined
   if (value._tag === 'Parameter')
     return offset(value.ordinal)
-      ? Object.freeze({
+      ? {
           _tag: 'Parameter',
           ...(typeof value.scope === 'string' ? { scope: value.scope } : {}),
           ordinal: value.ordinal,
           range,
-        })
+        }
       : undefined
   return value._tag === 'Literal' && isRecord(value.at) && value.at._tag === 'AuthoredAnchor'
-    ? Object.freeze({
+    ? {
         _tag: 'Literal',
         at: value.at as unknown as AuthoredIdentity.Anchor,
         range,
-      })
+      }
     : undefined
 }
 
@@ -361,9 +356,9 @@ const textOrigin = (value: unknown): TextOrigin | undefined => {
     const range = isRecord(segment) ? textRange(segment.value) : undefined
     const from = isRecord(segment) ? textSource(segment.from) : undefined
     if (range === undefined || from === undefined) return undefined
-    segments.push(Object.freeze({ value: range, from }))
+    segments.push({ value: range, from })
   }
-  return Object.freeze(segments)
+  return segments
 }
 
 const textValue = (bytes: unknown, origin?: unknown): Admission => {
@@ -372,20 +367,18 @@ const textValue = (bytes: unknown, origin?: unknown): Admission => {
     bytes.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 0xff)
   )
     return rejected('InvalidText', 'static text must contain only bytes')
-  const canonicalBytes = Object.freeze([...bytes])
+  const canonicalBytes = [...bytes]
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(canonicalBytes))
   } catch {
     return rejected('InvalidText', 'static text must be valid UTF-8')
   }
   const canonicalOrigin = textOrigin(origin)
-  return admitted(
-    Object.freeze({
-      _tag: 'TextValue',
-      bytes: canonicalBytes,
-      ...(canonicalOrigin === undefined ? {} : { origin: canonicalOrigin }),
-    }),
-  )
+  return admitted({
+    _tag: 'TextValue',
+    bytes: canonicalBytes,
+    ...(canonicalOrigin === undefined ? {} : { origin: canonicalOrigin }),
+  })
 }
 
 const aggregateIdentity = (value: unknown): AggregateIdentity | undefined => {
@@ -398,11 +391,11 @@ const aggregateIdentity = (value: unknown): AggregateIdentity | undefined => {
       value.length < 0
     )
       return undefined
-    return Object.freeze({
+    return {
       _tag: 'ArrayAggregateIdentity',
       element: value.element,
       length: value.length,
-    })
+    }
   }
   if (value._tag !== 'NominalAggregateIdentity') return undefined
   const declaration = canonicalId(value.declaration)
@@ -422,14 +415,14 @@ const aggregateIdentity = (value: unknown): AggregateIdentity | undefined => {
       typeof value.variant.name !== 'string'
     )
       return undefined
-    variant = Object.freeze({ ordinal: value.variant.ordinal, name: value.variant.name })
+    variant = { ordinal: value.variant.ordinal, name: value.variant.name }
   }
-  return Object.freeze({
+  return {
     _tag: 'NominalAggregateIdentity',
     declaration,
-    typeArguments: Object.freeze([...value.typeArguments]),
+    typeArguments: [...value.typeArguments],
     ...(variant === undefined ? {} : { variant }),
-  })
+  }
 }
 
 const isAggregateKind = (value: unknown): value is AggregateKind =>
@@ -443,28 +436,28 @@ const typeDescriptorValue = (value: unknown): TypeDescriptorValue | undefined =>
     return undefined
   const owner = Type.fromUnknown(value.owner)
   if (owner === undefined || !Type.isNominal(owner)) return undefined
-  return Object.freeze({ _tag: 'TypeDescriptorValue', owner, kind: value.kind })
+  return { _tag: 'TypeDescriptorValue', owner, kind: value.kind }
 }
 
 const reflectedMember = (value: unknown): ReflectedMember | undefined => {
   if (!isRecord(value)) return undefined
   if (value._tag === 'LabeledField') {
     return typeof value.label === 'string' && value.label.length > 0
-      ? Object.freeze({ _tag: 'LabeledField', label: value.label })
+      ? { _tag: 'LabeledField', label: value.label }
       : undefined
   }
   if (value._tag !== 'PositionalField') return undefined
   return typeof value.ordinal === 'number' &&
     Number.isSafeInteger(value.ordinal) &&
     value.ordinal >= 0
-    ? Object.freeze({ _tag: 'PositionalField', ordinal: value.ordinal })
+    ? { _tag: 'PositionalField', ordinal: value.ordinal }
     : undefined
 }
 
 const descriptorProvenance = (value: unknown): DescriptorProvenance | undefined => {
   if (!isRecord(value) || !isRecord(value.anchor) || value.anchor._tag !== 'AuthoredAnchor')
     return undefined
-  return Object.freeze({ anchor: value.anchor as unknown as AuthoredIdentity.Anchor })
+  return { anchor: value.anchor as unknown as AuthoredIdentity.Anchor }
 }
 
 const fieldDescriptorValue = (value: unknown): FieldDescriptorValue | undefined => {
@@ -485,7 +478,7 @@ const fieldDescriptorValue = (value: unknown): FieldDescriptorValue | undefined 
     provenance === undefined
   )
     return undefined
-  return Object.freeze({
+  return {
     _tag: 'FieldDescriptorValue',
     owner,
     declarationOrdinal: value.declarationOrdinal,
@@ -493,7 +486,7 @@ const fieldDescriptorValue = (value: unknown): FieldDescriptorValue | undefined 
     valueType,
     authorization,
     provenance,
-  })
+  }
 }
 
 const testDescriptorValue = (value: unknown): TestDescriptorValue | undefined => {
@@ -508,12 +501,12 @@ const testDescriptorValue = (value: unknown): TestDescriptorValue | undefined =>
     value.authorization.length === 0
   )
     return undefined
-  return Object.freeze({
+  return {
     _tag: 'TestDescriptorValue',
     declaration,
     callable,
     authorization: value.authorization,
-  })
+  }
 }
 
 const sameTypeDescriptor = (left: TypeDescriptorValue, right: TypeDescriptorValue): boolean =>
@@ -540,7 +533,7 @@ const admissionAt = (
         return typeof input.value === 'number' &&
           Number.isSafeInteger(input.value) &&
           Scalar.isUnicodeScalarValue(BigInt(input.value))
-          ? admitted(Object.freeze({ _tag: 'CharacterValue', value: input.value }))
+          ? admitted({ _tag: 'CharacterValue', value: input.value })
           : rejected('InvalidCharacter', 'character is not a Unicode scalar', path)
       case 'IntegerValue':
         return Scalar.isIntegerSpelling(input.type) && typeof input.value === 'bigint'
@@ -566,15 +559,13 @@ const admissionAt = (
         const range = Scalar.range(scalar, 64)
         if (input.discriminant < range.minimum || input.discriminant > range.maximum)
           return rejected('InvalidEnum', 'enum discriminant exceeds its representation', path)
-        return admitted(
-          Object.freeze({
-            _tag: 'EnumValue',
-            type,
-            member: input.member,
-            representation,
-            discriminant: input.discriminant,
-          }),
-        )
+        return admitted({
+          _tag: 'EnumValue',
+          type,
+          member: input.member,
+          representation,
+          discriminant: input.discriminant,
+        })
       }
       case 'TextValue':
         return textValue(input.bytes, input.origin)
@@ -596,7 +587,7 @@ const admissionAt = (
           ordinals.add(field.ordinal)
           const nested = admissionAt(field.value, options, [...path, field.ordinal], active)
           if (nested._tag === 'Rejected') return nested
-          fields.push(Object.freeze({ ordinal: field.ordinal, value: nested.value }))
+          fields.push({ ordinal: field.ordinal, value: nested.value })
         }
         fields.sort((left, right) => left.ordinal - right.ordinal)
         if (
@@ -627,9 +618,9 @@ const admissionAt = (
             )
               return false
             ordinals.add(id.ordinal)
-            admittedFields.push(Object.freeze({ id, type }))
+            admittedFields.push({ id, type })
           }
-          return Object.freeze(admittedFields)
+          return admittedFields
         })()
         if (runtimeFields === false)
           return rejected(
@@ -637,14 +628,12 @@ const admissionAt = (
             'aggregate runtime field metadata does not match admitted fields',
             path,
           )
-        return admitted(
-          Object.freeze({
-            _tag: 'AggregateValue',
-            identity,
-            fields: Object.freeze(fields),
-            ...(runtimeFields === undefined ? {} : { runtimeFields }),
-          }),
-        )
+        return admitted({
+          _tag: 'AggregateValue',
+          identity,
+          fields: fields,
+          ...(runtimeFields === undefined ? {} : { runtimeFields }),
+        })
       }
       case 'TypeDescriptorValue': {
         const descriptor = typeDescriptorValue(input)
@@ -685,13 +674,11 @@ const admissionAt = (
           fields.push(descriptor)
         }
         fields.sort((left, right) => left.declarationOrdinal - right.declarationOrdinal)
-        return admitted(
-          Object.freeze({
-            _tag: 'FieldCollectionValue',
-            owner,
-            fields: Object.freeze(fields),
-          }),
-        )
+        return admitted({
+          _tag: 'FieldCollectionValue',
+          owner,
+          fields: fields,
+        })
       }
       case 'StaticSequenceValue': {
         const elementType = Type.fromUnknown(input.elementType)
@@ -707,13 +694,11 @@ const admissionAt = (
           if (nested._tag === 'Rejected') return nested
           elements.push(nested.value)
         }
-        return admitted(
-          Object.freeze({
-            _tag: 'StaticSequenceValue',
-            elementType,
-            elements: Object.freeze(elements),
-          }),
-        )
+        return admitted({
+          _tag: 'StaticSequenceValue',
+          elementType,
+          elements: elements,
+        })
       }
       case 'TestDescriptorValue': {
         const descriptor = testDescriptorValue(input)
@@ -741,7 +726,7 @@ const admissionAt = (
           declarations.add(key)
           tests.push(descriptor)
         }
-        return admitted(Object.freeze({ _tag: 'TestCollectionValue', tests: Object.freeze(tests) }))
+        return admitted({ _tag: 'TestCollectionValue', tests: tests })
       }
       default:
         return rejected(
@@ -762,15 +747,14 @@ const admissionAt = (
  * the static evaluator's closed value domain.
  */
 export const admit = (input: unknown, options: AdmissionOptions): Admission =>
-  admissionAt(input, options, Object.freeze([]), new WeakSet())
+  admissionAt(input, options, [], new WeakSet())
 
 /** Constructs the canonical empty sequence for one concrete semantic element type. */
-export const emptySequence = (elementType: Type.Type): StaticSequenceValue =>
-  Object.freeze({
-    _tag: 'StaticSequenceValue',
-    elementType,
-    elements: Object.freeze([]),
-  })
+export const emptySequence = (elementType: Type.Type): StaticSequenceValue => ({
+  _tag: 'StaticSequenceValue',
+  elementType,
+  elements: [],
+})
 
 /** Appends one admitted element without changing the original sequence. */
 export const appendSequence = (
@@ -780,11 +764,11 @@ export const appendSequence = (
 ): StaticSequenceValue | undefined =>
   !Type.equals(elementType, self.elementType)
     ? undefined
-    : Object.freeze({
+    : {
         _tag: 'StaticSequenceValue',
         elementType: self.elementType,
-        elements: Object.freeze([...self.elements, element]),
-      })
+        elements: [...self.elements, element],
+      }
 
 /** Concatenates equal-element-type sequences without changing either input. */
 export const concatenateSequences = (
@@ -793,11 +777,11 @@ export const concatenateSequences = (
 ): StaticSequenceValue | undefined =>
   !Type.equals(left.elementType, right.elementType)
     ? undefined
-    : Object.freeze({
+    : {
         _tag: 'StaticSequenceValue',
         elementType: left.elementType,
-        elements: Object.freeze([...left.elements, ...right.elements]),
-      })
+        elements: [...left.elements, ...right.elements],
+      }
 
 /** Returns the finite number of elements in one static sequence. */
 export const sequenceLength = (self: StaticSequenceValue): number => self.elements.length

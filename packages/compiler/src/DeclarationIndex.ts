@@ -17,11 +17,10 @@ export const make = (
   modules: ReadonlyArray<DeclarationFacts.ModuleHeaders>,
   diagnostics: ReadonlyArray<Diagnostic.Located>,
   generatedAggregates: ReadonlyMap<string, DeclarationFacts.StructFact> = new Map(),
-): Index =>
-  Object.freeze({
-    _tag: 'DeclarationIndex',
-    stage,
-    modules: Object.freeze(modules),
-    generatedAggregates,
-    diagnostics: Object.freeze(diagnostics),
-  })
+): Index => ({
+  _tag: 'DeclarationIndex',
+  stage,
+  modules: modules,
+  generatedAggregates,
+  diagnostics: diagnostics,
+})

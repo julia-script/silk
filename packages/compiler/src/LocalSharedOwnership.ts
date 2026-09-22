@@ -25,7 +25,7 @@ export interface CoreFact {
 /** Inspects a core without exposing address, count, access, layout, or reclaim lanes. */
 export const inspect = (type: Type.Type): CoreFact | undefined =>
   Type.isSharedCore(type)
-    ? Object.freeze({
+    ? {
         _tag: 'LocalSharedCoreFact',
         identity: 'Intrinsic.SharedCore',
         type,
@@ -33,7 +33,7 @@ export const inspect = (type: Type.Type): CoreFact | undefined =>
         role: strongRole,
         category: 'Affine',
         affinity: ExecutionAffinity.localExecution,
-      })
+      }
     : undefined
 
 /** The exact structural location of a live strong-handle obligation. */
@@ -67,15 +67,17 @@ export type ObligationPlan =
     }
   | { readonly _tag: 'Unavailable'; readonly causes: ReadonlyArray<Diagnostic.CauseIdentity> }
 
-export const none: ObligationPlan = Object.freeze({ _tag: 'NoLocalSharedObligation' })
+export const none: ObligationPlan = { _tag: 'NoLocalSharedObligation' }
 
-const unavailable = (causes: ReadonlyArray<Diagnostic.CauseIdentity>): ObligationPlan =>
-  Object.freeze({ _tag: 'Unavailable', causes: Object.freeze([...causes]) })
+const unavailable = (causes: ReadonlyArray<Diagnostic.CauseIdentity>): ObligationPlan => ({
+  _tag: 'Unavailable',
+  causes: [...causes],
+})
 
 const causeOf = (
   fact: DeclarationFacts.DeclaredTypeFact,
 ): ReadonlyArray<Diagnostic.CauseIdentity> =>
-  'cause' in fact && fact.cause !== undefined ? Object.freeze([fact.cause]) : Object.freeze([])
+  'cause' in fact && fact.cause !== undefined ? [fact.cause] : []
 
 const product = (components: ReadonlyArray<ObligationPlan>): ObligationPlan => {
   const retained = components.filter((component) => component._tag !== 'NoLocalSharedObligation')
@@ -83,7 +85,7 @@ const product = (components: ReadonlyArray<ObligationPlan>): ObligationPlan => {
   const only = retained.at(0)
   return retained.length === 1 && only !== undefined
     ? only
-    : Object.freeze({ _tag: 'Product', components: Object.freeze(retained) })
+    : { _tag: 'Product', components: retained }
 }
 
 /** Combines independently retained structural obligations without inventing a representation. */
@@ -95,25 +97,24 @@ const ofTypeInner = (
   type: Type.Type,
   active: ReadonlySet<string>,
 ): ObligationPlan => {
-  if (Type.isSharedCore(type)) return Object.freeze({ _tag: 'LocalSharedStrong', core: type })
-  if (Type.isParameter(type)) return Object.freeze({ _tag: 'ParameterDependent', parameter: type })
+  if (Type.isSharedCore(type)) return { _tag: 'LocalSharedStrong', core: type }
+  if (Type.isParameter(type)) return { _tag: 'ParameterDependent', parameter: type }
   if (Type.isFixedArray(type))
     return type.length === 0
       ? none
-      : Object.freeze({
+      : {
           _tag: 'Repeat',
           length: type.length,
           element: ofTypeInner(index, type.element, active),
-        })
+        }
   if (Type.isUnion(type))
-    return Object.freeze({
+    return {
       _tag: 'ActiveUnion',
-      cases: Object.freeze(
-        type.members.map((member) =>
-          Object.freeze({ member, obligations: ofTypeInner(index, member, active) }),
-        ),
-      ),
-    })
+      cases: type.members.map((member) => ({
+        member,
+        obligations: ofTypeInner(index, member, active),
+      })),
+    }
   // Lexical/raw-storage views do not own initialized element values as structural fields.
   if (Type.isSlot(type) || Type.isRawBuffer(type)) return none
   // Borrows retain affinity, not an independently owned strong-count obligation.
@@ -153,24 +154,20 @@ const ofTypeInner = (
     ) ?? new Map()
   const next = new Set(active).add(key)
   if (declaration._tag === 'UnionDeclaration')
-    return Object.freeze({
+    return {
       _tag: 'ActiveNominalUnion',
       type,
-      cases: Object.freeze(
-        declaration.variants.map((variant) =>
-          Object.freeze({
-            variant: variant.id,
-            obligations: product(
-              variant.fields.map((field) =>
-                field.declaredType._tag === 'Resolved'
-                  ? ofTypeInner(index, Type.substitute(field.declaredType.type, substitution), next)
-                  : unavailable(causeOf(field.declaredType)),
-              ),
-            ),
-          }),
+      cases: declaration.variants.map((variant) => ({
+        variant: variant.id,
+        obligations: product(
+          variant.fields.map((field) =>
+            field.declaredType._tag === 'Resolved'
+              ? ofTypeInner(index, Type.substitute(field.declaredType.type, substitution), next)
+              : unavailable(causeOf(field.declaredType)),
+          ),
         ),
-      ),
-    })
+      })),
+    }
   return product(
     declaration.fields.map((field) =>
       field.declaredType._tag === 'Resolved'

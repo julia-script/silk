@@ -55,13 +55,13 @@ const encoder = new TextEncoder()
 
 const frame = (bytes: ReadonlyArray<number>): ReadonlyArray<number> => {
   const length = bytes.length
-  return Object.freeze([
+  return [
     (length >>> 24) & 0xff,
     (length >>> 16) & 0xff,
     (length >>> 8) & 0xff,
     length & 0xff,
     ...bytes,
-  ])
+  ]
 }
 
 /** Versioned, domain-separated digest of exactly one declaration's authored header and body. */
@@ -115,13 +115,13 @@ const normalizeLogicalPath = (value: string): string =>
 const sourceOf = (request: Request, module: ModuleClosure.Module): Source | undefined => {
   const supplied = request.sources?.get(module.name)
   if (supplied !== undefined)
-    return Object.freeze({ ...supplied, logicalPath: normalizeLogicalPath(supplied.logicalPath) })
+    return { ...supplied, logicalPath: normalizeLogicalPath(supplied.logicalPath) }
   if (module.syntax.source.origin._tag !== 'ProjectFile') return undefined
   const prefix = request.logicalRoot === undefined ? '' : normalizeLogicalPath(request.logicalRoot)
-  return Object.freeze({
+  return {
     ownership: 'Project',
     logicalPath: `${prefix.length === 0 ? '' : `${prefix}/`}${module.name}.silk`,
-  })
+  }
 }
 
 const callableType = (declaration: DeclarationFacts.DeclarationFact): Type.Callable => {
@@ -149,7 +149,7 @@ const position = (
       column = 1
     } else column += 1
   }
-  return Object.freeze({ line, column })
+  return { line, column }
 }
 
 const compareEntries = (left: Entry, right: Entry): number => {
@@ -179,31 +179,29 @@ export const make = Effect.fn('TestDiscovery.make')(function* (
       if (!declaration.test || declaration.canonical._tag !== 'Canonical') continue
       if (declaration.name._tag !== 'Present') continue
       const location = position(module, declaration)
-      entries.push(
-        Object.freeze({
-          declaration,
-          callable: callableType(declaration),
-          info: Object.freeze({
-            identity: AuthoredIdentity.key(declaration.owner),
-            name: declaration.name.spelling,
-            module: headers.module,
-            path: source.logicalPath,
-            line: location.line,
-            column: location.column,
-            fingerprint: yield* fingerprint(result, declaration),
-          }),
-        }),
-      )
+      entries.push({
+        declaration,
+        callable: callableType(declaration),
+        info: {
+          identity: AuthoredIdentity.key(declaration.owner),
+          name: declaration.name.spelling,
+          module: headers.module,
+          path: source.logicalPath,
+          line: location.line,
+          column: location.column,
+          fingerprint: yield* fingerprint(result, declaration),
+        },
+      })
     }
   }
   entries.sort(compareEntries)
-  const frozen = Object.freeze(entries)
-  return Object.freeze({
+  const frozen = entries
+  return {
     _tag: 'TestCatalog',
-    request: Object.freeze({
+    request: {
       ...request,
       ...(request.sources === undefined ? {} : { sources: new Map(request.sources) }),
-    }),
+    },
     entries: frozen,
     identity: Canonical.record('TestCatalog.v1', [
       request.root,
@@ -223,5 +221,5 @@ export const make = Effect.fn('TestDiscovery.make')(function* (
         ),
       ),
     ]),
-  })
+  }
 })
