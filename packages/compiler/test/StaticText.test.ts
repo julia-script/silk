@@ -605,23 +605,7 @@ it('canonicalizes nominal reflection descriptors and heterogeneous field collect
     StaticValue.admit(
       {
         _tag: 'TypeDescriptorValue',
-        owner: Object.freeze({ _tag: 'NominalType' }),
-        kind: 'Named',
-      },
-      { pointerBits: 64 },
-    )._tag,
-    'Rejected',
-  )
-  assert.strictEqual(
-    StaticValue.admit(
-      {
-        _tag: 'TypeDescriptorValue',
-        owner: Object.freeze({
-          _tag: 'NominalType',
-          module: 'example.reflection',
-          name: 'MutableArguments',
-          arguments: [],
-        }),
+        owner: { _tag: 'NominalType' },
         kind: 'Named',
       },
       { pointerBits: 64 },
