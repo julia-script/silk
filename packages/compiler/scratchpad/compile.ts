@@ -65,8 +65,9 @@ const program = Effect.gen(function* () {
     cache,
     saveTemps: true,
   }).pipe(
-    Effect.provide(FileSourceResolver.layer(FileSourceResolver.make(sourceRoot))),
-    Effect.provide(caches),
+    Effect.provide(
+      Layer.mergeAll(FileSourceResolver.layer(FileSourceResolver.make(sourceRoot)), caches),
+    ),
   )
 
   // Inspect outcome.report here for phase timings; rejected builds retain diagnostics/sources.
