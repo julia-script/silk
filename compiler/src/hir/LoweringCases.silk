@@ -1,0 +1,313 @@
+//! HIR tests kept beside the self-hosted lowering and imported by the package root.
+
+import hir.Hir
+import hir.Hir {
+  Cause,
+  CauseCode,
+  Defect,
+  HirId,
+  HirRef,
+  Module,
+  Node,
+  OwnerKey,
+  OwnerKind,
+  Range,
+  Violation,
+}
+import lexer.Span {Span}
+import hir.Intern {StringTable, Symbol, SymbolRef}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.effect {Effect}
+import silk.string {String}
+import silk.testing {AssertionError, Testing}
+import silk.usize
+import silk.writer {WriterError}
+import silk.vector {Vector}
+
+fn bytesEqual(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if left[index] != right[index] {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+/// Appends the decimal spelling of `value` so a growth case can generate distinct byte strings.
+effect fn decimalBytes(value: usize) -> Vector<u8> ! OutOfMemoryError ? &mut Allocator {
+  let mut digits = Vector.make<u8>()
+  if value == usize.ZERO {
+    run Vector.append<u8>(&mut digits, 48)
+    return move digits
+  }
+  let mut remaining = value
+  let mut reversed = Vector.make<u8>()
+  while remaining > usize.ZERO {
+    run Vector.append<u8>(&mut reversed, usize.toU8(48 + remaining % 10))
+    remaining = remaining / 10
+  }
+  let mut index = Vector.length<u8>(&reversed)
+  while index > usize.ZERO {
+    index = index - usize.ONE
+    run Vector.append<u8>(&mut digits, Vector.get<u8>(&reversed, index))
+  }
+  return move digits
+}
+
+effect fn internTwice() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let mut table = StringTable.make()
+  let first = run StringTable.intern(&mut table, String.utf8Bytes("declaration"))
+  let second = run StringTable.intern(&mut table, String.utf8Bytes("declaration"))
+  run Testing.expect(first.index == second.index, "equal bytes share one symbol")
+  run Testing.expect(StringTable.length(&table) == usize.ONE, "equal bytes store one entry")
+  run Testing.expect(
+    bytesEqual(StringTable.get(&table, first), String.utf8Bytes("declaration")),
+    "the symbol resolves to its bytes",
+  )
+  return ()
+}
+
+test effect fn internerReusesEqualBytes() -> () ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run internTwice() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn internDistinct() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let mut table = StringTable.make()
+  let first = run StringTable.intern(&mut table, String.utf8Bytes("alpha"))
+  let second = run StringTable.intern(&mut table, String.utf8Bytes("beta"))
+  let empty = run StringTable.intern(&mut table, String.utf8Bytes(""))
+  run Testing.expect(first.index != second.index, "different bytes take different symbols")
+  run Testing.expect(empty.index != first.index, "the empty string is an ordinary entry")
+  run Testing.expect(
+    StringTable.length(&table) == usize.add(usize.ONE, 2),
+    "three distinct strings store three entries",
+  )
+  run Testing.expect(
+    bytesEqual(StringTable.get(&table, second), String.utf8Bytes("beta")),
+    "each symbol resolves to its own bytes",
+  )
+  return ()
+}
+
+test effect fn internerSeparatesDistinctBytes() -> () ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run internDistinct() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn internManyThenResolve() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let count = usize.add(usize.ZERO, 300)
+  let mut table = StringTable.make()
+  let mut symbols = Vector.make<Symbol>()
+  let mut index = usize.ZERO
+  while index < count {
+    let digits = run decimalBytes(index)
+    let symbol = run StringTable.intern(&mut table, Vector.asSlice<u8>(&digits))
+    run Vector.append<Symbol>(&mut symbols, symbol)
+    drop digits
+    index = index + usize.ONE
+  }
+  run Testing.expect(
+    StringTable.length(&table) == count,
+    "distinct strings survive index growth as distinct entries",
+  )
+  let mut checked = usize.ZERO
+  while checked < count {
+    let digits = run decimalBytes(checked)
+    let symbol = Vector.get<Symbol>(&symbols, checked)
+    run Testing.expect(
+      bytesEqual(StringTable.get(&table, symbol), Vector.asSlice<u8>(&digits)),
+      "an earlier symbol still resolves to its bytes after growth",
+    )
+    let again = run StringTable.intern(&mut table, Vector.asSlice<u8>(&digits))
+    run Testing.expect(again.index == symbol.index, "re-interning after growth reuses the symbol")
+    drop digits
+    checked = checked + usize.ONE
+  }
+  return ()
+}
+
+test effect fn internerGrowsWithoutLosingSymbols() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run internManyThenResolve() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn verifyEmpty() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let module = Module.make()
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "an empty module satisfies every arena invariant",
+  )
+  drop defects
+  return ()
+}
+
+test effect fn emptyModuleVerifies() -> () ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run verifyEmpty() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn renderEmpty() -> () ! WriterError | AssertionError<'static> {
+  let module = Module.make()
+  let rendered = run Hir.render(&module)
+  let expected = String.utf8Bytes(
+    """documentation none
+declarations []
+
+nodes 0
+
+causes 0
+
+diagnostics 0
+""",
+  )
+  run Testing.expect(
+    bytesEqual(Vector.asSlice<u8>(&rendered), expected),
+    "an empty module renders its section headers only",
+  )
+  drop rendered
+  return ()
+}
+
+test effect fn emptyModuleRenders() -> () ! WriterError | AssertionError<'static> {
+  return run renderEmpty()
+}
+
+/// Appends one node with its span and its (usually empty) recovery-cause run.
+effect fn appendNode(module: &mut Module, node: Node, span: Span, causes: Range) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let index = Vector.length<Node>(&module.nodes)
+  run Vector.append<Node>(&mut module.nodes, node)
+  run Vector.append<Span>(&mut module.spans, span)
+  run Vector.append<Range>(&mut module.nodeCauses, causes)
+  return HirId {index: index}
+}
+
+/// Builds `pub role Clock` reduced to the three nodes this test needs.
+effect fn buildModule() -> Module ! OutOfMemoryError ? &mut Allocator {
+  let mut module = Module.make()
+  let clock = run Module.intern(&mut module, String.utf8Bytes("Clock"))
+  let name = run appendNode(
+    &mut module,
+    Node.Name {text: clock},
+    Span.make(9, 14),
+    Range.empty(),
+  )
+  let header = run appendNode(
+    &mut module,
+    Node.RoleHeader {name: name, isPublic: true},
+    Span.make(0, 14),
+    Range.empty(),
+  )
+  let body = run appendNode(&mut module, Node.NoBody, Span.make(14, 14), Range.empty())
+  let declaration = run appendNode(
+    &mut module,
+    Node.Declaration {
+      owner: OwnerKey {kind: OwnerKind.Role, name: SymbolRef.of(clock), occurrence: usize.ZERO},
+      header: header,
+      body: body,
+    },
+    Span.make(0, 14),
+    Range.empty(),
+  )
+  let start = Vector.length<HirId>(&module.children)
+  run Vector.append<HirId>(&mut module.children, declaration)
+  module.declarations = Range {start: start, length: usize.ONE}
+  return move module
+}
+
+effect fn renderBuilt() -> ()
+! OutOfMemoryError | WriterError | AssertionError<'static>
+? &mut Allocator {
+  let module = run buildModule()
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "a well-formed module reports no defect",
+  )
+  drop defects
+  let rendered = run Hir.render(&module)
+  let expected = String.utf8Bytes(
+    """documentation none
+declarations [#3]
+
+nodes 4
+#0 Name 9..14
+  text: "Clock"
+#1 RoleHeader 0..14
+  name: #0
+  isPublic: true
+#2 NoBody 14..14
+#3 Declaration 0..14
+  owner: Role "Clock" #0
+  header: #1
+  body: #2
+
+causes 0
+
+diagnostics 0
+""",
+  )
+  run Testing.expect(
+    bytesEqual(Vector.asSlice<u8>(&rendered), expected),
+    "a built module renders one block per node",
+  )
+  drop rendered
+  return ()
+}
+
+test effect fn builtModuleRenders() -> ()
+! OutOfMemoryError | WriterError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run renderBuilt() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn detectDefects() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let mut module = run buildModule()
+  let forward = run appendNode(
+    &mut module,
+    Node.MoveExpression {operand: HirId {index: 9}},
+    Span.make(0, 0),
+    Range.empty(),
+  )
+  let damaged = run appendNode(
+    &mut module,
+    Node.MissingType,
+    Span.make(0, 0),
+    Range.empty(),
+  )
+  let defects = run Hir.verify(&module)
+  let found = Vector.asSlice<Defect>(&defects)
+  let mut sawOutOfBounds = false
+  let mut sawEmptyCauses = false
+  let mut index = usize.ZERO
+  while index < found.length {
+    let defect = found[index]
+    if defect.violation == Violation.ReferenceOutOfBounds && defect.id.index == forward.index {
+      sawOutOfBounds = true
+    }
+    if defect.violation == Violation.EmptyRecoveryCauses && defect.id.index == damaged.index {
+      sawEmptyCauses = true
+    }
+    index = index + usize.ONE
+  }
+  run Testing.expect(sawOutOfBounds, "a child identity outside the arena is a defect")
+  run Testing.expect(sawEmptyCauses, "a recovery node with no cause is a defect")
+  drop defects
+  return ()
+}
+
+test effect fn verifyDetectsBrokenArena() -> () ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run detectDefects() |> Effect.provideMut<Allocator>(&mut allocator)
+}

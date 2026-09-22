@@ -56,3 +56,10 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
   pre-coordination or unverified CBM generation was active · Reuse the indexed main Silk checkout
   for structural discovery and use targeted filesystem inspection only for uncovered task-local or
   ignored files · repository
+- 2026-09-22 · A `cd` into a temporary probe project reset the shell cwd, and every following
+  `pnpm exec silk` call failed with `MODULE_NOT_FOUND` before running · Keep the shell in the
+  repository root and address probe projects only through `--manifest-path` · repository
+- 2026-09-22 · A large union failed to parse with a misleading `Expected }` at an unrelated later
+  variant because one field was named after the contextual keyword `role`; keyword fields such as
+  `type` and `unsafe` reported clearly, but `role` did not · Check a new field name against the
+  `TokenKind` keyword list before debugging the enclosing declaration · compiler

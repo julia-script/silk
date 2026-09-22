@@ -47,6 +47,21 @@ problems are result values, not effect failures; allocation failure is still an 
 The AST inspection executable intentionally prints the recovered result instead of stopping at
 its first syntax diagnostic. A future compilation driver can stop on that diagnostic.
 
+## Lowered representation
+
+`hir/Hir.silk` defines the target of lowering: a `Module` is one postorder node arena where a
+`HirId` is exactly an index and children precede parents. A node owns no heap vector — single
+children are `HirId`, optional children are `HirRef`, and lists are `Range` runs into one shared
+child vector. Every byte string is interned through `hir/Intern.silk`, so a module holds no source
+bytes and no `SyntaxTree`; `spans` and `nodeCauses` run parallel to `nodes` and keep coordinates
+only. Every tagged record of the bootstrap `AuthoredHir` has a counterpart variant; the module doc
+comment lists each deliberate difference.
+
+`Hir.write` dumps a module as indented text and `Hir.render` produces the same bytes in an owned
+buffer, so a test can compare a lowered module against expected text. `Hir.verify` reports the
+arena invariants a module violates rather than asserting them, which replaces the bootstrap's
+structured-clone publication step.
+
 CST construction remains postponed. The token vector retains source information, but there is no
 second concrete-syntax tree to maintain.
 
@@ -73,6 +88,8 @@ available stack in the bootstrap-generated debug executable before recovery coul
 | `parser/Property.silk`                         | Sealed function/module property syntax                                                                                                      |
 | `parser/Grammar.silk`, `parser/Lookahead.silk` | Shared boundaries, precedence, and non-consuming ambiguity checks                                                                           |
 | `parser/SyntaxTree.silk`                       | Tree ownership and flat AST printing                                                                                                        |
+| `hir/Intern.silk`                              | Deduplicated byte-string storage: `Symbol` identities and the `StringTable` that produces them                                              |
+| `hir/Hir.silk`                                 | The flat HIR vocabulary, the `Module` arena, its debug dump writer, and its arena verifier                                                  |
 
 Grammar rules are ordinary Silk functions. They consume `State` and return it with either an
 unfinished element list or a completed node ID. Replacement values are evaluated before assigning
