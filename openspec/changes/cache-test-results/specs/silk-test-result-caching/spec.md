@@ -49,7 +49,7 @@ interrupted, trapped, or operationally incomplete tests SHALL have no reusable r
 
 #### Scenario: Reuse an unchanged pass across processes
 
-- **WHEN** an eligible selected test completed as passed, its record was published, and a later process computes the same execution identity
+- **WHEN** an eligible selected test completed as passed, its record was published, and a later process computes the same execution identity and admits a per-test exchange within its bounds
 - **THEN** the later invocation may report the test as cached without invoking its body
 
 #### Scenario: Rerun a previous failure
@@ -65,13 +65,15 @@ interrupted, trapped, or operationally incomplete tests SHALL have no reusable r
 ### Requirement: Runner exchange is isolated and authoritative
 
 Cache admission and executed outcomes SHALL use a bounded versioned exchange channel separate from
-the child process's inherited stdout and stderr. The complete input plan SHALL identify every
-discovered declaration, carry its opaque compiler-owned execution identity when eligible, and
+the child process's inherited stdout and stderr. In `PerTest` mode the complete input plan SHALL
+identify every discovered declaration, carry its opaque compiler-owned execution identity when eligible, and
 state whether an exact valid hit is available. The source runner SHALL validate declaration order,
 treat the identity as opaque, and echo it for selected dispositions rather than constructing cache
-authority. The complete result receipt SHALL bind a fresh invocation nonce, the input plan,
-selected dispositions, counts, and completed exit status. User-written stdout or stderr bytes MUST
-NOT be parsed as cache authority. A normally exiting process with an invalid or incomplete receipt
+authority. Its complete result receipt SHALL bind a fresh invocation nonce, the input plan,
+selected dispositions, counts, and completed exit status. In `Uncached` mode the exchange SHALL
+instead use the fixed-size plan and aggregate receipt defined below, without per-test authority.
+Every receipt SHALL be admitted only against its input plan's mode. User-written stdout or stderr
+bytes MUST NOT be parsed as cache authority. A normally exiting process with an invalid or incomplete receipt
 SHALL publish no records and SHALL be treated as runner operational failure; abnormal process
 termination SHALL retain its existing meaning.
 
@@ -89,6 +91,75 @@ termination SHALL retain its existing meaning.
 
 - **WHEN** a test traps before the runner completes its result receipt
 - **THEN** the process retains abnormal termination and no partial receipt authorizes publication
+
+### Requirement: Oversized exchanges use bounded uncached execution
+
+Before result-cache lookup or encoded-file allocation, the workflow SHALL establish that both the
+actual `PerTest` plan and the maximum complete receipt fit
+`min(4096 + 256 * discoveredCount, 16 MiB)` bytes each. The calculation SHALL include complete UTF-8
+identities, every frame, eligible execution identities even without hits, and all discovered tests
+selected with the longest possible disposition encoding. Size overflow or inability to prove
+either bound SHALL select `Uncached`; clearing hits, truncating identities, omitting declarations,
+or splitting files MUST NOT substitute for this mode.
+
+`Uncached` SHALL use exactly a 256-byte plan and a 256-byte aggregate completion receipt, with no
+per-test list in either direction. The plan SHALL contain only 8-byte magic, 4-byte version,
+4-byte mode, 32-byte nonce, 32-byte catalog digest, 8-byte discovered count, and 168 zero padding
+bytes, in that order. The receipt SHALL contain only 8-byte magic, 4-byte version, 4-byte mode,
+32-byte echoed nonce, 32-byte SHA-256 digest of the full plan, six 8-byte counts in
+discovered/selected/cached/executed/passed/failed order, 4-byte status, and 124 zero padding bytes.
+Integers SHALL be unsigned little-endian, with exact unsigned 64-bit counts and checked arithmetic
+without unsafe-number narrowing. The catalog digest SHALL be SHA-256 over catalog-order entries,
+each framed by its unsigned 64-bit ordinal and UTF-8 identity byte length followed by identity
+bytes, and SHALL NOT serve as a result-cache key. It MAY be computed incrementally.
+
+The runner SHALL validate the complete compact plan, including exact size, magic/version/mode,
+padding, and discovered count and digest matching its compiled catalog, before executing any test.
+It SHALL retain file/name filtering over the full compiled catalog, sequential execution of all
+selected tests, ordinary cleanup/recovery, streaming per-test output, and summary/status behavior.
+Both modes SHALL compile every discovered test before filtering. The compact completion receipt
+SHALL be written only after the loop and cleanup finish. Admission SHALL validate exact layout,
+nonce, plan digest, counts, and process status: discovered equals the plan, selected does not
+exceed discovered, cached is zero, executed equals selected, passed plus failed equals executed,
+and status is 0 for no failures or 1 for test failures. Zero selection SHALL remain status 0.
+Invalid compact plans or normally exited invalid receipts SHALL be operational status 2; abnormal
+termination SHALL retain its meaning. Values outside existing compiler/runtime representability
+limits SHALL fail operationally without wrapping, saturation, or cache-dependent test-count limits.
+
+Compact mode MUST NOT carry execution identities, hit flags, or per-test dispositions, perform any
+result-cache reads or writes, skip selected bodies, or publish pass records, even from a valid
+successful aggregate receipt. The exchange size SHALL remain independent of identity length,
+catalog size, selection size, and user output volume; the exchange bound SHALL NOT truncate output.
+
+#### Scenario: Long declaration identity exceeds a per-test bound without hits
+
+- **WHEN** a canonical declaration identity makes either per-test file exceed its bound even though no record is a cache hit
+- **THEN** the workflow uses the fixed compact plan and aggregate receipt, every selected test executes normally, cached is zero, and no result records are read or published
+
+#### Scenario: Large discovered catalog exceeds the hard ceiling
+
+- **WHEN** enough discovered tests make a per-test file exceed 16 MiB or checked size preflight cannot establish a bound, even if a runtime filter selects few or no tests
+- **THEN** the workflow uses the same 256-byte compact files, compiles all discovered tests, applies filters in the runner, and preserves exact counts and the ordinary zero-selection outcome without hits or publication
+
+#### Scenario: Receipt alone exceeds its bound
+
+- **WHEN** the per-test plan fits but the maximum complete receipt would exceed its bound
+- **THEN** preflight selects compact uncached mode before result-cache lookup or any test executes, without attempting an oversized receipt or rerunning test bodies
+
+#### Scenario: Compact completion preserves test failure semantics
+
+- **WHEN** selected tests in compact mode complete with both passes and recovered test failures
+- **THEN** each selected body runs once in catalog order with normal cleanup and output, the aggregate reports cached zero and exact executed/pass/fail counts, status is 1, and no passing result is published
+
+#### Scenario: Reject invalid compact authority
+
+- **WHEN** a compact plan has extra per-test data, invalid framing or padding, or a catalog count or digest mismatch
+- **THEN** the runner rejects it before any test executes with operational status 2 rather than downgrading or accepting a hit
+
+#### Scenario: Reject an invalid aggregate receipt
+
+- **WHEN** a normally exiting compact run returns the wrong mode, size, padding, nonce, plan digest, counts, or status, or an incomplete receipt
+- **THEN** the invocation exits with operational status 2 and publishes no results
 
 ### Requirement: Cache failures degrade to execution
 

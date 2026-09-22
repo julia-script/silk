@@ -95,23 +95,26 @@ match. The actor converts typed `StorageError` and decode/admission failures int
 publication converts typed expected failures into an observable skipped write. It catches no
 interruption or defect.
 
-Only a completed, fully validated runner receipt can request publication. A receipt may publish
-the executed passes from a completed mixed pass/fail run, but never failures or cached entries. A
-trap, signal, incomplete receipt, or operational exchange failure publishes nothing from that run.
+Only a completed, fully validated per-test runner receipt can request publication. Such a receipt
+may publish the executed passes from a completed mixed pass/fail run, but never failures or cached
+entries. An uncached aggregate receipt carries no publication authority. A trap, signal, incomplete
+receipt, or operational exchange failure publishes nothing from that run.
 
 The alternative—putting result meaning in generic `Storage`—would couple opaque storage to test
 policy. Storing one suite record would also prevent independent reuse and is rejected.
 
 ### 3. Program owns a scoped two-file binary exchange; stdout/stderr stay inherited
 
-Add a `TestExchange` actor for a closed length-framed binary schema. `Program.runTest` creates a
+Add a `TestExchange` actor for a closed binary schema with bounded layouts. `Program.runTest` creates a
 unique owner-private scratch directory with `Effect.acquireUseRelease`, writes a complete input
 plan, passes the plan/result paths as internal runner arguments, executes with inherited stdin/
 stdout/stderr, reads one result receipt, and releases the scratch directory after success, typed
 failure, defect, or interruption without replacing the primary exit.
 
-Both files start with fixed magic/version, a fresh 256-bit nonce, and discovered count. The plan
-contains one canonical-order entry per discovered declaration: ordinal, declaration identity,
+The schema has two explicit modes, `PerTest` and `Uncached`; they are not interchangeable during
+admission. Both files start with fixed magic/version and bind the mode and a fresh 256-bit nonce.
+A `PerTest` plan includes discovered
+count and one canonical-order entry per discovered declaration: ordinal, declaration identity,
 optional opaque execution identity, and `Execute` or `Cached`. Only an eligible entry can carry an
 execution identity and only an admitted record can select `Cached`. The source runner validates
 the declaration sequence, treats the execution identity as opaque compiler-owned data, and echoes
@@ -120,10 +123,47 @@ ordered disposition for every selected test (`Cached`, `Passed`, or `Failed`), a
 discovered, selected, cached, executed, passed, failed, and status totals. Duplicate, missing,
 out-of-order, or mismatched entries reject the complete receipt.
 
-The maximum plan or receipt size is `4096 + 256 * discoveredCount` bytes with checked safe-integer
-arithmetic and a 16 MiB hard ceiling. If a manifest cannot fit, the workflow uses an all-execute
-bounded plan and publishes no results. The bundled runner validates the complete plan before the
-first test, remains the authority for file/name filtering, and writes the completion frame only
+For `PerTest`, each file is bounded by `min(4096 + 256 * discoveredCount, 16 MiB)`. Before
+result-cache lookup or allocating either encoded file, preflight the actual encoded plan size and
+the maximum possible complete receipt size, assuming every discovered test is selected and using
+the longest disposition encoding. Account for every frame, full UTF-8 declaration identity, and
+eligible execution identity even when no records will hit. Use checked size arithmetic; an
+overflow or inability to establish either bound selects `Uncached`. Never truncate identities,
+drop entries, chunk the exchange, or merely clear hits and retry the same per-test shape. Thus a
+single long identity, many declarations, or receipt-only overflow all take the same bounded path.
+
+`Uncached` uses exactly one 256-byte plan and one 256-byte aggregate completion receipt, independent
+of declaration lengths, selected/discovered counts, and output volume. All integers are unsigned
+little-endian, counts are exact 64-bit values, and encoders/decoders must not narrow them through
+unsafe JavaScript numbers. The fixed layouts, in field order, are:
+
+- Plan: 8-byte magic, 4-byte version, 4-byte mode, 32-byte nonce, 32-byte catalog digest,
+  8-byte discovered count, and 168 zero padding bytes.
+- Receipt: 8-byte magic, 4-byte version, 4-byte mode, 32-byte echoed nonce, 32-byte SHA-256 digest
+  of the complete input plan, six 8-byte counts (discovered, selected, cached, executed, passed,
+  failed), 4-byte status, and 124 zero padding bytes.
+
+The catalog digest is SHA-256 over the canonical declaration sequence, framing each ordinal and
+UTF-8 identity byte length as unsigned 64-bit integers before the identity bytes. Both sides can
+compute it incrementally from their existing catalogs without serializing a declaration list into
+the exchange. It binds the compiled catalog only and never serves as an execution-result key.
+The runner validates the exact plan size, magic/version/mode, zero padding, discovered count, and
+catalog digest against its compiled catalog before executing any test. Unknown modes, extra bytes,
+or invalid plans are operational failures, not an instruction to downgrade or execute unvalidated.
+The nonce and plan digest are checked on receipt admission. Counts must satisfy discovered equal
+to the plan, selected at most discovered, cached equal to zero, executed equal to selected, and
+passed plus failed equal to executed; status must agree with the counts and process exit (0 for
+no failures, including zero selection; 1 for test failures). Checked count arithmetic rejects
+overflow rather than wrapping or saturating; existing compiler/runtime representability limits
+remain operational limits and are not new cache-dependent test-count limits.
+
+There are no declaration entries, execution identities, hit bits, or per-test dispositions in
+either `Uncached` file. This mode performs no result-cache reads or writes, accepts no hits, and
+cannot publish any pass records, even after a successful aggregate receipt. The runner still
+filters its full compiled catalog using the existing runtime arguments, invokes every selected
+test sequentially with ordinary recovery and cleanup, and streams ordinary per-test output and
+the summary with cached zero. Human output is not subject to the exchange byte bound. In either
+mode the runner validates the complete plan before the first test and writes completion only
 after the sequential loop and cleanup finish.
 
 The CLI never captures or parses user stdout/stderr, so arbitrary test output cannot be mistaken
@@ -136,16 +176,18 @@ and isolation semantics.
 
 `TestCommand` adds a boolean `--no-cache` flag and `TestSelection` carries `cacheResults`, defaulting
 to true. `Workflow.test` still compiles the complete discovery catalog before filters execute. For
-an eligible manifest it opens the project-local result store and attempts one lookup per eligible
-entry; unselected lookups are permitted so the CLI does not duplicate source selection policy.
+an exchange that passes the `PerTest` size preflight it opens the project-local result store and
+attempts one lookup per eligible entry; unselected lookups are permitted so the CLI does not
+duplicate source selection policy. A failed size preflight selects `Uncached` before any lookup.
 The plan marks only exact admitted hits. The source runner applies filters, reports selected hits
 as cached, and executes all selected misses in catalog order.
 
-After `Program.runTest`, Workflow validates the complete receipt, publishes only its executed
-passes, reports cache read/write events separately from test failures, and returns the authoritative
-runner status. `--no-cache` performs no `TestResult.lookup` or `TestResult.publishPass` calls and
-passes an all-execute plan; it does not set `Driver.CompileRequest.cache = false`, so compiler
-caches retain their existing behavior.
+After `Program.runTest`, Workflow validates the complete receipt against the selected mode,
+publishes only the executed passes of a `PerTest` receipt, reports cache read/write events
+separately from test failures, and returns the authoritative runner status. `--no-cache` selects
+`Uncached` directly and performs no `TestResult.lookup` or `TestResult.publishPass` calls; it does
+not set `Driver.CompileRequest.cache = false`, so compiler caches retain their existing behavior.
+An aggregate receipt can never be reinterpreted as per-test success authority.
 
 The summary expands to discovered/selected/cached/executed/passed/failed. Cached is a subset of
 passed; executed equals passed-executed plus failed. Existing status 0/1/2, zero-selection,
@@ -182,6 +224,7 @@ isolation/input model outside this change.
    support without yet enabling persistent hits in the workflow.
 3. Add default-on Workflow/TestCommand integration, pass-only publication, expanded reporting,
    documentation, and the `--no-cache` bypass.
-4. Delete the unconditional-rerun path and any temporary dual exchange shape in the same change.
+4. Delete the superseded unconditional-rerun path and any temporary protocol implementation in the
+   same change, retaining the single versioned schema with its `PerTest` and `Uncached` modes.
    Rollback is a normal revert; derived records under the versioned namespace need no migration and
    incompatible leftovers are ignored.
