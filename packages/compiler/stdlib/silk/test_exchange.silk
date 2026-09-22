@@ -229,17 +229,22 @@ pub fn validateUncached(
   expectedCatalogDigest: &[u8],
   expectedDiscovered: u64,
 ) -> bool {
-  if !isUncached(&plan) || plan.bytes.length != COMPACT_BYTES {
+  if failed(&plan) || !isUncached(&plan) || plan.bytes.length != COMPACT_BYTES {
     reject(&mut plan)
     return false
   }
   let digest = take(&mut plan, 32)
   let discovered = readU64(&mut plan)
+  if failed(&plan) { return false }
   if !same(digest, expectedCatalogDigest) || discovered != expectedDiscovered {
     reject(&mut plan)
+    return false
   }
   while plan.cursor < plan.bytes.length {
-    if readU8(&mut plan) != 0 { reject(&mut plan) }
+    if readU8(&mut plan) != 0 {
+      reject(&mut plan)
+      return false
+    }
   }
   return !plan.failedValue
 }

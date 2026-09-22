@@ -192,9 +192,16 @@ effect fn runSelected<'file, 'name>(
     drop entry
     ordinal = ordinal + 1
   }
-  let summary = .{discovered: discovered, selected: selected, passed: passed, failed: failed}
+  let summary = .{
+    discovered: discovered,
+    selected: selected,
+    cached: cached,
+    executed: executed,
+    passed: passed,
+    failed: failed,
+  }
   run Format.format(
-    "summary: {discovered} discovered, {selected} selected, {passed} passed, {failed} failed\n",
+    "summary: {discovered} discovered, {selected} selected, {cached} cached, {executed} executed, {passed} passed, {failed} failed\n",
     &summary,
   )
   let mut status: u32 = 1

@@ -123,12 +123,85 @@ const writeFailure = PlatformError.systemError({
 const cleanupFileSystem = (
   cleanup: () => void,
   write: FileSystem.FileSystem['writeFile'] = () => Effect.void,
+  realPath: FileSystem.FileSystem['realPath'] = (path) => Effect.succeed(path),
 ): FileSystem.FileSystem =>
   FileSystem.makeNoop({
     makeTempDirectory: () => Effect.succeed('/scratch'),
+    realPath,
     writeFile: write,
     remove: () => Effect.sync(cleanup),
   })
+
+it.effect('passes canonical scratch paths to the runner and removes the acquired path', () =>
+  Effect.gen(function* () {
+    let writtenPath: string | undefined
+    let removedPath: string | undefined
+    let childArguments: ReadonlyArray<string> | undefined
+    const defect = Object.freeze({ injected: 'capture-command' })
+    const fileSystem = FileSystem.makeNoop({
+      makeTempDirectory: () => Effect.succeed('/var/private-scratch'),
+      realPath: () => Effect.succeed('/private/var/private-scratch'),
+      writeFile: (path) =>
+        Effect.sync(() => {
+          writtenPath = path
+        }),
+      remove: (path) =>
+        Effect.sync(() => {
+          removedPath = path
+        }),
+    })
+    const spawner = ChildProcessSpawnerModule.make((command) => {
+      if (command._tag === 'StandardCommand') childArguments = command.args
+      return Effect.die(defect)
+    })
+    const exit = yield* Effect.exit(
+      Program.runTest('/program', compactPlan).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(ChildProcessSpawnerModule.ChildProcessSpawner, spawner),
+      ),
+    )
+    assert.strictEqual(writtenPath, '/private/var/private-scratch/plan.bin')
+    assert.deepEqual(childArguments?.slice(-4), [
+      '--silk-test-plan',
+      '/private/var/private-scratch/plan.bin',
+      '--silk-test-result',
+      '/private/var/private-scratch/receipt.bin',
+    ])
+    assert.strictEqual(removedPath, '/var/private-scratch')
+    assert.isTrue(Exit.isFailure(exit))
+    if (Exit.isFailure(exit)) assert.isTrue(Cause.hasDies(exit.cause))
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('removes the acquired scratch path when canonicalization fails', () =>
+  Effect.gen(function* () {
+    let cleanups = 0
+    const realPathFailure = PlatformError.systemError({
+      _tag: 'PermissionDenied',
+      module: 'FileSystem',
+      method: 'realPath',
+      description: 'injected real-path failure',
+      pathOrDescriptor: '/scratch',
+    })
+    const attempted = yield* Effect.result(
+      Program.runTest('/program', compactPlan).pipe(
+        Effect.provideService(
+          FileSystem.FileSystem,
+          cleanupFileSystem(
+            () => {
+              cleanups += 1
+            },
+            undefined,
+            () => Effect.fail(realPathFailure),
+          ),
+        ),
+      ),
+    )
+    assert.isTrue(Result.isFailure(attempted))
+    if (Result.isFailure(attempted)) assert.strictEqual(attempted.failure._tag, 'ProgramError')
+    assert.strictEqual(cleanups, 1)
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
 
 it.effect('removes scratch state after a typed setup failure and a defect', () =>
   Effect.gen(function* () {

@@ -76,6 +76,7 @@ export type ExchangeErrorReason =
 export class ExchangeError extends Data.TaggedError('ExchangeError')<{
   readonly operation:
     | 'TestExchange.nonce'
+    | 'TestExchange.catalogDigest'
     | 'TestExchange.planDigest'
     | 'TestExchange.encodePlan'
     | 'TestExchange.decodePlan'
@@ -294,6 +295,59 @@ export const nonce = Effect.fn('TestExchange.nonce')(function* (): Effect.fn.Ret
     Effect.map((value) => Uint8Array.from(value)),
     Effect.mapError((cause) => cryptoFailure('TestExchange.nonce', cause)),
   )
+})
+
+/**
+ * Hashes catalog-order declaration identities with the compact protocol's exact framing.
+ * This protocol digest is distinct from `TestExecution.Manifest.catalogIdentity`.
+ */
+export const catalogDigest = Effect.fn('TestExchange.catalogDigest')(function* (
+  declarationIdentities: ReadonlyArray<string>,
+): Effect.fn.Return<Uint8Array, ExchangeError, Crypto.Crypto> {
+  const encoded: Array<Uint8Array> = []
+  let size = 0
+  for (const identity of declarationIdentities) {
+    const bytes = textEncoder.encode(identity)
+    if (identity.length === 0)
+      return yield* invalid(
+        'TestExchange.catalogDigest',
+        'InvalidPlan',
+        'catalog declaration identity is empty',
+      )
+    if (size > Number.MAX_SAFE_INTEGER - 16 - bytes.length)
+      return yield* invalid(
+        'TestExchange.catalogDigest',
+        'InvalidPlan',
+        'catalog framing exceeds the host size range',
+      )
+    encoded.push(bytes)
+    size += 16 + bytes.length
+  }
+  const framed = yield* Effect.try({
+    try: () => new Uint8Array(size),
+    catch: (cause) => {
+      if (!(cause instanceof RangeError)) throw cause
+      return invalid(
+        'TestExchange.catalogDigest',
+        'InvalidPlan',
+        'catalog framing exceeds the runtime allocation range',
+      )
+    },
+  })
+  const writer: Writer = { bytes: framed, offset: 0 }
+  for (let ordinal = 0; ordinal < encoded.length; ordinal += 1) {
+    const identity = encoded.at(ordinal)
+    if (identity === undefined)
+      return yield* invalid(
+        'TestExchange.catalogDigest',
+        'InvalidPlan',
+        `catalog entry ${ordinal} is missing`,
+      )
+    writeU64(writer, BigInt(ordinal))
+    writeU64(writer, BigInt(identity.length))
+    writeBytes(writer, identity)
+  }
+  return yield* digest('TestExchange.catalogDigest', framed)
 })
 
 /** Computes the binding digest of one complete encoded plan. */
@@ -599,7 +653,9 @@ const matchingEntry = (plan: PerTestPlan, receipt: ReceiptEntry, previous: bigin
     planned.executionIdentity !== receipt.executionIdentity
   )
     return false
-  return receipt.disposition !== 'Cached' || planned.action === 'Cached'
+  return planned.action === 'Cached'
+    ? receipt.disposition === 'Cached'
+    : receipt.disposition !== 'Cached'
 }
 
 /** Admits one complete receipt only against its exact plan, nonce, digest, mode, and process exit. */

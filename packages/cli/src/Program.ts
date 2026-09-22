@@ -88,8 +88,11 @@ export const runTest = Effect.fn('Program.runTest')(function* (
       ProgramError,
       Crypto.Crypto
     > {
-      const planPath = path.join(directory, 'plan.bin')
-      const resultPath = path.join(directory, 'receipt.bin')
+      const canonicalDirectory = yield* fileSystem
+        .realPath(directory)
+        .pipe(Effect.mapError((cause) => processError(executable, cause)))
+      const planPath = path.join(canonicalDirectory, 'plan.bin')
+      const resultPath = path.join(canonicalDirectory, 'receipt.bin')
       yield* fileSystem
         .writeFile(planPath, encodedPlan)
         .pipe(Effect.mapError((cause) => processError(executable, cause)))

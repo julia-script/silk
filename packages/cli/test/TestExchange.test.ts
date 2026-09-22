@@ -110,6 +110,17 @@ it.effect('round trips the exact compact layouts with unsigned 64-bit counts', (
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
+it.effect('hashes catalog identities with ordinal and UTF-8 byte-length framing', () =>
+  Effect.gen(function* () {
+    const digest = yield* TestExchange.catalogDigest(['tests/Cases::alpha', 'tests/Cases::βeta'])
+    assert.strictEqual(
+      Buffer.from(digest).toString('hex'),
+      '945fbbcd0117fa654f11fcec7b7dc6890581abdc199c1f8f26a29415ee2e373e',
+    )
+    yield* expectExchangeFailure(TestExchange.catalogDigest(['']))
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
 it('preflights both directions before hits or allocation', () => {
   assert.strictEqual(TestExchange.selectMode(entries), 'PerTest')
   assert.strictEqual(
@@ -170,6 +181,63 @@ it.effect('rejects duplicate, reordered, mismatched, truncated, and extra per-te
     const extra = new Uint8Array(validBytes.length + 1)
     extra.set(validBytes)
     yield* expectExchangeFailure(TestExchange.admitReceipt(perTestPlan, planBytes, extra, 0))
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('requires planned actions and receipt dispositions to agree in both directions', () =>
+  Effect.gen(function* () {
+    const planBytes = yield* TestExchange.encodePlan(perTestPlan)
+    const planDigest = yield* TestExchange.planDigest(planBytes)
+    const mismatches: ReadonlyArray<TestExchange.PerTestReceipt> = [
+      {
+        _tag: 'PerTest',
+        nonce,
+        planDigest,
+        entries: [
+          {
+            ordinal: 0n,
+            declarationIdentity: entries[0]?.declarationIdentity ?? '',
+            executionIdentity: firstIdentity,
+            disposition: 'Passed',
+          },
+        ],
+        counts: {
+          discovered: 3n,
+          selected: 1n,
+          cached: 0n,
+          executed: 1n,
+          passed: 1n,
+          failed: 0n,
+        },
+        status: 0,
+      },
+      {
+        _tag: 'PerTest',
+        nonce,
+        planDigest,
+        entries: [
+          {
+            ordinal: 2n,
+            declarationIdentity: entries[2]?.declarationIdentity ?? '',
+            executionIdentity: secondIdentity,
+            disposition: 'Cached',
+          },
+        ],
+        counts: {
+          discovered: 3n,
+          selected: 1n,
+          cached: 1n,
+          executed: 0n,
+          passed: 1n,
+          failed: 0n,
+        },
+        status: 0,
+      },
+    ]
+    for (const receipt of mismatches) {
+      const bytes = yield* TestExchange.encodeReceipt(receipt)
+      yield* expectExchangeFailure(TestExchange.admitReceipt(perTestPlan, planBytes, bytes, 0))
+    }
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
