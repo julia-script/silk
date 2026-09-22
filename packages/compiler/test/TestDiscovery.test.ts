@@ -6,7 +6,9 @@ import * as Analysis from '../src/Analysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceOrigin from '../src/SourceOrigin.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as TestExecution from '../src/TestExecution.js'
 import * as Tir from '../src/Tir.js'
+import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
 
@@ -66,6 +68,50 @@ const fingerprintSnapshot = (text: string) =>
       SourceResolver.overlay([source('Cases', text)]).pipe(
         Layer.provideMerge(SourceResolver.empty),
       ),
+    ),
+  )
+
+const executionManifest = Effect.fnUntraced(function* (
+  text: string,
+  environment: TestExecution.Environment = {
+    profileIdentity: 'profile-a',
+    bootstrapIdentity: 'bootstrap-a',
+    runnerIdentity: TestExecution.runnerPolicyIdentity,
+    compilerIdentity: 'compiler-a',
+    runtimeIdentity: 'runtime-a',
+    nativeIdentity: 'native-a',
+    complete: true,
+  },
+) {
+  const analysis = yield* Analysis.makeRealized({
+    root: 'Cases',
+    target: 'x86_64-unknown-linux-gnu',
+    discovery: { root: 'Cases' },
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([source('Cases', text)]).pipe(
+        Layer.provideMerge(SourceResolver.empty),
+      ),
+    ),
+  )
+  assert.deepEqual(Analysis.diagnostics(analysis), [])
+  const catalog = analysis.testCatalog
+  assert.isDefined(catalog)
+  if (catalog === undefined) return unreachable('expected test catalog')
+  return yield* TestExecution.make({
+    catalog,
+    discovery: Analysis.instancesOf(analysis),
+    results: analysis.results,
+    environment,
+  })
+})
+
+const eligibleIdentities = (manifest: TestExecution.Manifest): ReadonlyMap<string, string> =>
+  new Map(
+    manifest.entries.flatMap((entry) =>
+      entry.eligibility._tag === 'Eligible'
+        ? [[entry.test.name, entry.eligibility.identity] as const]
+        : [],
     ),
   )
 
@@ -146,6 +192,105 @@ fn helper() -> () { let value = 2 drop value }`)
       assert.notStrictEqual(before.testCatalog?.identity, bodyAndHelperEdit.testCatalog?.identity)
       assert.notStrictEqual(before.testCatalog?.identity, movedAndTriviaEdit.testCatalog?.identity)
     }),
+)
+
+it.effect('derives isolated execution identities from complete transitive authored work', () =>
+  Effect.gen(function* () {
+    const runner = `pub fn main() -> () {
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`
+    const program = (alphaLeaf: number, betaLeaf: number, unrelated: number) =>
+      `static fn staticAlpha() -> i32 { return ${alphaLeaf} }
+fn alphaLeaf<T>(value: T) -> i32 { return staticAlpha() }
+fn alphaMiddle() -> i32 { return alphaLeaf<i32>(0) }
+fn betaLeaf() -> i32 { return ${betaLeaf} }
+fn unrelated() -> i32 { return ${unrelated} }
+test fn alpha() -> () { let value = alphaMiddle() drop value }
+test fn beta() -> () { let value = betaLeaf() drop value }
+${runner}`
+
+    const before = yield* executionManifest(program(1, 2, 3))
+    const unchanged = yield* executionManifest(`
+
+${program(1, 2, 3).replaceAll(' = ', '=')}`)
+    const alphaChanged = yield* executionManifest(program(4, 2, 3))
+    const directHelperChanged = yield* executionManifest(
+      program(1, 2, 3).replace('return alphaLeaf<i32>(0)', 'return alphaLeaf<i32>(0) + 1'),
+    )
+    const betaChanged = yield* executionManifest(program(1, 5, 3))
+    const ownBodyChanged = yield* executionManifest(
+      program(1, 2, 3).replace('let value = betaLeaf()', 'let value = betaLeaf() + 1'),
+    )
+    const unrelatedChanged = yield* executionManifest(program(1, 2, 6))
+    const beforeIdentities = eligibleIdentities(before)
+    const unchangedIdentities = eligibleIdentities(unchanged)
+    const alphaIdentities = eligibleIdentities(alphaChanged)
+    const directHelperIdentities = eligibleIdentities(directHelperChanged)
+    const betaIdentities = eligibleIdentities(betaChanged)
+    const ownBodyIdentities = eligibleIdentities(ownBodyChanged)
+    const unrelatedIdentities = eligibleIdentities(unrelatedChanged)
+
+    assert.deepEqual(
+      before.entries.filter((entry) => entry.eligibility._tag === 'Ineligible'),
+      [],
+    )
+    assert.deepEqual(unchangedIdentities, beforeIdentities)
+    assert.notStrictEqual(alphaIdentities.get('alpha'), beforeIdentities.get('alpha'))
+    assert.strictEqual(alphaIdentities.get('beta'), beforeIdentities.get('beta'))
+    assert.notStrictEqual(directHelperIdentities.get('alpha'), beforeIdentities.get('alpha'))
+    assert.strictEqual(directHelperIdentities.get('beta'), beforeIdentities.get('beta'))
+    assert.strictEqual(betaIdentities.get('alpha'), beforeIdentities.get('alpha'))
+    assert.notStrictEqual(betaIdentities.get('beta'), beforeIdentities.get('beta'))
+    assert.strictEqual(ownBodyIdentities.get('alpha'), beforeIdentities.get('alpha'))
+    assert.notStrictEqual(ownBodyIdentities.get('beta'), beforeIdentities.get('beta'))
+    assert.deepEqual(unrelatedIdentities, beforeIdentities)
+  }),
+)
+
+it.effect('includes normalized execution configuration in every eligible identity', () =>
+  Effect.gen(function* () {
+    const source = `test fn alpha() -> () {}
+test fn beta() -> () {}
+pub fn main() -> () {
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`
+    const before = yield* executionManifest(source)
+    const changed = yield* executionManifest(source, {
+      profileIdentity: 'profile-b',
+      bootstrapIdentity: 'bootstrap-a',
+      runnerIdentity: TestExecution.runnerPolicyIdentity,
+      compilerIdentity: 'compiler-a',
+      runtimeIdentity: 'runtime-a',
+      nativeIdentity: 'native-a',
+      complete: true,
+    })
+    const incomplete = yield* executionManifest(source, {
+      profileIdentity: 'profile-a',
+      bootstrapIdentity: 'bootstrap-a',
+      runnerIdentity: TestExecution.runnerPolicyIdentity,
+      compilerIdentity: 'compiler-a',
+      runtimeIdentity: 'runtime-a',
+      nativeIdentity: 'native-a',
+      complete: false,
+    })
+    assert.notStrictEqual(changed.environmentIdentity, before.environmentIdentity)
+    for (const [name, identity] of eligibleIdentities(before)) {
+      assert.notStrictEqual(eligibleIdentities(changed).get(name), identity)
+    }
+    assert.deepEqual(
+      incomplete.entries.map((entry) => entry.eligibility),
+      [
+        { _tag: 'Ineligible', reason: { _tag: 'IncompleteEnvironment', component: 'Runner' } },
+        { _tag: 'Ineligible', reason: { _tag: 'IncompleteEnvironment', component: 'Runner' } },
+      ],
+    )
+  }),
 )
 
 it.effect('requires the explicit discovery root', () =>

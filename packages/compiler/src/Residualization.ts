@@ -25,6 +25,7 @@ import * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredWalk from './AuthoredWalk.js'
 import * as SemanticContext from './SemanticContext.js'
 import * as Semantic from './Semantic.js'
+import * as SemanticQuery from './SemanticQuery.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
 import type * as TestDiscovery from './TestDiscovery.js'
@@ -79,9 +80,20 @@ export interface Counters {
 }
 
 export interface Observation {
+  readonly application: string
   readonly declaration: DeclarationFacts.CanonicalId
   readonly reason: SelectionReason | 'UnchangedBody'
+  readonly dependencies: ReadonlyArray<Dependency>
+  readonly complete: boolean
   readonly counters: Counters
+}
+
+/** One canonical authored input demanded while specializing an exact runtime application. */
+export interface Dependency {
+  readonly kind: 'Helper' | 'Default' | 'Predicate'
+  readonly application: string
+  readonly declaration: DeclarationFacts.CanonicalId
+  readonly canonical: string
 }
 
 type MutableCounters = { -readonly [Key in keyof Counters]: Counters[Key] }
@@ -290,22 +302,148 @@ export const observations = (self: EvaluationCoordinator): ReadonlyArray<Observa
 
 const record = (
   self: EvaluationCoordinator,
+  application: string,
   declaration: DeclarationFacts.CanonicalId,
   reason: Observation['reason'],
   outcome: 'sourceReused' | 'checked' | 'cacheReused' | 'rejected',
   failed: boolean,
+  dependencies: ReadonlyArray<Dependency> = [],
+  complete = true,
 ): void => {
   const state = self[stateSymbol]
-  const key = Canonical.record('ResidualBodyWork', [declaration.module, declaration.name, reason])
+  const key = Canonical.record('ResidualBodyWork', [application, reason])
   let observation = state.observations.get(key)
   if (observation === undefined) {
-    observation = { declaration, reason, counters: emptyCounters() }
+    observation = {
+      application,
+      declaration,
+      reason,
+      dependencies: [...dependencies],
+      complete,
+      counters: emptyCounters(),
+    }
     state.observations.set(key, observation)
   }
   for (const work of [state.counters, observation.counters]) {
     work.requests += 1
     work[outcome] += 1
     if (failed) work.failures += 1
+  }
+}
+
+const canonicalFields = (value: string): ReadonlyArray<string> | undefined => {
+  const fields: string[] = []
+  let offset = 0
+  while (offset < value.length) {
+    const separator = value.indexOf(':', offset)
+    if (separator < 0) return undefined
+    const lengthText = value.slice(offset, separator)
+    if (!/^\d+$/.test(lengthText)) return undefined
+    const length = Number(lengthText)
+    if (!Number.isSafeInteger(length)) return undefined
+    const start = separator + 1
+    const end = start + length
+    if (end > value.length) return undefined
+    fields.push(value.slice(start, end))
+    offset = end
+  }
+  return fields
+}
+
+const descriptorParts = (address: string): ReadonlyArray<string> | undefined => {
+  const value: unknown = JSON.parse(address)
+  return Array.isArray(value) && value.every((part): part is string => typeof part === 'string')
+    ? value
+    : undefined
+}
+
+const dependencyOf = (self: EvaluationCoordinator, application: string): Dependency | undefined => {
+  const fields = canonicalFields(application)
+  if (fields?.at(0) !== 'StaticApplication') return undefined
+  const module = fields.at(3)
+  const encodedName = fields.at(4)
+  if (module === undefined || encodedName === undefined) return undefined
+  const predicate = encodedName.endsWith('#validation')
+  const name = predicate ? encodedName.slice(0, -'#validation'.length) : encodedName
+  const declaration = lookupDeclaration(self, {
+    _tag: 'CanonicalDeclarationId',
+    module,
+    name,
+  })
+  if (declaration === undefined || declaration.canonical._tag !== 'Canonical') return undefined
+  if (declaration._tag === 'FunctionDeclaration') {
+    const canonical = declaration.bodyTemplate?.canonical
+    return canonical === undefined
+      ? undefined
+      : {
+          kind: 'Helper',
+          application,
+          declaration: declaration.canonical.id,
+          canonical,
+        }
+  }
+  if (
+    declaration._tag !== 'ConstantDeclaration' &&
+    declaration._tag !== 'PackageParameterDeclaration'
+  )
+    return undefined
+  let canonical: string | undefined
+  if (predicate) {
+    canonical =
+      declaration._tag === 'PackageParameterDeclaration'
+        ? declaration.predicateTemplate?.canonical
+        : undefined
+  } else canonical = declaration.initializerTemplate.canonical
+  return canonical === undefined
+    ? undefined
+    : {
+        kind: predicate ? 'Predicate' : 'Default',
+        application,
+        declaration: declaration.canonical.id,
+        canonical,
+      }
+}
+
+const applicationDependencies = (
+  self: EvaluationCoordinator,
+  application: string,
+): { readonly dependencies: ReadonlyArray<Dependency>; readonly complete: boolean } => {
+  const snapshot = Semantic.snapshot(self[stateSymbol].semantic)
+  const records = snapshot.records
+  const root = [...records.values()].find((record) => {
+    const parts = descriptorParts(record.descriptor.address)
+    return record.descriptor.family === 'ConstructResidual' && parts?.at(0) === application
+  })
+  if (root === undefined) return { dependencies: [], complete: false }
+  const dependencies = new Map<string, Dependency>()
+  const visited = new Set<string>()
+  const pending = [root]
+  let complete = true
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (current === undefined || visited.has(current.key)) continue
+    visited.add(current.key)
+    for (const observation of current.observations) {
+      if (observation._tag !== 'QueryRead') continue
+      const nested = records.get(SemanticQuery.keyOf(observation.descriptor))
+      if (nested === undefined) {
+        complete = false
+        continue
+      }
+      pending.push(nested)
+      if (observation.descriptor.family !== 'Evaluate') continue
+      const nestedApplication = descriptorParts(observation.descriptor.address)?.at(0)
+      const dependency =
+        nestedApplication === undefined ? undefined : dependencyOf(self, nestedApplication)
+      if (dependency === undefined) complete = false
+      else dependencies.set(dependency.application, dependency)
+    }
+  }
+  return {
+    dependencies: [...dependencies.values()].sort((left, right) =>
+      Canonical.compare(left.application, right.application),
+    ),
+    complete,
   }
 }
 
@@ -1171,10 +1309,43 @@ export const selectionReason = (
   return selected
 }
 
+/** Canonical application identity shared by specialization observations and discovered instances. */
+export const applicationIdentity = (self: Coordinator, key: ApplicationKey): string =>
+  Evaluation.applicationKey(self[stateSymbol].environment, {
+    declaration: key.declaration,
+    typeArguments: key.typeArguments.map(Type.genericArgumentKey),
+    evidence: key.evidence,
+    contractRow: key.contractRow,
+    staticArguments: key.staticArguments,
+    span: Location.at(
+      declarationOf(self, key.declaration)?.anchor ?? {
+        _tag: 'AuthoredAnchor',
+        owner: AuthoredIdentity.module('', key.declaration.module),
+        path: [],
+      },
+    ),
+  })
+
 /** Produces one concrete residual TIR body for a demanded runtime application. */
 export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
   const declaration = declarationOf(self, key.declaration)
   const input = declaration === undefined ? undefined : moduleInput(self, declaration)
+  const span = Location.at(
+    declaration?.anchor ?? {
+      _tag: 'AuthoredAnchor',
+      owner: AuthoredIdentity.module('', key.declaration.module),
+      path: [],
+    },
+  )
+  const application: Evaluation.Application = {
+    declaration: key.declaration,
+    typeArguments: key.typeArguments.map(Type.genericArgumentKey),
+    evidence: key.evidence,
+    contractRow: key.contractRow,
+    staticArguments: key.staticArguments,
+    span,
+  }
+  const applicationIdentity = Evaluation.applicationKey(self[stateSymbol].environment, application)
   const bindings =
     declaration === undefined
       ? undefined
@@ -1183,13 +1354,6 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         bindStaticParameters(declaration, key.staticArguments)
   if (declaration === undefined || input === undefined || bindings === undefined) {
     // A declaration that is gone has no node; its module's root resolves to that module's start.
-    const span = Location.at(
-      declaration?.anchor ?? {
-        _tag: 'AuthoredAnchor',
-        owner: AuthoredIdentity.module('', key.declaration.module),
-        path: [],
-      },
-    )
     const failure = Evaluation.phaseViolation(
       'Residualization.residualize',
       'application does not match one runtime declaration',
@@ -1198,6 +1362,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     )
     record(
       self,
+      applicationIdentity,
       key.declaration,
       declaration === undefined ? 'UnavailableDeclaration' : 'UnavailableBody',
       'rejected',
@@ -1211,7 +1376,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
     )
     if (body !== undefined) {
-      record(self, key.declaration, 'UnchangedBody', 'sourceReused', false)
+      record(self, applicationIdentity, key.declaration, 'UnchangedBody', 'sourceReused', false)
       return {
         _tag: 'ResidualBody',
         artifact: body.artifact,
@@ -1220,14 +1385,6 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         diagnostics: [],
       }
     }
-  }
-  const application: Evaluation.Application = {
-    declaration: key.declaration,
-    typeArguments: key.typeArguments.map(Type.genericArgumentKey),
-    evidence: key.evidence,
-    contractRow: key.contractRow,
-    staticArguments: key.staticArguments,
-    span: Location.at(declaration.anchor),
   }
   let executed = false
   const evaluated = Semantic.constructResidual(
@@ -1362,13 +1519,17 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
   let branch: 'cacheReused' | 'checked' | 'rejected' = 'rejected'
   if (evaluated.cached) branch = 'cacheReused'
   else if (executed) branch = 'checked'
+  const attribution = applicationDependencies(self, evaluated.key)
   record(
     self,
+    evaluated.key,
     key.declaration,
     reason ?? 'UnavailableBody',
     branch,
     evaluated._tag !== 'Complete' ||
       evaluated.value.diagnostics.some((diagnostic) => diagnostic.severity === 'error'),
+    attribution.dependencies,
+    attribution.complete,
   )
   return evaluated._tag === 'Complete'
     ? evaluated.value

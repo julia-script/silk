@@ -63,6 +63,23 @@ const expectReasons = (
   if (found._tag === 'Recomputed') assert.deepEqual(found.reasons, reasons)
 }
 
+it.effect('does not equate checked-body reuse with unchanged transitive static execution', () =>
+  Effect.gen(function* () {
+    const before = `static fn base() -> i32 { return 1 }
+static fn indirect() -> i32 { return base() }
+pub fn main() -> i32 { return indirect() }`
+    const previous = yield* analyze(sources({ 'query/Static': before }), ['query/Static'])
+    const current = yield* analyze(
+      sources({ 'query/Static': before.replace('return 1', 'return 2') }),
+      ['query/Static'],
+      previous,
+    )
+
+    expectReasons(current, 'query/Static', ['LocalChange'])
+    expectBodyChecks(current, 1, 2)
+  }),
+)
+
 it.effect('validates editor name reads across revisions', () =>
   Effect.gen(function* () {
     const importer = 'import query.Dependency { answer } pub fn use() -> i32 { return answer() }'

@@ -115,6 +115,43 @@ const expectedPhases = [
   'link',
 ]
 
+it.effect('publishes execution identities for a successful discovered-test executable', () =>
+  Effect.gen(function* () {
+    const root = 'memory/driver-tests'
+    const outcome = yield* compileSource(
+      'test-execution-manifest',
+      `test fn alpha() -> () {}
+pub fn main() -> () {
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`,
+      {
+        compilation: {
+          root,
+          discovery: {
+            root,
+            sources: new Map([
+              [root, { ownership: 'Project', logicalPath: 'tests/driver-tests.silk' }],
+            ]),
+          },
+        },
+      },
+    )
+
+    assert.deepEqual(
+      outcome._tag === 'Rejected' ? outcome.diagnostics.map((diagnostic) => diagnostic.code) : [],
+      [],
+    )
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    assert.strictEqual(outcome.testManifest?.entries.length, 1)
+    assert.strictEqual(outcome.testManifest?.entries.at(0)?.test.name, 'alpha')
+    assert.strictEqual(outcome.testManifest?.entries.at(0)?.eligibility._tag, 'Eligible')
+  }),
+)
+
 it.effect(
   'forwards semantic persistence and bypasses it when compilation caching is disabled',
   () =>

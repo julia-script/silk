@@ -29,6 +29,7 @@ import * as SemanticPersistence from './SemanticPersistence.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import * as Target from './Target.js'
+import * as TestExecution from './TestExecution.js'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
 
@@ -219,6 +220,8 @@ export interface Compiled {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<DriverPhaseReport>
   readonly toolchainIdentity: string
+  /** Per-test execution identities, present only for a successful discovered-test executable. */
+  readonly testManifest?: TestExecution.Manifest
 }
 
 /** Target selection stopped compilation before MIR lowering. */
@@ -388,7 +391,7 @@ export const compile = Effect.fn('Driver.compile')(
       request.compilation.configuration !== undefined || targetId === undefined
         ? request.compilation
         : {
-            root: request.compilation.root,
+            ...request.compilation,
             configuration: {
               package: `${request.packageName}@0.0.0`,
               profile: {
@@ -1012,6 +1015,38 @@ export const compile = Effect.fn('Driver.compile')(
                   { heapBytes },
                 )
               : undefined
+          const testRunnerIdentity =
+            frontend.testCatalog === undefined
+              ? undefined
+              : TestExecution.runnerIdentity(preparation.instances)
+          const testManifest =
+            cacheKind === 'NativeExecutable' &&
+            frontend.testCatalog !== undefined &&
+            bundle.completion !== undefined &&
+            testRunnerIdentity !== undefined
+              ? yield* TestExecution.make({
+                  catalog: frontend.testCatalog,
+                  discovery: preparation.instances,
+                  results: frontend.results,
+                  environment: {
+                    profileIdentity: preparation.profile.identity,
+                    bootstrapIdentity: bundle.completion.bootstrapIdentity,
+                    runnerIdentity: testRunnerIdentity.identity,
+                    compilerIdentity: distribution.digest,
+                    runtimeIdentity: TestExecution.runtimeIdentity(
+                      distribution,
+                      artifact.nativeRuntimeSymbols,
+                    ),
+                    nativeIdentity: TestExecution.nativeIdentity(
+                      linkPlan,
+                      generatedObjects.map((entry) => entry.path),
+                      bound.success.identity,
+                      helpers.map((helper) => helper.identity),
+                    ),
+                    complete: testRunnerIdentity.complete,
+                  },
+                })
+              : undefined
           // Return the durable artifact together with linkage provenance, foreign symbols,
           // diagnostics, and the complete phase report. Exiting this scope releases temporary files.
           return {
@@ -1031,6 +1066,7 @@ export const compile = Effect.fn('Driver.compile')(
             foreignExports: artifact.foreignExports,
             foreignStatics: artifact.foreignStatics,
             ...(libraryInterface === undefined ? {} : { libraryInterface }),
+            ...(testManifest === undefined ? {} : { testManifest }),
             diagnostics,
             report: [...report],
             toolchainIdentity: distribution.digest,

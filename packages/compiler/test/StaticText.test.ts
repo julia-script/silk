@@ -1431,8 +1431,11 @@ pub fn main() -> i32 { return choose(true, 42) }`),
     })
     assert.deepEqual(Residualization.observations(coordinator), [
       {
+        application: Residualization.applicationIdentity(coordinator, application),
         declaration: application.declaration,
         reason: 'StaticArguments',
+        dependencies: [],
+        complete: true,
         counters: Residualization.counters(coordinator),
       },
     ])
