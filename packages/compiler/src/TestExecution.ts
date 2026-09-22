@@ -341,8 +341,12 @@ const executionEncoding = Effect.fnUntraced(function* (
     for (const capture of effect.captures) addType(capture.type)
   }
   for (const body of closure.residualBodies)
-    for (const dependency of body.dependencies)
+    for (const dependency of body.dependencies) {
       for (const argument of dependency.typeArguments) addArgument(argument)
+      for (const type of dependency.resolvedTypes) addType(type)
+      for (const declaration of dependency.resolvedConstants)
+        constants.set(declarationKey(declaration), declaration)
+    }
 
   const selectedConstants = new Map(
     discovery.constants.map((constant) => [declarationKey(constant.declaration), constant]),

@@ -97,6 +97,9 @@ export interface Dependency {
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
   readonly declaration: DeclarationFacts.CanonicalId
   readonly canonical: string
+  /** Constants and types read while evaluating this exact application, before its value folded. */
+  readonly resolvedConstants: ReadonlyArray<DeclarationFacts.CanonicalId>
+  readonly resolvedTypes: ReadonlyArray<Type.Type>
 }
 
 type MutableCounters = { -readonly [Key in keyof Counters]: Counters[Key] }
@@ -122,6 +125,13 @@ interface State {
   readonly dependencyApplications: Map<
     string,
     { readonly specialization: string; readonly typeArguments: ReadonlyArray<Type.GenericArgument> }
+  >
+  readonly applicationProvenance: Map<
+    string,
+    {
+      readonly constants: Map<string, DeclarationFacts.CanonicalId>
+      readonly types: Map<string, Type.Type>
+    }
   >
   readonly parameters: ReadonlyMap<string, StaticValue.Value>
   readonly environment: Evaluation.TargetEnvironment
@@ -218,6 +228,7 @@ const makeState = (
     parameters: new Map(parameters),
     dependencies: new Map(),
     dependencyApplications: new Map(),
+    applicationProvenance: new Map(),
     environment: Evaluation.targetEnvironment(compilation, sourceIdentity),
     results,
     spans: SemanticContext.fromModules([...results.values()]),
@@ -383,7 +394,8 @@ const dependencyOf = (self: EvaluationCoordinator, application: string): Depende
   if (exact === undefined) return undefined
   if (declaration._tag === 'FunctionDeclaration') {
     const canonical = declaration.bodyTemplate?.canonical
-    return canonical === undefined
+    const provenance = self[stateSymbol].applicationProvenance.get(application)
+    return canonical === undefined || provenance === undefined
       ? undefined
       : {
           kind: 'Helper',
@@ -392,6 +404,15 @@ const dependencyOf = (self: EvaluationCoordinator, application: string): Depende
           typeArguments: exact.typeArguments,
           declaration: declaration.canonical.id,
           canonical,
+          resolvedConstants: [...provenance.constants.values()].sort((left, right) =>
+            Canonical.compare(
+              Canonical.record(left.module, [left.name]),
+              Canonical.record(right.module, [right.name]),
+            ),
+          ),
+          resolvedTypes: [...provenance.types.values()].sort((left, right) =>
+            Canonical.compare(Type.key(left), Type.key(right)),
+          ),
         }
   }
   if (
@@ -415,7 +436,29 @@ const dependencyOf = (self: EvaluationCoordinator, application: string): Depende
         typeArguments: exact.typeArguments,
         declaration: declaration.canonical.id,
         canonical,
+        resolvedConstants: [declaration.canonical.id],
+        resolvedTypes:
+          declaration.declaredType._tag === 'Resolved' ? [declaration.declaredType.type] : [],
       }
+}
+
+const beginApplicationProvenance = (
+  self: EvaluationCoordinator,
+  application: string,
+): NonNullable<Evaluation.NodeContext['observeResolved']> => {
+  const provenance = {
+    constants: new Map<string, DeclarationFacts.CanonicalId>(),
+    types: new Map<string, Type.Type>(),
+  }
+  self[stateSymbol].applicationProvenance.set(application, provenance)
+  return (observed) => {
+    for (const constant of observed.constants)
+      provenance.constants.set(
+        Canonical.record('Declaration', [constant.module, constant.name]),
+        constant,
+      )
+    for (const type of observed.types) provenance.types.set(Type.key(type), type)
+  }
 }
 
 const applicationDependencies = (
@@ -823,6 +866,7 @@ const evaluateStaticFunction = (
     application,
     parentTrace,
     (evaluation) => {
+      const observeResolved = beginApplicationProvenance(self, originScope)
       const input = moduleInput(self, declaration)
       const bindings = bindStaticParameters(declaration, arguments_, argumentSpans, [], originScope)
       const typeSubstitution = TypeInference.substitution(
@@ -872,6 +916,7 @@ const evaluateStaticFunction = (
         valueOrigins: bindings.valueOrigins,
         expressionSpans: new Map<Tir.Expression, Location.Location>(),
         expressionOrigins: new Map<Tir.Expression, Evaluation.TextOrigin>(),
+        observeResolved,
         nodes: BodyBuilder.staticLowering(semantic, builder),
         lookup,
         returnedTextSpan: { value: undefined },
@@ -1066,6 +1111,7 @@ function evaluateConstantValue(
     application,
     parentTrace,
     (evaluation) => {
+      const observeResolved = beginApplicationProvenance(self, applicationIdentity)
       const input = moduleInput(self, declaration)
       if (input === undefined || declaration.declaredType._tag !== 'Resolved')
         return Evaluation.failed(
@@ -1116,6 +1162,7 @@ function evaluateConstantValue(
         valueOrigins: new Map<string, Evaluation.TextOrigin>(),
         expressionSpans: new Map<Tir.Expression, Location.Location>(),
         expressionOrigins: new Map<Tir.Expression, Evaluation.TextOrigin>(),
+        observeResolved,
         nodes: BodyBuilder.staticLowering(semantic, builder),
         lookup: (id: DeclarationFacts.CanonicalId) => lookupDeclaration(self, id),
         trace: evaluation.trace,

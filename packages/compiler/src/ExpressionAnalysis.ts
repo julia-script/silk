@@ -11454,6 +11454,7 @@ export interface StaticAnalysisContext {
   readonly valueOrigins: Map<string, Evaluation.TextOrigin>
   readonly expressionSpans: Map<Tir.Expression, Location.Location>
   readonly expressionOrigins: Map<Tir.Expression, Evaluation.TextOrigin>
+  readonly observeResolved?: NonNullable<Evaluation.NodeContext['observeResolved']>
   readonly returnedTextSpan?: { value: Location.Location | undefined }
   readonly trace: Evaluation.Trace
   /** The nodes of what this body has analyzed so far, which is what the evaluator interprets. */

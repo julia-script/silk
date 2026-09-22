@@ -1071,6 +1071,8 @@ export interface NodeContext {
   /** Per-node provenance retained outside canonical value identity. */
   readonly expressionSpans: Map<Tir.Expression, Location.Location>
   readonly expressionOrigins: Map<Tir.Expression, TextOrigin>
+  /** Exact resolved semantic inputs read by nodes that static evaluation actually interprets. */
+  readonly observeResolved?: (provenance: ResolvedProvenance) => void
   /** Return provenance written by one static-function statement evaluation. */
   readonly returnedTextSpan?: { value: Location.Location | undefined }
   readonly returnedTextOrigin?: { value: TextOrigin | undefined }
@@ -1104,6 +1106,12 @@ export interface NodeContext {
   readonly step?: (span: Location.Location, trace: Trace) => StaticFailure | undefined
   /** Present only after a valid discovery root has been selected and sealed. */
   readonly testCatalog?: TestDiscovery.Catalog
+}
+
+/** Resolved declarations and types retained independently from a folded static value. */
+export interface ResolvedProvenance {
+  readonly constants: ReadonlyArray<DeclarationFacts.CanonicalId>
+  readonly types: ReadonlyArray<Type.Type>
 }
 
 export interface CallResult {
@@ -1665,6 +1673,17 @@ const evaluateExpression = (
   node: Tir.Expression,
   context: NodeContext,
 ): ExecutionOutcome<StaticValue.Value> => {
+  const types: Array<Type.Type> = 'type' in node ? [node.type] : []
+  if ('typeArguments' in node)
+    for (const argument of node.typeArguments)
+      if (Type.isTypeArgument(argument)) types.push(argument)
+  const constant =
+    node.constant ?? (node._tag === 'ConstantReference' ? node.declaration : undefined)
+  if (constant !== undefined || types.length > 0)
+    context.observeResolved?.({
+      constants: constant === undefined ? [] : [constant],
+      types,
+    })
   const admit = (value: unknown) =>
     admittedValue(context.environment, value, 'Evaluation.evaluate', at(node), context.trace)
   switch (node._tag) {

@@ -73,17 +73,19 @@ const fingerprintSnapshot = (text: string) =>
     ),
   )
 
-const executionManifest = Effect.fnUntraced(function* (
+const defaultEnvironment: TestExecution.Environment = {
+  profileIdentity: 'profile-a',
+  bootstrapIdentity: 'bootstrap-a',
+  runnerIdentity: TestExecution.runnerPolicyIdentity,
+  compilerIdentity: 'compiler-a',
+  runtimeIdentity: 'runtime-a',
+  nativeIdentity: 'native-a',
+  complete: true,
+}
+
+const executionSnapshot = Effect.fnUntraced(function* (
   text: string,
-  environment: TestExecution.Environment = {
-    profileIdentity: 'profile-a',
-    bootstrapIdentity: 'bootstrap-a',
-    runnerIdentity: TestExecution.runnerPolicyIdentity,
-    compilerIdentity: 'compiler-a',
-    runtimeIdentity: 'runtime-a',
-    nativeIdentity: 'native-a',
-    complete: true,
-  },
+  environment: TestExecution.Environment = defaultEnvironment,
 ) {
   const analysis = yield* Analysis.makeRealized({
     root: 'Cases',
@@ -100,12 +102,20 @@ const executionManifest = Effect.fnUntraced(function* (
   const catalog = analysis.testCatalog
   assert.isDefined(catalog)
   if (catalog === undefined) return unreachable('expected test catalog')
-  return yield* TestExecution.make({
+  const manifest = yield* TestExecution.make({
     catalog,
     discovery: Analysis.instancesOf(analysis),
     results: analysis.results,
     environment,
   })
+  return { analysis, manifest }
+})
+
+const executionManifest = Effect.fnUntraced(function* (
+  text: string,
+  environment: TestExecution.Environment = defaultEnvironment,
+) {
+  return (yield* executionSnapshot(text, environment)).manifest
 })
 
 const eligibleIdentities = (manifest: TestExecution.Manifest): ReadonlyMap<string, string> =>
@@ -315,6 +325,119 @@ test fn alpha() -> () { let value = count() drop value }
 test fn beta() -> () {}`)
     assert.notStrictEqual(aliasAfter.get('alpha'), aliasBefore.get('alpha'))
     assert.strictEqual(aliasAfter.get('beta'), aliasBefore.get('beta'))
+  }),
+)
+
+it.effect('retains folded constant provenance for shared memoized static helpers', () =>
+  Effect.gen(function* () {
+    const program = (initializer: string) => `const ANSWER: i32 = ${initializer}
+static fn leaf() -> i32 { return ANSWER }
+test fn alpha() -> () {
+  let answer = leaf()
+  if answer == 2 { let crash = 1 / 0 drop crash }
+}
+test fn shared() -> () { let answer = leaf() drop answer }
+test fn beta() -> () {}
+pub fn main() -> () {
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`
+    const before = yield* executionSnapshot(program('1'))
+    const changed = yield* executionSnapshot(program('2'))
+    const sameResultEdit = yield* executionSnapshot(program('1 + 0'))
+    const beforeIdentities = eligibleIdentities(before.manifest)
+    const changedIdentities = eligibleIdentities(changed.manifest)
+    const sameResultIdentities = eligibleIdentities(sameResultEdit.manifest)
+
+    for (const snapshot of [before, changed, sameResultEdit]) {
+      assert.deepEqual(
+        snapshot.manifest.entries.map((entry) => entry.eligibility._tag),
+        ['Eligible', 'Eligible', 'Eligible'],
+      )
+      const dependencies = new Map(
+        Analysis.instancesOf(snapshot.analysis).residualBodies.flatMap((body) =>
+          body.declaration.module === 'Cases'
+            ? body.dependencies
+                .filter((dependency) => dependency.declaration.name === 'leaf')
+                .map((dependency) => [body.declaration.name, dependency] as const)
+            : [],
+        ),
+      )
+      const alpha = dependencies.get('alpha')
+      const shared = dependencies.get('shared')
+      assert.isDefined(alpha)
+      assert.isDefined(shared)
+      if (alpha === undefined || shared === undefined)
+        return unreachable('expected shared static helper dependencies')
+      assert.strictEqual(alpha.application, shared.application)
+      for (const dependency of [alpha, shared]) {
+        assert.deepEqual(dependency.resolvedConstants, [
+          { _tag: 'CanonicalDeclarationId', module: 'Cases', name: 'ANSWER' },
+        ])
+        assert.include(dependency.resolvedTypes, 'i32')
+      }
+    }
+
+    for (const name of ['alpha', 'shared']) {
+      assert.notStrictEqual(changedIdentities.get(name), beforeIdentities.get(name))
+      assert.notStrictEqual(sameResultIdentities.get(name), beforeIdentities.get(name))
+    }
+    assert.strictEqual(changedIdentities.get('beta'), beforeIdentities.get('beta'))
+    assert.strictEqual(sameResultIdentities.get('beta'), beforeIdentities.get('beta'))
+  }),
+)
+
+it.effect('retains folded constant provenance in custom runner work', () =>
+  Effect.gen(function* () {
+    const program = (initializer: string) => `const ANSWER: i32 = ${initializer}
+static fn leaf() -> i32 { return ANSWER }
+test fn alpha() -> () {}
+test fn beta() -> () {}
+pub fn main() -> () {
+  let answer = leaf()
+  if answer == 2 { let crash = 1 / 0 drop crash }
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`
+    const before = yield* executionSnapshot(program('1'))
+    const changed = yield* executionSnapshot(program('2'))
+    const sameResultEdit = yield* executionSnapshot(program('1 + 0'))
+    const runnerOf = Effect.fnUntraced(function* (snapshot: typeof before) {
+      const catalog = snapshot.analysis.testCatalog
+      if (catalog === undefined) return unreachable('expected test catalog')
+      return yield* TestExecution.runnerIdentity(
+        Analysis.instancesOf(snapshot.analysis),
+        snapshot.analysis.results,
+        catalog,
+      )
+    })
+    const beforeRunner = yield* runnerOf(before)
+    const changedRunner = yield* runnerOf(changed)
+    const sameResultRunner = yield* runnerOf(sameResultEdit)
+    assert.isTrue(beforeRunner.complete)
+    assert.isTrue(changedRunner.complete)
+    assert.isTrue(sameResultRunner.complete)
+    assert.notStrictEqual(changedRunner.identity, beforeRunner.identity)
+    assert.notStrictEqual(sameResultRunner.identity, beforeRunner.identity)
+    assert.deepEqual(eligibleIdentities(changed.manifest), eligibleIdentities(before.manifest))
+    assert.deepEqual(
+      eligibleIdentities(sameResultEdit.manifest),
+      eligibleIdentities(before.manifest),
+    )
+
+    const runnerDependency = Analysis.instancesOf(before.analysis)
+      .residualBodies.find(
+        (body) => body.declaration.module === 'Cases' && body.declaration.name === 'main',
+      )
+      ?.dependencies.find((dependency) => dependency.declaration.name === 'leaf')
+    assert.isDefined(runnerDependency)
+    assert.deepEqual(runnerDependency?.resolvedConstants, [
+      { _tag: 'CanonicalDeclarationId', module: 'Cases', name: 'ANSWER' },
+    ])
   }),
 )
 
