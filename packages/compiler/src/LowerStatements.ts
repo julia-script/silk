@@ -372,6 +372,31 @@ const lowerStatement = (
     return 'Terminated'
   }
 
+  // A body whose every path already returned still receives a synthesized trailing return, and
+  // that implicit statement has no value to elaborate: its expression is `Unavailable`. Lowering
+  // it as an ordinary return fails the whole body, and EntryAssembly then replaces the function
+  // with a trap stub whose parameters are all fabricated as `i32` — so callers already lowered
+  // against the real signature disagree with the declaration. The statement is unreachable by
+  // construction, so it lowers exactly like any other unavailable statement: a trap.
+  if (
+    statement._tag === 'Return' &&
+    statement.implicit === true &&
+    statement.expression._tag === 'Unavailable'
+  ) {
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      ...ownerFields(ownerLoop),
+      operations: [],
+      outcome: {
+        _tag: 'Trap',
+        reason: 'implicit return is unreachable',
+        provenance: generated(statement.span),
+      },
+    })
+    return 'Terminated'
+  }
+
   if (statement._tag === 'Bind') {
     const initializerType =
       'type' in statement.initializer ? fn.semantic(statement.initializer.type) : undefined
