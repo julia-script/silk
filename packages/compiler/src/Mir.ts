@@ -1817,7 +1817,9 @@ export const matchesCall = (
 ): boolean =>
   matchesInstance(fn, declaration, typeArguments, staticArguments) &&
   (result._tag === 'EffectValue' && fn.result._tag === 'EffectValue'
-    ? EffectExecutionContract.equals(result.type, fn.result.type) &&
+    ? // The site and environment instance below already pin one realization, so the contract only
+      // has to confirm it: a fail-only block reaches its declared result type through `never`.
+      EffectExecutionContract.realizes(result.type, fn.result.type) &&
       Tir.sameExecutableSite(result.site, fn.result.site) &&
       Instances.runtimeKeyText(result.environment.instance) ===
         Instances.runtimeKeyText(fn.result.environment.instance)
