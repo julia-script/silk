@@ -7,6 +7,8 @@ import * as Analysis from '../src/Analysis.js'
 import * as Tir from '../src/Tir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as SourceResolver from '../src/SourceResolver.js'
+import * as Target from '../src/Target.js'
 const encoder = new TextEncoder()
 
 const pipelineSource = 'import silk.i32\npub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }'
@@ -53,5 +55,93 @@ it.effect('pins one operator pipeline through canonical TIR, MIR, and LLVM', () 
       `${createHash('sha256').update(artifact.bitcode).digest('hex')}\n`,
       golden('bc.sha256'),
     )
+  }),
+)
+
+const pipedSectionViolations = Effect.fnUntraced(function* (name: string, source: string) {
+  const frontend = yield* AnalysisFixture.retainingMain(
+    name,
+    encoder.encode(source),
+    Target.wasm32UnknownUnknown.id,
+  )
+  const snapshot = yield* Analysis.realize(
+    frontend,
+    AnalysisFixture.configuration(frontend.closure.rootModule, Target.wasm32UnknownUnknown.id),
+    { normalizeMir: false },
+  ).pipe(Effect.provide(SourceResolver.empty))
+  assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  return yield* MirVerification.verify(Analysis.loweredMir(snapshot))
+})
+
+it.effect('pipes into a section of an ordinary function whose capture carries a lifetime', () =>
+  Effect.gen(function* () {
+    const found = yield* pipedSectionViolations(
+      'pipe/section-owned',
+      `import silk.option { Option }
+pub fn main() -> i32 {
+  let present = Option.some<string>("Silk")
+  let name = move present |> Option.unwrapOr<string>("")
+  drop name
+  return 0
+}`,
+    )
+    assert.deepEqual(found, [])
+  }),
+)
+
+it.effect('pipes a chained accessor pipeline ending in a section without splitting it', () =>
+  Effect.gen(function* () {
+    const found = yield* pipedSectionViolations(
+      'pipe/section-chained',
+      `import silk.option { Option }
+fn label<'a>(value: i32) -> string<'a> { return "leaf" }
+pub fn main() -> i32 {
+  let text = Option.some<i32>(7)
+    |> Option.map<i32, string>(label)
+    |> Option.unwrapOr<string>("")
+  drop text
+  return 0
+}`,
+    )
+    assert.deepEqual(found, [])
+  }),
+)
+
+it.effect('pipes a borrow-returning accessor into a section', () =>
+  Effect.gen(function* () {
+    const found = yield* pipedSectionViolations(
+      'pipe/section-borrow',
+      `import silk.option { Option }
+struct Doc { value: i32 }
+fn field<'a>(doc: &'a Doc, key: string) -> Option<&'a Doc> { return Option.some<&'a Doc>(doc) }
+fn fieldAt<'a>(self: Option<&'a Doc>, key: string) -> Option<&'a Doc> { return move self }
+pub fn main() -> i32 {
+  let doc = Doc { value: 1 }
+  let out = field(&doc, "k") |> fieldAt("child")
+  drop out
+  return 0
+}`,
+    )
+    assert.deepEqual(found, [])
+  }),
+)
+
+it.effect('pipes a section over a recursive type', () =>
+  Effect.gen(function* () {
+    const found = yield* pipedSectionViolations(
+      'pipe/section-recursive',
+      `import silk.option { Option }
+import silk.box { Box }
+struct Node { label: string<'static> next: Option<Box<Node>> }
+fn named<'a>(node: &Node, fallback: string<'a>) -> string<'a> { return fallback }
+pub fn main() -> i32 {
+  let node = Node { label: "head", next: Option.none<Box<Node>>() }
+  let name = &node |> named("anonymous")
+  drop name
+  drop node
+  return 0
+}`,
+    )
+    assert.deepEqual(found, [])
   }),
 )

@@ -6544,7 +6544,7 @@ const computeVerify = Effect.fnUntraced(function* (
                   return (
                     sourceType !== undefined &&
                     parameterType !== undefined &&
-                    SilkType.equals(semanticType(sourceType), semanticType(parameterType))
+                    acceptsRuntimeOperand(semanticType(sourceType), semanticType(parameterType))
                   )
                 }))
           const directForm =
