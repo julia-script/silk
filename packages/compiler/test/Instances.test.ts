@@ -2313,7 +2313,8 @@ it.effect(
       assert.strictEqual(Analysis.loweredMir(valid).executionStorage?.acquire.symbol, 'reserve')
       assert.notStrictEqual(valid.artifactPlan?.identity, changed.artifactPlan?.identity)
     }),
-  { timeout: 30_000 },
+  // Two storage-provider analyses took 22.1s locally on 2026-09-23 and exceeded 30s in CI shard 1.
+  { timeout: 60_000 },
 )
 
 it.effect('admits storage bootstrap observation whose cleanup needs no storage', () =>
