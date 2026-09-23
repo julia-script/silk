@@ -14,6 +14,9 @@
 //! delimiter remains unconsumed. After any error the state is terminal; create a new state.
 //! Nesting is limited to [`MAX_DEPTH`]. The scanner validates syntax, not duplicate key equality.
 //!
+//! # Examples
+//! ## Scan a complete number
+//!
 //! ```silk
 //! import silk.json_scanner { JsonScanner, JsonToken, JsonError }
 //! import silk.result { Result }
@@ -69,6 +72,8 @@ pub enum JsonReason {
   TrailingContent,
   /// An absolute byte offset cannot be represented as `usize`.
   OffsetOverflow,
+  /// A streaming consumer's caller-owned token buffer is too small.
+  TokenTooLarge,
 }
 
 /// A deterministic JSON failure with absolute input position and optional capacity details.
