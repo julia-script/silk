@@ -1,0 +1,192 @@
+//! Allocation-free JSON token reading from a fixed-capacity buffered input.
+//!
+//! # When to use
+//! Use [`JsonReader`] when a JSON document does not fit in one input slice. Use
+//! `silk.json_scanner.JsonScanner` when the complete document is available.
+//!
+//! # Details
+//! Each call to [`next`] returns one validated token. Raw string, number, and literal bytes use
+//! caller-owned scratch storage. The reader keeps no input or scratch view between calls.
+//!
+//! # Gotchas
+//! A raw token longer than scratch fails with `JsonReason.TokenTooLarge`. The reader becomes
+//! terminal after a JSON, buffer, or capacity failure. Drop each token view before the next call.
+
+import silk.buffered_input { BufferedInput, BufferError, FillOutcome }
+import silk.byte_duplex { ByteDuplex }
+import silk.effect { Effect }
+import silk.json_scanner { JsonError, JsonReason, JsonScanEvent, JsonScanState, JsonScanStep, JsonToken }
+import silk.monotonic_clock { MonotonicClock }
+import silk.option { Option }
+import silk.result { Result }
+import silk.slice { Slice }
+import silk.system_clock { Instant, SystemClock }
+import silk.usize
+
+/// One validated token and its raw bytes in caller-owned scratch storage.
+///
+/// # Details
+/// `raw` includes quotes and escapes for strings. Punctuation and end-of-input have an empty
+/// `raw` slice. The view remains valid only while its scratch borrow is held.
+pub struct JsonReadToken<'scratch> {
+  /// The token with absolute document offsets.
+  pub token: JsonToken
+  /// The raw source spelling for a string, number, or literal token.
+  pub raw: &'scratch [u8]
+}
+
+/// Owned state for one JSON document read from `BufferedInput`.
+///
+/// # Details
+/// This state keeps no input or scratch reference. It retains scanner progress across input
+/// fills. A completed document returns sticky end-of-input.
+pub struct JsonReader {
+  state: JsonScanState
+  offset: usize
+  tokenStart: usize
+  written: usize
+  ended: bool
+  terminal: bool
+}
+
+impl JsonReader {
+  /// Creates an empty reader for one JSON document without allocation.
+  pub fn make() -> JsonReader {
+    return JsonReader {
+      state: JsonScanState.make(),
+      offset: usize.ZERO,
+      tokenStart: usize.ZERO,
+      written: usize.ZERO,
+      ended: false,
+      terminal: false,
+    }
+  }
+
+  /// Returns the next token with raw bytes copied into caller scratch.
+  ///
+  /// # Details
+  /// The token view borrows only `scratch`. A number at an input boundary waits for its delimiter.
+  /// The delimiter stays in `input` for the next call. Whitespace uses no scratch space.
+  ///
+  /// # Gotchas
+  /// If scratch is too small, `JsonReason.TokenTooLarge` reports the token's first byte and the
+  /// available capacity. JSON and buffer failures also make the reader terminal. End is sticky.
+  pub effect fn next<'scratch>(
+    self: &mut JsonReader,
+    input: &mut BufferedInput,
+    scratch: &'scratch mut [u8],
+    deadline: Option<Instant>,
+  ) -> JsonReadToken<'scratch>
+  ! JsonError | BufferError
+  ? &mut ByteDuplex | &mut MonotonicClock {
+    if self.terminal { fail BufferError.Terminal }
+    if self.ended {
+      return JsonReadToken<'scratch> {
+        token: JsonToken.EndOfInput,
+        raw: Slice.view<u8>(move scratch, usize.ZERO, usize.ZERO),
+      }
+    }
+    self.written = usize.ZERO
+    while true {
+      if BufferedInput.unread(&input.*) == usize.ZERO && !BufferedInput.isEnded(&input.*) {
+        let filling = run Effect.result(BufferedInput.fill(
+          &mut input.*,
+          usize.ONE,
+          copyDeadline(&deadline),
+        ))
+        match move filling {
+          Result<FillOutcome, BufferError>.Failure { error } => {
+            self.terminal = true
+            fail move error
+          }
+          Result<FillOutcome, BufferError>.Success { value: _ } => {}
+        }
+      }
+
+      let chunk = BufferedInput.peek(&input.*)
+      let stepped = JsonScanState.step(&mut self.state, chunk, BufferedInput.isEnded(&input.*))
+      let step = match move stepped {
+        Result<JsonScanStep, JsonError>.Failure { error } => {
+          drop chunk
+          self.terminal = true
+          fail move error
+        }
+        Result<JsonScanStep, JsonError>.Success { value } => value
+      }
+      let fixed = fixedPunctuation(&step.event)
+      if !fixed && step.fragment.length > usize.ZERO {
+        if self.written == usize.ZERO {
+          self.tokenStart = self.offset + step.fragment.offset
+        }
+        if step.fragment.length > scratch.length - self.written {
+          drop chunk
+          self.terminal = true
+          fail JsonError {
+            reason: JsonReason.TokenTooLarge,
+            offset: Option.some<usize>(self.tokenStart),
+            required: Option.none<usize>(),
+            available: Option.some<usize>(scratch.length),
+          }
+        }
+        let mut index = usize.ZERO
+        while index < step.fragment.length {
+          scratch[self.written + index] = chunk[step.fragment.offset + index]
+          index = index + usize.ONE
+        }
+        self.written = self.written + step.fragment.length
+      }
+      drop chunk
+      let consumed = step.consumed
+      let consuming = run Effect.result(BufferedInput.consume(&mut input.*, consumed))
+      match move consuming {
+        Result<(), BufferError>.Failure { error } => {
+          self.terminal = true
+          fail move error
+        }
+        Result<(), BufferError>.Success { value: _ } => {}
+      }
+      self.offset = self.offset + consumed
+      match move step.event {
+        JsonScanEvent.Token { token } => {
+          return JsonReadToken<'scratch> {
+            token: move token,
+            raw: Slice.view<u8>(move scratch, usize.ZERO, self.written),
+          }
+        }
+        JsonScanEvent.NeedMore => {}
+        JsonScanEvent.EndOfInput => {
+          self.ended = true
+          return JsonReadToken<'scratch> {
+            token: JsonToken.EndOfInput,
+            raw: Slice.view<u8>(move scratch, usize.ZERO, usize.ZERO),
+          }
+        }
+      }
+    }
+    fail BufferError.Terminal
+  }
+}
+
+fn fixedPunctuation(event: &JsonScanEvent) -> bool {
+  return match &event.* {
+    JsonScanEvent.Token { token } => match &token {
+      JsonToken.ObjectBegin => true
+      JsonToken.ObjectEnd => true
+      JsonToken.ArrayBegin => true
+      JsonToken.ArrayEnd => true
+      JsonToken.KeySeparator => true
+      JsonToken.ValueSeparator => true
+      _ => false
+    }
+    _ => false
+  }
+}
+
+fn copyDeadline(value: &Option<Instant>) -> Option<Instant> {
+  return match &value.* {
+    Option<Instant>.None => Option.none<Instant>()
+    Option<Instant>.Some { value: present } => Option.some<Instant>(
+      SystemClock.make(SystemClock.seconds(&present), SystemClock.nanoseconds(&present)),
+    )
+  }
+}

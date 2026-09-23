@@ -21,6 +21,64 @@ pub fn main() -> i32 {
   return 42
 }`
 
+const jsonReaderProgram = `import silk.buffered_input { BufferedInput, BufferError }
+import silk.byte_duplex { ByteDuplex }
+import silk.json_reader { JsonReader, JsonReadToken }
+import silk.json_scanner { JsonError }
+import silk.monotonic_clock { MonotonicClock }
+import silk.option { Option }
+import silk.system_clock { Instant }
+effect fn next<'scratch>(
+  reader: &mut JsonReader,
+  input: &mut BufferedInput,
+  scratch: &'scratch mut [u8]
+) -> JsonReadToken<'scratch>
+! JsonError | BufferError
+? &mut ByteDuplex | &mut MonotonicClock {
+  return run JsonReader.next(&mut reader.*, &mut input.*, move scratch, Option.none<Instant>())
+}
+pub fn main() -> i32 { return 0 }`
+
+it.effect('keeps the JSON reader result tied to scratch with exact effect rows', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/json-reader',
+      ascii(jsonReaderProgram),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).filter(
+        (diagnostic) =>
+          diagnostic.span.sourceId === 'stdlib-namespace/json-reader' ||
+          diagnostic.span.sourceId === 'silk/json_reader',
+      ),
+      [],
+    )
+    const module = Analysis.declarationIndex(snapshot).modules.find(
+      (candidate) => candidate.module === 'silk/json_reader',
+    )
+    const next = module?.declarations.find(
+      (declaration) => declaration.associatedMember?.name === 'next',
+    )
+    const result = next === undefined ? undefined : DeclarationFacts.callableContract(next).result
+    assert.isTrue(result !== undefined && Type.isEffect(result))
+    if (result === undefined || !Type.isEffect(result)) return
+    assert.deepEqual(Type.failureMembers(result).map(Type.encode), [
+      'silk/buffered_input.BufferError',
+      'silk/json_scanner.JsonError',
+    ])
+    assert.deepEqual(
+      Type.requirementMembers(result).map((requirement) => ({
+        capability: Type.encode(requirement.capability),
+        access: requirement.access,
+      })),
+      [
+        { capability: 'silk/byte_duplex.ByteDuplex', access: 'Exclusive' },
+        { capability: 'silk/monotonic_clock.MonotonicClock', access: 'Exclusive' },
+      ],
+    )
+  }),
+)
+
 it.effect('resolves Option, Result, and Vector operations through their namespaces', () =>
   Effect.gen(function* () {
     const module = 'stdlib-namespace/qualified'
