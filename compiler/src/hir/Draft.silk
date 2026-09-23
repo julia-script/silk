@@ -311,14 +311,14 @@ fn isTrivia(kind: TokenKind) -> bool {
   }
 }
 
-/// Returns the number of direct elements of `parent`.
-fn elementCount(tree: &SyntaxTree, parent: NodeId) -> usize {
+/// Returns the number of direct elements of `parent`, tokens and missing tokens included.
+pub fn elementCount(tree: &SyntaxTree, parent: NodeId) -> usize {
   let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
   return Vector.length<Element>(&nodes[parent.index].elements)
 }
 
 /// Returns the direct element of `parent` at `index` in source order.
-fn elementAt(tree: &SyntaxTree, parent: NodeId, index: usize) -> Element {
+pub fn elementAt(tree: &SyntaxTree, parent: NodeId, index: usize) -> Element {
   let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
   return Vector.get<Element>(&nodes[parent.index].elements, index)
 }
@@ -1920,6 +1920,24 @@ pub effect fn unitLiteral(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) 
 ! OutOfMemoryError
 ? &mut Allocator {
   return run appendHealthy(&mut draft.*, Node.UnitLiteral, nodeSpan(tree, parent))
+}
+
+/// Lowers one text literal token into a [`Node.TextLiteral`](hir.Hir.Node) holding its payload.
+///
+/// # Details
+///
+/// This is the bootstrap `textLiteralToken` for an ABI or symbol literal written as a header
+/// token rather than as an expression node. A literal the lexer accepted but the decoder rejected
+/// lowers to an invalid expression, because no parser diagnostic explains it.
+pub effect fn textFromToken(draft: &mut Draft, tree: &SyntaxTree, literal: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let decoded = run decodeStatic(&mut draft.*, tree, literal)
+  if !decoded.valid || decoded.isBytes {
+    return run undecodableLiteral(&mut draft.*, literal, CauseCode.InvalidLiteralEncoding)
+  }
+  let value = run internScratch(&mut draft.*)
+  return run appendHealthy(&mut draft.*, Node.TextLiteral {value: value}, literal)
 }
 
 /// Lowers one lifetime token into a [`Node.Lifetime`](hir.Hir.Node) over its name.

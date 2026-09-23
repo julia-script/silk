@@ -1,0 +1,1331 @@
+//! Lowering of types, generic parameters, rows, constraints, and callable contracts.
+//!
+//! # When to use
+//!
+//! Call [`lowerType`] wherever the grammar admits a type operand, [`rowOperand`] wherever it also admits
+//! a written requirement such as `&Work`, and [`callableContract`] for the header of a function,
+//! operation, or anonymous callable.
+//!
+//! # Details
+//!
+//! This is the port of the `type`, `typeArguments`, `requirementRow`, `genericParameters`,
+//! `parameterList`, `callableContract`, and `constraints` section of the bootstrap
+//! `AuthoredLowering` (`packages/compiler/src/AuthoredLowering.ts`). Every function appends its
+//! children before itself, so the arena stays postorder.
+//!
+//! A damaged operand never deletes its healthy siblings: an absent operand becomes
+//! [`Node.MissingType`](hir.Hir.Node) with the causes the parser recorded, and source that cannot
+//! be a type becomes [`Node.InvalidType`](hir.Hir.Node).
+//!
+//! # Gotchas
+//!
+//! Grouping parentheses carry no meaning: [`lowerType`] unwraps a `ParenthesizedType` and lowers its
+//! operand in place, so a parenthesized type leaves no node of its own.
+
+import hir.Draft
+import hir.Draft {Draft as DraftState}
+import hir.Hir {
+  Access,
+  CallableMode,
+  CauseCode,
+  HirId,
+  HirRef,
+  Multiplicity,
+  Node,
+  ParameterMode,
+  Module,
+  Range,
+  RangeRef,
+  SpanRef,
+}
+import lexer.Span {Span}
+import lexer.Token {Token, TokenKind, kind as tokenKind, span as tokenSpan}
+import parser.Element {Element}
+import parser.Node {Node as SyntaxNode, NodeKind}
+import parser.NodeId {NodeId}
+import parser.SyntaxTree {SyntaxTree}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.usize
+import silk.vector {Vector}
+
+// ---------------------------------------------------------------------------
+// Syntax classification
+// ---------------------------------------------------------------------------
+
+/// Reports whether `kind` may occupy one type-operand position.
+///
+/// # Details
+///
+/// This is the bootstrap `typeKinds`. `Requirement` and `Error` belong to it because a row position
+/// admits a written requirement and because a damaged operand is still retained in place.
+pub fn isTypeKind(kind: NodeKind) -> bool {
+  return match kind {
+    NodeKind.TypePath => true
+    NodeKind.AppliedType => true
+    NodeKind.FixedArrayType => true
+    NodeKind.SliceType => true
+    NodeKind.ReferenceType => true
+    NodeKind.PointerType => true
+    NodeKind.CallableType => true
+    NodeKind.ForeignFunctionType => true
+    NodeKind.ExactRepresentationType => true
+    NodeKind.OpaqueResultType => true
+    NodeKind.UnitType => true
+    NodeKind.ParenthesizedType => true
+    NodeKind.UnionType => true
+    NodeKind.RowWithout => true
+    NodeKind.LifetimeType => true
+    NodeKind.Requirement => true
+    NodeKind.Error => true
+    _ => false
+  }
+}
+
+/// A child node found by one of the searches below, or the explicit absence of one.
+pub struct NodeRef {
+  /// Whether [`id`](NodeRef.id) names a syntax node.
+  pub present: bool
+  /// The found node; meaningful only when [`present`](NodeRef.present) is `true`.
+  pub id: NodeId
+}
+
+impl Copy for NodeRef {}
+
+impl NodeRef {
+  /// Constructs the absent reference.
+  pub fn absent() -> NodeRef {
+    return NodeRef {present: false, id: NodeId {index: usize.ZERO}}
+  }
+
+  /// Constructs a present reference to `id`.
+  pub fn of(id: NodeId) -> NodeRef {
+    return NodeRef {present: true, id: id}
+  }
+}
+
+/// Returns the first direct child of `parent` whose grammar category is `wanted`.
+pub fn firstChildOf(tree: &SyntaxTree, parent: NodeId, wanted: NodeKind) -> NodeRef {
+  let count = Draft.childCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parent, index)
+    if Draft.kindOf(tree, child) == wanted {
+      return NodeRef.of(child)
+    }
+    index = index + usize.ONE
+  }
+  return NodeRef.absent()
+}
+
+/// Returns the type operand of `parent` at `offset` among its type-kind children.
+///
+/// # Details
+///
+/// This is the bootstrap `typeChildren(parent)[offset]`. `skipDamaged` drops `Error` children,
+/// which the callers that slice a positional operand list need and the ones that retain damage
+/// in place do not.
+pub fn typeChildAt(tree: &SyntaxTree, parent: NodeId, offset: usize, skipDamaged: bool) -> NodeRef {
+  let count = Draft.childCount(tree, parent)
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parent, index)
+    let kind = Draft.kindOf(tree, child)
+    let counts = isTypeKind(kind) && (!skipDamaged || kind != NodeKind.Error)
+    if counts {
+      if seen == offset {
+        return NodeRef.of(child)
+      }
+      seen = seen + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  return NodeRef.absent()
+}
+
+/// Returns the number of type operands of `parent`, optionally ignoring damaged ones.
+pub fn typeChildCount(tree: &SyntaxTree, parent: NodeId, skipDamaged: bool) -> usize {
+  let count = Draft.childCount(tree, parent)
+  let mut found = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    let kind = Draft.kindOf(tree, Draft.childAt(tree, parent, index))
+    if isTypeKind(kind) && (!skipDamaged || kind != NodeKind.Error) {
+      found = found + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  return found
+}
+
+fn accessOf(tree: &SyntaxTree, parent: NodeId) -> Access {
+  if Draft.hasToken(tree, parent, TokenKind.MutKeyword) {
+    return Access.Mutable
+  }
+  return Access.Shared
+}
+
+fn parameterModeOf(tree: &SyntaxTree, parent: NodeId) -> ParameterMode {
+  if Draft.hasToken(tree, parent, TokenKind.StaticKeyword) {
+    return ParameterMode.Static
+  }
+  if Draft.hasToken(tree, parent, TokenKind.MutKeyword) {
+    return ParameterMode.Mutable
+  }
+  return ParameterMode.Value
+}
+
+/// A written callable mode, or the absence of one.
+struct ModeRef {
+  present: bool
+  mode: CallableMode
+}
+
+impl Copy for ModeRef {}
+
+fn callableModeOf(tree: &SyntaxTree, parent: NodeId) -> ModeRef {
+  if Draft.hasToken(tree, parent, TokenKind.MutKeyword) {
+    return ModeRef {present: true, mode: CallableMode.Mutable}
+  }
+  if Draft.hasToken(tree, parent, TokenKind.OnceKeyword) {
+    return ModeRef {present: true, mode: CallableMode.Once}
+  }
+  return ModeRef {present: false, mode: CallableMode.Shared}
+}
+
+/// Answers the span a required-but-absent construct should occupy.
+///
+/// # Details
+///
+/// A missing token gives the grammar's own insertion point, which underlines nothing rather than
+/// the whole enclosing construct. The bootstrap writes this as `missing(...)?.span ?? spanOf(...)`.
+fn absentSpan(tree: &SyntaxTree, parent: NodeId, expected: TokenKind) -> Span {
+  let missing = Draft.missingToken(tree, parent, expected)
+  if missing.present {
+    return missing.span
+  }
+  return Draft.nodeSpan(tree, parent)
+}
+
+// ---------------------------------------------------------------------------
+// Recovery types
+// ---------------------------------------------------------------------------
+
+/// Lowers a required but absent type.
+pub effect fn missingType(draft: &mut DraftState, tree: &SyntaxTree, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let causes = run Draft.recoveryCauses(&mut draft.*, tree, span, CauseCode.MissingToken)
+  return run Draft.append(&mut draft.*, Node.MissingType, span, causes)
+}
+
+/// Lowers a type position holding source that cannot be a type, retaining `retained`.
+pub effect fn invalidType(draft: &mut DraftState, tree: &SyntaxTree, span: Span, retained: Range)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let causes = run Draft.recoveryCauses(&mut draft.*, tree, span, CauseCode.UnexpectedToken)
+  return run Draft.append(&mut draft.*, Node.InvalidType {retained: retained}, span, causes)
+}
+
+/// Lowers `operand` when it is present, and a missing type over `span` when it is not.
+pub effect fn typeOrMissing(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  operand: NodeRef,
+  span: Span,
+) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  if !operand.present {
+    return run missingType(&mut draft.*, tree, span)
+  }
+  return run lowerType(&mut draft.*, tree, operand.id)
+}
+
+// ---------------------------------------------------------------------------
+// Lifetimes
+// ---------------------------------------------------------------------------
+
+/// Lowers every lifetime token written directly in `parent`, answering their range.
+///
+/// # Details
+///
+/// This is the bootstrap `lifetimesIn`, used for the `<'a & 'b;` environment of a type-argument
+/// list and for the `fn<'a>` environment of a callable contract. The list may legitimately be
+/// empty, which is why the caller keeps it in a [`RangeRef`] rather than a [`Range`].
+pub effect fn lifetimesIn(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.elementCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    if let Element.Token {id} = Draft.elementAt(tree, parent, index) {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      if tokenKind(token) == TokenKind.Lifetime {
+        let lowered = run Draft.lifetimeFromToken(&mut draft.*, tree, token)
+        run Draft.pushChild(&mut draft.*, lowered)
+      }
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+/// Lowers the lifetime token of `parent` into a name, or a missing name at its insertion point.
+effect fn lifetimeNameIn(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let lifetime = Draft.directToken(tree, parent, TokenKind.Lifetime)
+  if lifetime.present {
+    return run Draft.nameFromToken(&mut draft.*, tree, lifetime.token)
+  }
+  return run Draft.missingName(
+    &mut draft.*,
+    tree,
+    absentSpan(tree, parent, TokenKind.Lifetime),
+    CauseCode.MissingToken,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Rows and requirements
+// ---------------------------------------------------------------------------
+
+/// Lowers one operand of a row position, which admits a written requirement beside a type.
+pub effect fn rowOperand(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  if Draft.kindOf(tree, syntax) == NodeKind.Requirement {
+    return run requirement(&mut draft.*, tree, syntax)
+  }
+  return run lowerType(&mut draft.*, tree, syntax)
+}
+
+/// Lowers one `&Capability at role.Path` requirement.
+///
+/// # Details
+///
+/// This is the bootstrap `requirement`. The capability is the first type operand that is not
+/// itself a requirement; the role, when written, is the `TypePath` that follows it.
+pub effect fn requirement(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let mut capability = NodeRef.absent()
+  let mut rolePath = NodeRef.absent()
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    let kind = Draft.kindOf(tree, child)
+    if !capability.present && isTypeKind(kind) && kind != NodeKind.Requirement {
+      capability = NodeRef.of(child)
+    } else if !rolePath.present && kind == NodeKind.TypePath {
+      rolePath = NodeRef.of(child)
+    }
+    index = index + usize.ONE
+  }
+  let hasAccess = Draft.hasToken(tree, syntax, TokenKind.Ampersand)
+  let capabilityId = run typeOrMissing(&mut draft.*, tree, capability, span)
+  let mut selected = HirRef.absent()
+  if rolePath.present {
+    selected = HirRef.of(run Draft.pathOf(&mut draft.*, tree, rolePath.id, true))
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.Requirement {
+      hasAccess: hasAccess,
+      access: accessOf(tree, syntax),
+      capability: capabilityId,
+      rolePath: selected,
+    },
+    span,
+    causes,
+  )
+}
+
+/// Lowers one `? &A, &B` requirement row, retaining its healthy members.
+pub effect fn requirementRow(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    if Draft.kindOf(tree, child) != NodeKind.Error {
+      let member = run rowOperand(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, member)
+    }
+    index = index + usize.ONE
+  }
+  let members = run Draft.finishChildren(&mut draft.*, mark)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(&mut draft.*, Node.RequirementRow {members: members}, span, causes)
+}
+
+/// Lowers a `! E` failure row or a `-> T` result clause into the one type it names.
+///
+/// # Details
+///
+/// This is the bootstrap `failureRow` and `returnType`, which have the same shape: the marker
+/// token carries no node, so the lowered operand stands alone, or a missing type when the clause
+/// names none.
+pub effect fn soleOperand(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let operand = typeChildAt(tree, syntax, usize.ZERO, false)
+  return run typeOrMissing(&mut draft.*, tree, operand, Draft.nodeSpan(tree, syntax))
+}
+
+/// Lowers one `Subject at role.Path` requirement selector written in a type-argument list.
+pub effect fn requirementSelector(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let count = Draft.childCount(tree, syntax)
+  let mut subject = NodeRef.absent()
+  let mut selector = NodeRef.absent()
+  if count > usize.ZERO {
+    subject = NodeRef.of(Draft.childAt(tree, syntax, usize.ZERO))
+  }
+  if count > usize.ONE {
+    selector = NodeRef.of(Draft.childAt(tree, syntax, usize.ONE))
+  }
+  let subjectId = run typeOrMissing(&mut draft.*, tree, subject, span)
+  let mut roleId = HirId {index: usize.ZERO}
+  if selector.present {
+    roleId = run Draft.pathOf(&mut draft.*, tree, selector.id, true)
+  } else {
+    // A selector with no role still lowers to a path, so a consumer never handles an absent one.
+    let segment = run Draft.missingName(&mut draft.*, tree, span, CauseCode.MissingToken)
+    let mark = Draft.beginChildren(&draft.*)
+    run Draft.pushChild(&mut draft.*, segment)
+    let segments = run Draft.finishChildren(&mut draft.*, mark)
+    roleId = run Draft.appendHealthy(&mut draft.*, Node.Path {segments: segments}, span)
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.RequirementSelector {subject: subjectId, rolePath: roleId},
+    span,
+    causes,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Type arguments
+// ---------------------------------------------------------------------------
+
+/// Lowers one `<...>` type-argument list, including its environment and its rows.
+///
+/// # Details
+///
+/// This is the bootstrap `typeArguments`. A lifetime argument lowers through its token rather than
+/// through [`lowerType`], because a bare lifetime is an argument here and an invalid type elsewhere.
+pub effect fn typeArguments(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let environment = firstChildOf(tree, syntax, NodeKind.EffectEnvironment)
+  let failures = firstChildOf(tree, syntax, NodeKind.FailureRow)
+  let requirements = firstChildOf(tree, syntax, NodeKind.RequirementRow)
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    let kind = Draft.kindOf(tree, child)
+    if kind == NodeKind.LifetimeType {
+      let lifetime = Draft.directToken(tree, child, TokenKind.Lifetime)
+      if lifetime.present {
+        let lowered = run Draft.lifetimeFromToken(&mut draft.*, tree, lifetime.token)
+        run Draft.pushChild(&mut draft.*, lowered)
+      }
+    } else if kind == NodeKind.RequirementSelector {
+      let lowered = run requirementSelector(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    } else if isTypeKind(kind) && kind != NodeKind.Error {
+      let lowered = run lowerType(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  let arguments = run Draft.finishChildren(&mut draft.*, mark)
+  let mut lifetimes = RangeRef.absent()
+  if environment.present {
+    lifetimes = RangeRef.of(run lifetimesIn(&mut draft.*, tree, environment.id))
+  }
+  let mut failureRef = HirRef.absent()
+  if failures.present {
+    failureRef = HirRef.of(run soleOperand(&mut draft.*, tree, failures.id))
+  }
+  let mut requirementRef = HirRef.absent()
+  if requirements.present {
+    requirementRef = HirRef.of(run requirementRow(&mut draft.*, tree, requirements.id))
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.TypeArguments {
+      arguments: arguments,
+      environment: lifetimes,
+      failures: failureRef,
+      requirements: requirementRef,
+    },
+    span,
+    causes,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Generic parameters
+// ---------------------------------------------------------------------------
+
+/// Lowers the bound list of one generic parameter, answering its range.
+effect fn boundsOf(draft: &mut DraftState, tree: &SyntaxTree, parameter: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, parameter)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parameter, index)
+    let kind = Draft.kindOf(tree, child)
+    if kind == NodeKind.LifetimeType {
+      let lifetime = Draft.directToken(tree, child, TokenKind.Lifetime)
+      if lifetime.present {
+        let lowered = run Draft.lifetimeFromToken(&mut draft.*, tree, lifetime.token)
+        run Draft.pushChild(&mut draft.*, lowered)
+      }
+    } else if kind != NodeKind.Error {
+      let lowered = run lowerType(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+/// Lowers a written `<T: Bound, ?R, 'a>` binder list, answering the range of its parameters.
+///
+/// # Details
+///
+/// This is the bootstrap `genericParameters`. A `?` marks a row parameter, which takes no bounds;
+/// a `'a` parameter names itself with a lifetime token rather than an identifier.
+pub effect fn genericParameters(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let element = Draft.childAt(tree, syntax, index)
+    let kind = Draft.kindOf(tree, element)
+    if kind == NodeKind.LifetimeParameter || kind == NodeKind.TypeParameter {
+      let lowered = run genericParameter(&mut draft.*, tree, element, kind)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+effect fn genericParameter(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  element: NodeId,
+  kind: NodeKind,
+) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, element)
+  if kind == NodeKind.LifetimeParameter {
+    let name = run lifetimeNameIn(&mut draft.*, tree, element)
+    let bounds = run boundsOf(&mut draft.*, tree, element)
+    let causes = run Draft.damage(&mut draft.*, tree, element)
+    return run Draft.append(
+      &mut draft.*,
+      Node.LifetimeParameter {name: name, bounds: bounds},
+      span,
+      causes,
+    )
+  }
+  if Draft.hasToken(tree, element, TokenKind.Question) {
+    let name = run Draft.nameIn(&mut draft.*, tree, element, true)
+    let causes = run Draft.damage(&mut draft.*, tree, element)
+    return run Draft.append(&mut draft.*, Node.RowParameter {name: name}, span, causes)
+  }
+  let name = run Draft.nameIn(&mut draft.*, tree, element, true)
+  let bounds = run boundsOf(&mut draft.*, tree, element)
+  let causes = run Draft.damage(&mut draft.*, tree, element)
+  return run Draft.append(
+    &mut draft.*,
+    Node.TypeParameter {name: name, bounds: bounds},
+    span,
+    causes,
+  )
+}
+
+/// Lowers the binder list `parent` writes, or the empty range when it writes none.
+pub effect fn bindersIn(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId, wanted: NodeKind)
+-> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let list = firstChildOf(tree, parent, wanted)
+  if !list.present {
+    return Range.empty()
+  }
+  return run genericParameters(&mut draft.*, tree, list.id)
+}
+
+// ---------------------------------------------------------------------------
+// Constraints
+// ---------------------------------------------------------------------------
+
+/// Lowers the constraints of a written `where` clause, answering their range.
+///
+/// # Details
+///
+/// This is the bootstrap `constraints`. A membership constraint's two operands are row positions,
+/// so a written requirement is admitted there; a provider's first operand is an ordinary type.
+///
+/// # Gotchas
+///
+/// The whole clause is lowered by this one function rather than by a per-constraint helper. The
+/// bootstrap compiler's realizer cannot size the ancestry of the extra call-graph level; see
+/// `compiler/BUGS.md`.
+pub effect fn constraints(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    let kind = Draft.kindOf(tree, child)
+    let membership = kind == NodeKind.MembershipConstraint
+    if membership || kind == NodeKind.ProviderConstraint {
+      let span = Draft.nodeSpan(tree, child)
+      let mut lowered = HirId {index: usize.ZERO}
+      if membership {
+        let subject = run rowOperandOrMissing(
+          &mut draft.*,
+          tree,
+          typeChildAt(tree, child, usize.ZERO, false),
+          span,
+        )
+        let source = run rowOperandOrMissing(
+          &mut draft.*,
+          tree,
+          typeChildAt(tree, child, usize.ONE, false),
+          span,
+        )
+        let causes = run Draft.damage(&mut draft.*, tree, child)
+        lowered = run Draft.append(
+          &mut draft.*,
+          Node.MembershipConstraint {subject: subject, source: source},
+          span,
+          causes,
+        )
+      } else {
+        let provider = run typeOrMissing(
+          &mut draft.*,
+          tree,
+          typeChildAt(tree, child, usize.ZERO, false),
+          span,
+        )
+        let selected = run rowOperandOrMissing(
+          &mut draft.*,
+          tree,
+          typeChildAt(tree, child, usize.ONE, false),
+          span,
+        )
+        let source = run rowOperandOrMissing(
+          &mut draft.*,
+          tree,
+          typeChildAt(tree, child, usize.add(usize.ONE, usize.ONE), false),
+          span,
+        )
+        let causes = run Draft.damage(&mut draft.*, tree, child)
+        lowered = run Draft.append(
+          &mut draft.*,
+          Node.ProviderConstraint {provider: provider, selected: selected, source: source},
+          span,
+          causes,
+        )
+      }
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+/// Lowers `operand` as a row position, and a missing type over `span` when it is absent.
+effect fn rowOperandOrMissing(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  operand: NodeRef,
+  span: Span,
+) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  if !operand.present {
+    return run missingType(&mut draft.*, tree, span)
+  }
+  return run rowOperand(&mut draft.*, tree, operand.id)
+}
+
+// ---------------------------------------------------------------------------
+// Callable contracts
+// ---------------------------------------------------------------------------
+
+/// Lowers one declared parameter, binding its name in the innermost open frame.
+///
+/// # Details
+///
+/// The binding is what lets an identifier expression in the body resolve to its parameter, which is
+/// decision 7 of the port. A parameter whose name is missing binds nothing.
+pub effect fn parameter(draft: &mut DraftState, tree: &SyntaxTree, element: NodeId, bind: bool)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, element)
+  let name = run Draft.nameIn(&mut draft.*, tree, element, true)
+  let annotation = run typeOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, element, usize.ZERO, false),
+    span,
+  )
+  let causes = run Draft.damage(&mut draft.*, tree, element)
+  let lowered = run Draft.append(
+    &mut draft.*,
+    Node.Parameter {name: name, annotation: annotation, mode: parameterModeOf(tree, element)},
+    span,
+    causes,
+  )
+  if bind {
+    if let Node.Name {text} = Module.node(&draft.module, name) {
+      run Draft.bind(&mut draft.*, text, lowered)
+    }
+  }
+  return lowered
+}
+
+/// The parameters of one written parameter list, and whether it ends with a variadic marker.
+pub struct Parameters {
+  /// The lowered parameters in written order.
+  pub range: Range
+  /// Whether the list ends with a written `...`.
+  pub variadic: bool
+}
+
+impl Copy for Parameters {}
+
+/// Lowers a written parameter list, answering its parameters and its variadic marker.
+pub effect fn parameterList(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, bind: bool)
+-> Parameters
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    if Draft.kindOf(tree, child) == NodeKind.ParameterDeclaration {
+      let lowered = run parameter(&mut draft.*, tree, child, bind)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  let range = run Draft.finishChildren(&mut draft.*, mark)
+  return Parameters {
+    range: range,
+    variadic: Draft.hasToken(tree, syntax, TokenKind.Ellipsis),
+  }
+}
+
+fn modifierAnchor(tree: &SyntaxTree, header: NodeId, wanted: TokenKind) -> SpanRef {
+  let marker = Draft.directToken(tree, header, wanted)
+  if !marker.present {
+    return SpanRef.absent()
+  }
+  return SpanRef.of(tokenSpan(marker.token))
+}
+
+fn listAnchor(tree: &SyntaxTree, list: NodeRef) -> SpanRef {
+  if !list.present {
+    return SpanRef.absent()
+  }
+  return SpanRef.of(Draft.nodeSpan(tree, list.id))
+}
+
+/// Lowers the complete signature written on one callable header.
+///
+/// # Details
+///
+/// This is the bootstrap `callableContract`. The contract's pieces are direct children of `header`
+/// rather than of a node of their own, so every lookup below searches `header` directly. `bind`
+/// records each parameter in the innermost open frame, which a declaration lowering opens before
+/// calling this and closes after lowering the body.
+pub effect fn callableContract(draft: &mut DraftState, tree: &SyntaxTree, header: NodeId, bind: bool)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, header)
+  let genericList = firstChildOf(tree, header, NodeKind.TypeParameterList)
+  let parameterSyntax = firstChildOf(tree, header, NodeKind.ParameterList)
+  let resultSyntax = firstChildOf(tree, header, NodeKind.ReturnType)
+  let failureSyntax = firstChildOf(tree, header, NodeKind.FailureRow)
+  let requirementSyntax = firstChildOf(tree, header, NodeKind.RequirementRow)
+  let environmentSyntax = firstChildOf(tree, header, NodeKind.EffectEnvironment)
+  let whereSyntax = firstChildOf(tree, header, NodeKind.WhereClause)
+
+  let mut generics = Range.empty()
+  if genericList.present {
+    generics = run genericParameters(&mut draft.*, tree, genericList.id)
+  }
+  let mut parameters = Parameters {range: Range.empty(), variadic: false}
+  if parameterSyntax.present {
+    parameters = run parameterList(&mut draft.*, tree, parameterSyntax.id, bind)
+  }
+  let mut result = HirRef.absent()
+  if resultSyntax.present {
+    result = HirRef.of(run soleOperand(&mut draft.*, tree, resultSyntax.id))
+  }
+  let mut failures = HirRef.absent()
+  if failureSyntax.present {
+    failures = HirRef.of(run soleOperand(&mut draft.*, tree, failureSyntax.id))
+  }
+  let mut requirements = HirRef.absent()
+  if requirementSyntax.present {
+    requirements = HirRef.of(run requirementRow(&mut draft.*, tree, requirementSyntax.id))
+  }
+  let mut clauses = Range.empty()
+  if whereSyntax.present {
+    clauses = run constraints(&mut draft.*, tree, whereSyntax.id)
+  }
+  let mut environment = RangeRef.absent()
+  if environmentSyntax.present {
+    environment = RangeRef.of(run lifetimesIn(&mut draft.*, tree, environmentSyntax.id))
+  }
+  let testMarker = Draft.contextualModifier(tree, header, "test")
+  let mut testAnchor = SpanRef.absent()
+  if testMarker.present {
+    testAnchor = SpanRef.of(testMarker.span)
+  }
+  let contract = Node.CallableContract {
+    generics: generics,
+    parameters: parameters.range,
+    variadic: parameters.variadic,
+    result: result,
+    failures: failures,
+    requirements: requirements,
+    constraints: clauses,
+    isEffect: Draft.hasToken(tree, header, TokenKind.EffectKeyword),
+    isTest: testMarker.present,
+    environment: environment,
+    isUnsafe: Draft.hasToken(tree, header, TokenKind.UnsafeKeyword),
+    isStatic: Draft.hasToken(tree, header, TokenKind.StaticKeyword),
+    effectAnchor: modifierAnchor(tree, header, TokenKind.EffectKeyword),
+    testAnchor: testAnchor,
+    unsafeAnchor: modifierAnchor(tree, header, TokenKind.UnsafeKeyword),
+    staticAnchor: modifierAnchor(tree, header, TokenKind.StaticKeyword),
+    genericsAnchor: listAnchor(tree, genericList),
+    failuresAnchor: listAnchor(tree, failureSyntax),
+    constraintsAnchor: listAnchor(tree, whereSyntax),
+  }
+  return run Draft.appendHealthy(&mut draft.*, contract, span)
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/// Lowers one type node in one operand position.
+///
+/// # Details
+///
+/// This is the bootstrap `type`. Grouping parentheses have no meaning, so a `ParenthesizedType`
+/// lowers to its operand in place and leaves no node of its own. A lifetime, a bare requirement, or
+/// a damaged region in a type position is retained as [`Node.InvalidType`](hir.Hir.Node).
+pub effect fn lowerType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let kind = Draft.kindOf(tree, syntax)
+  let span = Draft.nodeSpan(tree, syntax)
+  if kind == NodeKind.ParenthesizedType {
+    let inner = typeChildAt(tree, syntax, usize.ZERO, false)
+    return run typeOrMissing(&mut draft.*, tree, inner, span)
+  }
+  if kind == NodeKind.TypePath {
+    return run namedType(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.AppliedType {
+    return run appliedType(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.FixedArrayType {
+    return run fixedArrayType(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.SliceType {
+    return run sliceType(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.ReferenceType {
+    return run referenceType(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.PointerType {
+    return run pointerType(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.CallableType || kind == NodeKind.ForeignFunctionType {
+    return run callableType(&mut draft.*, tree, syntax, kind == NodeKind.ForeignFunctionType)
+  }
+  if kind == NodeKind.ExactRepresentationType {
+    return run exactRepresentationType(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.OpaqueResultType {
+    return run opaqueResultType(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.UnitType {
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.UnitType, span, causes)
+  }
+  if kind == NodeKind.UnionType {
+    return run unionType(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.RowWithout {
+    return run rowWithout(&mut draft.*, tree, syntax)
+  }
+  return run invalidType(&mut draft.*, tree, span, Range.empty())
+}
+
+effect fn namedType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let path = run Draft.pathOf(&mut draft.*, tree, syntax, true)
+  let mode = callableModeOf(tree, syntax)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.NamedType {path: path, hasMode: mode.present, mode: mode.mode},
+    span,
+    causes,
+  )
+}
+
+/// Lowers `Target<...>`, moving a mode written on the application onto its named target.
+///
+/// # Details
+///
+/// The parser attaches the `once`/`mut` of `once Effect<...>` to the applied node, but the mode
+/// belongs to the type the arguments apply to, exactly as in the bootstrap.
+effect fn appliedType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let argumentSyntax = firstChildOf(tree, syntax, NodeKind.TypeArgumentList)
+  let mut targetSyntax = NodeRef.absent()
+  if Draft.childCount(tree, syntax) > usize.ZERO {
+    let first = Draft.childAt(tree, syntax, usize.ZERO)
+    if Draft.kindOf(tree, first) != NodeKind.TypeArgumentList {
+      targetSyntax = NodeRef.of(first)
+    }
+  }
+  let mode = callableModeOf(tree, syntax)
+  let mut target = HirId {index: usize.ZERO}
+  if targetSyntax.present && mode.present && Draft.kindOf(tree, targetSyntax.id) == NodeKind.TypePath {
+    let targetSpan = Draft.nodeSpan(tree, targetSyntax.id)
+    let path = run Draft.pathOf(&mut draft.*, tree, targetSyntax.id, true)
+    let targetCauses = run Draft.damage(&mut draft.*, tree, targetSyntax.id)
+    target = run Draft.append(
+      &mut draft.*,
+      Node.NamedType {path: path, hasMode: true, mode: mode.mode},
+      targetSpan,
+      targetCauses,
+    )
+  } else {
+    target = run typeOrMissing(&mut draft.*, tree, targetSyntax, span)
+  }
+  let mut arguments = HirId {index: usize.ZERO}
+  if argumentSyntax.present {
+    arguments = run typeArguments(&mut draft.*, tree, argumentSyntax.id)
+  } else {
+    arguments = run Draft.appendHealthy(
+      &mut draft.*,
+      Node.TypeArguments {
+        arguments: Range.empty(),
+        environment: RangeRef.absent(),
+        failures: HirRef.absent(),
+        requirements: HirRef.absent(),
+      },
+      span,
+    )
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.AppliedType {target: target, arguments: arguments},
+    span,
+    causes,
+  )
+}
+
+effect fn fixedArrayType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let element = run typeOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, syntax, usize.ZERO, false),
+    span,
+  )
+  let digits = Draft.directToken(tree, syntax, TokenKind.DecimalInteger)
+  let mut length = HirId {index: usize.ZERO}
+  if digits.present {
+    let digitSpan = tokenSpan(digits.token)
+    length = run Draft.integerFromToken(&mut draft.*, tree, digitSpan, digitSpan)
+  } else {
+    length = run Draft.missingExpression(
+      &mut draft.*,
+      tree,
+      absentSpan(tree, syntax, TokenKind.DecimalInteger),
+      CauseCode.MissingToken,
+    )
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.FixedArrayType {element: element, length: length},
+    span,
+    causes,
+  )
+}
+
+effect fn sliceType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let element = run typeOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, syntax, usize.ZERO, false),
+    span,
+  )
+  let marker = Draft.directToken(tree, syntax, TokenKind.Lifetime)
+  let mut lifetime = HirRef.absent()
+  if marker.present {
+    lifetime = HirRef.of(run Draft.lifetimeFromToken(&mut draft.*, tree, marker.token))
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.SliceType {element: element, access: accessOf(tree, syntax), lifetime: lifetime},
+    span,
+    causes,
+  )
+}
+
+effect fn referenceType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let referent = run typeOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, syntax, usize.ZERO, false),
+    span,
+  )
+  let marker = Draft.directToken(tree, syntax, TokenKind.Lifetime)
+  let mut lifetime = HirRef.absent()
+  if marker.present {
+    lifetime = HirRef.of(run Draft.lifetimeFromToken(&mut draft.*, tree, marker.token))
+  }
+  let mut roleName = HirRef.absent()
+  if Draft.hasToken(tree, syntax, TokenKind.At) {
+    let marker = Draft.directToken(tree, syntax, TokenKind.Identifier)
+    if marker.present {
+      roleName = HirRef.of(run Draft.nameFromToken(&mut draft.*, tree, marker.token))
+    }
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.ReferenceType {
+      referent: referent,
+      access: accessOf(tree, syntax),
+      lifetime: lifetime,
+      roleName: roleName,
+    },
+    span,
+    causes,
+  )
+}
+
+effect fn pointerQualifier(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let digits = Draft.directToken(tree, syntax, TokenKind.DecimalInteger)
+  let mut value = HirId {index: usize.ZERO}
+  if digits.present {
+    let digitSpan = tokenSpan(digits.token)
+    value = run Draft.integerFromToken(&mut draft.*, tree, digitSpan, digitSpan)
+  } else {
+    value = run Draft.missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.PointerQualifier {name: name, value: value},
+    span,
+    causes,
+  )
+}
+
+effect fn pointerType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let pointee = run typeOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, syntax, usize.ZERO, false),
+    span,
+  )
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    if Draft.kindOf(tree, child) == NodeKind.PointerQualifier {
+      let lowered = run pointerQualifier(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  let qualifiers = run Draft.finishChildren(&mut draft.*, mark)
+  let mut multiplicity = Multiplicity.Single
+  if Draft.hasToken(tree, syntax, TokenKind.LeftBracket) {
+    multiplicity = Multiplicity.Many
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.PointerType {
+      pointee: pointee,
+      access: accessOf(tree, syntax),
+      nullable: Draft.hasToken(tree, syntax, TokenKind.Question),
+      multiplicity: multiplicity,
+      qualifiers: qualifiers,
+    },
+    span,
+    causes,
+  )
+}
+
+/// Lowers a callable or foreign function type; both share the operand and binder layout.
+effect fn callableType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, foreign: bool)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let mut abi = HirId {index: usize.ZERO}
+  if foreign {
+    abi = run abiLiteral(&mut draft.*, tree, syntax)
+  }
+  let binders = run bindersIn(&mut draft.*, tree, syntax, NodeKind.LifetimeBinderList)
+  let mut environment = HirRef.absent()
+  if !foreign {
+    let environmentSyntax = firstChildOf(tree, syntax, NodeKind.CallableEnvironment)
+    if environmentSyntax.present {
+      let marker = Draft.directToken(tree, environmentSyntax.id, TokenKind.Lifetime)
+      if marker.present {
+        environment = HirRef.of(run Draft.lifetimeFromToken(&mut draft.*, tree, marker.token))
+      }
+    }
+  }
+  // The last healthy type operand is the result; the ones before it are the parameters.
+  let operands = typeChildCount(tree, syntax, true)
+  let mut parameterCount = operands
+  if operands > usize.ZERO {
+    parameterCount = operands - usize.ONE
+  }
+  let mark = Draft.beginChildren(&draft.*)
+  let mut index = usize.ZERO
+  while index < parameterCount {
+    let operand = typeChildAt(tree, syntax, index, true)
+    if operand.present {
+      let lowered = run lowerType(&mut draft.*, tree, operand.id)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  let parameters = run Draft.finishChildren(&mut draft.*, mark)
+  let mut result = HirId {index: usize.ZERO}
+  let resultSyntax = typeChildAt(tree, syntax, parameterCount, true)
+  if operands == usize.ZERO || !Draft.hasToken(tree, syntax, TokenKind.Arrow) {
+    result = run missingType(&mut draft.*, tree, absentSpan(tree, syntax, TokenKind.Arrow))
+  } else {
+    result = run typeOrMissing(&mut draft.*, tree, resultSyntax, span)
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  if foreign {
+    // wave 4: properties lowered with LowerExpression
+    return run Draft.append(
+      &mut draft.*,
+      Node.ForeignFunctionType {
+        abi: abi,
+        binders: binders,
+        parameters: parameters,
+        result: result,
+        properties: Range.empty(),
+      },
+      span,
+      causes,
+    )
+  }
+  let mode = callableModeOf(tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.CallableType {
+      mode: mode.mode,
+      isUnsafe: Draft.hasToken(tree, syntax, TokenKind.UnsafeKeyword),
+      binders: binders,
+      environment: environment,
+      parameters: parameters,
+      result: result,
+    },
+    span,
+    causes,
+  )
+}
+
+/// Lowers the ABI text literal of a foreign function type, or its explicit absence.
+effect fn abiLiteral(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let literal = Draft.directToken(tree, syntax, TokenKind.TextLiteral)
+  if !literal.present {
+    return run Draft.missingExpression(
+      &mut draft.*,
+      tree,
+      absentSpan(tree, syntax, TokenKind.TextLiteral),
+      CauseCode.MissingToken,
+    )
+  }
+  return run Draft.textFromToken(&mut draft.*, tree, tokenSpan(literal.token))
+}
+
+effect fn exactRepresentationType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let subject = run typeOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, syntax, usize.ZERO, false),
+    span,
+  )
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.ExactRepresentationType {subject: subject},
+    span,
+    causes,
+  )
+}
+
+effect fn opaqueResultType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let binders = run bindersIn(&mut draft.*, tree, syntax, NodeKind.TypeParameterList)
+  let result = run typeOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, syntax, usize.ZERO, false),
+    span,
+  )
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.OpaqueResultType {binders: binders, result: result},
+    span,
+    causes,
+  )
+}
+
+effect fn unionType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    if Draft.kindOf(tree, child) != NodeKind.Error {
+      let member = run rowOperand(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, member)
+    }
+    index = index + usize.ONE
+  }
+  let members = run Draft.finishChildren(&mut draft.*, mark)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(&mut draft.*, Node.UnionType {members: members}, span, causes)
+}
+
+effect fn rowWithout(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let mut source = HirId {index: usize.ZERO}
+  let mut removed = HirId {index: usize.ZERO}
+  let first = healthyChildAt(tree, syntax, usize.ZERO)
+  let second = healthyChildAt(tree, syntax, usize.ONE)
+  if first.present {
+    source = run rowOperand(&mut draft.*, tree, first.id)
+  } else {
+    source = run missingType(&mut draft.*, tree, span)
+  }
+  if second.present {
+    removed = run rowOperand(&mut draft.*, tree, second.id)
+  } else {
+    removed = run missingType(&mut draft.*, tree, span)
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.RowWithout {source: source, removed: removed},
+    span,
+    causes,
+  )
+}
+
+/// Returns the child of `parent` at `offset` among its non-damaged children.
+fn healthyChildAt(tree: &SyntaxTree, parent: NodeId, offset: usize) -> NodeRef {
+  let count = Draft.childCount(tree, parent)
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parent, index)
+    if Draft.kindOf(tree, child) != NodeKind.Error {
+      if seen == offset {
+        return NodeRef.of(child)
+      }
+      seen = seen + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  return NodeRef.absent()
+}

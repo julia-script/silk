@@ -5,14 +5,17 @@ import hir.Draft {Draft as DraftState}
 import hir.Hir
 import hir.Hir {
   Cause,
+  Access,
   CauseCode,
   Defect,
   DurationUnit,
   HirId,
   HirRef,
   Module,
+  Multiplicity,
   Node,
   OwnerKey,
+  ParameterMode,
   OwnerKind,
   Radix,
   Range,
@@ -20,6 +23,7 @@ import hir.Hir {
   Violation,
 }
 import hir.Intern {StringTable, Symbol, SymbolRef}
+import hir.LowerType
 import lexer.Lexer {Lexer}
 import lexer.Span {Span}
 import lexer.Token {Token}
@@ -807,4 +811,307 @@ test effect fn floatingLiteralKeepsSignedExponent() -> ()
 ! OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   return run checkFloatingLiteral() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// ---------------------------------------------------------------------------
+// Types, generics, contracts, and constraints
+// ---------------------------------------------------------------------------
+
+/// Lowers the first `kind` node of `source` as a type, answering the finished module.
+effect fn lowerTypeOf(source: string<'static>, kind: NodeKind) -> Module
+! OutOfMemoryError
+? &mut Allocator {
+  let tree = run parseWithAllocator(source)
+  let target = firstNode(&tree, kind)
+  let mut draft = DraftState.make()
+  let lowered = run LowerType.lowerType(&mut draft, &tree, target)
+  let mut module = DraftState.finish(move draft)
+  let start = Vector.length<HirId>(&module.children)
+  run Vector.append<HirId>(&mut module.children, lowered)
+  module.declarations = Range {start: start, length: usize.ONE}
+  drop tree
+  return move module
+}
+
+/// Lowers the contract of the first function declaration of `source`.
+effect fn lowerContractOf(source: string<'static>) -> Module
+! OutOfMemoryError
+? &mut Allocator {
+  let tree = run parseWithAllocator(source)
+  let target = firstNode(&tree, NodeKind.FunctionDeclaration)
+  let mut draft = DraftState.make()
+  run Draft.pushFrame(&mut draft)
+  let lowered = run LowerType.callableContract(&mut draft, &tree, target, true)
+  Draft.popFrame(&mut draft)
+  let mut module = DraftState.finish(move draft)
+  let start = Vector.length<HirId>(&module.children)
+  run Vector.append<HirId>(&mut module.children, lowered)
+  module.declarations = Range {start: start, length: usize.ONE}
+  drop tree
+  return move module
+}
+
+/// Returns the node of the module's last-appended root.
+fn lastNode(module: &Module) -> Node {
+  return Module.node(module, HirId {index: Module.length(module) - usize.ONE})
+}
+
+/// Reports whether `id` names a node of the given kind name in `Hir.nodeKindName` terms.
+fn isMissingType(module: &Module, id: HirId) -> bool {
+  match Module.node(module, id) {
+    Node.MissingType => { return true }
+    _ => { return false }
+  }
+}
+
+effect fn checkAppliedTypeRows() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerTypeOf(
+    "fn main(worker: Task<'a & 'b; u8 !Error ?&Clock>) -> i32 { return 0 }",
+    NodeKind.AppliedType,
+  )
+  let mut arguments = HirId {index: usize.ZERO}
+  if let Node.AppliedType {arguments: found, ..} = lastNode(&module) {
+    arguments = found
+  }
+  let mut sawFailures = false
+  let mut sawRequirements = false
+  let mut sawEnvironment = false
+  let mut argumentCount = usize.ZERO
+  if let Node.TypeArguments {
+    arguments: list,
+    environment,
+    failures,
+    requirements,
+  } = Module.node(&module, arguments) {
+    argumentCount = list.length
+    sawEnvironment = environment.present
+    sawFailures = failures.present
+    sawRequirements = requirements.present
+  }
+  run Testing.expect(argumentCount == usize.ONE, "the written type argument is retained")
+  run Testing.expect(sawEnvironment, "a written lifetime environment stays distinct from an absent one")
+  run Testing.expect(sawFailures, "a `!` row lowers into the failures slot")
+  run Testing.expect(sawRequirements, "a `?` row lowers into the requirements slot")
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "an applied type with rows leaves a consistent arena",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn appliedTypeKeepsRowsAndEnvironment() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkAppliedTypeRows() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkPointerQualifiers() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerTypeOf(
+    "fn main(handle: [*]const align(8) addrspace(3) u8) -> i32 { return 0 }",
+    NodeKind.PointerType,
+  )
+  let mut qualifiers = Range.empty()
+  let mut multiplicity = Multiplicity.Single
+  let mut access = Access.Mutable
+  let mut nullable = true
+  if let Node.PointerType {
+    access: foundAccess,
+    nullable: foundNullable,
+    multiplicity: foundMultiplicity,
+    qualifiers: found,
+    ..
+  } = lastNode(&module) {
+    qualifiers = found
+    multiplicity = foundMultiplicity
+    access = foundAccess
+    nullable = foundNullable
+  }
+  run Testing.expect(qualifiers.length == usize.add(0, 2), "both written qualifiers are retained")
+  run Testing.expect(multiplicity == Multiplicity.Many, "`[*]` addresses a run of values")
+  run Testing.expect(access == Access.Shared, "`const` leaves the pointer read-only")
+  run Testing.expect(!nullable, "a pointer without `?` does not admit null")
+  let mut value = u64.add(0, 0)
+  if let Node.PointerQualifier {value: valueId, ..}
+    = Module.node(&module, Module.child(&module, qualifiers, usize.ZERO)) {
+    if let Node.IntegerLiteral {magnitude, ..} = Module.node(&module, valueId) {
+      value = magnitude
+    }
+  }
+  run Testing.expect(value == 8, "a qualifier keeps its written magnitude")
+  drop module
+  return ()
+}
+
+test effect fn pointerTypeKeepsQualifiers() -> () ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkPointerQualifiers() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkCallableBinders() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerTypeOf(
+    "fn main(apply: for<'a> unsafe fn(&'a u8, i32) -> i32) -> i32 { return 0 }",
+    NodeKind.CallableType,
+  )
+  let mut binders = Range.empty()
+  let mut parameters = Range.empty()
+  let mut isUnsafe = false
+  let mut resultId = HirId {index: usize.ZERO}
+  if let Node.CallableType {
+    isUnsafe: foundUnsafe,
+    binders: foundBinders,
+    parameters: foundParameters,
+    result,
+    ..
+  } = lastNode(&module) {
+    binders = foundBinders
+    parameters = foundParameters
+    isUnsafe = foundUnsafe
+    resultId = result
+  }
+  run Testing.expect(binders.length == usize.ONE, "a `for<'a>` binder list keeps its parameter")
+  run Testing.expect(parameters.length == usize.add(0, 2), "every operand but the last is a parameter")
+  run Testing.expect(isUnsafe, "a written `unsafe` is recorded on the callable type")
+  run Testing.expect(!isMissingType(&module, resultId), "the last operand is the result type")
+  let mut isLifetime = false
+  if let Node.LifetimeParameter {..}
+    = Module.node(&module, Module.child(&module, binders, usize.ZERO)) {
+    isLifetime = true
+  }
+  run Testing.expect(isLifetime, "a `'a` binder lowers to a lifetime parameter")
+  drop module
+  return ()
+}
+
+test effect fn callableTypeKeepsBinders() -> () ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkCallableBinders() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkFullContract() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerContractOf(
+    "pub test effect fn run<T>(mut value: T, ...) -> i32 !Error ?&Clock where T in Copy { return 0 }",
+  )
+  let mut generics = Range.empty()
+  let mut parameters = Range.empty()
+  let mut constraints = Range.empty()
+  let mut variadic = false
+  let mut isEffect = false
+  let mut isTest = false
+  let mut hasResult = false
+  let mut hasFailures = false
+  let mut hasRequirements = false
+  let mut effectAnchored = false
+  let mut testAnchored = false
+  let mut genericsAnchored = false
+  let mut constraintsAnchored = false
+  if let Node.CallableContract {
+    generics: foundGenerics,
+    parameters: foundParameters,
+    variadic: foundVariadic,
+    result,
+    failures,
+    requirements,
+    constraints: foundConstraints,
+    isEffect: foundEffect,
+    isTest: foundTest,
+    effectAnchor,
+    testAnchor,
+    genericsAnchor,
+    constraintsAnchor,
+    ..
+  } = lastNode(&module) {
+    generics = foundGenerics
+    parameters = foundParameters
+    constraints = foundConstraints
+    variadic = foundVariadic
+    isEffect = foundEffect
+    isTest = foundTest
+    hasResult = result.present
+    hasFailures = failures.present
+    hasRequirements = requirements.present
+    effectAnchored = effectAnchor.present
+    testAnchored = testAnchor.present
+    genericsAnchored = genericsAnchor.present
+    constraintsAnchored = constraintsAnchor.present
+  }
+  run Testing.expect(generics.length == usize.ONE, "the written generic parameter is retained")
+  run Testing.expect(parameters.length == usize.ONE, "the written parameter is retained")
+  run Testing.expect(variadic, "a trailing `...` marks the list variadic")
+  run Testing.expect(isEffect && effectAnchored, "`effect` is recorded with the keyword it was written as")
+  run Testing.expect(isTest && testAnchored, "a contextual `test` before `fn` is a test marker")
+  run Testing.expect(hasResult && hasFailures && hasRequirements, "result and both rows are written")
+  run Testing.expect(constraints.length == usize.ONE, "the `where` clause keeps its one constraint")
+  run Testing.expect(genericsAnchored && constraintsAnchored, "a written list keeps its own anchor")
+  let mut isMembership = false
+  if let Node.MembershipConstraint {..}
+    = Module.node(&module, Module.child(&module, constraints, usize.ZERO)) {
+    isMembership = true
+  }
+  run Testing.expect(isMembership, "`T in Copy` lowers to a membership constraint")
+  let mut mode = ParameterMode.Value
+  if let Node.Parameter {mode: found, ..}
+    = Module.node(&module, Module.child(&module, parameters, usize.ZERO)) {
+    mode = found
+  }
+  run Testing.expect(mode == ParameterMode.Mutable, "a `mut` parameter receives its argument mutably")
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "a full contract leaves a consistent arena",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn contractKeepsEveryModifierAndClause() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkFullContract() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkMissingResultType() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerTypeOf(
+    "fn main(apply: fn(i32)) -> i32 { return 0 }",
+    NodeKind.CallableType,
+  )
+  let mut resultId = HirId {index: usize.ZERO}
+  if let Node.CallableType {result, ..} = lastNode(&module) {
+    resultId = result
+  }
+  run Testing.expect(
+    isMissingType(&module, resultId),
+    "a callable type written with no `->` lowers its result to MissingType",
+  )
+  run Testing.expect(
+    Module.causeRange(&module, resultId).length > usize.ZERO,
+    "a missing result type always records why it is missing",
+  )
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "a callable type with no result leaves a consistent arena",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn missingResultTypeRecordsACause() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkMissingResultType() |> Effect.provideMut<Allocator>(&mut allocator)
 }
