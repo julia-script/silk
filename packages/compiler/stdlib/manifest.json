@@ -556,7 +556,15 @@
     "module": "silk/json_scanner",
     "path": "silk/json_scanner.silk",
     "namespace": "JsonScanner",
-    "aliases": ["JsonError", "JsonReason", "JsonScanEvent", "JsonScanState", "JsonScanStep", "JsonSpan", "JsonToken"]
+    "aliases": [
+      "JsonError",
+      "JsonReason",
+      "JsonScanEvent",
+      "JsonScanState",
+      "JsonScanStep",
+      "JsonSpan",
+      "JsonToken"
+    ]
   },
   {
     "module": "silk/layout",
