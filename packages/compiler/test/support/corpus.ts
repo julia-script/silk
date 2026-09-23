@@ -56,6 +56,9 @@ import { httpServerAcceptanceSource } from './httpServerAcceptance.js'
 import { websocketUpgradeAcceptanceSource } from './websocketUpgradeAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
 import { jsonScannerAcceptanceSource } from './jsonScannerAcceptance.js'
+import { utf8DecoderAcceptanceSource } from './utf8DecoderAcceptance.js'
+import { jsonReaderAcceptanceSource } from './jsonReaderAcceptance.js'
+import { jsonValueAcceptanceSource } from './jsonValueAcceptance.js'
 import { httpRequestAcceptanceSource } from './httpRequestAcceptance.js'
 import { httpClientOwnershipAcceptanceSource } from './httpClientOwnershipAcceptance.js'
 import {
@@ -6576,6 +6579,11 @@ pub fn main() -> i32 { return run Effect.catchAll(verify(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'utf8-decoder',
+    source: utf8DecoderAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'format-float-parser',
     source: `import silk.f32
 import silk.f64
@@ -6629,6 +6637,16 @@ pub fn main() -> i32 {
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'json-reader',
+    source: jsonReaderAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'json-value',
+    source: jsonValueAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
   },
   {
     name: 'buffered-byte-io',

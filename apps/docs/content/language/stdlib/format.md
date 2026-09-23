@@ -482,6 +482,38 @@ Reads complete decimal text as a signed value, accepting one leading `-`.
 Digits accumulate negatively, so text naming `i64.MIN` reads like any other value. A leading `+`
 is not accepted. A value outside `i64.MIN`–`i64.MAX` is `OutOfRange`.
 
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e66363456616c7565"></a>
+
+### Associated function `Format.f64Value`
+
+```silk
+pub fn f64Value<'life0>(text: string<'life0>) -> silk/result.Result<f64, silk/format.ParseError>
+```
+
+Reads a complete finite decimal spelling, rounding directly to IEEE binary64.
+
+#### Details
+
+An optional sign, decimal point, and `e` exponent are accepted. `NaN` and `Infinity` are
+rejected. Overflow rounds to infinity and underflow rounds to signed zero. The fallback
+compares exact decimal values with binary64 rounding boundaries, including subnormals and
+ties to even; no intermediate floating-point multiplication decides the result.
+
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e66333256616c7565"></a>
+
+### Associated function `Format.f32Value`
+
+```silk
+pub fn f32Value<'life0>(text: string<'life0>) -> silk/result.Result<f32, silk/format.ParseError>
+```
+
+Reads a complete finite decimal spelling, rounding directly to IEEE binary32.
+
+#### Details
+
+The decimal is never rounded through binary64, avoiding double rounding. Overflow produces
+infinity and underflow preserves the sign of zero.
+
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e753856616c7565"></a>
 
 ### Associated function `Format.u8Value`

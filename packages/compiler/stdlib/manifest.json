@@ -553,6 +553,18 @@
     "namespace": "isize"
   },
   {
+    "module": "silk/json_output",
+    "path": "silk/json_output.silk",
+    "namespace": "JsonOutput",
+    "aliases": ["JsonOptions"]
+  },
+  {
+    "module": "silk/json_reader",
+    "path": "silk/json_reader.silk",
+    "namespace": "JsonReader",
+    "aliases": ["JsonReadToken"]
+  },
+  {
     "module": "silk/json_scanner",
     "path": "silk/json_scanner.silk",
     "namespace": "JsonScanner",
@@ -565,6 +577,12 @@
       "JsonSpan",
       "JsonToken"
     ]
+  },
+  {
+    "module": "silk/json_value",
+    "path": "silk/json_value.silk",
+    "namespace": "Json",
+    "aliases": ["JsonChild", "JsonEntry", "Value"]
   },
   {
     "module": "silk/layout",
@@ -1111,6 +1129,12 @@
     "module": "silk/usize",
     "path": "silk/usize.silk",
     "namespace": "usize"
+  },
+  {
+    "module": "silk/utf8_decoder",
+    "path": "silk/utf8_decoder.silk",
+    "namespace": "Utf8Decoder",
+    "aliases": ["Utf8Step"]
   },
   {
     "module": "silk/vector",

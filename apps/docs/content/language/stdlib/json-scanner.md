@@ -28,16 +28,16 @@ Nesting is limited to [`MAX_DEPTH`](#declaration-73696c6b2f6a736f6e5f7363616e6e6
 ### Scan a complete number
 
 ```silk
-import silk.json_scanner { JsonScanner, JsonToken, JsonError }
-import silk.result { Result }
+import silk.json_scanner {JsonScanner, JsonToken, JsonError}
+import silk.result {Result}
 
 pub fn main() -> i32 {
   let mut scanner = JsonScanner.make(b"42")
   let token = JsonScanner.next(&mut scanner)
   return match move token {
-    Result<JsonToken, JsonError>.Failure { error } => 1
-    Result<JsonToken, JsonError>.Success { value } => match value {
-      JsonToken.Number { span: _ } => 0
+    Result<JsonToken, JsonError>.Failure {error} => 1
+    Result<JsonToken, JsonError>.Success {value} => match move value {
+      JsonToken.Number {span: _} => 0
       _ => 1
     }
   }
@@ -150,50 +150,70 @@ A number does not satisfy the JSON number grammar.
 
 <a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a35"></a>
 
+### `DuplicateKey`
+
+```silk
+DuplicateKey = 5
+```
+
+An object repeats a decoded member name.
+
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a36"></a>
+
+### `InvalidValue`
+
+```silk
+InvalidValue = 6
+```
+
+A constructed value contains a child of the wrong container kind.
+
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a37"></a>
+
 ### `UnexpectedEnd`
 
 ```silk
-UnexpectedEnd = 5
+UnexpectedEnd = 7
 ```
 
 The final input ended before the single root value was complete.
 
-<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a36"></a>
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a38"></a>
 
 ### `DepthExceeded`
 
 ```silk
-DepthExceeded = 6
+DepthExceeded = 8
 ```
 
 The fixed nesting stack is full.
 
-<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a37"></a>
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a39"></a>
 
 ### `TrailingContent`
 
 ```silk
-TrailingContent = 7
+TrailingContent = 9
 ```
 
 A second root value follows the first.
 
-<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a38"></a>
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a3130"></a>
 
 ### `OffsetOverflow`
 
 ```silk
-OffsetOverflow = 8
+OffsetOverflow = 10
 ```
 
 An absolute byte offset cannot be represented as `usize`.
 
-<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a39"></a>
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a3131"></a>
 
 ### `TokenTooLarge`
 
 ```silk
-TokenTooLarge = 9
+TokenTooLarge = 11
 ```
 
 A streaming consumer's caller-owned token buffer is too small.
