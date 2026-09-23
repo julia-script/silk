@@ -103,6 +103,13 @@ pub struct JsonError {
   pub available: Option<usize>
 }
 
+impl JsonError {
+  /// Creates an input failure at an absolute byte offset.
+  pub fn at(reason: JsonReason, offset: usize) -> JsonError {
+    return errorAt(reason, offset)
+  }
+}
+
 /// One validated JSON token. String and number spans retain the raw source spelling.
 pub union JsonToken {
   /// An opening object brace.

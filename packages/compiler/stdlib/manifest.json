@@ -553,6 +553,16 @@
     "namespace": "isize"
   },
   {
+    "module": "silk/json_array",
+    "path": "silk/json_array.silk",
+    "namespace": "JsonArray"
+  },
+  {
+    "module": "silk/json_object",
+    "path": "silk/json_object.silk",
+    "namespace": "JsonObject"
+  },
+  {
     "module": "silk/json_output",
     "path": "silk/json_output.silk",
     "namespace": "JsonOutput",
@@ -577,6 +587,12 @@
       "JsonSpan",
       "JsonToken"
     ]
+  },
+  {
+    "module": "silk/json_serde",
+    "path": "silk/json_serde.silk",
+    "namespace": "Serialize",
+    "aliases": ["Decode", "Deserialize"]
   },
   {
     "module": "silk/json_value",

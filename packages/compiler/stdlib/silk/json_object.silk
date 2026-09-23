@@ -1,0 +1,86 @@
+//! Effectful JSON object construction through the ambient Writer.
+//!
+//! # When to use
+//! Use [`JsonObject`] to write named values with a [`Serialize`] implementation.
+//! Each operation keeps the object state in an Effect for the next operation.
+//!
+//! # Details
+//! The object owns its comma and depth state. It does not own or borrow the Writer.
+//! A failed write can leave an accepted prefix in the Writer.
+
+import silk.effect { Effect }
+import silk.json_output { JsonOptions, JsonOutput }
+import silk.json_scanner { JsonError }
+import silk.json_serde { Serialize }
+import silk.option { Option }
+import silk.writer { Writer, WriterError }
+
+/// Owned formatting state for one open JSON object.
+pub struct JsonObject {
+  options: JsonOptions
+  child: JsonOptions
+  first: bool
+}
+
+impl JsonObject {
+  /// Opens an object after checking its depth limit.
+  pub effect fn begin(options: &JsonOptions)
+    -> JsonObject ! JsonError | WriterError ? &mut Writer {
+    let child = run JsonOptions.child(options)
+    run Writer.writeAll(b"{")
+    return JsonObject { options: options.*, child: move child, first: true }
+  }
+
+  /// Writes one named value and returns the open object state.
+  ///
+  /// # Details
+  /// The incoming Effect runs once. If it fails, this operation writes nothing.
+  pub effect fn field<'env, T: Serialize, E, ?R>(
+    self: once Effect<'env; JsonObject ! E ? R>,
+    key: string<'env>,
+    value: &'env T
+  ) -> JsonObject ! E | JsonError | WriterError ? R | &mut Writer {
+    let mut state = run move self
+    run JsonOutput.separator(&state.child, state.first)
+    run JsonOutput.writeString(key)
+    run JsonOutput.colon(&state.child)
+    run Serialize.serialize(value, &state.child)
+    state.first = false
+    return move state
+  }
+
+  /// Writes a present named value or leaves an absent member out of the object.
+  ///
+  /// # Details
+  /// The incoming Effect runs once. `None` does not write a key or a separator.
+  pub effect fn fieldIfSome<'env, T: Serialize, E, ?R>(
+    self: once Effect<'env; JsonObject ! E ? R>,
+    key: string<'env>,
+    value: &'env Option<T>
+  ) -> JsonObject ! E | JsonError | WriterError ? R | &mut Writer {
+    let mut state = run move self
+    match &value.* {
+      Option<T>.None => {}
+      Option<T>.Some { value: present } => {
+        run JsonOutput.separator(&state.child, state.first)
+        run JsonOutput.writeString(key)
+        run JsonOutput.colon(&state.child)
+        run Serialize.serialize(&present, &state.child)
+        state.first = false
+      }
+    }
+    return move state
+  }
+
+  /// Closes an object and returns the completed write.
+  ///
+  /// # Details
+  /// The incoming Effect runs once. If it fails, the closing brace is not written.
+  pub effect fn end<'env, E, ?R>(
+    self: once Effect<'env; JsonObject ! E ? R>
+  ) -> () ! E | JsonError | WriterError ? R | &mut Writer {
+    let state = run move self
+    if !state.first { run JsonOutput.line(&state.options) }
+    return run Writer.writeAll(b"}")
+  }
+}

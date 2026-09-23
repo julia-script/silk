@@ -37,6 +37,13 @@
 //! }
 //! ```
 
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.json_output { JsonOptions }
+import silk.json_scanner { JsonError, JsonScanner, JsonToken }
+import silk.json_serde { Decode, Deserialize, JsonSerde, Serialize }
+import silk.result { Result }
+import silk.writer { Writer, WriterError }
+
 /// An owned value that is either [`Some`] or [`None`].
 ///
 /// # Details
@@ -132,4 +139,68 @@ impl<T> Option<T> {
 fn keepPresent<T>(present: T, unused: T) -> T {
   drop unused
   return move present
+}
+
+effect fn jsonToken(scanner: &mut JsonScanner, lookAhead: bool) -> JsonToken ! JsonError {
+  if lookAhead {
+    return match move JsonScanner.peek(&mut scanner.*) {
+      Result<JsonToken, JsonError>.Success { value } => move value
+      Result<JsonToken, JsonError>.Failure { error } => { fail move error }
+    }
+  }
+  return match move JsonScanner.next(&mut scanner.*) {
+    Result<JsonToken, JsonError>.Success { value } => move value
+    Result<JsonToken, JsonError>.Failure { error } => { fail move error }
+  }
+}
+
+impl<T: Serialize> Serialize for Option<T> {
+  effect fn serialize(self: &Self, options: &JsonOptions)
+    -> () ! JsonError | WriterError ? &mut Writer {
+    return match &self.* {
+      Option<T>.None => run Writer.writeAll(b"null")
+      Option<T>.Some { value } => run Serialize.serialize(&value, options)
+    }
+  }
+}
+
+impl<T: Decode> Decode for Option<T> {
+  fn decode(scanner: &mut JsonScanner) -> Result<Self, JsonError> {
+    let peeked = JsonScanner.peek(&mut scanner.*)
+    return match move peeked {
+      Result<JsonToken, JsonError>.Failure { error } =>
+        Result.failResult<Option<T>, JsonError>(move error)
+      Result<JsonToken, JsonError>.Success { value } => match move value {
+        JsonToken.Null => {
+          let consumed = JsonScanner.next(&mut scanner.*)
+          return match move consumed {
+            Result<JsonToken, JsonError>.Failure { error } =>
+              Result.failResult<Option<T>, JsonError>(move error)
+            Result<JsonToken, JsonError>.Success { value: _ } =>
+              Result.succeed<Option<T>, JsonError>(Option.none<T>())
+          }
+        }
+        _ => match move JsonSerde.decodeOne<T>(&mut scanner.*) {
+          Result<T, JsonError>.Success { value: decoded } =>
+            Result.succeed<Option<T>, JsonError>(Option.some<T>(move decoded))
+          Result<T, JsonError>.Failure { error } =>
+            Result.failResult<Option<T>, JsonError>(move error)
+        }
+      }
+    }
+  }
+}
+
+impl<T: Deserialize> Deserialize for Option<T> {
+  effect fn deserialize(scanner: &mut JsonScanner)
+    -> Self ! JsonError | OutOfMemoryError ? &mut Allocator {
+    let token = run jsonToken(&mut scanner.*, true)
+    return match move token {
+      JsonToken.Null => {
+        let consumed = run jsonToken(&mut scanner.*, false)
+        return Option.none<T>()
+      }
+      _ => Option.some<T>(run JsonSerde.deserializeOne<T>(&mut scanner.*))
+    }
+  }
 }

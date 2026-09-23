@@ -39,6 +39,70 @@ effect fn next<'scratch>(
 }
 pub fn main() -> i32 { return 0 }`
 
+const jsonSerdeProgram = `import silk.json_serde { Decode, Deserialize, Serialize }
+import silk.json_array { JsonArray }
+import silk.json_object { JsonObject }
+import silk.effect { Effect }
+import silk.json_output { JsonOptions }
+import silk.json_scanner { JsonError, JsonScanner }
+import silk.result { Result }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.writer { Writer, WriterError }
+fn read<T: Decode>(scanner: &mut JsonScanner) -> Result<T, JsonError> {
+  return Decode.decode(&mut scanner.*)
+}
+effect fn readOwned<T: Deserialize>(scanner: &mut JsonScanner)
+  -> T ! JsonError | OutOfMemoryError ? &mut Allocator {
+  return run Deserialize.deserialize(&mut scanner.*)
+}
+effect fn write<T: Serialize>(value: &T, options: &JsonOptions)
+  -> () ! JsonError | WriterError ? &mut Writer {
+  return run Serialize.serialize(value, options)
+}
+effect fn writeObject(value: &i32, options: &JsonOptions)
+  -> () ! JsonError | WriterError ? &mut Writer {
+  return run JsonObject.begin(options)
+    |> JsonObject.field("x", value)
+    |> JsonObject.end
+}
+effect fn writeArray(values: &[i32], options: &JsonOptions)
+  -> () ! JsonError | WriterError ? &mut Writer {
+  return run JsonArray.begin(options)
+    |> JsonArray.items(values)
+    |> JsonArray.end
+}
+struct Sink {}
+effect fn writeAll(self: &mut Sink, values: &[u8]) -> () ! WriterError { return () }
+effect fn flush(self: &mut Sink) -> () ! WriterError { return () }
+impl Writer for Sink { writeAll: Sink.writeAll flush: Sink.flush }
+pub effect fn main() -> i32 ! JsonError | WriterError {
+  let options = JsonOptions.compact()
+  let value: i32 = 1
+  let values = [value]
+  let mut sink = Sink {}
+  run writeObject(&value, &options) |> Effect.provideMut<Writer>(&mut sink)
+  run writeArray(&values, &options) |> Effect.provideMut<Writer>(&mut sink)
+  return 0
+}`
+
+it.effect('resolves JSON conversion contracts with exact allocation boundaries', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/json-serde',
+      ascii(jsonSerdeProgram),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        message: diagnostic.message,
+        source: diagnostic.span.sourceId,
+        start: diagnostic.span.start,
+      })),
+      [],
+    )
+  }),
+)
+
 it.effect('keeps the JSON reader result tied to scratch with exact effect rows', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(

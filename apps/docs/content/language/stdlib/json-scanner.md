@@ -88,6 +88,14 @@ pub length: usize
 
 The number of bytes in the range.
 
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Copy for JsonSpan`
+
+```silk
+impl Copy for JsonSpan
+```
+
 <a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e"></a>
 
 ## `JsonReason`
@@ -170,50 +178,90 @@ A constructed value contains a child of the wrong container kind.
 
 <a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a37"></a>
 
+### `TypeMismatch`
+
+```silk
+TypeMismatch = 7
+```
+
+A valid JSON value does not have the requested type.
+
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a38"></a>
+
+### `NumberOutOfRange`
+
+```silk
+NumberOutOfRange = 8
+```
+
+A JSON number cannot fit the requested numeric type.
+
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a39"></a>
+
+### `MissingField`
+
+```silk
+MissingField = 9
+```
+
+A required object member is absent.
+
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a3130"></a>
+
+### `UnknownField`
+
+```silk
+UnknownField = 10
+```
+
+An object member is not part of the requested type.
+
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a3131"></a>
+
 ### `UnexpectedEnd`
 
 ```silk
-UnexpectedEnd = 7
+UnexpectedEnd = 11
 ```
 
 The final input ended before the single root value was complete.
 
-<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a38"></a>
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a3132"></a>
 
 ### `DepthExceeded`
 
 ```silk
-DepthExceeded = 8
+DepthExceeded = 12
 ```
 
 The fixed nesting stack is full.
 
-<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a39"></a>
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a3133"></a>
 
 ### `TrailingContent`
 
 ```silk
-TrailingContent = 9
+TrailingContent = 13
 ```
 
 A second root value follows the first.
 
-<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a3130"></a>
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a3134"></a>
 
 ### `OffsetOverflow`
 
 ```silk
-OffsetOverflow = 10
+OffsetOverflow = 14
 ```
 
 An absolute byte offset cannot be represented as `usize`.
 
-<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a3131"></a>
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e526561736f6e3a3a6d656d6265723a3135"></a>
 
 ### `TokenTooLarge`
 
 ```silk
-TokenTooLarge = 11
+TokenTooLarge = 15
 ```
 
 A streaming consumer's caller-owned token buffer is too small.
@@ -267,6 +315,16 @@ pub available: silk/option.Option<usize>
 ```
 
 Capacity available to a future consumer, if applicable.
+
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e4572726f722e6174"></a>
+
+### Associated function `JsonError.at`
+
+```silk
+pub fn at(reason: JsonReason, offset: usize) -> JsonError
+```
+
+Creates an input failure at an absolute byte offset.
 
 <a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e546f6b656e"></a>
 
@@ -427,6 +485,14 @@ JsonToken.EndOfInput: JsonToken
 ```
 
 The complete root value and trailing whitespace have ended.
+
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `Copy for JsonToken`
+
+```silk
+impl Copy for JsonToken
+```
 
 <a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e5363616e4576656e74"></a>
 
@@ -592,6 +658,26 @@ pub fn next<'input, 'life1>(self: &'life1 mut silk/json_scanner.JsonScanner<'inp
 ```
 
 Returns the next token or sticky `EndOfInput` after trailing whitespace.
+
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e5363616e6e65722e7065656b"></a>
+
+### Method `JsonScanner.peek`
+
+```silk
+pub fn peek<'input, 'life1>(self: &'life1 mut silk/json_scanner.JsonScanner<'input>) -> silk/result.Result<silk/json_scanner.JsonToken, silk/json_scanner.JsonError>
+```
+
+Returns the next token without consuming it.
+
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e5363616e6e65722e6f6666736574"></a>
+
+### Method `JsonScanner.offset`
+
+```silk
+pub fn offset<'input, 'life1>(self: &'life1 silk/json_scanner.JsonScanner<'input>) -> usize
+```
+
+Returns the absolute byte offset of the last token returned by `next` or `peek`.
 
 <a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e5363616e6e65722e736c696365"></a>
 

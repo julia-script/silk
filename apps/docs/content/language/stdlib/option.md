@@ -189,3 +189,51 @@ fallback: T
 ```
 
 The owned alternative consumed only when `self` is absent.
+
+<a id="declaration-73696c6b2f6f7074696f6e3a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Serialize for silk/option.Option<T>`
+
+```silk
+impl Serialize for silk/option.Option<T>
+```
+
+<a id="declaration-73696c6b2f6f7074696f6e3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+
+### Operation `serialize`
+
+```silk
+serialize = Option.impl@0.serialize
+```
+
+<a id="declaration-73696c6b2f6f7074696f6e3a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `Decode for silk/option.Option<T>`
+
+```silk
+impl Decode for silk/option.Option<T>
+```
+
+<a id="declaration-73696c6b2f6f7074696f6e3a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
+
+### Operation `decode`
+
+```silk
+decode = Option.impl@1.decode
+```
+
+<a id="declaration-73696c6b2f6f7074696f6e3a3a696d706c656d656e746174696f6e3a32"></a>
+
+## Implementation `Deserialize for silk/option.Option<T>`
+
+```silk
+impl Deserialize for silk/option.Option<T>
+```
+
+<a id="declaration-73696c6b2f6f7074696f6e3a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
+
+### Operation `deserialize`
+
+```silk
+deserialize = Option.impl@2.deserialize
+```

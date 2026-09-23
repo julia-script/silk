@@ -429,3 +429,19 @@ pub struct ScalarStep
 ```
 
 One decoded Unicode scalar, its byte offset, and the cursor after it.
+
+<a id="declaration-73696c6b2f737472696e673a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Serialize for String`
+
+```silk
+impl Serialize for String
+```
+
+<a id="declaration-73696c6b2f737472696e673a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+
+### Operation `serialize`
+
+```silk
+serialize = String.impl@0.serialize
+```

@@ -10,12 +10,15 @@ Writer-backed value presentation, statically validated templates, and complete d
 
 Use [`display`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e646973706c6179) for one value. Use [`format`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e666f726d6174) for a static template and a borrowed argument
 pack. Use [`displayWith`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e646973706c617957697468) when presentation needs explicit options. Integer `parse` operations
-are the allocation-free inverse of their default presentation.
+and [`f64Value`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e66363456616c7565)/[`f32Value`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e66333256616c7565) are allocation-free inverses of their default presentation.
 
 ## Details
 
 A [`Formatter`](#declaration-73696c6b2f666f726d61743a3a466f726d6174746572) carries presentation policy while the ambient [`Writer`](./writer.md#declaration-73696c6b2f7772697465723a3a577269746572) owns byte transport.
-Formatter and the shipped integer presentations do not allocate an intermediate `String`.
+Formatter and the shipped numeric presentations do not allocate an intermediate `String`.
+Finite floats use the shortest decimal significand that parses back to identical IEEE bits.
+Nonfinite floats display as `NaN` or `Infinity`; formats requiring finite values must check
+with `f64.isFinite` or `f32.isFinite` before display.
 Width counts Unicode scalars rather than UTF-8 bytes or terminal cells. A Writer failure
 preserves any prefix that the provider accepted. Formatter does not roll output back.
 Template parsing, field selection, and `Display` selection occur during compilation.
@@ -1059,10 +1062,10 @@ display = isize.impl@9.display
 
 <a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a3130"></a>
 
-## Implementation `Display for string<'text>`
+## Implementation `Display for f64`
 
 ```silk
-impl Display for string<'text>
+impl Display for f64
 ```
 
 <a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31303a3a6f7065726174696f6e3a30"></a>
@@ -1070,7 +1073,39 @@ impl Display for string<'text>
 ### Operation `display`
 
 ```silk
-display = string.impl@10.display
+display = f64.impl@10.display
+```
+
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a3131"></a>
+
+## Implementation `Display for f32`
+
+```silk
+impl Display for f32
+```
+
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31313a3a6f7065726174696f6e3a30"></a>
+
+### Operation `display`
+
+```silk
+display = f32.impl@11.display
+```
+
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a3132"></a>
+
+## Implementation `Display for string<'text>`
+
+```silk
+impl Display for string<'text>
+```
+
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31323a3a6f7065726174696f6e3a30"></a>
+
+### Operation `display`
+
+```silk
+display = string.impl@12.display
 ```
 
 Writes the string's UTF-8 bytes through the ambient mutable Writer.

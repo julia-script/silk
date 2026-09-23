@@ -85,11 +85,15 @@ import silk.bytes { Bytes }
 import silk.char
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.allocator { OutOfMemoryError }
+import silk.json_output { JsonOptions, JsonOutput }
+import silk.json_scanner { JsonError }
+import silk.json_serde { Serialize }
 import silk.option { Option }
 import silk.result { Result }
 import silk.u32
 import silk.u8
 import silk.usize
+import silk.writer { Writer, WriterError }
 
 /// An owned sequence of valid UTF-8 bytes that releases its storage on drop.
 pub struct String {
@@ -430,3 +434,9 @@ fn scalar32(value: u8) -> u32 {
   return u8.toU32(value)
 }
 
+impl Serialize for String {
+  effect fn serialize(self: &Self, options: &JsonOptions)
+    -> () ! JsonError | WriterError ? &mut Writer {
+    return run JsonOutput.writeString(String.view(self))
+  }
+}

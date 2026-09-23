@@ -15,7 +15,7 @@ Use [`Json.parse`](#declaration-73696c6b2f6a736f6e5f76616c75653a3a4a736f6e2e7061
 ## Details
 
 Arrays and objects retain source order. Numbers retain valid source spelling and decode into
-integers only when accessed. String escapes are decoded into owned UTF-8 storage. A failed
+integers or floats only when accessed. String escapes are decoded into owned UTF-8 storage. A failed
 parse releases every partially built value.
 
 ## Gotchas
@@ -348,6 +348,26 @@ pub fn asU64<'life0>(self: silk/option.Option<&'life0 silk/json_value.Value>) ->
 ```
 
 Decodes an integer number into `u64`, returning `None` for absence or overflow.
+
+<a id="declaration-73696c6b2f6a736f6e5f76616c75653a3a4a736f6e2e6173463634"></a>
+
+### Associated function `Json.asF64`
+
+```silk
+pub fn asF64<'life0>(self: silk/option.Option<&'life0 silk/json_value.Value>) -> silk/option.Option<f64>
+```
+
+Decodes a finite `f64`, or returns `None` for absence, wrong type, invalid text, or overflow.
+
+<a id="declaration-73696c6b2f6a736f6e5f76616c75653a3a4a736f6e2e6173463332"></a>
+
+### Associated function `Json.asF32`
+
+```silk
+pub fn asF32<'life0>(self: silk/option.Option<&'life0 silk/json_value.Value>) -> silk/option.Option<f32>
+```
+
+Decodes a finite `f32`, or returns `None` for absence, wrong type, invalid text, or overflow.
 
 <a id="declaration-73696c6b2f6a736f6e5f76616c75653a3a4a736f6e2e6173537472696e67"></a>
 

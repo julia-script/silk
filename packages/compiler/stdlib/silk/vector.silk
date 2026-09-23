@@ -106,12 +106,17 @@ import silk.allocator {Allocator, OutOfMemoryError}
 import silk.allocator {OutOfMemoryError}
 import silk.layout {Layout}
 import silk.layout {LayoutOverflow}
+import silk.json_output { JsonOptions, JsonOutput }
+import silk.json_scanner { JsonError, JsonReason, JsonScanner, JsonToken }
+import silk.json_serde { Deserialize, JsonSerde, Serialize }
 import silk.option {Option}
 import silk.order {Order}
 import silk.raw_buffer {RawBuffer}
+import silk.result { Result }
 import silk.slot {Slot}
 import silk.u8
 import silk.usize
+import silk.writer { Writer, WriterError }
 
 /// The allocation-free storage state of an empty [`Vector`].
 pub struct Empty<T> {
@@ -918,4 +923,65 @@ fn releaseScratch<T>(buffer: RawBuffer<T>, leftover: RawBuffer<T>) -> RawBuffer<
     drop spent
   }
   return move buffer
+}
+
+effect fn jsonVectorToken(scanner: &mut JsonScanner, lookAhead: bool) -> JsonToken ! JsonError {
+  if lookAhead {
+    return match move JsonScanner.peek(&mut scanner.*) {
+      Result<JsonToken, JsonError>.Success { value } => move value
+      Result<JsonToken, JsonError>.Failure { error } => { fail move error }
+    }
+  }
+  return match move JsonScanner.next(&mut scanner.*) {
+    Result<JsonToken, JsonError>.Success { value } => move value
+    Result<JsonToken, JsonError>.Failure { error } => { fail move error }
+  }
+}
+
+impl<T: Serialize> Serialize for Vector<T> {
+  effect fn serialize(self: &Self, options: &JsonOptions)
+    -> () ! JsonError | WriterError ? &mut Writer {
+    let child = run JsonOptions.child(options)
+    let values = Vector.asSlice<T>(self)
+    run Writer.writeAll(b"[")
+    let mut index = usize.ZERO
+    while index < values.length {
+      run JsonOutput.separator(&child, index == usize.ZERO)
+      run Serialize.serialize(&values[index], &child)
+      index = index + usize.ONE
+    }
+    if values.length != usize.ZERO { run JsonOutput.line(options) }
+    return run Writer.writeAll(b"]")
+  }
+}
+
+impl<T: Deserialize> Deserialize for Vector<T> {
+  effect fn deserialize(scanner: &mut JsonScanner)
+    -> Self ! JsonError | OutOfMemoryError ? &mut Allocator {
+    let opening = run jsonVectorToken(&mut scanner.*, false)
+    match move opening {
+      JsonToken.ArrayBegin => {}
+      _ => { fail JsonError.at(JsonReason.TypeMismatch, JsonScanner.offset(&scanner.*)) }
+    }
+    let mut values = Vector.make<T>()
+    let first = run jsonVectorToken(&mut scanner.*, true)
+    match move first {
+      JsonToken.ArrayEnd => {
+        let closing = run jsonVectorToken(&mut scanner.*, false)
+        return move values
+      }
+      _ => {}
+    }
+    while true {
+      let value = run JsonSerde.deserializeOne<T>(&mut scanner.*)
+      run Vector.append<T>(&mut values, move value)
+      let separator = run jsonVectorToken(&mut scanner.*, false)
+      match move separator {
+        JsonToken.ArrayEnd => { return move values }
+        JsonToken.ValueSeparator => {}
+        _ => { fail JsonError.at(JsonReason.UnexpectedByte, JsonScanner.offset(&scanner.*)) }
+      }
+    }
+    fail JsonError.at(JsonReason.UnexpectedEnd, JsonScanner.offset(&scanner.*))
+  }
 }
