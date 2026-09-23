@@ -117,3 +117,6 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
 - 2026-09-23 · `pnpm --filter ... exec vitest` tried to reinstall and purge the existing dependency
   tree in a non-TTY session, aborting before a focused test could run · Invoke the already-installed
   `node_modules/.bin/vitest` directly for focused compiler checks · compiler
+- 2026-09-23 · Native acceptance reached `ArtifactCache.set` but failed with `EPERM` because its
+  default cache writes under `~/.cache`, outside this worktree's writable sandbox · Set
+  `SILK_NATIVE_CACHE_DIR` to a dedicated directory under `/private/tmp` for local tests · compiler
