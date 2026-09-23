@@ -214,19 +214,11 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   if signed != 42 { return 16 }
   let unsigned = Json.field(&document, "id") |> Json.asU64 |> Option.unwrapOr<u64>(0)
   if unsigned != 42 { return 17 }
-  let nameText = Json.field(&document, "name") |> Json.asString
-  // JUL-223: direct call; piped section fails MIR InvalidCallableOperation
-  let name = Option.unwrapOr<string>(move nameText, "")
+  let name = Json.field(&document, "name") |> Json.asString |> Option.unwrapOr<string>("")
   if name != "Silk" { return 2 }
-  let musicText = Json.field(&document, "music") |> Json.asString
-  // JUL-223: direct call; piped section fails MIR InvalidCallableOperation
-  let music = Option.unwrapOr<string>(move musicText, "")
+  let music = Json.field(&document, "music") |> Json.asString |> Option.unwrapOr<string>("")
   if music != "𝄞" { return 3 }
-  let missingField = Json.field(&document, "missing")
-  // JUL-223: direct call; piped section fails MIR InvalidCallableOperation
-  let missingChild = Json.fieldAt(move missingField, "child")
-  // JUL-223: direct call; piped section fails MIR InvalidCallableOperation
-  let missing = Json.asI32(move missingChild)
+  let missing = Json.field(&document, "missing") |> Json.fieldAt("child") |> Json.asI32
   if Option.unwrapOr<i32>(move missing, -1) != -1 { return 4 }
   let checked = run roundTrip(source) |> Effect.provideMut<Allocator>(&mut allocator)
   if !checked { return 5 }

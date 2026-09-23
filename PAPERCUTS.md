@@ -139,3 +139,6 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
   operation failed and sends debugging to the wrong code · Read the violation's `detail` string,
   not the `rule`: "callable construction disagrees ..." is `MakeCallable`, "callable application
   disagrees ..." is `ApplyCallable` · compiler
+- 2026-09-23 · Focused Vitest matched an untracked `.pnpm-store/v11/projects` duplicate of the
+  compiler suite and failed after the intended JSON case passed · Exclude `.pnpm-store/**` from
+  focused Vitest runs until the store is outside test discovery · compiler

@@ -20,7 +20,7 @@ floating-point values fail with `JsonError` before any bytes are written.
 ## Gotchas
 
 The current compiler rejects a hand-written witness that specializes another concrete JSON
-witness from its body with `SEM0053`. A nested user-struct witness cannot yet delegate to its
+witness from its body with `SEM0053` (JUL-226). A nested user-struct witness cannot yet delegate to its
 child through `JsonObject.field` or `JsonSerde.deserializeOne`. Keep the contracts unchanged;
 a flat struct can still decode directly from `JsonScanner` and serialize with the builders.
 
