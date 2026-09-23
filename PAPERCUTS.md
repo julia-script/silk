@@ -124,3 +124,12 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
   match the current `format.silk`; the compiler loaded an older embedded copy from
   `Stdlib.generated.ts` · Run `node scripts/generate-stdlib.mjs` in `packages/compiler` after
   editing stdlib Silk before interpreting diagnostic offsets or runtime results · compiler
+- 2026-09-23 · A second agent working the same checkout committed my uncommitted `format.silk`
+  inside its own commit, then a later step reverted the file to base, silently losing ~180 lines
+  of finished work · Keep a copy of your file outside the tree (`cp x /tmp/x.mine`) before running
+  anything that touches shared state, and commit your own scope the moment it passes rather than
+  batching it behind further verification · compiler
+- 2026-09-23 · A fresh `intent` worktree had no `node_modules`, so both the workspace and the
+  primary checkout's `vitest` failed to resolve `effect` · Run `pnpm install --frozen-lockfile` in
+  the worktree once; the symlink trick from the older papercut does not resolve workspace packages
+  · repository
