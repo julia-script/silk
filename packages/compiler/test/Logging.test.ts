@@ -34,11 +34,9 @@ pub effect fn main() -> () ! LogError {
   { timeout: 90_000 },
 )
 
-it.effect(
-  'specializes static logging templates without exposing formatting requirements',
-  () =>
-    Effect.gen(function* () {
-      const frontend = yield* snapshot(`import silk.effect { Effect }
+it.effect('specializes static logging templates without exposing formatting requirements', () =>
+  Effect.gen(function* () {
+    const frontend = yield* snapshot(`import silk.effect { Effect }
 import silk.logger { LogError, LogLevel, Logger }
 
 effect fn exercise(level: LogLevel) -> () ! LogError ? &mut Logger {
@@ -60,10 +58,9 @@ pub fn main() -> i32 {
   run Effect.catchAll(program(), ignore)
   return 42
 }`)
-      assert.deepEqual(Analysis.diagnostics(frontend), [])
-      assert.strictEqual(frontend.mir._tag, 'Available')
-    }),
-  { timeout: 30_000 },
+    assert.deepEqual(Analysis.diagnostics(frontend), [])
+    assert.strictEqual(frontend.mir._tag, 'Available')
+  }),
 )
 
 it.effect('applies Format template and Display diagnostics to logging calls', () =>
@@ -131,11 +128,9 @@ pub fn main() -> i32 {
   { timeout: 60_000 },
 )
 
-it.effect(
-  'forwards provider-selection evidence only from an exact enclosing constraint',
-  () =>
-    Effect.gen(function* () {
-      const wrapper = (constraint: string) => `import silk.os_logger { StdoutLogger }
+it.effect('forwards provider-selection evidence only from an exact enclosing constraint', () =>
+  Effect.gen(function* () {
+    const wrapper = (constraint: string) => `import silk.os_logger { StdoutLogger }
 import silk.effect { Effect }
 import silk.logger { Logger, LogError }
 
@@ -156,32 +151,31 @@ pub effect fn main() -> () ! LogError {
   return run bind(read(), &mut logger)
 }`
 
-      const constrained = yield* snapshot(wrapper('where &mut P provides S from R'))
-      assert.deepEqual(Analysis.diagnostics(constrained), [])
-      const bind = Analysis.instancesOf(constrained).instances.find(
-        (instance) => instance.key.declaration.name === 'bind',
+    const constrained = yield* snapshot(wrapper('where &mut P provides S from R'))
+    assert.deepEqual(Analysis.diagnostics(constrained), [])
+    const bind = Analysis.instancesOf(constrained).instances.find(
+      (instance) => instance.key.declaration.name === 'bind',
+    )
+    assert.isDefined(bind)
+    if (bind !== undefined) {
+      assert.strictEqual(
+        RowAlgebra.concretize(
+          Type.requirementRowPolicy(),
+          bind.specialization.requirementRow ??
+            RowAlgebra.concrete(Type.requirementRowPolicy(), []),
+        )._tag,
+        'Concrete',
       )
-      assert.isDefined(bind)
-      if (bind !== undefined) {
-        assert.strictEqual(
-          RowAlgebra.concretize(
-            Type.requirementRowPolicy(),
-            bind.specialization.requirementRow ??
-              RowAlgebra.concrete(Type.requirementRowPolicy(), []),
-          )._tag,
-          'Concrete',
-        )
-        assert.isTrue(bind.specialization.evidence.length > 0)
-        assert.include(
-          bind.specialization.evidence.map((proof) => proof._tag),
-          'RequirementSelection',
-        )
-      }
+      assert.isTrue(bind.specialization.evidence.length > 0)
+      assert.include(
+        bind.specialization.evidence.map((proof) => proof._tag),
+        'RequirementSelection',
+      )
+    }
 
-      const unconstrained = yield* snapshot(wrapper(''))
-      assert.isAbove(Analysis.diagnostics(unconstrained).length, 0)
-    }),
-  { timeout: 30_000 },
+    const unconstrained = yield* snapshot(wrapper(''))
+    assert.isAbove(Analysis.diagnostics(unconstrained).length, 0)
+  }),
 )
 
 it.effect('rejects a callable relay whose leading binding has observable work', () =>

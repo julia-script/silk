@@ -2,6 +2,11 @@
 
 Format: date · symptom · fix · project. Check here first when tooling is slow or fails mysteriously.
 
+- 2026-09-23 · A fresh task checkout had no `node_modules`; offline pnpm install missed cached
+  tarballs and sandboxed registry requests failed DNS resolution, then focused Vitest could not
+  import `ToolchainIntegrity.generated.js` · Run the lockfile install with approved network access
+  and `pnpm --filter @silklang/compiler toolchain:generate` before focused checks · compiler
+
 - 2026-09-19 · Ran the whole `packages/compiler` vitest suite (about 230 files, 25–40 min locally;
   each `ModuleVerification` shard alone is about 10 min) after every change and as the harness for
   a temporary probe, which cost hours · Typecheck, then run only the test files that exercise the

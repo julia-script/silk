@@ -2295,25 +2295,22 @@ fn allocateOnly() -> () {
   return { analyze, provider, observedProvider, rejections }
 })
 
-it.effect(
-  'binds arbitrary storage exports and keys their source content',
-  () =>
-    Effect.gen(function* () {
-      const { analyze, provider } = yield* storageFixture
-      const valid = yield* analyze(provider, true)
-      const changed = yield* analyze(
-        provider.replace(
-          'fn finish(state: ?*mut u8) -> () {}',
-          'fn finish(state: ?*mut u8) -> () { let changed = 1 }',
-        ),
-        true,
-      )
-      assert.deepEqual(Analysis.diagnostics(valid), [])
-      assert.deepEqual(Analysis.diagnostics(changed), [])
-      assert.strictEqual(Analysis.loweredMir(valid).executionStorage?.acquire.symbol, 'reserve')
-      assert.notStrictEqual(valid.artifactPlan?.identity, changed.artifactPlan?.identity)
-    }),
-  { timeout: 30_000 },
+it.effect('binds arbitrary storage exports and keys their source content', () =>
+  Effect.gen(function* () {
+    const { analyze, provider } = yield* storageFixture
+    const valid = yield* analyze(provider, true)
+    const changed = yield* analyze(
+      provider.replace(
+        'fn finish(state: ?*mut u8) -> () {}',
+        'fn finish(state: ?*mut u8) -> () { let changed = 1 }',
+      ),
+      true,
+    )
+    assert.deepEqual(Analysis.diagnostics(valid), [])
+    assert.deepEqual(Analysis.diagnostics(changed), [])
+    assert.strictEqual(Analysis.loweredMir(valid).executionStorage?.acquire.symbol, 'reserve')
+    assert.notStrictEqual(valid.artifactPlan?.identity, changed.artifactPlan?.identity)
+  }),
 )
 
 it.effect('admits storage bootstrap observation whose cleanup needs no storage', () =>
