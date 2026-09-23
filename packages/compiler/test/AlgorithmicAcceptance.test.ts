@@ -12,6 +12,7 @@ import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Projections from './support/projections.js'
+import * as MirGolden from './support/MirGolden.js'
 
 const fixtureRoot = fileURLToPath(new URL('./fixtures/algorithmic-acceptance', import.meta.url))
 const rootModule = 'app/Main'
@@ -61,10 +62,9 @@ it.effect('accepts the compiler-shaped fold through every static compiler phase'
       new URL('./goldens/algorithmic.mir.sha256', import.meta.url),
       'utf8',
     )
-    assert.strictEqual(
-      `${createHash('sha256').update(MirEncoding.encode(lowered)).digest('hex')}\n`,
-      expected,
-    )
+    const normalizedMir = MirGolden.normalizeSourceSpans(MirEncoding.encode(lowered))
+    assert.notMatch(normalizedMir, /\[\d+, \d+\)/)
+    assert.strictEqual(`${createHash('sha256').update(normalizedMir).digest('hex')}\n`, expected)
     const llvm = yield* Analysis.codegen(self, { mode: 'release' })
     assert.strictEqual(llvm.symbols.filter((entry) => entry.declaration.name === 'fold').length, 1)
   }),

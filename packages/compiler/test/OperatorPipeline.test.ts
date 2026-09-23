@@ -7,17 +7,13 @@ import * as Analysis from '../src/Analysis.js'
 import * as Tir from '../src/Tir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as MirGolden from './support/MirGolden.js'
 const encoder = new TextEncoder()
 
 const pipelineSource = 'import silk.i32\npub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }'
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/operator.${name}`, import.meta.url), 'utf8')
-
-const normalizeMirSourceSpans = (mir: string): string =>
-  mir
-    .replace(/(?<=\bavailable )\[\d+, \d+\)/g, '[source span]')
-    .replace(/ \[\d+, \d+\)(?=(?: generated)?$)/gm, ' [source span]')
 
 it('normalizes MIR source spans while retaining operations and provenance', () => {
   const mir =
@@ -26,20 +22,26 @@ it('normalizes MIR source spans while retaining operations and provenance', () =
     '  r0 operation:\n' +
     '    %3 = multiply %1, %2 : i32 [50, 55) generated\n' +
     '    return %3 [50, 55)\n'
-  const expected = normalizeMirSourceSpans(mir)
+  const expected = MirGolden.normalizeSourceSpans(mir)
 
   assert.strictEqual(
-    normalizeMirSourceSpans(
+    MirGolden.normalizeSourceSpans(
       mir.replace('[35266, 35268)', '[37266, 37268)').replaceAll('[50, 55)', '[70, 75)'),
     ),
     expected,
   )
-  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace('multiply', 'add')), expected)
-  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace('%1, %2', '%1, %0')), expected)
-  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace('entry=r0', 'entry=r1')), expected)
-  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace('return %3', 'return %2')), expected)
-  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace(' generated', '')), expected)
-  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace('bits=64', 'bits=32')), expected)
+  assert.notStrictEqual(MirGolden.normalizeSourceSpans(mir.replace('multiply', 'add')), expected)
+  assert.notStrictEqual(MirGolden.normalizeSourceSpans(mir.replace('%1, %2', '%1, %0')), expected)
+  assert.notStrictEqual(
+    MirGolden.normalizeSourceSpans(mir.replace('entry=r0', 'entry=r1')),
+    expected,
+  )
+  assert.notStrictEqual(
+    MirGolden.normalizeSourceSpans(mir.replace('return %3', 'return %2')),
+    expected,
+  )
+  assert.notStrictEqual(MirGolden.normalizeSourceSpans(mir.replace(' generated', '')), expected)
+  assert.notStrictEqual(MirGolden.normalizeSourceSpans(mir.replace('bits=64', 'bits=32')), expected)
 })
 
 it.effect('lowers negation to generated zero plus source-authored trapping subtraction', () =>
@@ -76,7 +78,7 @@ it.effect('pins one operator pipeline through canonical TIR, MIR, and LLVM', () 
 
     assert.strictEqual(Tir.encode(Analysis.rootAnalysis(snapshot).tir), golden('tir.txt'))
     assert.strictEqual(
-      normalizeMirSourceSpans(MirEncoding.encode(Analysis.loweredMir(snapshot))),
+      MirGolden.normalizeSourceSpans(MirEncoding.encode(Analysis.loweredMir(snapshot))),
       golden('mir.txt'),
     )
     assert.strictEqual(artifact.ir, golden('ll.txt'))
