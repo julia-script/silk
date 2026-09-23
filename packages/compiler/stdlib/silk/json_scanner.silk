@@ -18,16 +18,16 @@
 //! ## Scan a complete number
 //!
 //! ```silk
-//! import silk.json_scanner { JsonScanner, JsonToken, JsonError }
-//! import silk.result { Result }
+//! import silk.json_scanner {JsonScanner, JsonToken, JsonError}
+//! import silk.result {Result}
 //!
 //! pub fn main() -> i32 {
 //!   let mut scanner = JsonScanner.make(b"42")
 //!   let token = JsonScanner.next(&mut scanner)
 //!   return match move token {
-//!     Result<JsonToken, JsonError>.Failure { error } => 1
-//!     Result<JsonToken, JsonError>.Success { value } => match move value {
-//!       JsonToken.Number { span: _ } => 0
+//!     Result<JsonToken, JsonError>.Failure {error} => 1
+//!     Result<JsonToken, JsonError>.Success {value} => match move value {
+//!       JsonToken.Number {span: _} => 0
 //!       _ => 1
 //!     }
 //!   }
