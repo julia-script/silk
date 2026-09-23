@@ -1,7 +1,5 @@
-//! Strict binary plans and receipts for the ordinary Silk test runner.
-//!
-//! The exchange is private process control. Test output remains ordinary inherited stdout and
-//! stderr and never carries result authority.
+//! Strict binary plans and receipts for private control of the ordinary Silk test runner.
+//! Test output uses inherited stdout and stderr and has no result authority.
 
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.bytes { Bytes }
