@@ -1658,6 +1658,31 @@ export const discover = (
     })
     return found
   }
+  /** A witness may delegate to a field's concrete type even when nominal types have no arguments. */
+  const isDirectWitnessFieldSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
+    if (!Type.isNominal(whole) || sameRuntimeType(candidate, whole)) return false
+    const declaration = DeclarationFacts.byCanonical(index, {
+      _tag: 'CanonicalDeclarationId',
+      module: whole.module,
+      name: whole.name,
+    })
+    if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
+      return false
+    const substitution =
+      TypeInference.substitution(
+        declaration.typeParameters.map((parameter) => parameter.type),
+        whole.arguments,
+      ) ?? new Map()
+    const fields =
+      declaration._tag === 'StructDeclaration'
+        ? declaration.fields
+        : declaration.variants.flatMap((variant) => variant.fields)
+    return fields.some((field) => {
+      if (field.declaredType._tag !== 'Resolved') return false
+      const type = Type.substitute(field.declaredType.type, substitution)
+      return sameRuntimeType(candidate, type) || isStrictRuntimeStructuralSubterm(candidate, type)
+    })
+  }
   const strictlyDescendsSameNominal = (candidate: Type.Nominal, whole: Type.Nominal): boolean => {
     if (candidate.module !== whole.module || candidate.name !== whole.name) return false
     return (
@@ -1681,6 +1706,37 @@ export const discover = (
         )
       })
     )
+  }
+  const concreteWitnessFieldDescent = (ancestor: InstanceKey, target: InstanceKey): boolean => {
+    if (ancestor.typeArguments.length !== target.typeArguments.length) return false
+    let descended = false
+    for (const [ordinal, argument] of ancestor.typeArguments.entries()) {
+      const next = target.typeArguments.at(ordinal)
+      if (next === undefined) return false
+      if (Type.isTypeArgument(argument) && Type.isTypeArgument(next)) {
+        if (Type.parameters(argument).length > 0 || Type.parameters(next).length > 0) return false
+        if (sameRuntimeType(argument, next)) continue
+        const sameNominal =
+          Type.isNominal(argument) &&
+          Type.isNominal(next) &&
+          nominalTypeText(argument) === nominalTypeText(next)
+        if (
+          !(sameNominal && strictlyDescendsSameNominal(next, argument)) &&
+          !(
+            !sameNominal &&
+            (isStrictRuntimeStructuralSubterm(next, argument) ||
+              isDirectWitnessFieldSubterm(next, argument))
+          )
+        )
+          return false
+        descended = true
+      } else if (
+        !(Type.isEffectIdentityArgument(argument) && Type.isEffectIdentityArgument(next)) &&
+        Type.runtimeGenericArgumentKey(argument) !== Type.runtimeGenericArgumentKey(next)
+      )
+        return false
+    }
+    return descended
   }
   const isStrictCleanupSubterm = (
     candidate: Type.Type,
@@ -2300,7 +2356,8 @@ export const discover = (
               !structurallyDescending &&
               !(
                 selectedWitnessOf(ancestor.key, key, fn) &&
-                nonGrowingTypeArguments(ancestor.key, targetKey)
+                (nonGrowingTypeArguments(ancestor.key, targetKey) ||
+                  concreteWitnessFieldDescent(ancestor.key, targetKey))
               ) &&
               !cleanupSpecialization &&
               !terminalCallableSpecialization

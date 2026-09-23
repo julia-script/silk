@@ -322,7 +322,9 @@ semantic analysis could not close.
 
 A recursively reachable call normally reuses its current concrete generic arguments. A concrete
 interface witness may delegate through a bounded helper to another concrete specialization when
-each argument's structural shape does not grow. Both routes keep specialization finite.
+its type arguments do not grow, or when a concrete field or type argument strictly descends while
+other type arguments remain fixed or descend. Hidden Effect identities may differ on a strict
+descent. These routes keep specialization finite.
 
 ```silk,ignore
 fn walk<T>(value: T, remaining: i32) -> T {
@@ -335,7 +337,8 @@ fn walk<T>(value: T, remaining: i32) -> T {
 
 The recursive call reuses the same `walk<T>` specialization. A concrete witness can also call a
 bounded helper at a smaller or equally sized concrete type, such as `decodeOne<Outer>()` delegating
-to `decodeOne<i32>()`; the reachable type shapes remain finite.
+to `decodeOne<i32>()`. An Effect witness can delegate from a concrete aggregate to its field type
+even when its hidden Effect identity changes. The reachable type shapes remain finite.
 
 **Boundary:** Ordinary polymorphic recursion that changes a type argument is outside the stable
 model. Witness delegation that grows a type argument along a recursive call cycle is also invalid:

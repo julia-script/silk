@@ -257,6 +257,66 @@ pub fn main() -> i32 { return decodeOne<Outer>().child.value }`)
   }),
 )
 
+it.effect('allows effect witnesses to delegate from concrete aggregates to field types', () =>
+  Effect.gen(function* () {
+    const analyzed = yield* snapshot(`interface Write { effect fn write(self: &Self) -> i32 }
+impl Write for i32 { effect fn write(self: &Self) -> i32 { return self.* } }
+struct Point { x: i32 }
+struct Segment { start: Point }
+effect fn writeOne<T: Write>(value: &T) -> i32 { return run Write.write(value) }
+impl Write for Point {
+  effect fn write(self: &Self) -> i32 { return run writeOne<i32>(&self.x) }
+}
+impl Write for Segment {
+  effect fn write(self: &Self) -> i32 { return run writeOne<Point>(&self.start) }
+}
+pub fn main() -> i32 {
+  let segment = Segment { start: Point { x: 42 } }
+  return run writeOne<Segment>(&segment)
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(analyzed).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    assert.deepEqual(analyzed.instances.violations, [])
+    assert.deepEqual(
+      analyzed.instances.instances
+        .filter((instance) => instance.key.declaration.name === 'writeOne')
+        .map((instance) => instance.key.typeArguments.at(0))
+        .map((argument) =>
+          argument === undefined ? undefined : Type.encodeGenericArgument(argument),
+        ),
+      ['golden/program.Segment', 'golden/program.Point', 'i32'],
+    )
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(analyzed)), [])
+  }),
+)
+
+it.effect('rejects growth through a concrete witness cycle', () =>
+  Effect.gen(function* () {
+    const analyzed = yield* snapshot(`interface Consume { fn consume(self: Self) -> i32 }
+struct Wrap<T> { value: T }
+fn consumeOne<T: Consume>(value: T) -> i32 { return Consume.consume(move value) }
+impl<T> Consume for Wrap<T> {
+  fn consume(self: Self) -> i32 {
+    return consumeOne<Wrap<Wrap<T>>>(Wrap { value: move self })
+  }
+}
+pub fn main() -> i32 { return consumeOne<Wrap<i32>>(Wrap { value: 42 }) }`)
+    assert.deepEqual(
+      Analysis.diagnostics(analyzed).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    assert.deepEqual(
+      analyzed.instances.violations.map((violation) => ({
+        caller: violation.caller.declaration.name,
+        target: violation.target.typeArguments.map(Type.encodeGenericArgument),
+      })),
+      [{ caller: 'impl@0.consume', target: ['golden/program.Wrap<golden/program.Wrap<i32>>'] }],
+    )
+  }),
+)
+
 it.effect('requires provider evidence for a direct zero-operand witness call', () =>
   Effect.gen(function* () {
     const source = `interface Decode { fn decode() -> Self }
