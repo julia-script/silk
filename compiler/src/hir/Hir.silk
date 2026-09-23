@@ -65,6 +65,8 @@ import silk.allocator {Allocator, OutOfMemoryError, SystemAllocator}
 import silk.effect {Effect}
 import silk.format {Format}
 import silk.result {Result}
+import silk.slice {Slice}
+import silk.string {String}
 import silk.u32
 import silk.u64
 import silk.usize
@@ -1756,10 +1758,46 @@ effect fn writeFieldName(name: string<'static>) -> () ! WriterError ? &mut Write
   return run Writer.writeString(": ")
 }
 
-effect fn writeQuotedSymbol(module: &Module, symbol: Symbol) -> () ! WriterError ? &mut Writer {
+/// Writes `text` between double quotes with `"`, `\`, and the line breaks escaped.
+///
+/// # Details
+///
+/// The dump is read back by `compiler/scripts/lower-corpus.mjs`, which is line oriented: a field
+/// occupies exactly one line and a quoted value ends at the first unescaped `"`. Interned text is
+/// arbitrary source bytes — a module documentation block spans many lines and a text literal may
+/// contain a quote — so writing it raw would let a symbol close a field early or open a line the
+/// reader cannot classify. Every other byte, including non-ASCII UTF-8, passes through unchanged.
+pub effect fn writeQuotedText(text: &[u8]) -> () ! WriterError ? &mut Writer {
   run Writer.writeString("\"")
-  run Writer.writeAll(StringTable.get(&module.strings, symbol))
+  let mut plain = usize.ZERO
+  let mut index = usize.ZERO
+  while index < text.length {
+    let byte = text[index]
+    let mut escape = ""
+    if byte == 34 {
+      escape = "\\\""
+    } else if byte == 92 {
+      escape = "\\\\"
+    } else if byte == 10 {
+      escape = "\\n"
+    } else if byte == 13 {
+      escape = "\\r"
+    } else if byte == 9 {
+      escape = "\\t"
+    }
+    if String.utf8Bytes(escape).length > usize.ZERO {
+      run Writer.writeAll(Slice.view<u8>(text, plain, index - plain))
+      run Writer.writeString(escape)
+      plain = index + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  run Writer.writeAll(Slice.view<u8>(text, plain, text.length - plain))
   return run Writer.writeString("\"")
+}
+
+effect fn writeQuotedSymbol(module: &Module, symbol: Symbol) -> () ! WriterError ? &mut Writer {
+  return run writeQuotedText(StringTable.get(&module.strings, symbol))
 }
 
 effect fn writeIdField(name: string<'static>, id: HirId) -> () ! WriterError ? &mut Writer {
@@ -2723,8 +2761,9 @@ effect fn writeDiagnostic(module: &Module, index: usize) -> () ! WriterError ? &
 /// The header names the module documentation and the top-level declaration range. Each node writes
 /// `#<id> <Kind> <start>..<end>` followed by one indented `  field: value` line per field. A child
 /// identity prints as `#id`, an absent child as `none`, a child range as `[#a #b]`, an interned
-/// symbol as its quoted text, and a span as `start..end`. The cause and diagnostic sections follow
-/// in storage order.
+/// symbol as quoted text escaped by [`writeQuotedText`], and a span as `start..end`. The cause and
+/// diagnostic sections follow in storage order. Every field occupies exactly one line, so a reader
+/// that walks lines never has to guess where a value ends.
 ///
 /// Output depends only on module content, never on interning order or arena capacity, so two
 /// modules with the same content render identically.
@@ -3487,6 +3526,13 @@ effect fn verifyNode(module: &Module, parent: usize, found: &mut Vector<Defect>)
 ///
 /// This verifies arena consistency, not lowering fidelity. A module that lowers the wrong syntax
 /// faithfully into a consistent arena passes.
+///
+/// It also does not prove that the arena is a forest — that one traversal from `declarations`
+/// reaches every node exactly once and that a child's span lies inside its parent's. That needs a
+/// per-node owner count threaded through all 132 arms of the field walk, only to exempt
+/// [`Node.IdentifierExpression`]'s `binding`, which points at a binder some other node owns.
+/// `compiler/scripts/lower-corpus.mjs` proves it from the dump instead, over every fixture,
+/// self-hosted source, and standard-library module.
 pub effect fn verify(module: &Module) -> Vector<Defect> ! OutOfMemoryError ? &mut Allocator {
   let mut found = Vector.make<Defect>()
   if Vector.length<Span>(&module.spans) != Vector.length<Node>(&module.nodes) {
@@ -3537,4 +3583,50 @@ pub effect fn verify(module: &Module) -> Vector<Defect> ! OutOfMemoryError ? &mu
     index = index + usize.ONE
   }
   return move found
+}
+
+/// Returns the stable debug spelling of one violated arena invariant.
+pub fn violationName(violation: Violation) -> string<'static> {
+  return match violation {
+    Violation.SpanCountMismatch => "SpanCountMismatch"
+    Violation.CauseCountMismatch => "CauseCountMismatch"
+    Violation.ChildNotBeforeParent => "ChildNotBeforeParent"
+    Violation.ReferenceOutOfBounds => "ReferenceOutOfBounds"
+    Violation.EmptyRecoveryCauses => "EmptyRecoveryCauses"
+  }
+}
+
+/// Verifies `module` and writes a `violations <count>` section naming every defect it found.
+///
+/// # When to use
+///
+/// Call after [`write`] in a dump. A reader that sees `violations 0` knows the arena the dump
+/// describes is self-consistent, so any disagreement it finds is its own decoding error.
+///
+/// # Details
+///
+/// The section repeats the shape of the `causes` and `diagnostics` sections: a count line, then
+/// one `#<id> <Violation>` line per defect in the order [`verify`] reports them. A defect whose
+/// violation concerns the arena as a whole rather than one node — [`SpanCountMismatch`] and
+/// [`CauseCountMismatch`] — records `#0`, as [`Defect`] documents.
+pub effect fn writeViolations(module: &Module) -> ()
+! WriterError | OutOfMemoryError
+? &mut Writer | &mut Allocator {
+  let defects = run verify(module)
+  run Writer.writeString("\nviolations ")
+  run Format.display(&Vector.length<Defect>(&defects))
+  run Writer.writeString("\n")
+  let found = Vector.asSlice<Defect>(&defects)
+  let mut index = usize.ZERO
+  while index < found.length {
+    let defect = found[index]
+    run Writer.writeString("#")
+    run Format.display(&defect.id.index)
+    run Writer.writeString(" ")
+    run Writer.writeString(violationName(defect.violation))
+    run Writer.writeString("\n")
+    index = index + usize.ONE
+  }
+  drop defects
+  return ()
 }

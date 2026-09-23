@@ -594,30 +594,24 @@ export const parseUnionVariant = (initial: State): NodeResult => {
   let state = left.state
   let children: ReadonlyArray<SyntaxTree.Element> = [...name.elements, ...left.elements]
 
-  if (nextSignificantKind(state) === 'RightBrace') {
+  while (
+    !beginsTopLevelDeclaration(state) &&
+    nextSignificantKind(state) !== 'RightBrace' &&
+    nextSignificantKind(state) !== 'EndOfFile'
+  ) {
     const field = parseUnionVariantField(state)
     children = [...children, field.node]
     state = field.state
-  } else {
-    while (
-      !beginsTopLevelDeclaration(state) &&
-      nextSignificantKind(state) !== 'RightBrace' &&
-      nextSignificantKind(state) !== 'EndOfFile'
-    ) {
-      const field = parseUnionVariantField(state)
-      children = [...children, field.node]
-      state = field.state
-      if (nextSignificantKind(state) === 'RightBrace') break
-      const comma = expect(state, 'Comma', [
-        'PubKeyword',
-        'Identifier',
-        'RightBrace',
-        ...topLevelFollowing,
-      ])
-      children = [...children, ...comma.elements]
-      state = comma.state
-      if (nextSignificantKind(state) === 'RightBrace') break
-    }
+    if (nextSignificantKind(state) === 'RightBrace') break
+    const comma = expect(state, 'Comma', [
+      'PubKeyword',
+      'Identifier',
+      'RightBrace',
+      ...topLevelFollowing,
+    ])
+    children = [...children, ...comma.elements]
+    state = comma.state
+    if (nextSignificantKind(state) === 'RightBrace') break
   }
 
   const right = expect(state, 'RightBrace', ['Comma', 'Identifier', ...topLevelFollowing])

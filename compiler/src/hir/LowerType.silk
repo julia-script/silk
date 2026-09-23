@@ -595,8 +595,7 @@ pub effect fn bindersIn(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeI
 ///
 /// This is the bootstrap `constraints`. A membership constraint's two operands are row positions,
 /// so a written requirement is admitted there; a provider's first operand is an ordinary type.
-/// Each form has its own helper: wave 3 inlined both into this loop to stay under a bootstrap
-/// discovery limit, which the fix at `2d4e1c6d` removed.
+/// Each form has its own helper, and both are dispatched from this loop.
 pub effect fn constraints(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Range
 ! OutOfMemoryError
 ? &mut Allocator {

@@ -284,3 +284,27 @@ Four `hir/LoweringCases` cases fail on the repaired compiler — `aBroadModuleSa
 Invariant`, `builtModuleRenders`, `moduleDocumentationIsInterned`, and
 `unionVariantsRecordTheirFieldBlock`. They are self-hosted golden mismatches in the lowering port,
 not discovery defects; they are simply the first cases that were ever able to run.
+
+## Empty union variant field block rejected by the bootstrap parser
+
+**Status:** repaired in the bootstrap parser; the self-hosted parser diverged first and the two are
+aligned again as of this commit.
+
+`pub union U { Empty {} }` emitted `PAR0001` and produced a `UnionVariant` carrying a synthesized
+`UnionVariantField` over a `TypePath` that was never written. `Parser/Declaration.ts` inverted the
+field-block branch: on seeing `RightBrace` immediately after the variant's `LeftBrace` it parsed a
+field anyway, instead of closing the block with no fields. Only the empty-brace case differed;
+every other variant shape parsed identically.
+
+A variant that writes braces and declares nothing is well-formed and distinct from a unit variant.
+`AuthoredHir.Variant.braces` already records that the braces were written, so an empty block lowers
+as `braces: true` with zero fields and needs no diagnostic to stay distinguishable.
+
+The self-hosted parser deleted the equivalent arm first, in `compiler/src/parser/Declaration.silk`
+(`cb445b9f`), which left the bootstrap as the only parser still carrying the defect. This commit
+deletes the branch in `Parser/Declaration.ts`; the surrounding field loop already terminates on
+`RightBrace`, so the whole arm was redundant as well as wrong.
+
+The regression lives in `packages/compiler/test/Parser.test.ts`, "parses an empty union variant
+field block as a braced variant with no fields". The neighbouring damaged-union case previously
+asserted the synthesized field as intended recovery and now asserts `Empty {}` parses clean.

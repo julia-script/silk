@@ -56,6 +56,9 @@ effect fn copyDiagnostics(draft: &mut DraftState, tree: &SyntaxTree) -> ()
 ///
 /// # Details
 ///
+/// `SourceFile` is a transparent container: its children become the module's declarations and the
+/// root itself yields no HIR node, which is why no lowering function dispatches on that kind.
+///
 /// Every top-level declaration shares one key scope, so two same-named functions in one file take
 /// occurrences zero and one. Members nested inside a declaration get their own scope, which is
 /// what makes an owner key depend on the declaration's parent rather than on the whole file.
