@@ -85,3 +85,7 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
   HIR churn; reverting it with `git checkout --` then also discarded the task's own edits to the
   same files · Do not run the project formatter on a task branch; if it is run, restore the
   unrelated files individually and re-apply the task edits from the change set · repository
+- 2026-09-23 · `match value { true => ..., false => ... }` on a `bool` is `SEM0044 Match does not
+cover bool` plus a parse error on each arm: `true` and `false` are not patterns, so the arms read
+  as binding identifiers · Use an `if` with a `mut` local; `match` is for unions and enums only ·
+  compiler

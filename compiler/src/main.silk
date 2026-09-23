@@ -1,4 +1,5 @@
 import hir.Draft
+import hir.Fingerprint
 import hir.Hir
 import hir.Lower
 import hir.LowerDeclaration
@@ -130,7 +131,9 @@ effect fn program() -> ()
   let tree = run Parser.parse(move source, move tokens)
   // `hir <file>` is accepted by `request` but not served here. Making `Lower.lower` reachable from
   // `main` aborts bootstrap instance discovery with `Map maximum size exceeded`; the lowering is
-  // exercised through `hir.LoweringCases` instead. See `compiler/BUGS.md`.
+  // exercised through `hir.LoweringCases` instead. See `compiler/BUGS.md`. When that is repaired,
+  // the mode is `Hir.write` over `Lower.lower(&tree)` followed by `Fingerprint.writeFingerprints`,
+  // both of which are written and tested.
   let ignoredMode = dumpHir
   return run SyntaxTree.write(&tree)
 }

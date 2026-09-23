@@ -107,6 +107,19 @@ block as the module documentation, lowers every top-level declaration under one 
 the lexical and parser diagnostics into module coordinates, and answers a `Module` that refers to
 nothing in the tree, which the caller then drops.
 
+`hir/Fingerprint.silk` turns a lowered declaration into the content key a later incremental cache
+compares. `Fingerprint.header` and `Fingerprint.body` encode a declaration's two halves as a flat
+sequence of tag-and-length frames: a node frames its grammar category and then one frame per field
+in declared order, a symbol frames the bytes it interns rather than its index, a child frames
+inline rather than as an arena identity, a recovery cause frames its code without its span, and a
+binder reference frames the binder's preorder ordinal within the declaration. Spans, `HirId`
+values, sibling declarations, trivia, and the string table's layout never reach the bytes, so
+reordering two declarations or interning extra strings beforehand leaves both encodings untouched.
+`Fingerprint.headerDigest` and `Fingerprint.bodyDigest` are the SHA-256 of those bytes, and
+`Fingerprint.moduleDigest` covers the module documentation and every declaration's two digests in
+written order, which is the one place declaration order does count. The cache itself is out of
+scope; these are its primitives.
+
 CST construction remains postponed. The token vector retains source information, but there is no
 second concrete-syntax tree to maintain.
 
@@ -142,6 +155,7 @@ available stack in the bootstrap-generated debug executable before recovery coul
 | `hir/LowerStatement.silk`                      | Statements, conditional chains, and the blocks that scope their bindings                                                                       |
 | `hir/LowerDeclaration.silk`                    | Declaration headers and bodies, owner keys and occurrence counting, and attached documentation                                                 |
 | `hir/Lower.silk`                               | The module entry point: documentation, top-level declarations, and copied frontend diagnostics                                                 |
+| `hir/Fingerprint.silk`                         | The canonical content encoding of one declaration, its SHA-256 digests, and the module digest                                                  |
 
 Grammar rules are ordinary Silk functions. They consume `State` and return it with either an
 unfinished element list or a completed node ID. Replacement values are evaluated before assigning

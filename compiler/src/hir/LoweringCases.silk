@@ -2,6 +2,7 @@
 
 import hir.Draft
 import hir.Draft {Draft as DraftState}
+import hir.Fingerprint
 import hir.Hir
 import hir.Hir {
   Cause,
@@ -2134,4 +2135,300 @@ test effect fn aBroadModuleSatisfiesEveryFlatInvariant() -> ()
 ! OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   return run checkBroadModule() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// ---------------------------------------------------------------------------
+// Canonical encoding and fingerprints
+// ---------------------------------------------------------------------------
+
+/// Returns the canonical header bytes of the top-level declaration at `offset`.
+effect fn headerOf(source: string<'static>, offset: usize) -> Vector<u8>
+! OutOfMemoryError
+? &mut Allocator {
+  let module = run lowerSource(source)
+  let bytes = run Fingerprint.header(&module, declarationAt(&module, offset))
+  drop module
+  return move bytes
+}
+
+/// Returns the canonical body bytes of the top-level declaration at `offset`.
+effect fn bodyOf(source: string<'static>, offset: usize) -> Vector<u8>
+! OutOfMemoryError
+? &mut Allocator {
+  let module = run lowerSource(source)
+  let bytes = run Fingerprint.body(&module, declarationAt(&module, offset))
+  drop module
+  return move bytes
+}
+
+/// Reports whether the declaration at `left` of one source encodes as the one at `right` of another.
+effect fn sameHeader(
+  first: string<'static>,
+  left: usize,
+  second: string<'static>,
+  right: usize,
+) -> bool
+! OutOfMemoryError
+? &mut Allocator {
+  let a = run headerOf(first, left)
+  let b = run headerOf(second, right)
+  let answer = bytesEqual(Vector.asSlice<u8>(&a), Vector.asSlice<u8>(&b))
+  drop a
+  drop b
+  return answer
+}
+
+/// Reports whether two declarations' body encodings agree.
+effect fn sameBody(
+  first: string<'static>,
+  left: usize,
+  second: string<'static>,
+  right: usize,
+) -> bool
+! OutOfMemoryError
+? &mut Allocator {
+  let a = run bodyOf(first, left)
+  let b = run bodyOf(second, right)
+  let answer = bytesEqual(Vector.asSlice<u8>(&a), Vector.asSlice<u8>(&b))
+  drop a
+  drop b
+  return answer
+}
+
+effect fn checkReorderingKeepsBytes() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let straight = "fn alpha() -> i32 { return 1 }\nfn beta() -> i32 { return 2 }\n"
+  let swapped = "fn beta() -> i32 { return 2 }\nfn alpha() -> i32 { return 1 }\n"
+  run Testing.expect(
+    run sameHeader(straight, usize.ZERO, swapped, usize.ONE),
+    "reordering two uniquely named declarations leaves `alpha`'s header bytes alone",
+  )
+  run Testing.expect(
+    run sameBody(straight, usize.ZERO, swapped, usize.ONE),
+    "reordering two uniquely named declarations leaves `alpha`'s body bytes alone",
+  )
+  run Testing.expect(
+    run sameHeader(straight, usize.ONE, swapped, usize.ZERO),
+    "reordering leaves `beta`'s header bytes alone too, so neither one paid for the move",
+  )
+  run Testing.expect(
+    run sameBody(straight, usize.ONE, swapped, usize.ZERO),
+    "reordering leaves `beta`'s body bytes alone too",
+  )
+  return ()
+}
+
+test effect fn reorderingDeclarationsKeepsTheirBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkReorderingKeepsBytes() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkTriviaIsInvisible() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let plain = "fn work(value: i32) -> i32 { return value }\n"
+  let padded = "\n// a leading comment\nfn work(  value : i32 )  ->  i32  {\n  // inside\n  return value\n}\n\n"
+  run Testing.expect(
+    run sameHeader(plain, usize.ZERO, padded, usize.ZERO),
+    "comments and spacing never reach the header bytes",
+  )
+  run Testing.expect(
+    run sameBody(plain, usize.ZERO, padded, usize.ZERO),
+    "comments and spacing never reach the body bytes",
+  )
+  return ()
+}
+
+test effect fn triviaNeverReachesTheBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkTriviaIsInvisible() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkStringTableLayoutIsInvisible() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let source = "fn work(value: i32) -> i32 { return value }\n"
+  let crowded =
+    "fn unrelated(first: i64, second: u8) -> u8 { return second }\nfn work(value: i32) -> i32 { return value }\n"
+  run Testing.expect(
+    run sameHeader(source, usize.ZERO, crowded, usize.ONE),
+    "interning other declarations' strings first does not move `work`'s header bytes",
+  )
+  run Testing.expect(
+    run sameBody(source, usize.ZERO, crowded, usize.ONE),
+    "a symbol frames its interned text, so its index never reaches the body bytes",
+  )
+  return ()
+}
+
+test effect fn theStringTableLayoutNeverReachesTheBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkStringTableLayoutIsInvisible() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkBodyEditsSpareTheHeader() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let before = "fn work(value: i32) -> i32 { return value }\n"
+  let after = "fn work(value: i32) -> i32 { return 0 }\n"
+  run Testing.expect(
+    run sameHeader(before, usize.ZERO, after, usize.ZERO),
+    "editing only the return expression leaves the header bytes identical",
+  )
+  run Testing.expect(
+    !(run sameBody(before, usize.ZERO, after, usize.ZERO)),
+    "editing the return expression changes the body bytes",
+  )
+  return ()
+}
+
+test effect fn aBodyEditSparesTheHeaderBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkBodyEditsSpareTheHeader() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkParameterTypeEditsSpareTheBody() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let before = "fn work(value: i32) -> i32 { return value }\n"
+  let after = "fn work(value: i64) -> i32 { return value }\n"
+  run Testing.expect(
+    !(run sameHeader(before, usize.ZERO, after, usize.ZERO)),
+    "changing a parameter type changes the header bytes",
+  )
+  run Testing.expect(
+    run sameBody(before, usize.ZERO, after, usize.ZERO),
+    "the body reaches its parameter by ordinal, so retyping it leaves the body bytes alone",
+  )
+  return ()
+}
+
+test effect fn aParameterTypeEditSparesTheBodyBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkParameterTypeEditsSpareTheBody() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkDamagedBodiesAreStable() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let damaged = "fn work() -> i32 { return }\n"
+  run Testing.expect(
+    run sameBody(damaged, usize.ZERO, damaged, usize.ZERO),
+    "two lowerings of the same damaged source encode the same body bytes",
+  )
+  run Testing.expect(
+    run sameHeader(damaged, usize.ZERO, damaged, usize.ZERO),
+    "two lowerings of the same damaged source encode the same header bytes",
+  )
+  let healthy = "fn work() -> i32 { return 0 }\n"
+  run Testing.expect(
+    !(run sameBody(damaged, usize.ZERO, healthy, usize.ZERO)),
+    "a recovery cause is content, so a damaged body never matches the repaired one",
+  )
+  return ()
+}
+
+test effect fn aDamagedBodyEncodesStableBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkDamagedBodiesAreStable() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkBindersUseOrdinals() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let first = "fn work(a: i32, b: i32) -> i32 { return a }\n"
+  let second = "fn work(a: i32, b: i32) -> i32 { return b }\n"
+  run Testing.expect(
+    !(run sameBody(first, usize.ZERO, second, usize.ZERO)),
+    "a body that reads its second parameter is not the body that reads its first",
+  )
+  let renamed = "fn work(a: i32, b: i32) -> i32 { return a }\n"
+  run Testing.expect(
+    run sameBody(first, usize.ZERO, renamed, usize.ZERO),
+    "an unchanged body encodes the same bytes across two lowerings",
+  )
+  return ()
+}
+
+test effect fn bindersEncodeAsPreorderOrdinals() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkBindersUseOrdinals() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkModuleDigestSeesOrder() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let straight = run lowerSource("fn alpha() -> i32 { return 1 }\nfn beta() -> i32 { return 2 }\n")
+  let swapped = run lowerSource("fn beta() -> i32 { return 2 }\nfn alpha() -> i32 { return 1 }\n")
+  let again = run lowerSource("fn alpha() -> i32 { return 1 }\nfn beta() -> i32 { return 2 }\n")
+  let first = run Fingerprint.moduleDigest(&straight)
+  let second = run Fingerprint.moduleDigest(&swapped)
+  let third = run Fingerprint.moduleDigest(&again)
+  run Testing.expect(
+    !bytesEqual(&first, &second),
+    "the module digest sees the declaration order that the per-declaration digests ignore",
+  )
+  run Testing.expect(
+    bytesEqual(&first, &third),
+    "the same module content digests the same twice",
+  )
+  drop straight
+  drop swapped
+  drop again
+  return ()
+}
+
+test effect fn theModuleDigestSeesDeclarationOrder() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkModuleDigestSeesOrder() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkDigestsAgreeWithBytes() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerSource("fn work(value: i32) -> i32 { return value }\n")
+  let id = declarationAt(&module, usize.ZERO)
+  let headerBytes = run Fingerprint.header(&module, id)
+  let bodyBytes = run Fingerprint.body(&module, id)
+  run Testing.expect(
+    Vector.length<u8>(&headerBytes) > usize.ZERO
+      && Vector.length<u8>(&bodyBytes) > usize.ZERO,
+    "both halves encode to a non-empty frame sequence",
+  )
+  run Testing.expect(
+    !bytesEqual(Vector.asSlice<u8>(&headerBytes), Vector.asSlice<u8>(&bodyBytes)),
+    "the domain frame keeps a header from ever colliding with a body",
+  )
+  let headerHash = run Fingerprint.headerDigest(&module, id)
+  let bodyHash = run Fingerprint.bodyDigest(&module, id)
+  run Testing.expect(
+    !bytesEqual(&headerHash, &bodyHash),
+    "the two digests answer for the two halves they were asked about",
+  )
+  let mut hex = Vector.make<u8>()
+  run Fingerprint.appendHex(&mut hex, &headerHash)
+  run Testing.expect(
+    Vector.length<u8>(&hex) == usize.add(0, 64),
+    "a 32-byte SHA-256 digest spells as 64 hexadecimal digits",
+  )
+  drop hex
+  drop headerBytes
+  drop bodyBytes
+  drop module
+  return ()
+}
+
+test effect fn digestsSummariseTheirOwnHalf() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkDigestsAgreeWithBytes() |> Effect.provideMut<Allocator>(&mut allocator)
 }
