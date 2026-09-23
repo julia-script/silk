@@ -17,7 +17,8 @@
 //!
 //! # Gotchas
 //! Converting to an integer discards the fractional part and traps for NaN, infinity, or a value
-//! outside the destination range. Converting a large integer to f32 can round it.
+//! outside the destination range. The `checkedTo*` counterparts return `None` on exactly those
+//! inputs instead of trapping. Converting a large integer to f32 can round it.
 //!
 //! # Examples
 //! ## Inspect a binary32 boundary by its bits
@@ -43,6 +44,7 @@ import silk.i32
 import silk.i64
 import silk.i8
 import silk.isize
+import silk.option { Option }
 import silk.u16
 import silk.u32
 import silk.u64
@@ -352,10 +354,66 @@ pub fn toU8(value: f32) -> u8 {
   return Intrinsic.f32ToU8(value)
 }
 
+/// Converts `value` toward zero to `u8`, or returns `None` when the truncated result is out of
+/// range.
+///
+/// # When to use
+///
+/// Use this function when a NaN, an infinity, or an out-of-range magnitude is input data rather
+/// than a program error. [`toU8`] traps on exactly the inputs this function reports as `None`.
+///
+/// # Details
+///
+/// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
+/// below one is in range and yields zero. The truncated value is accepted when it is at least zero
+/// and below `2^8`. Both bounds are powers of two and so are exact in binary32; a bound converted
+/// from `u8.MAX` would round outward and wrongly admit an overflowing value.
+///
+/// # Gotchas
+///
+/// NaN and either infinity return `None`. A value in `(-1.0, -0.0]` truncates to negative zero and
+/// converts to `0`, so its sign is discarded rather than rejected.
+pub fn checkedToU8(value: f32) -> Option<u8> {
+  if Intrinsic.f32IsNaN(value) { return Option.none<u8>() }
+  if Intrinsic.f32IsInfinite(value) { return Option.none<u8>() }
+  let truncated = trunc(value)
+  if truncated < 0.0 { return Option.none<u8>() }
+  if truncated >= 256.0 { return Option.none<u8>() }
+  return Option.some<u8>(Intrinsic.f32ToU8(truncated))
+}
+
 /// Converts `value` toward zero to `u16`. Traps for NaN, infinity, or a result
 /// outside the `u16` range.
 pub fn toU16(value: f32) -> u16 {
   return Intrinsic.f32ToU16(value)
+}
+
+/// Converts `value` toward zero to `u16`, or returns `None` when the truncated result is out of
+/// range.
+///
+/// # When to use
+///
+/// Use this function when a NaN, an infinity, or an out-of-range magnitude is input data rather
+/// than a program error. [`toU16`] traps on exactly the inputs this function reports as `None`.
+///
+/// # Details
+///
+/// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
+/// below one is in range and yields zero. The truncated value is accepted when it is at least zero
+/// and below `2^16`. Both bounds are powers of two and so are exact in binary32; a bound converted
+/// from `u16.MAX` would round outward and wrongly admit an overflowing value.
+///
+/// # Gotchas
+///
+/// NaN and either infinity return `None`. A value in `(-1.0, -0.0]` truncates to negative zero and
+/// converts to `0`, so its sign is discarded rather than rejected.
+pub fn checkedToU16(value: f32) -> Option<u16> {
+  if Intrinsic.f32IsNaN(value) { return Option.none<u16>() }
+  if Intrinsic.f32IsInfinite(value) { return Option.none<u16>() }
+  let truncated = trunc(value)
+  if truncated < 0.0 { return Option.none<u16>() }
+  if truncated >= 65536.0 { return Option.none<u16>() }
+  return Option.some<u16>(Intrinsic.f32ToU16(truncated))
 }
 
 /// Converts `value` toward zero to `u32`. Traps for NaN, infinity, or a result
@@ -364,10 +422,66 @@ pub fn toU32(value: f32) -> u32 {
   return Intrinsic.f32ToU32(value)
 }
 
+/// Converts `value` toward zero to `u32`, or returns `None` when the truncated result is out of
+/// range.
+///
+/// # When to use
+///
+/// Use this function when a NaN, an infinity, or an out-of-range magnitude is input data rather
+/// than a program error. [`toU32`] traps on exactly the inputs this function reports as `None`.
+///
+/// # Details
+///
+/// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
+/// below one is in range and yields zero. The truncated value is accepted when it is at least zero
+/// and below `2^32`. Both bounds are powers of two and so are exact in binary32; a bound converted
+/// from `u32.MAX` would round outward and wrongly admit an overflowing value.
+///
+/// # Gotchas
+///
+/// NaN and either infinity return `None`. A value in `(-1.0, -0.0]` truncates to negative zero and
+/// converts to `0`, so its sign is discarded rather than rejected.
+pub fn checkedToU32(value: f32) -> Option<u32> {
+  if Intrinsic.f32IsNaN(value) { return Option.none<u32>() }
+  if Intrinsic.f32IsInfinite(value) { return Option.none<u32>() }
+  let truncated = trunc(value)
+  if truncated < 0.0 { return Option.none<u32>() }
+  if truncated >= 4294967296.0 { return Option.none<u32>() }
+  return Option.some<u32>(Intrinsic.f32ToU32(truncated))
+}
+
 /// Converts `value` toward zero to `u64`. Traps for NaN, infinity, or a result
 /// outside the `u64` range.
 pub fn toU64(value: f32) -> u64 {
   return Intrinsic.f32ToU64(value)
+}
+
+/// Converts `value` toward zero to `u64`, or returns `None` when the truncated result is out of
+/// range.
+///
+/// # When to use
+///
+/// Use this function when a NaN, an infinity, or an out-of-range magnitude is input data rather
+/// than a program error. [`toU64`] traps on exactly the inputs this function reports as `None`.
+///
+/// # Details
+///
+/// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
+/// below one is in range and yields zero. The truncated value is accepted when it is at least zero
+/// and below `2^64`. Both bounds are powers of two and so are exact in binary32; a bound converted
+/// from `u64.MAX` would round outward and wrongly admit an overflowing value.
+///
+/// # Gotchas
+///
+/// NaN and either infinity return `None`. A value in `(-1.0, -0.0]` truncates to negative zero and
+/// converts to `0`, so its sign is discarded rather than rejected.
+pub fn checkedToU64(value: f32) -> Option<u64> {
+  if Intrinsic.f32IsNaN(value) { return Option.none<u64>() }
+  if Intrinsic.f32IsInfinite(value) { return Option.none<u64>() }
+  let truncated = trunc(value)
+  if truncated < 0.0 { return Option.none<u64>() }
+  if truncated >= 18446744073709551616.0 { return Option.none<u64>() }
+  return Option.some<u64>(Intrinsic.f32ToU64(truncated))
 }
 
 /// Converts `value` toward zero to `usize`. Traps for NaN, infinity, or a result
@@ -376,10 +490,66 @@ pub fn toUsize(value: f32) -> usize {
   return Intrinsic.f32ToUsize(value)
 }
 
+/// Converts `value` toward zero to `usize`, or returns `None` when the truncated result is out of
+/// range.
+///
+/// # When to use
+///
+/// Use this function when a NaN, an infinity, or an out-of-range magnitude is input data rather
+/// than a program error. [`toUsize`] traps on exactly the inputs this function reports as `None`.
+///
+/// # Details
+///
+/// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
+/// below one is in range and yields zero. The truncated value is accepted when it is at least zero
+/// and below `2^64`. Both bounds are powers of two and so are exact in binary32; a bound converted
+/// from `usize.MAX` would round outward and wrongly admit an overflowing value.
+///
+/// # Gotchas
+///
+/// NaN and either infinity return `None`. A value in `(-1.0, -0.0]` truncates to negative zero and
+/// converts to `0`, so its sign is discarded rather than rejected.
+pub fn checkedToUsize(value: f32) -> Option<usize> {
+  if Intrinsic.f32IsNaN(value) { return Option.none<usize>() }
+  if Intrinsic.f32IsInfinite(value) { return Option.none<usize>() }
+  let truncated = trunc(value)
+  if truncated < 0.0 { return Option.none<usize>() }
+  if truncated >= 18446744073709551616.0 { return Option.none<usize>() }
+  return Option.some<usize>(Intrinsic.f32ToUsize(truncated))
+}
+
 /// Converts `value` toward zero to `i8`. Traps for NaN, infinity, or a result
 /// outside the `i8` range.
 pub fn toI8(value: f32) -> i8 {
   return Intrinsic.f32ToI8(value)
+}
+
+/// Converts `value` toward zero to `i8`, or returns `None` when the truncated result is out of
+/// range.
+///
+/// # When to use
+///
+/// Use this function when a NaN, an infinity, or an out-of-range magnitude is input data rather
+/// than a program error. [`toI8`] traps on exactly the inputs this function reports as `None`.
+///
+/// # Details
+///
+/// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
+/// below one is in range and yields zero. The truncated value is accepted when it is at least
+/// `-2^7` and below `2^7`. Both bounds are powers of two and so are exact in binary32; a bound
+/// converted from `i8.MAX` would round outward and wrongly admit an overflowing value.
+///
+/// # Gotchas
+///
+/// NaN and either infinity return `None`. A value in `(-1.0, -0.0]` truncates to negative zero and
+/// converts to `0`, so its sign is discarded rather than rejected.
+pub fn checkedToI8(value: f32) -> Option<i8> {
+  if Intrinsic.f32IsNaN(value) { return Option.none<i8>() }
+  if Intrinsic.f32IsInfinite(value) { return Option.none<i8>() }
+  let truncated = trunc(value)
+  if truncated < -128.0 { return Option.none<i8>() }
+  if truncated >= 128.0 { return Option.none<i8>() }
+  return Option.some<i8>(Intrinsic.f32ToI8(truncated))
 }
 
 /// Converts `value` toward zero to `i16`. Traps for NaN, infinity, or a result
@@ -388,10 +558,66 @@ pub fn toI16(value: f32) -> i16 {
   return Intrinsic.f32ToI16(value)
 }
 
+/// Converts `value` toward zero to `i16`, or returns `None` when the truncated result is out of
+/// range.
+///
+/// # When to use
+///
+/// Use this function when a NaN, an infinity, or an out-of-range magnitude is input data rather
+/// than a program error. [`toI16`] traps on exactly the inputs this function reports as `None`.
+///
+/// # Details
+///
+/// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
+/// below one is in range and yields zero. The truncated value is accepted when it is at least
+/// `-2^15` and below `2^15`. Both bounds are powers of two and so are exact in binary32; a bound
+/// converted from `i16.MAX` would round outward and wrongly admit an overflowing value.
+///
+/// # Gotchas
+///
+/// NaN and either infinity return `None`. A value in `(-1.0, -0.0]` truncates to negative zero and
+/// converts to `0`, so its sign is discarded rather than rejected.
+pub fn checkedToI16(value: f32) -> Option<i16> {
+  if Intrinsic.f32IsNaN(value) { return Option.none<i16>() }
+  if Intrinsic.f32IsInfinite(value) { return Option.none<i16>() }
+  let truncated = trunc(value)
+  if truncated < -32768.0 { return Option.none<i16>() }
+  if truncated >= 32768.0 { return Option.none<i16>() }
+  return Option.some<i16>(Intrinsic.f32ToI16(truncated))
+}
+
 /// Converts `value` toward zero to `i32`. Traps for NaN, infinity, or a result
 /// outside the `i32` range.
 pub fn toI32(value: f32) -> i32 {
   return Intrinsic.f32ToI32(value)
+}
+
+/// Converts `value` toward zero to `i32`, or returns `None` when the truncated result is out of
+/// range.
+///
+/// # When to use
+///
+/// Use this function when a NaN, an infinity, or an out-of-range magnitude is input data rather
+/// than a program error. [`toI32`] traps on exactly the inputs this function reports as `None`.
+///
+/// # Details
+///
+/// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
+/// below one is in range and yields zero. The truncated value is accepted when it is at least
+/// `-2^31` and below `2^31`. Both bounds are powers of two and so are exact in binary32; a bound
+/// converted from `i32.MAX` would round outward and wrongly admit an overflowing value.
+///
+/// # Gotchas
+///
+/// NaN and either infinity return `None`. A value in `(-1.0, -0.0]` truncates to negative zero and
+/// converts to `0`, so its sign is discarded rather than rejected.
+pub fn checkedToI32(value: f32) -> Option<i32> {
+  if Intrinsic.f32IsNaN(value) { return Option.none<i32>() }
+  if Intrinsic.f32IsInfinite(value) { return Option.none<i32>() }
+  let truncated = trunc(value)
+  if truncated < -2147483648.0 { return Option.none<i32>() }
+  if truncated >= 2147483648.0 { return Option.none<i32>() }
+  return Option.some<i32>(Intrinsic.f32ToI32(truncated))
 }
 
 /// Converts `value` toward zero to `i64`. Traps for NaN, infinity, or a result
@@ -400,8 +626,64 @@ pub fn toI64(value: f32) -> i64 {
   return Intrinsic.f32ToI64(value)
 }
 
+/// Converts `value` toward zero to `i64`, or returns `None` when the truncated result is out of
+/// range.
+///
+/// # When to use
+///
+/// Use this function when a NaN, an infinity, or an out-of-range magnitude is input data rather
+/// than a program error. [`toI64`] traps on exactly the inputs this function reports as `None`.
+///
+/// # Details
+///
+/// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
+/// below one is in range and yields zero. The truncated value is accepted when it is at least
+/// `-2^63` and below `2^63`. Both bounds are powers of two and so are exact in binary32; a bound
+/// converted from `i64.MAX` would round outward and wrongly admit an overflowing value.
+///
+/// # Gotchas
+///
+/// NaN and either infinity return `None`. A value in `(-1.0, -0.0]` truncates to negative zero and
+/// converts to `0`, so its sign is discarded rather than rejected.
+pub fn checkedToI64(value: f32) -> Option<i64> {
+  if Intrinsic.f32IsNaN(value) { return Option.none<i64>() }
+  if Intrinsic.f32IsInfinite(value) { return Option.none<i64>() }
+  let truncated = trunc(value)
+  if truncated < -9223372036854775808.0 { return Option.none<i64>() }
+  if truncated >= 9223372036854775808.0 { return Option.none<i64>() }
+  return Option.some<i64>(Intrinsic.f32ToI64(truncated))
+}
+
 /// Converts `value` toward zero to `isize`. Traps for NaN, infinity, or a result
 /// outside the `isize` range.
 pub fn toIsize(value: f32) -> isize {
   return Intrinsic.f32ToIsize(value)
+}
+
+/// Converts `value` toward zero to `isize`, or returns `None` when the truncated result is out of
+/// range.
+///
+/// # When to use
+///
+/// Use this function when a NaN, an infinity, or an out-of-range magnitude is input data rather
+/// than a program error. [`toIsize`] traps on exactly the inputs this function reports as `None`.
+///
+/// # Details
+///
+/// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
+/// below one is in range and yields zero. The truncated value is accepted when it is at least
+/// `-2^63` and below `2^63`. Both bounds are powers of two and so are exact in binary32; a bound
+/// converted from `isize.MAX` would round outward and wrongly admit an overflowing value.
+///
+/// # Gotchas
+///
+/// NaN and either infinity return `None`. A value in `(-1.0, -0.0]` truncates to negative zero and
+/// converts to `0`, so its sign is discarded rather than rejected.
+pub fn checkedToIsize(value: f32) -> Option<isize> {
+  if Intrinsic.f32IsNaN(value) { return Option.none<isize>() }
+  if Intrinsic.f32IsInfinite(value) { return Option.none<isize>() }
+  let truncated = trunc(value)
+  if truncated < -9223372036854775808.0 { return Option.none<isize>() }
+  if truncated >= 9223372036854775808.0 { return Option.none<isize>() }
+  return Option.some<isize>(Intrinsic.f32ToIsize(truncated))
 }

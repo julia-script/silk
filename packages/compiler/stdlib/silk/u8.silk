@@ -178,12 +178,14 @@ pub fn checkedToIsize(value: u8) -> Option<isize> {
   return Intrinsic.u8CheckedToIsize<Option<isize>>(value, Option.some, Option.none)
 }
 
-/// Converts `value` to the nearest `f32` value, with ties to even.
+/// Converts `value` exactly to `f32`. Every `u8` value is below `2^24` and so is exactly
+/// representable.
 pub fn toF32(value: u8) -> f32 {
   return Intrinsic.u8ToF32(value)
 }
 
-/// Converts `value` to the nearest `f64` value, with ties to even.
+/// Converts `value` exactly to `f64`. Every `u8` value is below `2^53` and so is exactly
+/// representable.
 pub fn toF64(value: u8) -> f64 {
   return Intrinsic.u8ToF64(value)
 }

@@ -189,12 +189,14 @@ pub fn checkedToIsize(value: usize) -> Option<isize> {
   return Intrinsic.usizeCheckedToIsize<Option<isize>>(value, Option.some, Option.none)
 }
 
-/// Converts `value` to the nearest `f32` value, with ties to even.
+/// Converts `value` to the nearest `f32` value, with ties to even. Only magnitudes below `2^24` are
+/// exactly representable, so a larger `usize` rounds.
 pub fn toF32(value: usize) -> f32 {
   return Intrinsic.usizeToF32(value)
 }
 
-/// Converts `value` to the nearest `f64` value, with ties to even.
+/// Converts `value` to the nearest `f64` value, with ties to even. Only magnitudes below `2^53` are
+/// exactly representable, so a larger `usize` rounds. Every `usize` is exact on a 32-bit target.
 pub fn toF64(value: usize) -> f64 {
   return Intrinsic.usizeToF64(value)
 }
