@@ -159,3 +159,32 @@ each `silk run` starts a new process, an unchanged project repeats backend emiss
 `SILK_NATIVE_CACHE_DIR` at a persistent directory changed the next unchanged run to a
 `backend-cache` hit and reduced wall time from 15.9 to 9.9 seconds. Running the already-built
 executable avoids compilation entirely.
+
+## Ancestor-history interning exceeds the V8 map limit for the HIR type lowering
+
+**Status:** repaired in bootstrap instance discovery by projecting each successor history onto its
+target's strongly connected component; the self-hosted type lowering now checks, builds, and tests
+without a workaround.
+
+Making both `LowerType.callableContract` and `LowerType.constraints` reachable from the test entry
+point aborted instance discovery with `RangeError: Map maximum size exceeded`, thrown from
+`AncestorHistory.union` through `Realization.discoverInstances`. The interned `unions` map passed
+2^24 entries. Neither function alone reproduced it: with `constraints` unreachable the suite ran
+34 tests, and `constraints` reached from its own test entry point while `callableContract` stayed
+unreachable also ran clean. The two together crossed the threshold.
+
+The trigger was a size threshold, not one edge. Stubbing `returnType`, `failureRow`, `parameterList`,
+or `requirementRow` out of the contract did not help; stubbing `constraints` did. Removing a single
+effectful declaration elsewhere (folding `returnType` and `failureRow` into one `soleOperand`) was
+enough to get back under the limit, which is what identified this as a scaling wall rather than a
+structural cycle. The blowup was static: it did not depend on the source being lowered, only on
+which declarations discovery could reach.
+
+This is the same failure mode as the parser entry above, one layer down. There, discovery
+accumulated ancestry-sensitive work items; here the ancestry itself interns past what a JavaScript
+`Map` can hold. The repair notes that a guard below a call to `T` can only re-consult an ancestor
+`V` when `T` also reaches `V`, so every ancestor outside `T`'s component is dead correlation, and
+projects it away before it multiplies through generic wrappers such as a test runner's Effect
+combinators around many recursive walkers.
+
+Encountered on 2026-09-22 while porting the type, generic, contract, and constraint lowering.

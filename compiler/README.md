@@ -62,6 +62,27 @@ buffer, so a test can compare a lowered module against expected text. `Hir.verif
 arena invariants a module violates rather than asserting them, which replaces the bootstrap's
 structured-clone publication step.
 
+`hir/Draft.silk` owns the module while it is being built. Every node enters the arena through
+`Draft.append`, which pushes one `nodes`, one `spans`, and one `nodeCauses` entry together, so the
+three parallel vectors cannot drift. Child lists and recovery-cause runs are collected on scratch
+vectors and copied into the module's shared storage when they close. Lexical binders use one flat
+vector with a frame-start stack, so opening and closing a scope truncates rather than allocates.
+The syntax accessors, the recovery-cause selection, and the name, path, and literal lowerings port
+the bootstrap `AuthoredLowering` helpers of the same names; the literal decoders port
+`internal/IntegerLiteral`, `internal/DurationLiteral`, `LiteralForm`, `StaticText`, and
+`internal/Escape`. A magnitude that no `u64` can hold lowers to an invalid expression with an
+overflow cause rather than widening the vocabulary.
+
+`hir/LowerType.silk` lowers every type operand, generic binder list, row, `where` constraint, and
+callable contract. `LowerType.lowerType` is the one type entry point: it unwraps grouping
+parentheses in place, so a parenthesized type leaves no node, and retains a lifetime, a bare
+requirement, or a damaged region in a type position as an invalid type. `LowerType.rowOperand`
+selects between a type and a written requirement wherever a row admits both.
+`LowerType.callableContract` reads the contract pieces directly off a callable header, because the
+grammar attaches them there rather than to a node of their own. Property clauses are not lowered
+yet; their values are expressions, so `ForeignFunctionType` carries an empty `properties` range
+until the expression lowering lands.
+
 CST construction remains postponed. The token vector retains source information, but there is no
 second concrete-syntax tree to maintain.
 
@@ -74,22 +95,24 @@ available stack in the bootstrap-generated debug executable before recovery coul
 
 ## Grammar modules
 
-| Module                                         | Responsibility                                                                                                                              |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/lexer/`                                   | Pull-based byte scanner, tokens, spans, and lexical diagnostics                                                                             |
-| `parser/ParseState.silk`                       | Ownership-threaded cursor, node construction, contextual spelling, and recovery primitives                                                  |
-| `parser/Parser.silk`                           | Source-file loop and final tree assembly                                                                                                    |
-| `parser/Import.silk`                           | Module paths, aliases, selected members, and public imports                                                                                 |
-| `parser/Declaration.silk`                      | Nominal declarations, functions, constants, parameters, services/interfaces, implementations, native headers, and static declaration groups |
-| `parser/Type.silk`                             | Type paths, generics, lifetimes, references, arrays, pointers, callable types, effect rows, and constraints                                 |
-| `parser/Expression.silk`                       | Literals, constructors, calls, projections, prefix/infix precedence, pipelines, effects, anonymous callables, and matches                   |
-| `parser/Pattern.silk`                          | Nominal/applied patterns, whole-value bindings, field shorthand/rest, enum/integer cases, and wildcards                                     |
-| `parser/Statement.silk`                        | Bindings, assignments, control flow, transfers, static loops, unsafe blocks, and block recovery                                             |
-| `parser/Property.silk`                         | Sealed function/module property syntax                                                                                                      |
-| `parser/Grammar.silk`, `parser/Lookahead.silk` | Shared boundaries, precedence, and non-consuming ambiguity checks                                                                           |
-| `parser/SyntaxTree.silk`                       | Tree ownership and flat AST printing                                                                                                        |
-| `hir/Intern.silk`                              | Deduplicated byte-string storage: `Symbol` identities and the `StringTable` that produces them                                              |
-| `hir/Hir.silk`                                 | The flat HIR vocabulary, the `Module` arena, its debug dump writer, and its arena verifier                                                  |
+| Module                                         | Responsibility                                                                                                                                 |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lexer/`                                   | Pull-based byte scanner, tokens, spans, and lexical diagnostics                                                                                |
+| `parser/ParseState.silk`                       | Ownership-threaded cursor, node construction, contextual spelling, and recovery primitives                                                     |
+| `parser/Parser.silk`                           | Source-file loop and final tree assembly                                                                                                       |
+| `parser/Import.silk`                           | Module paths, aliases, selected members, and public imports                                                                                    |
+| `parser/Declaration.silk`                      | Nominal declarations, functions, constants, parameters, services/interfaces, implementations, native headers, and static declaration groups    |
+| `parser/Type.silk`                             | Type paths, generics, lifetimes, references, arrays, pointers, callable types, effect rows, and constraints                                    |
+| `parser/Expression.silk`                       | Literals, constructors, calls, projections, prefix/infix precedence, pipelines, effects, anonymous callables, and matches                      |
+| `parser/Pattern.silk`                          | Nominal/applied patterns, whole-value bindings, field shorthand/rest, enum/integer cases, and wildcards                                        |
+| `parser/Statement.silk`                        | Bindings, assignments, control flow, transfers, static loops, unsafe blocks, and block recovery                                                |
+| `parser/Property.silk`                         | Sealed function/module property syntax                                                                                                         |
+| `parser/Grammar.silk`, `parser/Lookahead.silk` | Shared boundaries, precedence, and non-consuming ambiguity checks                                                                              |
+| `parser/SyntaxTree.silk`                       | Tree ownership and flat AST printing                                                                                                           |
+| `hir/Intern.silk`                              | Deduplicated byte-string storage: `Symbol` identities and the `StringTable` that produces them                                                 |
+| `hir/Hir.silk`                                 | The flat HIR vocabulary, the `Module` arena, its debug dump writer, and its arena verifier                                                     |
+| `hir/Draft.silk`                               | The in-progress module a lowering builds: arena appends, interning, binder frames, syntax accessors, and the name, path, and literal lowerings |
+| `hir/LowerType.silk`                           | Types, generic parameters, rows, `where` constraints, and callable contracts                                                                   |
 
 Grammar rules are ordinary Silk functions. They consume `State` and return it with either an
 unfinished element list or a completed node ID. Replacement values are evaluated before assigning

@@ -36,7 +36,9 @@
 //!   logical name through [`OwnerKey`] instead of a structured owner identity.
 //! - `IntegerLiteral.value` and the floating and duration magnitudes are `u64` rather than
 //!   arbitrary precision. A literal that exceeds `u64` lowers to [`Node.InvalidExpression`] with an
-//!   [`CauseCode.IntegerOverflow`] cause.
+//!   [`CauseCode.IntegerOverflow`] cause. The bootstrap's signed `FloatingLiteral.exponent` becomes
+//!   an unsigned magnitude paired with [`Node.FloatingLiteral`]'s `exponentSign`, because a `u64`
+//!   cannot carry the sign that `1.5` needs.
 //! - `Parameter`, `Field`, `Property`, and the other list elements stay ordinary nodes referenced
 //!   through a [`Range`], so no parent embeds an array.
 //! - The bootstrap `NamedHeader` mixin is flattened: each named header variant declares its own
@@ -45,7 +47,9 @@
 //!   than anchors, because a span is what a diagnostic needs to underline a keyword.
 //! - Field names that are Silk keywords are renamed, never dropped: `type` is `annotation`,
 //!   `public` is `isPublic`, `role` is `rolePath` or `roleName` by its child kind, and `effect`,
-//!   `test`, `unsafe`, `static`, and `move` take an `is` prefix.
+//!   `test`, `unsafe`, `static`, and `move` take an `is` prefix. The bootstrap's signed
+//!   `IntegerLiteral.value` becomes an unsigned `magnitude` paired with a `sign`, for the same
+//!   reason `FloatingLiteral` splits its exponent: a `u64` cannot carry the sign.
 //! - `Requirement.access` and `NamedType.mode` are non-optional enums paired with a `hasAccess` or
 //!   `hasMode` flag, because an enum cannot carry an absence marker and a reserved variant would
 //!   make one written mode unrepresentable.
@@ -765,6 +769,8 @@ pub union Node {
 
   /// An integer literal whose magnitude fits `u64`.
   IntegerLiteral {
+    /// The written sign of the literal.
+    pub sign: Sign,
     /// The decoded magnitude.
     pub magnitude: u64,
     /// The written base.
@@ -779,12 +785,14 @@ pub union Node {
   },
   /// A floating-point literal decomposed into sign, coefficient, and exponent digits.
   FloatingLiteral {
-    /// The written sign.
+    /// The written sign of the literal itself.
     pub sign: Sign,
-    /// The decoded coefficient digits.
+    /// The decoded coefficient digits, with the decimal point removed.
     pub coefficient: u64,
-    /// The decoded decimal exponent.
+    /// The magnitude of the decimal exponent that scales the coefficient.
     pub exponent: u64,
+    /// The direction of that exponent: `Negative` scales the coefficient down.
+    pub exponentSign: Sign,
     /// The interned literal suffix, if written.
     pub suffix: SymbolRef,
   },
@@ -1965,9 +1973,9 @@ fn nodeKindName(node: Node) -> string<'static> {
     Node.CallableContract {generics: ignored1, parameters: ignored2, variadic: ignored3, result: ignored4, failures: ignored5, requirements: ignored6, constraints: ignored7, isEffect: ignored8, isTest: ignored9, environment: ignored10, isUnsafe: ignored11, isStatic: ignored12, effectAnchor: ignored13, testAnchor: ignored14, unsafeAnchor: ignored15, staticAnchor: ignored16, genericsAnchor: ignored17, failuresAnchor: ignored18, constraintsAnchor: ignored19} => "CallableContract"
     Node.Property {name: ignored1, value: ignored2} => "Property"
     Node.PropertyClause {namespace: ignored1, operation: ignored2, properties: ignored3} => "PropertyClause"
-    Node.IntegerLiteral {magnitude: ignored1, radix: ignored2, suffix: ignored3} => "IntegerLiteral"
+    Node.IntegerLiteral {sign: ignored1, magnitude: ignored2, radix: ignored3, suffix: ignored4} => "IntegerLiteral"
     Node.TextLiteral {value: ignored1} => "TextLiteral"
-    Node.FloatingLiteral {sign: ignored1, coefficient: ignored2, exponent: ignored3, suffix: ignored4} => "FloatingLiteral"
+    Node.FloatingLiteral {sign: ignored1, coefficient: ignored2, exponent: ignored3, exponentSign: ignored4, suffix: ignored5} => "FloatingLiteral"
     Node.DurationComponent {magnitude: ignored1, unit: ignored2} => "DurationComponent"
     Node.DurationLiteral {components: ignored1} => "DurationLiteral"
     Node.BytesLiteral {value: ignored1} => "BytesLiteral"
@@ -2224,7 +2232,8 @@ effect fn writeNodeFields(module: &Module, node: Node) -> () ! WriterError ? &mu
       run writeIdField("operation", operation)
       run writeRangeField(module, "properties", properties)
     }
-    Node.IntegerLiteral {magnitude, radix, suffix} => {
+    Node.IntegerLiteral {sign, magnitude, radix, suffix} => {
+      run writeSignField("sign", sign)
       run writeMagnitudeField("magnitude", magnitude)
       run writeRadixField("radix", radix)
       run writeSymbolRefField(module, "suffix", suffix)
@@ -2232,10 +2241,11 @@ effect fn writeNodeFields(module: &Module, node: Node) -> () ! WriterError ? &mu
     Node.TextLiteral {value} => {
       run writeSymbolField(module, "value", value)
     }
-    Node.FloatingLiteral {sign, coefficient, exponent, suffix} => {
+    Node.FloatingLiteral {sign, coefficient, exponent, exponentSign, suffix} => {
       run writeSignField("sign", sign)
       run writeMagnitudeField("coefficient", coefficient)
       run writeMagnitudeField("exponent", exponent)
+      run writeSignField("exponentSign", exponentSign)
       run writeSymbolRefField(module, "suffix", suffix)
     }
     Node.DurationComponent {magnitude, unit} => {
@@ -2612,7 +2622,10 @@ effect fn writeNodeFields(module: &Module, node: Node) -> () ! WriterError ? &mu
 
 effect fn writeNode(module: &Module, index: usize) -> () ! WriterError ? &mut Writer {
   let nodes = Vector.asSlice<Node>(&module.nodes)
-  let span = Vector.get<Span>(&module.spans, index)
+  let mut span = Span {start: usize.ZERO, end: usize.ZERO}
+  if index < Vector.length<Span>(&module.spans) {
+    span = Vector.get<Span>(&module.spans, index)
+  }
   run Writer.writeString("#")
   run Format.display(&index)
   run Writer.writeString(" ")
@@ -2620,7 +2633,10 @@ effect fn writeNode(module: &Module, index: usize) -> () ! WriterError ? &mut Wr
   run Writer.writeString(" ")
   run writeSpanText(span)
   run Writer.writeString("\n")
-  let causes = Vector.get<Range>(&module.nodeCauses, index)
+  let mut causes = Range.empty()
+  if index < Vector.length<Range>(&module.nodeCauses) {
+    causes = Vector.get<Range>(&module.nodeCauses, index)
+  }
   if causes.length > usize.ZERO {
     run writeFieldName("causes")
     let mut offset = usize.ZERO
@@ -2682,6 +2698,9 @@ effect fn writeDiagnostic(module: &Module, index: usize) -> () ! WriterError ? &
 ///
 /// This is a debugging and testing format, not a stable serialization. A writer failure preserves
 /// any output prefix the writer already accepted.
+///
+/// A node whose `spans` or `nodeCauses` entry is missing — a [`verify`] defect — still writes,
+/// with an empty span and no causes, so a hand-built module can be inspected before it is repaired.
 pub effect fn write(module: &Module) -> () ! WriterError ? &mut Writer {
   run Writer.writeString("documentation ")
   if module.documentation.present {
@@ -3071,13 +3090,13 @@ effect fn verifyNode(module: &Module, parent: usize, found: &mut Vector<Defect>)
       run recordId(module, parent, operation, &mut found.*)
       run recordRange(module, parent, properties, &mut found.*)
     }
-    Node.IntegerLiteral {magnitude: ignored1, radix: ignored2, suffix} => {
+    Node.IntegerLiteral {sign: ignored1, magnitude: ignored2, radix: ignored3, suffix} => {
       run recordSymbolRef(module, parent, suffix, &mut found.*)
     }
     Node.TextLiteral {value} => {
       run recordSymbol(module, parent, value, &mut found.*)
     }
-    Node.FloatingLiteral {sign: ignored1, coefficient: ignored2, exponent: ignored3, suffix} => {
+    Node.FloatingLiteral {sign: ignored1, coefficient: ignored2, exponent: ignored3, exponentSign: ignored4, suffix} => {
       run recordSymbolRef(module, parent, suffix, &mut found.*)
     }
     Node.DurationComponent {magnitude: ignored1, unit: ignored2} => ()
