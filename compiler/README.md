@@ -1,9 +1,10 @@
 # Self-hosted Silk frontend
 
-This directory contains the self-hosted lexer and parser. The current executable reads one Silk
-file and prints its flat AST and syntax diagnostics. It does not yet perform name resolution,
-type checking, lowering, or code generation on that input. The TypeScript bootstrap compiler
-still builds this executable.
+This directory contains the self-hosted lexer, parser, and HIR lowering. The current executable
+reads one Silk file and prints either its flat AST and syntax diagnostics or, in `hir` mode, its
+lowered module and declaration fingerprints. It does not yet perform name resolution, type
+checking, or code generation on that input. The TypeScript bootstrap compiler still builds this
+executable.
 
 ## Inspect a source file
 
@@ -27,6 +28,21 @@ Apple Silicon with the debug LLVM target:
 ```sh
 compiler/build/llvm/aarch64-apple-darwin/debug/silk-compiler compiler/src/main.silk
 ```
+
+## Inspect a lowered module
+
+Prefix the path with `hir` to lower the file instead of dumping its syntax tree:
+
+```sh
+pnpm exec silk run --manifest-path compiler/silk.toml -- hir compiler/src/main.silk
+```
+
+The dump opens with the module's `//!` documentation and the declaration range, then lists every
+arena node in postorder: `#<index> <kind> <start>..<end>`, one indented line per field, and a
+`causes` line on any node that recorded recovery. The `causes` and `diagnostics` sections follow,
+then a `fingerprints` section naming each declaration's owner key with its header and body digests
+as hexadecimal. The text depends only on module content, so two builds of one file agree byte for
+byte. This is a debug dump; the output is not a stable format.
 
 ## Representation and recovery
 

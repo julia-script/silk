@@ -157,28 +157,22 @@ effect fn variant(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Alloca
     let consumed = run move p
       |> ParseState.consume
     p = move consumed
-    if ParseState.currentKind(&p.state) == TokenKind.RightBrace {
-      let attached = run ParseState.attach(
+    // An immediately closing brace is an empty field block, not a damaged field: `Empty {}` is a
+    // variant that wrote braces and declared nothing. Only a field-starting token enters the loop.
+    while !Grammar.declarationStart(&p.state) && (ParseState.currentKind(&p.state) == TokenKind.Identifier || ParseState.currentKind(
+      &p.state,
+    ) == TokenKind.PubKeyword) {
+      let attached2 = run ParseState.attach(
         move p.elements,
         run field(move p.state, NodeKind.UnionVariantField),
       )
-      p = move attached
-    } else {
-      while !Grammar.declarationStart(&p.state) && (ParseState.currentKind(&p.state) == TokenKind.Identifier || ParseState.currentKind(
-        &p.state,
-      ) == TokenKind.PubKeyword) {
-        let attached2 = run ParseState.attach(
-          move p.elements,
-          run field(move p.state, NodeKind.UnionVariantField),
-        )
-        p = move attached2
-        if ParseState.currentKind(&p.state) == TokenKind.RightBrace {
-          break
-        }
-        let afterComma = run move p
-          |> ParseState.expect(TokenKind.Comma)
-        p = move afterComma
+      p = move attached2
+      if ParseState.currentKind(&p.state) == TokenKind.RightBrace {
+        break
       }
+      let afterComma = run move p
+        |> ParseState.expect(TokenKind.Comma)
+      p = move afterComma
     }
     let afterRightBrace = run move p
       |> ParseState.expect(TokenKind.RightBrace)

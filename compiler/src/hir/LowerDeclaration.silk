@@ -370,28 +370,32 @@ fn startsLine(tree: &SyntaxTree, span: Span) -> bool {
 effect fn leadingTrivia(tree: &SyntaxTree, syntax: NodeId, out: &mut Vector<Token>) -> ()
 ! OutOfMemoryError
 ? &mut Allocator {
-  let count = Draft.elementCount(tree, syntax)
+  // The parser never makes leading trivia an element of the node it precedes: a declaration's
+  // first element is its own first significant token, so the `///` block that documents it sits
+  // earlier in the tree's flat token order. The scan therefore runs over `tree.tokens`, like
+  // `moduleDocumentation`, rather than over the node's elements.
+  let tokens = Vector.asSlice<Token>(&tree.tokens)
+  let start = Draft.significantStart(tree, syntax)
+  let mut boundary = tokens.length
   let mut index = usize.ZERO
-  while index < count {
-    match Draft.elementAt(tree, syntax, index) {
-      Element.Token {id} => {
-        let token = Vector.get<Token>(&tree.tokens, id.index)
-        if !isTriviaKind(tokenKind(token)) {
-          return ()
-        }
-        run Vector.append<Token>(&mut out.*, token)
-      }
-      Element.Node {id} => {
-        if Vector.length<Token>(&out.*) == usize.ZERO {
-          run leadingTrivia(tree, id, &mut out.*)
-        }
-        return ()
-      }
-      Element.MissingToken {expected: ignoredExpected, span: ignoredSpan} => {
-        return ()
-      }
+  while index < tokens.length {
+    if tokenSpan(tokens[index]).start == start && !isTriviaKind(tokenKind(tokens[index])) {
+      boundary = index
+      break
     }
     index = index + usize.ONE
+  }
+  let mut first = boundary
+  while first > usize.ZERO {
+    if !isTriviaKind(tokenKind(tokens[first - usize.ONE])) {
+      break
+    }
+    first = first - usize.ONE
+  }
+  let mut emit = first
+  while emit < boundary {
+    run Vector.append<Token>(&mut out.*, tokens[emit])
+    emit = emit + usize.ONE
   }
   return ()
 }

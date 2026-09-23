@@ -277,6 +277,7 @@ nodes 4
 #2 NoBody 14..14
 #3 Declaration 0..14
   owner: Role "Clock" #0
+  documentation: none
   header: #1
   body: #2
 
@@ -2110,7 +2111,7 @@ pub effect fn main() -> () { return () }
     "a syntactically clean file lowers with no recovery cause",
   )
   run Testing.expect(
-    module.declarations.length == usize.add(0, 15),
+    module.declarations.length == usize.add(0, 16),
     "every top-level declaration of the file lowers into its own declaration node",
   )
   run Testing.expect(
