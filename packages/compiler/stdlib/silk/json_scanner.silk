@@ -197,7 +197,13 @@ fn errorAt(reason: JsonReason, offset: usize) -> JsonError {
   }
 }
 
-fn failed(self: &mut JsonScanState, reason: JsonReason, offset: usize) -> Result<JsonScanStep, JsonError> {
+fn failed(self: &mut JsonScanState, reason: JsonReason) -> Result<JsonScanStep, JsonError> {
+  self.mode = ScanMode.Terminal
+  return Result.failResult<JsonScanStep, JsonError>(errorAt(reason, self.offset))
+}
+
+fn failedBack(self: &mut JsonScanState, reason: JsonReason, back: usize) -> Result<JsonScanStep, JsonError> {
+  let offset = self.offset - back
   self.mode = ScanMode.Terminal
   return Result.failResult<JsonScanStep, JsonError>(errorAt(reason, offset))
 }
@@ -266,7 +272,7 @@ fn hexDigit(byte: u8) -> Option<u32> {
 fn zeroStack() -> [u8; 64] {
   return [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
@@ -335,13 +341,14 @@ impl JsonScanState {
   /// its lookahead delimiter is left for the following call. Errors make this state terminal.
   pub fn step(self: &mut JsonScanState, chunk: &[u8], final: bool) -> Result<JsonScanStep, JsonError> {
     if self.mode == ScanMode.Terminal {
-      return failed(self, JsonReason.UnexpectedByte, self.offset)
+      return failed(&mut self, JsonReason.UnexpectedByte)
     }
     let mut index = usize.ZERO
-    let mut fragmentStart = if self.mode == ScanMode.Idle { chunk.length } else { usize.ZERO }
+    let mut fragmentStart = usize.ZERO
+    if self.mode == ScanMode.Idle { fragmentStart = chunk.length }
     while index < chunk.length {
       if self.offset == usize.MAX {
-        return failed(self, JsonReason.OffsetOverflow, self.offset)
+        return failed(&mut self, JsonReason.OffsetOverflow)
       }
       let byte = chunk[index]
 
@@ -349,21 +356,21 @@ impl JsonScanState {
         if self.stringMode == StringMode.Text {
           if self.utf8Remaining != 0 {
             if byte < 128 || byte > 191 {
-              return failed(self, JsonReason.InvalidUtf8, self.offset)
+              return failed(&mut self, JsonReason.InvalidUtf8)
             }
             self.utf8Value = u32.bitOr(u32.shiftLeft(self.utf8Value, 6), u8.toU32(byte - 128))
             self.utf8Remaining = self.utf8Remaining - 1
             if self.utf8Remaining == 0 {
               if self.utf8Value < self.utf8Minimum || self.utf8Value > 1114111
                 || (self.utf8Value >= 55296 && self.utf8Value <= 57343) {
-                return failed(self, JsonReason.InvalidUtf8, self.offset)
+                return failed(&mut self, JsonReason.InvalidUtf8)
               }
             }
-            consume(self, &mut index)
+            consume(&mut self, &mut index)
             continue
           }
           if byte == 34 {
-            consume(self, &mut index)
+            consume(&mut self, &mut index)
             self.mode = ScanMode.Idle
             let span = JsonSpan { offset: self.tokenStart, length: self.offset - self.tokenStart }
             let token = JsonToken.String { span: move span, escaped: self.escaped }
@@ -372,22 +379,22 @@ impl JsonScanState {
               if self.stack[top] == OBJECT_FIRST || self.stack[top] == OBJECT_KEY {
                 self.stack[top] = OBJECT_COLON
               } else {
-                valueStarted(self)
+                valueStarted(&mut self)
               }
             } else {
-              valueStarted(self)
+              valueStarted(&mut self)
             }
             return emitted(move token, index, fragmentStart)
           }
           if byte == 92 {
             self.escaped = true
             self.stringMode = StringMode.Escape
-            consume(self, &mut index)
+            consume(&mut self, &mut index)
             continue
           }
-          if byte < 32 { return failed(self, JsonReason.UnexpectedByte, self.offset) }
+          if byte < 32 { return failed(&mut self, JsonReason.UnexpectedByte) }
           if byte < 128 {
-            consume(self, &mut index)
+            consume(&mut self, &mut index)
             continue
           }
           if byte >= 194 && byte <= 223 {
@@ -403,52 +410,52 @@ impl JsonScanState {
             self.utf8Value = u8.toU32(byte - 240)
             self.utf8Minimum = 65536
           } else {
-            return failed(self, JsonReason.InvalidUtf8, self.offset)
+            return failed(&mut self, JsonReason.InvalidUtf8)
           }
-          consume(self, &mut index)
+          consume(&mut self, &mut index)
           continue
         }
         if self.stringMode == StringMode.Escape {
           if byte == 34 || byte == 92 || byte == 47 || byte == 98 || byte == 102
             || byte == 110 || byte == 114 || byte == 116 {
             self.stringMode = StringMode.Text
-            consume(self, &mut index)
+            consume(&mut self, &mut index)
             continue
           }
           if byte == 117 {
             self.stringMode = StringMode.Unicode
             self.unicodeDigits = 0
             self.unicodeValue = 0
-            consume(self, &mut index)
+            consume(&mut self, &mut index)
             continue
           }
-          return failed(self, JsonReason.InvalidEscape, self.offset)
+          return failed(&mut self, JsonReason.InvalidEscape)
         }
         if self.stringMode == StringMode.HighSlash {
-          if byte != 92 { return failed(self, JsonReason.InvalidEscape, self.offset) }
+          if byte != 92 { return failed(&mut self, JsonReason.InvalidEscape) }
           self.stringMode = StringMode.HighU
-          consume(self, &mut index)
+          consume(&mut self, &mut index)
           continue
         }
         if self.stringMode == StringMode.HighU {
-          if byte != 117 { return failed(self, JsonReason.InvalidEscape, self.offset) }
+          if byte != 117 { return failed(&mut self, JsonReason.InvalidEscape) }
           self.stringMode = StringMode.Unicode
           self.unicodeDigits = 0
           self.unicodeValue = 0
-          consume(self, &mut index)
+          consume(&mut self, &mut index)
           continue
         }
         let digit = match move hexDigit(byte) {
-          Option<u32>.None => { return failed(self, JsonReason.InvalidEscape, self.offset) }
+          Option<u32>.None => { return failed(&mut self, JsonReason.InvalidEscape) }
           Option<u32>.Some { value } => value
         }
         self.unicodeValue = u32.bitOr(u32.shiftLeft(self.unicodeValue, 4), digit)
         self.unicodeDigits = self.unicodeDigits + 1
-        consume(self, &mut index)
+        consume(&mut self, &mut index)
         if self.unicodeDigits == 4 {
           if self.pendingHigh {
             if self.unicodeValue < 56320 || self.unicodeValue > 57343 {
-              return failed(self, JsonReason.InvalidEscape, self.offset - 4)
+              return failedBack(&mut self, JsonReason.InvalidEscape, 4)
             }
             self.pendingHigh = false
             self.stringMode = StringMode.Text
@@ -456,7 +463,7 @@ impl JsonScanState {
             self.pendingHigh = true
             self.stringMode = StringMode.HighSlash
           } else if self.unicodeValue >= 56320 && self.unicodeValue <= 57343 {
-            return failed(self, JsonReason.InvalidEscape, self.offset - 4)
+            return failedBack(&mut self, JsonReason.InvalidEscape, 4)
           } else {
             self.stringMode = StringMode.Text
           }
@@ -468,74 +475,80 @@ impl JsonScanState {
         if self.numberMode == NumberMode.Minus {
           if byte == 48 { self.numberMode = NumberMode.Zero }
           else if byte >= 49 && byte <= 57 { self.numberMode = NumberMode.Integer }
-          else { return failed(self, JsonReason.InvalidNumber, self.offset) }
-          consume(self, &mut index)
+          else { return failed(&mut self, JsonReason.InvalidNumber) }
+          consume(&mut self, &mut index)
           continue
         }
         if self.numberMode == NumberMode.Zero || self.numberMode == NumberMode.Integer {
           if isDigit(byte) {
             if self.numberMode == NumberMode.Zero {
-              return failed(self, JsonReason.InvalidNumber, self.offset)
+              return failed(&mut self, JsonReason.InvalidNumber)
             }
-            consume(self, &mut index)
+            consume(&mut self, &mut index)
             continue
           }
           if byte == 46 {
             self.numberMode = NumberMode.Dot
-            consume(self, &mut index)
+            consume(&mut self, &mut index)
             continue
           }
           if byte == 101 || byte == 69 {
             self.numberMode = NumberMode.Exponent
-            consume(self, &mut index)
+            consume(&mut self, &mut index)
             continue
           }
         } else if self.numberMode == NumberMode.Dot {
-          if !isDigit(byte) { return failed(self, JsonReason.InvalidNumber, self.offset) }
+          if !isDigit(byte) { return failed(&mut self, JsonReason.InvalidNumber) }
           self.numberMode = NumberMode.Fraction
-          consume(self, &mut index)
+          consume(&mut self, &mut index)
           continue
         } else if self.numberMode == NumberMode.Fraction {
-          if isDigit(byte) { consume(self, &mut index); continue }
+          if isDigit(byte) {
+            consume(&mut self, &mut index)
+            continue
+          }
           if byte == 101 || byte == 69 {
             self.numberMode = NumberMode.Exponent
-            consume(self, &mut index)
+            consume(&mut self, &mut index)
             continue
           }
         } else if self.numberMode == NumberMode.Exponent {
           if byte == 43 || byte == 45 {
             self.numberMode = NumberMode.ExponentSign
-            consume(self, &mut index)
+            consume(&mut self, &mut index)
             continue
           }
-          if !isDigit(byte) { return failed(self, JsonReason.InvalidNumber, self.offset) }
+          if !isDigit(byte) { return failed(&mut self, JsonReason.InvalidNumber) }
           self.numberMode = NumberMode.ExponentDigits
-          consume(self, &mut index)
+          consume(&mut self, &mut index)
           continue
         } else if self.numberMode == NumberMode.ExponentSign {
-          if !isDigit(byte) { return failed(self, JsonReason.InvalidNumber, self.offset) }
+          if !isDigit(byte) { return failed(&mut self, JsonReason.InvalidNumber) }
           self.numberMode = NumberMode.ExponentDigits
-          consume(self, &mut index)
+          consume(&mut self, &mut index)
           continue
         } else {
-          if isDigit(byte) { consume(self, &mut index); continue }
+          if isDigit(byte) {
+            consume(&mut self, &mut index)
+            continue
+          }
         }
-        if !isDelimiter(byte) { return failed(self, JsonReason.InvalidNumber, self.offset) }
+        if !isDelimiter(byte) { return failed(&mut self, JsonReason.InvalidNumber) }
         self.mode = ScanMode.Idle
         let span = JsonSpan { offset: self.tokenStart, length: self.offset - self.tokenStart }
-        valueStarted(self)
+        valueStarted(&mut self)
         return emitted(JsonToken.Number { span: move span }, index, fragmentStart)
       }
 
       if self.mode == ScanMode.Literal {
         if byte != literalByte(self.literalKind, self.literalIndex) {
-          return failed(self, JsonReason.UnexpectedByte, self.offset)
+          return failed(&mut self, JsonReason.UnexpectedByte)
         }
         self.literalIndex = self.literalIndex + 1
-        consume(self, &mut index)
+        consume(&mut self, &mut index)
         if self.literalIndex == literalLength(self.literalKind) {
           self.mode = ScanMode.Idle
-          valueStarted(self)
+          valueStarted(&mut self)
           if self.literalKind == 1 { return emitted(JsonToken.True, index, fragmentStart) }
           if self.literalKind == 2 { return emitted(JsonToken.False, index, fragmentStart) }
           return emitted(JsonToken.Null, index, fragmentStart)
@@ -544,48 +557,48 @@ impl JsonScanState {
       }
 
       if isWhitespace(byte) {
-        consume(self, &mut index)
+        consume(&mut self, &mut index)
         continue
       }
       fragmentStart = index
       if self.depth == usize.ZERO && self.rootStarted {
-        return failed(self, JsonReason.TrailingContent, self.offset)
+        return failed(&mut self, JsonReason.TrailingContent)
       }
-      let mut expected = 0
+      let mut expected: u8 = 0
       if self.depth > usize.ZERO { expected = self.stack[self.depth - usize.ONE] }
       if expected == ARRAY_VALUE || expected == OBJECT_COMMA {
         if byte == 44 {
           if expected == ARRAY_VALUE { self.stack[self.depth - usize.ONE] = ARRAY_COMMA }
           else { self.stack[self.depth - usize.ONE] = OBJECT_KEY }
-          consume(self, &mut index)
+          consume(&mut self, &mut index)
           return emitted(JsonToken.ValueSeparator, index, fragmentStart)
         }
       }
       if expected == OBJECT_COLON {
-        if byte != 58 { return failed(self, JsonReason.UnexpectedByte, self.offset) }
+        if byte != 58 { return failed(&mut self, JsonReason.UnexpectedByte) }
         self.stack[self.depth - usize.ONE] = OBJECT_VALUE
-        consume(self, &mut index)
+        consume(&mut self, &mut index)
         return emitted(JsonToken.KeySeparator, index, fragmentStart)
       }
       if expected == ARRAY_FIRST || expected == ARRAY_VALUE {
         if byte == 93 {
           self.depth = self.depth - usize.ONE
-          consume(self, &mut index)
+          consume(&mut self, &mut index)
           return emitted(JsonToken.ArrayEnd, index, fragmentStart)
         }
       }
       if expected == OBJECT_FIRST || expected == OBJECT_COMMA {
         if byte == 125 {
           self.depth = self.depth - usize.ONE
-          consume(self, &mut index)
+          consume(&mut self, &mut index)
           return emitted(JsonToken.ObjectEnd, index, fragmentStart)
         }
       }
       if expected == ARRAY_VALUE || expected == OBJECT_COMMA || expected == OBJECT_COLON {
-        return failed(self, JsonReason.UnexpectedByte, self.offset)
+        return failed(&mut self, JsonReason.UnexpectedByte)
       }
       if expected == OBJECT_FIRST || expected == OBJECT_KEY {
-        if byte != 34 { return failed(self, JsonReason.UnexpectedByte, self.offset) }
+        if byte != 34 { return failed(&mut self, JsonReason.UnexpectedByte) }
       }
       if byte == 34 {
         self.tokenStart = self.offset
@@ -594,19 +607,19 @@ impl JsonScanState {
         self.escaped = false
         self.utf8Remaining = 0
         self.pendingHigh = false
-        consume(self, &mut index)
+        consume(&mut self, &mut index)
         continue
       }
       if expected == OBJECT_FIRST || expected == OBJECT_KEY {
-        return failed(self, JsonReason.UnexpectedByte, self.offset)
+        return failed(&mut self, JsonReason.UnexpectedByte)
       }
       if byte == 123 || byte == 91 {
-        if self.depth == MAX_DEPTH { return failed(self, JsonReason.DepthExceeded, self.offset) }
-        valueStarted(self)
+        if self.depth == MAX_DEPTH { return failed(&mut self, JsonReason.DepthExceeded) }
+        valueStarted(&mut self)
         if byte == 123 { self.stack[self.depth] = OBJECT_FIRST }
         else { self.stack[self.depth] = ARRAY_FIRST }
         self.depth = self.depth + usize.ONE
-        consume(self, &mut index)
+        consume(&mut self, &mut index)
         if byte == 123 { return emitted(JsonToken.ObjectBegin, index, fragmentStart) }
         return emitted(JsonToken.ArrayBegin, index, fragmentStart)
       }
@@ -616,7 +629,7 @@ impl JsonScanState {
         if byte == 45 { self.numberMode = NumberMode.Minus }
         else if byte == 48 { self.numberMode = NumberMode.Zero }
         else { self.numberMode = NumberMode.Integer }
-        consume(self, &mut index)
+        consume(&mut self, &mut index)
         continue
       }
       if byte == 116 || byte == 102 || byte == 110 {
@@ -625,23 +638,23 @@ impl JsonScanState {
         else if byte == 102 { self.literalKind = 2 }
         else { self.literalKind = 3 }
         self.literalIndex = 1
-        consume(self, &mut index)
+        consume(&mut self, &mut index)
         continue
       }
-      return failed(self, JsonReason.UnexpectedByte, self.offset)
+      return failed(&mut self, JsonReason.UnexpectedByte)
     }
     if !final { return needMore(index, fragmentStart) }
     if self.mode == ScanMode.Number {
       if !numberCanEnd(self.numberMode) {
-        return failed(self, JsonReason.UnexpectedEnd, self.offset)
+        return failed(&mut self, JsonReason.UnexpectedEnd)
       }
       self.mode = ScanMode.Idle
       let span = JsonSpan { offset: self.tokenStart, length: self.offset - self.tokenStart }
-      valueStarted(self)
+      valueStarted(&mut self)
       return emitted(JsonToken.Number { span: move span }, index, fragmentStart)
     }
     if self.mode != ScanMode.Idle || self.depth != usize.ZERO || !self.rootStarted {
-      return failed(self, JsonReason.UnexpectedEnd, self.offset)
+      return failed(&mut self, JsonReason.UnexpectedEnd)
     }
     return ended(index)
   }
@@ -657,18 +670,24 @@ impl<'input> JsonScanner<'input> {
   pub fn next(self: &mut JsonScanner<'input>) -> Result<JsonToken, JsonError> {
     let remaining = Slice.view<u8>(self.input, self.cursor, self.input.length - self.cursor)
     let result = JsonScanState.step(&mut self.state, remaining, true)
-    return match move result {
+    match move result {
       Result<JsonScanStep, JsonError>.Failure { error } => {
-        Result.failResult<JsonToken, JsonError>(move error)
+        return Result.failResult<JsonToken, JsonError>(move error)
       }
       Result<JsonScanStep, JsonError>.Success { value } => {
         self.cursor = self.cursor + value.consumed
-        return match move value.event {
-          JsonScanEvent.Token { token } => Result.succeed<JsonToken, JsonError>(move token)
-          JsonScanEvent.EndOfInput => Result.succeed<JsonToken, JsonError>(JsonToken.EndOfInput)
-          JsonScanEvent.NeedMore => Result.failResult<JsonToken, JsonError>(
-            errorAt(JsonReason.UnexpectedEnd, self.cursor),
-          )
+        match move value.event {
+          JsonScanEvent.Token { token } => {
+            return Result.succeed<JsonToken, JsonError>(move token)
+          }
+          JsonScanEvent.EndOfInput => {
+            return Result.succeed<JsonToken, JsonError>(JsonToken.EndOfInput)
+          }
+          JsonScanEvent.NeedMore => {
+            return Result.failResult<JsonToken, JsonError>(
+              errorAt(JsonReason.UnexpectedEnd, self.cursor),
+            )
+          }
         }
       }
     }

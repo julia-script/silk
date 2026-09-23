@@ -55,6 +55,7 @@ import { httpContentAcceptanceSource } from './httpContentAcceptance.js'
 import { httpServerAcceptanceSource } from './httpServerAcceptance.js'
 import { websocketUpgradeAcceptanceSource } from './websocketUpgradeAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
+import { jsonScannerAcceptanceSource } from './jsonScannerAcceptance.js'
 import { httpRequestAcceptanceSource } from './httpRequestAcceptance.js'
 import { httpClientOwnershipAcceptanceSource } from './httpClientOwnershipAcceptance.js'
 import {
@@ -6567,6 +6568,11 @@ pub fn main() -> i32 { return run Effect.catchAll(verify(), recover) }`,
   {
     name: 'base64-rfc4648',
     source: base64AcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'json-scanner',
+    source: jsonScannerAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
