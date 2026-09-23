@@ -6,8 +6,8 @@
 //!
 //! # Details
 //! Each decode consumes one JSON value from a slice scanner. The caller checks for end of input.
-//! Integer and Boolean values support all three contracts. Floating-point values decode, but
-//! they do not serialize until finite-number rendering is available.
+//! Integer, Boolean, and finite floating-point values support all three contracts. Nonfinite
+//! floating-point values fail with `JsonError` before any bytes are written.
 
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.f32
@@ -15,6 +15,7 @@ import silk.f64
 import silk.format { Format, ParseError, NotANumber, OutOfRange }
 import silk.json_output { JsonOptions, JsonOutput }
 import silk.json_scanner { JsonError, JsonReason, JsonScanner, JsonToken }
+import silk.option { Option }
 import silk.result { Result }
 import silk.writer { Writer, WriterError }
 
@@ -347,9 +348,20 @@ impl Deserialize for f32 {
   }
 }
 
-// task 8: impl Serialize for f32 uses
-// effect fn serialize(self: &Self, options: &JsonOptions)
-//   -> () ! JsonError | WriterError ? &mut Writer.
+impl Serialize for f32 {
+  effect fn serialize(self: &Self, options: &JsonOptions)
+    -> () ! JsonError | WriterError ? &mut Writer {
+    if !f32.isFinite(self.*) {
+      fail JsonError {
+        reason: JsonReason.InvalidNumber,
+        offset: Option.none<usize>(),
+        required: Option.none<usize>(),
+        available: Option.none<usize>(),
+      }
+    }
+    return run Format.display<f32>(self)
+  }
+}
 
 impl Decode for f64 {
   fn decode(scanner: &mut JsonScanner) -> Result<Self, JsonError> {
@@ -373,9 +385,20 @@ impl Deserialize for f64 {
   }
 }
 
-// task 8: impl Serialize for f64 uses
-// effect fn serialize(self: &Self, options: &JsonOptions)
-//   -> () ! JsonError | WriterError ? &mut Writer.
+impl Serialize for f64 {
+  effect fn serialize(self: &Self, options: &JsonOptions)
+    -> () ! JsonError | WriterError ? &mut Writer {
+    if !f64.isFinite(self.*) {
+      fail JsonError {
+        reason: JsonReason.InvalidNumber,
+        offset: Option.none<usize>(),
+        required: Option.none<usize>(),
+        available: Option.none<usize>(),
+      }
+    }
+    return run Format.display<f64>(self)
+  }
+}
 
 impl<'a> Serialize for string<'a> {
   effect fn serialize(self: &Self, options: &JsonOptions)
