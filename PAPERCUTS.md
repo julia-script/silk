@@ -113,3 +113,6 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
   `node_modules`, then registry DNS failures left `.bin` missing · Stop the install, move the
   incomplete directory aside, link the prepared main checkout's `node_modules`, and invoke its
   binaries directly for focused local checks · compiler CI
+- 2026-09-23 · The codebase-memory index worker refused this worktree because another generation
+  was active, so graph discovery could not start · Inspect its log, then use targeted source reads
+  for the workflow and report script until indexing is available · compiler CI
