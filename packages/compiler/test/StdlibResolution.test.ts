@@ -610,6 +610,7 @@ it.effect('resolves standard-library imports without vendoring source', () =>
         'silk/raw_buffer',
         'silk/reflect',
         'silk/result',
+        'silk/slice',
         'silk/slot',
         'silk/static_sequence',
         'silk/static_text',
