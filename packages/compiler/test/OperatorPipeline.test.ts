@@ -14,6 +14,34 @@ const pipelineSource = 'import silk.i32\npub fn main() -> i32 { return 2 + 3 * 4
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/operator.${name}`, import.meta.url), 'utf8')
 
+const normalizeMirSourceSpans = (mir: string): string =>
+  mir
+    .replace(/(?<=\bavailable )\[\d+, \d+\)/g, '[source span]')
+    .replace(/ \[\d+, \d+\)(?=(?: generated)?$)/gm, ' [source span]')
+
+it('normalizes MIR source spans while retaining operations and provenance', () => {
+  const mir =
+    'usize-literal 20 bits=64 available [35266, 35268)\n' +
+    'fn sample.main params=0 locals=4 -> i32 entry=r0\n' +
+    '  r0 operation:\n' +
+    '    %3 = multiply %1, %2 : i32 [50, 55) generated\n' +
+    '    return %3 [50, 55)\n'
+  const expected = normalizeMirSourceSpans(mir)
+
+  assert.strictEqual(
+    normalizeMirSourceSpans(
+      mir.replace('[35266, 35268)', '[37266, 37268)').replaceAll('[50, 55)', '[70, 75)'),
+    ),
+    expected,
+  )
+  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace('multiply', 'add')), expected)
+  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace('%1, %2', '%1, %0')), expected)
+  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace('entry=r0', 'entry=r1')), expected)
+  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace('return %3', 'return %2')), expected)
+  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace(' generated', '')), expected)
+  assert.notStrictEqual(normalizeMirSourceSpans(mir.replace('bits=64', 'bits=32')), expected)
+})
+
 it.effect('lowers negation to generated zero plus source-authored trapping subtraction', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
@@ -47,7 +75,10 @@ it.effect('pins one operator pipeline through canonical TIR, MIR, and LLVM', () 
     const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
 
     assert.strictEqual(Tir.encode(Analysis.rootAnalysis(snapshot).tir), golden('tir.txt'))
-    assert.strictEqual(MirEncoding.encode(Analysis.loweredMir(snapshot)), golden('mir.txt'))
+    assert.strictEqual(
+      normalizeMirSourceSpans(MirEncoding.encode(Analysis.loweredMir(snapshot))),
+      golden('mir.txt'),
+    )
     assert.strictEqual(artifact.ir, golden('ll.txt'))
     assert.strictEqual(
       `${createHash('sha256').update(artifact.bitcode).digest('hex')}\n`,
