@@ -4,20 +4,27 @@
 //!
 //! This module is an ordinary Silk application selected by `silk test`. It discovers tests from
 //! the compilation request, applies runtime-only filters, invokes matching tests sequentially, and
-//! returns process status 0, 1, or 2. Equal fingerprints never skip execution.
+//! returns process status 0, 1, or 2. Its host plan is validated before any test body runs.
 
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.bytes { Bytes }
 import silk.effect { Effect }
+import silk.filesystem { DirectoryInfo, FileError, FileInfo, FileSystem, Path }
 import silk.format { Format }
 import silk.host_input { HostInput, HostInputError }
 import silk.monotonic_clock { MonotonicClock }
+import silk.os_filesystem { OsFileSystem }
 import silk.os_monotonic_clock { OsMonotonicClock }
 import silk.os_writer { StdoutWriter }
 import silk.result { Result }
-import silk.string { InvalidUtf8 }
+import silk.sha2 { Sha256 }
+import silk.string { InvalidUtf8, String }
 import silk.system_clock { Instant, SystemClock }
+import silk.test_exchange as TestExchange
 import silk.testing { Testing }
+import silk.u32
+import silk.u64
+import silk.u8
 import silk.vector { Vector }
 import silk.writer { Writer, WriterError }
 import silk.usize
@@ -84,53 +91,171 @@ effect fn writeResult(passed: bool, nanoseconds: i64) -> () ! WriterError ? &mut
   return run Writer.writeString("\n")
 }
 
-effect fn runSelected<'file, 'name>(fileFilter: string<'file>, nameFilter: string<'name>) -> i32
-! WriterError
-? &mut Writer {
-  let mut discovered = usize.ZERO
-  let mut selected = usize.ZERO
-  let mut passed = usize.ZERO
-  let mut failed = usize.ZERO
+fn discoveredCount() -> u64 {
+  let mut discovered: u64 = 0
+  static for descriptor in Intrinsic.tests() { discovered = discovered + 1 }
+  return discovered
+}
+
+fn catalogDigest() -> [u8; 32] {
+  let mut state = Sha256.make()
+  let mut ordinal: u64 = 0
+  static for descriptor in Intrinsic.tests() {
+    let identity = Intrinsic.testInfo(descriptor).identity
+    TestExchange.updateCatalogDigest(&mut state, ordinal, String.utf8Bytes(identity))
+    ordinal = ordinal + 1
+  }
+  return state.finish()
+}
+
+fn validatePlan(bytes: &[u8], discovered: u64) -> i32 {
+  let mut plan = TestExchange.openPlan(bytes)
+  if TestExchange.isPerTest(&plan) {
+    if !TestExchange.beginPerTest(&mut plan, discovered) { return 11 }
+    let mut ordinal: u64 = 0
+    static for descriptor in Intrinsic.tests() {
+      let identity = Intrinsic.testInfo(descriptor).identity
+      let entry = TestExchange.readEntry(&mut plan, ordinal, String.utf8Bytes(identity))
+      drop entry
+      if TestExchange.failed(&plan) { return 12 }
+      ordinal = ordinal + 1
+    }
+    if TestExchange.finishPerTest(&mut plan) { return 0 }
+    return 13
+  }
+  if TestExchange.isUncached(&plan) {
+    let digest = catalogDigest()
+    if TestExchange.validateUncached(&mut plan, &digest, discovered) { return 0 }
+    return 21
+  }
+  return 1
+}
+
+fn selectedCount<'file, 'name>(fileFilter: string<'file>, nameFilter: string<'name>) -> u64 {
+  let mut selected: u64 = 0
+  static for descriptor in Intrinsic.tests() {
+    if Testing.matches(
+      Intrinsic.testInfo(descriptor).path,
+      Intrinsic.testInfo(descriptor).name,
+      fileFilter,
+      nameFilter,
+    ) { selected = selected + 1 }
+  }
+  return selected
+}
+
+effect fn runSelected<'file, 'name>(
+  fileFilter: string<'file>,
+  nameFilter: string<'name>,
+  planBytes: &[u8],
+  resultPath: &Path,
+) -> i32
+! OutOfMemoryError | FileError | WriterError
+? &mut Allocator | &mut FileSystem | &mut Writer {
+  let discovered = discoveredCount()
+  if validatePlan(planBytes, discovered) != 0 { return 2 }
+  let opened = TestExchange.openPlan(planBytes)
+  let perTest = TestExchange.isPerTest(&opened)
+  drop opened
+  let selected = selectedCount(fileFilter, nameFilter)
+  let mut receipt = run TestExchange.beginReceipt(planBytes, perTest, selected)
+  let mut plan = TestExchange.openPlan(planBytes)
+  if perTest {
+    let began = TestExchange.beginPerTest(&mut plan, discovered)
+    drop began
+  }
+  let mut ordinal: u64 = 0
+  let mut cached: u64 = 0
+  let mut executed: u64 = 0
+  let mut passed: u64 = 0
+  let mut failed: u64 = 0
   let mut clock = OsMonotonicClock.make()
   let started = run MonotonicClock.now()
     |> Effect.provideMut<MonotonicClock>(&mut clock)
   static for descriptor in Intrinsic.tests() {
-    discovered = discovered + usize.ONE
+    let declaration = String.utf8Bytes(Intrinsic.testInfo(descriptor).identity)
+    let entry = TestExchange.readEntry(&mut plan, ordinal, declaration)
     if Testing.matches(
       Intrinsic.testInfo(descriptor).path,
       Intrinsic.testInfo(descriptor).name,
       fileFilter,
       nameFilter,
     ) {
-      selected = selected + usize.ONE
       let module = Intrinsic.testInfo(descriptor).module
       let name = Intrinsic.testInfo(descriptor).name
       let identity = .{module: module, name: name}
       run Format.format("  {module}::{name}\n", &identity)
-      let body = Intrinsic.testFunction(descriptor)
-      let testStarted = run MonotonicClock.now()
-        |> Effect.provideMut<MonotonicClock>(&mut clock)
-      let value = body()
-      let provider = selectOutcome(&value)
-      let ok = completeTest(move value, move provider)
-      let testFinished = run MonotonicClock.now()
-        |> Effect.provideMut<MonotonicClock>(&mut clock)
-      run writeResult(ok, elapsedNanoseconds(&testStarted, &testFinished))
-      if ok { passed = passed + usize.ONE } else { failed = failed + usize.ONE }
+      if perTest && TestExchange.cached(&entry) {
+        run Writer.writeString("    CACHED\n")
+        run TestExchange.appendResult(
+          &mut receipt,
+          ordinal,
+          declaration,
+          TestExchange.executionIdentity(&entry),
+          0,
+        )
+        cached = cached + 1
+        passed = passed + 1
+      } else {
+        let body = Intrinsic.testFunction(descriptor)
+        let testStarted = run MonotonicClock.now()
+          |> Effect.provideMut<MonotonicClock>(&mut clock)
+        let value = body()
+        let provider = selectOutcome(&value)
+        let ok = completeTest(move value, move provider)
+        let testFinished = run MonotonicClock.now()
+          |> Effect.provideMut<MonotonicClock>(&mut clock)
+        run writeResult(ok, elapsedNanoseconds(&testStarted, &testFinished))
+        executed = executed + 1
+        if ok { passed = passed + 1 } else { failed = failed + 1 }
+        if perTest {
+          let mut disposition: u8 = 2
+          if ok { disposition = 1 }
+          run TestExchange.appendResult(
+            &mut receipt,
+            ordinal,
+            declaration,
+            TestExchange.executionIdentity(&entry),
+            disposition,
+          )
+        }
+      }
     }
+    drop entry
+    ordinal = ordinal + 1
+  }
+  let summary = .{
+    discovered: discovered,
+    selected: selected,
+    cached: cached,
+    executed: executed,
+    passed: passed,
+    failed: failed,
   }
   let finished = run MonotonicClock.now()
     |> Effect.provideMut<MonotonicClock>(&mut clock)
-  let summary = .{discovered: discovered, selected: selected, passed: passed, failed: failed}
   run Writer.writeString("\n")
   run Format.format(
-    "Tests  {passed} passed, {failed} failed ({selected} selected, {discovered} discovered)\n",
+    "Tests  {passed} passed, {failed} failed ({cached} cached, {executed} executed, {selected} selected, {discovered} discovered)\n",
     &summary,
   )
   run Writer.writeString("Time   ")
   run writeDuration(elapsedNanoseconds(&started, &finished))
   run Writer.writeString("\n")
-  if failed == usize.ZERO { return 0 }
+  let mut status: u32 = 1
+  if failed == 0 { status = 0 }
+  let bytes = run TestExchange.finishReceipt(
+    move receipt,
+    discovered,
+    selected,
+    cached,
+    executed,
+    passed,
+    failed,
+    status,
+  )
+  run FileSystem.writeFile(resultPath, Bytes.asSlice(&bytes))
+  if status == 0 { return 0 }
   return 1
 }
 
@@ -148,9 +273,12 @@ fn argumentOrEmpty<'arguments>(
   return argumentText(arguments, index)
 }
 
-effect fn executeArguments<'arguments>(values: &'arguments [Bytes]) -> i32 ! WriterError {
+effect fn executeArguments<'arguments>(values: &'arguments [Bytes]) -> i32
+! FileError | OutOfMemoryError | WriterError {
   let mut fileIndex = usize.ZERO
   let mut nameIndex = usize.ZERO
+  let mut planIndex = usize.ZERO
+  let mut resultIndex = usize.ZERO
   let mut index = usize.ONE
   while index < values.length {
     let option = match move argumentText(values, index) {
@@ -164,7 +292,15 @@ effect fn executeArguments<'arguments>(values: &'arguments [Bytes]) -> i32 ! Wri
       if Intrinsic.stringEqualsExact(option, "--filter") {
         nameIndex = index + usize.ONE
       } else {
-        return 2
+        if Intrinsic.stringEqualsExact(option, "--silk-test-plan") {
+          planIndex = index + usize.ONE
+        } else {
+          if Intrinsic.stringEqualsExact(option, "--silk-test-result") {
+            resultIndex = index + usize.ONE
+          } else {
+            return 2
+          }
+        }
       }
     }
     index = index + 2
@@ -177,13 +313,42 @@ effect fn executeArguments<'arguments>(values: &'arguments [Bytes]) -> i32 ! Wri
     Result<string, InvalidUtf8>.Success { value } => move value
     Result<string, InvalidUtf8>.Failure { error } => { drop error return 2 }
   }
+  if planIndex == usize.ZERO || resultIndex == usize.ZERO { return 2 }
+  let planText = match move argumentText(values, planIndex) {
+    Result<string, InvalidUtf8>.Success { value } => move value
+    Result<string, InvalidUtf8>.Failure { error } => { drop error return 2 }
+  }
+  let resultText = match move argumentText(values, resultIndex) {
+    Result<string, InvalidUtf8>.Success { value } => move value
+    Result<string, InvalidUtf8>.Failure { error } => { drop error return 2 }
+  }
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut fileSystem = run OsFileSystem.make(b"/")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let planPath = run Path.make(planText)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let resultPath = run Path.make(resultText)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let metadata = run FileSystem.stat(&planPath)
+    |> Effect.provideMut<FileSystem>(&mut fileSystem)
+  let planLength = match move metadata {
+    FileInfo { byteLength } => byteLength
+    DirectoryInfo {} => usize.MAX
+  }
+  if planLength > 16777216 { return 2 }
+  let reading = FileSystem.readFile(&planPath)
+    |> Effect.provideMut<FileSystem>(&mut fileSystem)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let planBytes = run reading
   let mut writer = StdoutWriter.make()
-  return run runSelected(fileFilter, nameFilter)
+  return run runSelected(fileFilter, nameFilter, Bytes.asSlice(&planBytes), &resultPath)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+    |> Effect.provideMut<FileSystem>(&mut fileSystem)
     |> Effect.provideMut<Writer>(&mut writer)
 }
 
 effect fn execute() -> i32
-! HostInputError | OutOfMemoryError | WriterError
+! FileError | HostInputError | OutOfMemoryError | WriterError
 ? &mut HostInput {
   let mut allocator = Allocator.systemAllocatorProvider()
   let collected = HostInput.arguments()

@@ -22,6 +22,11 @@ const filter = Flag.string('filter').pipe(
   Flag.optional,
 )
 
+const noCache = Flag.boolean('no-cache').pipe(
+  Flag.withDescription('Execute selected tests without reading or writing persistent results.'),
+  Flag.withDefault(false),
+)
+
 export const command = Command.make(
   'test',
   {
@@ -35,6 +40,7 @@ export const command = Command.make(
     root,
     file,
     filter,
+    noCache,
   },
   Effect.fnUntraced(function* (config) {
     const options = ProjectOptions.resolve({
@@ -56,6 +62,7 @@ export const command = Command.make(
         ...(Option.isNone(config.root) ? {} : { root: config.root.value }),
         ...(Option.isNone(config.file) ? {} : { file: config.file.value }),
         ...(Option.isNone(config.filter) ? {} : { filter: config.filter.value }),
+        cacheResults: !config.noCache,
       }),
     )
   }),

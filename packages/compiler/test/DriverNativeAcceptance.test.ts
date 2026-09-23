@@ -1,10 +1,21 @@
 import * as Layer from 'effect/Layer'
 import { NodeServices } from '@effect/platform-node'
+import * as CliProgram from '../../cli/src/Program.js'
+import * as CliTestExchange from '../../cli/src/TestExchange.js'
 import type * as RuntimeComponent from '../src/RuntimeComponent.js'
 import * as ArtifactComposition from '../src/ArtifactComposition.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { platform, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -34,6 +45,7 @@ import { websocketUpgradePortableAcceptanceSource } from './support/websocketUpg
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
 import { networkAddressResolutionCorpusProgram } from './support/networkAddressResolutionAcceptance.js'
 import * as Driver from './support/TestDriver.js'
+import type * as TestExecution from '../src/TestExecution.js'
 
 const defaultClang = (): string => {
   if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
@@ -57,15 +69,131 @@ const toolchain: NativeToolchain.Toolchain = Object.freeze({
 const encoder = new TextEncoder()
 const ascii = (value: string): Uint8Array => encoder.encode(value)
 
-const runCompiled = Effect.fnUntraced(function* (path: string, run: NativeRun = {}) {
+const runnerPlanMagic = ascii('SLKTPLN1')
+const runnerReceiptMagic = ascii('SLKTRCP1')
+
+const concatBytes = (...parts: ReadonlyArray<Uint8Array>): Uint8Array => {
+  const bytes = new Uint8Array(parts.reduce((length, part) => length + part.length, 0))
+  let offset = 0
+  for (const part of parts) {
+    bytes.set(part, offset)
+    offset += part.length
+  }
+  return bytes
+}
+
+const runnerU32 = (value: number): Uint8Array => {
+  const bytes = new Uint8Array(4)
+  new DataView(bytes.buffer).setUint32(0, value, true)
+  return bytes
+}
+
+const runnerU64 = (value: bigint): Uint8Array => {
+  const bytes = new Uint8Array(8)
+  new DataView(bytes.buffer).setBigUint64(0, value, true)
+  return bytes
+}
+
+const runnerText = (value: string): Uint8Array => {
+  const bytes = encoder.encode(value)
+  return concatBytes(runnerU64(BigInt(bytes.length)), bytes)
+}
+
+const runnerPerTestPlan = (
+  manifest: TestExecution.Manifest,
+  cachedNames: ReadonlySet<string> = new Set(),
+): Uint8Array =>
+  concatBytes(
+    runnerPlanMagic,
+    runnerU32(1),
+    runnerU32(1),
+    Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    runnerU64(BigInt(manifest.entries.length)),
+    ...manifest.entries.map((entry, ordinal) => {
+      const execution =
+        entry.eligibility._tag === 'Eligible' ? entry.eligibility.identity : undefined
+      return concatBytes(
+        runnerU64(BigInt(ordinal)),
+        runnerText(entry.test.identity),
+        runnerText(execution ?? ''),
+        Uint8Array.of(cachedNames.has(entry.test.name) && execution !== undefined ? 1 : 0),
+      )
+    }),
+  )
+
+const runnerUncachedPlan = Effect.fnUntraced(function* (manifest: TestExecution.Manifest) {
+  const plan: CliTestExchange.UncachedPlan = {
+    _tag: 'Uncached',
+    nonce: Uint8Array.from({ length: 32 }, (_, index) => 32 - index),
+    catalogDigest: yield* CliTestExchange.catalogDigest(
+      manifest.entries.map((entry) => entry.test.identity),
+    ),
+    discovered: BigInt(manifest.entries.length),
+  }
+  return { plan, bytes: yield* CliTestExchange.encodePlan(plan) }
+})
+
+interface RunnerReceipt {
+  readonly mode: number
+  readonly dispositions: ReadonlyArray<number>
+  readonly counts: ReadonlyArray<bigint>
+  readonly status: number
+}
+
+const runnerReceipt = (path: string, plan: Uint8Array): RunnerReceipt => {
+  const bytes = readFileSync(path)
+  assert.deepEqual(bytes.subarray(0, 8), runnerReceiptMagic)
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  assert.strictEqual(view.getUint32(8, true), 1)
+  const mode = view.getUint32(12, true)
+  assert.deepEqual(bytes.subarray(16, 48), plan.subarray(16, 48))
+  assert.deepEqual(bytes.subarray(48, 80), createHash('sha256').update(plan).digest())
+  let offset = 80
+  const dispositions: Array<number> = []
+  if (mode === 1) {
+    const selected = view.getBigUint64(offset, true)
+    offset += 8
+    for (let index = 0n; index < selected; index += 1n) {
+      offset += 8
+      const declarationLength = Number(view.getBigUint64(offset, true))
+      offset += 8 + declarationLength
+      const executionLength = Number(view.getBigUint64(offset, true))
+      offset += 8 + executionLength
+      dispositions.push(view.getUint8(offset))
+      offset += 1
+    }
+  }
+  const counts = [
+    view.getBigUint64(offset, true),
+    view.getBigUint64(offset + 8, true),
+    view.getBigUint64(offset + 16, true),
+    view.getBigUint64(offset + 24, true),
+    view.getBigUint64(offset + 32, true),
+    view.getBigUint64(offset + 40, true),
+  ]
+  const status = view.getUint32(offset + 48, true)
+  if (mode === 2) {
+    assert.strictEqual(bytes.length, 256)
+    assert.isTrue(bytes.subarray(offset + 52).every((value) => value === 0))
+  } else assert.strictEqual(offset + 52, bytes.length)
+  return { mode, dispositions, counts, status }
+}
+
+const runCompiled = Effect.fnUntraced(function* (
+  path: string,
+  run: NativeRun & { readonly timeout?: number } = {},
+) {
   return yield* Effect.sync(() =>
     run.closeStderr
       ? spawnSync(
           '/bin/sh',
           ['-c', 'exec 2>&-; exec "$@"', 'silk-native-corpus', path, ...(run.arguments ?? [])],
-          { encoding: 'utf8' },
+          { encoding: 'utf8', ...(run.timeout === undefined ? {} : { timeout: run.timeout }) },
         )
-      : spawnSync(path, run.arguments ?? [], { encoding: 'utf8' }),
+      : spawnSync(path, run.arguments ?? [], {
+          encoding: 'utf8',
+          ...(run.timeout === undefined ? {} : { timeout: run.timeout }),
+        }),
   )
 })
 
@@ -489,6 +617,8 @@ effect fn release(resource: &mut i32) -> () {
 
 fn choose(values: [i32; 1], index: usize) -> i32 { return values[index] }
 
+test fn cacheablePass() -> () {}
+
 test effect fn failsBeforeContinuation() -> () ! ExpectedFailure { fail ExpectedFailure {} }
 
 test effect fn cleanupExactlyOnce() -> () ! CleanupFailure {
@@ -512,6 +642,7 @@ test fn runsAfterFailure() -> () {
           {
             sourceModule: 'tests/Root',
             root: 'silk/test_runner',
+            cache: false,
             discovery: {
               root: 'tests/Root',
               sources: new Map([
@@ -525,13 +656,46 @@ test fn runsAfterFailure() -> () {
         )
         assert.strictEqual(outcome._tag, 'Compiled', Json.stringify(outcome))
         if (outcome._tag !== 'Compiled') return
+        const manifest = outcome.testManifest
+        assert.isDefined(manifest)
+        if (manifest === undefined) return
+        assert.strictEqual(manifest.entries.length, 5)
+        const cacheablePass = manifest.entries.find((entry) => entry.test.name === 'cacheablePass')
+        assert.strictEqual(
+          cacheablePass?.eligibility._tag,
+          'Eligible',
+          Json.stringify(cacheablePass),
+        )
 
-        const first = yield* runCompiled(outcome.path, {
-          arguments: ['--file', 'tests/Cases.silk'],
-        })
-        const second = yield* runCompiled(outcome.path, {
-          arguments: ['--file', 'tests/Cases.silk'],
-        })
+        let invocation = 0
+        const argumentsFor = (
+          plan: Uint8Array,
+          arguments_: ReadonlyArray<string>,
+        ): { readonly arguments: ReadonlyArray<string>; readonly resultPath: string } => {
+          invocation += 1
+          const runnerRoot = realpathSync(destinationRoot)
+          const planPath = join(runnerRoot, `runner-plan-${invocation}.bin`)
+          const resultPath = join(runnerRoot, `runner-result-${invocation}.bin`)
+          writeFileSync(planPath, plan)
+          rmSync(resultPath, { force: true })
+          return {
+            arguments: [
+              ...arguments_,
+              '--silk-test-plan',
+              planPath,
+              '--silk-test-result',
+              resultPath,
+            ],
+            resultPath,
+          }
+        }
+
+        const firstPlan = runnerPerTestPlan(manifest)
+        const firstInvocation = argumentsFor(firstPlan, ['--file', 'tests/Cases.silk'])
+        const first = yield* runCompiled(outcome.path, firstInvocation)
+        const cachedPlan = runnerPerTestPlan(manifest, new Set(['cacheablePass']))
+        const cachedInvocation = argumentsFor(cachedPlan, ['--file', 'tests/Cases.silk'])
+        const second = yield* runCompiled(outcome.path, cachedInvocation)
         assert.strictEqual(
           first.status,
           1,
@@ -552,9 +716,7 @@ test fn runsAfterFailure() -> () {
             stderr: second.stderr,
           }),
         )
-        const withoutDurations = (output: string) =>
-          output.replaceAll(/^(    (?:PASS|FAIL)  |Time   )(?:<1|\d+) (?:us|ms)$/gm, '$1<duration>')
-        assert.strictEqual(withoutDurations(second.stdout), withoutDurations(first.stdout))
+        assert.match(first.stdout, /  tests\/Cases::cacheablePass\n    PASS  (?:<1|\d+) (?:us|ms)/)
         assert.match(
           first.stdout,
           /  tests\/Cases::failsBeforeContinuation\n    FAIL  (?:<1|\d+) (?:us|ms)/,
@@ -567,35 +729,146 @@ test fn runsAfterFailure() -> () {
           first.stdout,
           /  tests\/Cases::runsAfterFailure\n    PASS  (?:<1|\d+) (?:us|ms)/,
         )
-        assert.include(first.stdout, 'Tests  2 passed, 1 failed (3 selected, 4 discovered)')
+        assert.include(
+          first.stdout,
+          'Tests  3 passed, 1 failed (0 cached, 4 executed, 4 selected, 5 discovered)',
+        )
+        assert.include(second.stdout, '  tests/Cases::cacheablePass\n    CACHED')
+        assert.notMatch(second.stdout, /tests\/Cases::cacheablePass\n    PASS/)
+        assert.include(
+          second.stdout,
+          'Tests  3 passed, 1 failed (1 cached, 3 executed, 4 selected, 5 discovered)',
+        )
         assert.match(first.stdout, /^Time   (?:<1|\d+) (?:us|ms)$/m)
+        assert.match(second.stdout, /^Time   (?:<1|\d+) (?:us|ms)$/m)
+        assert.deepEqual(runnerReceipt(firstInvocation.resultPath, firstPlan), {
+          mode: 1,
+          dispositions: [1, 1, 2, 1],
+          counts: [5n, 4n, 0n, 4n, 3n, 1n],
+          status: 1,
+        })
+        assert.deepEqual(runnerReceipt(cachedInvocation.resultPath, cachedPlan), {
+          mode: 1,
+          dispositions: [0, 1, 2, 1],
+          counts: [5n, 4n, 1n, 3n, 3n, 1n],
+          status: 1,
+        })
         assert.match(first.stderr, /ExpectedFailure/)
         assert.isBelow(
           first.stdout.indexOf('tests/Cases::failsBeforeContinuation'),
           first.stdout.indexOf('tests/Cases::runsAfterFailure'),
         )
 
-        const filtered = yield* runCompiled(outcome.path, {
-          arguments: ['--file', 'tests/Cases.silk', '--filter', 'CLEANUP'],
-        })
+        const filteredPlan = runnerPerTestPlan(manifest)
+        const filteredInvocation = argumentsFor(filteredPlan, [
+          '--file',
+          'tests/Cases.silk',
+          '--filter',
+          'CLEANUP',
+        ])
+        const filtered = yield* runCompiled(outcome.path, filteredInvocation)
         assert.strictEqual(filtered.status, 0, filtered.stderr)
-        assert.include(filtered.stdout, '  tests/Cases::cleanupExactlyOnce\n    PASS  ')
-        assert.include(filtered.stdout, 'Tests  1 passed, 0 failed (1 selected, 4 discovered)')
+        assert.match(
+          filtered.stdout,
+          /  tests\/Cases::cleanupExactlyOnce\n    PASS  (?:<1|\d+) (?:us|ms)/,
+        )
+        assert.include(
+          filtered.stdout,
+          'Tests  1 passed, 0 failed (0 cached, 1 executed, 1 selected, 5 discovered)',
+        )
+        assert.deepEqual(runnerReceipt(filteredInvocation.resultPath, filteredPlan).counts, [
+          5n,
+          1n,
+          0n,
+          1n,
+          1n,
+          0n,
+        ])
 
-        const empty = yield* runCompiled(outcome.path, {
-          arguments: ['--filter', 'does-not-exist'],
-        })
+        const emptyPlan = runnerPerTestPlan(manifest)
+        const emptyInvocation = argumentsFor(emptyPlan, ['--filter', 'does-not-exist'])
+        const empty = yield* runCompiled(outcome.path, emptyInvocation)
         assert.strictEqual(empty.status, 0, empty.stderr)
-        assert.include(empty.stdout, 'Tests  0 passed, 0 failed (0 selected, 4 discovered)')
+        assert.include(
+          empty.stdout,
+          'Tests  0 passed, 0 failed (0 cached, 0 executed, 0 selected, 5 discovered)',
+        )
+        assert.deepEqual(runnerReceipt(emptyInvocation.resultPath, emptyPlan).counts, [
+          5n,
+          0n,
+          0n,
+          0n,
+          0n,
+          0n,
+        ])
 
-        const malformed = yield* runCompiled(outcome.path, {
-          arguments: ['--unknown', 'value'],
+        const uncachedExchange = yield* runnerUncachedPlan(manifest).pipe(
+          Effect.provide(NodeServices.layer),
+        )
+        const hostSourceSeam = yield* CliProgram.runTest(outcome.path, uncachedExchange.plan, [
+          '--filter',
+          'does-not-exist',
+        ]).pipe(Effect.provide(NodeServices.layer))
+        assert.strictEqual(hostSourceSeam._tag, 'Completed')
+        if (hostSourceSeam._tag === 'Completed') {
+          assert.strictEqual(hostSourceSeam.status, 0)
+          assert.strictEqual(hostSourceSeam.receipt._tag, 'Uncached')
+          assert.deepEqual(hostSourceSeam.receipt.counts, {
+            discovered: 5n,
+            selected: 0n,
+            cached: 0n,
+            executed: 0n,
+            passed: 0n,
+            failed: 0n,
+          })
+        }
+        const uncachedPlan = uncachedExchange.bytes
+        const uncachedInvocation = argumentsFor(uncachedPlan, ['--file', 'tests/Cases.silk'])
+        const uncached = yield* runCompiled(outcome.path, uncachedInvocation)
+        assert.strictEqual(uncached.status, 1, uncached.stderr)
+        assert.include(
+          uncached.stdout,
+          'Tests  3 passed, 1 failed (0 cached, 4 executed, 4 selected, 5 discovered)',
+        )
+        assert.deepEqual(runnerReceipt(uncachedInvocation.resultPath, uncachedPlan), {
+          mode: 2,
+          dispositions: [],
+          counts: [5n, 4n, 0n, 4n, 3n, 1n],
+          status: 1,
         })
+
+        for (const [label, offset] of [
+          ['magic', 0],
+          ['version', 8],
+          ['mode', 12],
+          ['catalog', 48],
+          ['count', 80],
+          ['padding', 88],
+        ] as const) {
+          const damagedPlan = Uint8Array.from(uncachedPlan)
+          damagedPlan[offset] = (damagedPlan.at(offset) ?? 0) ^ 1
+          const damagedInvocation = argumentsFor(damagedPlan, [])
+          const damaged = yield* runCompiled(outcome.path, {
+            ...damagedInvocation,
+            timeout: 3_000,
+          })
+          assert.isUndefined(damaged.error, `${label} compact plan stalled`)
+          assert.strictEqual(damaged.signal, null, `${label} compact plan was terminated`)
+          assert.strictEqual(damaged.status, 2, `${label} compact plan did not reject`)
+          assert.strictEqual(damaged.stdout, '', `${label} compact plan ran test effects`)
+          assert.isFalse(existsSync(damagedInvocation.resultPath))
+        }
+
+        const malformedPlan = runnerPerTestPlan(manifest)
+        malformedPlan[0] = 0
+        const malformedInvocation = argumentsFor(malformedPlan, [])
+        const malformed = yield* runCompiled(outcome.path, malformedInvocation)
         assert.strictEqual(malformed.status, 2, malformed.stderr)
+        assert.isFalse(existsSync(malformedInvocation.resultPath))
 
-        const trapped = yield* runCompiled(outcome.path, {
-          arguments: ['--file', 'tests/Trap.silk'],
-        })
+        const trappedPlan = runnerPerTestPlan(manifest)
+        const trappedInvocation = argumentsFor(trappedPlan, ['--file', 'tests/Trap.silk'])
+        const trapped = yield* runCompiled(outcome.path, trappedInvocation)
         assert.strictEqual(
           trapped.signal !== null || (trapped.status !== null && trapped.status !== 0),
           true,
@@ -603,6 +876,7 @@ test fn runsAfterFailure() -> () {
         )
         assert.include(trapped.stdout, '  tests/Trap::fatalTrap')
         assert.notInclude(trapped.stdout, 'Tests  ')
+        assert.isFalse(existsSync(trappedInvocation.resultPath))
       }),
     ),
   120_000,
@@ -682,6 +956,7 @@ it.effect.each(selectedCorpus)(
           program.nativeSource ?? program.source,
           program.nativeImports,
           {
+            ...(program.name === 'test-exchange-binary-framing' ? { cache: false } : {}),
             ...(program.nativeComponents === undefined
               ? {}
               : { components: program.nativeComponents }),

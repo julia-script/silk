@@ -1191,11 +1191,16 @@ const residualExpression = (
         }
   }
   if (fact._tag === 'Constant') {
+    const constant =
+      fact.declaration.canonical._tag === 'Canonical'
+        ? { constant: fact.declaration.canonical.id }
+        : {}
     if (fact.value?._tag === 'Character')
       return {
         _tag: 'CharacterLiteral',
         value: fact.value.value,
         type: 'char',
+        ...constant,
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
       }
@@ -1204,6 +1209,7 @@ const residualExpression = (
         _tag: 'BooleanLiteral',
         value: fact.value.value,
         type: 'bool',
+        ...constant,
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
       }
@@ -1212,9 +1218,7 @@ const residualExpression = (
         _tag: 'IntegerLiteral',
         value: fact.value.value,
         type: fact.value.type,
-        ...(fact.declaration.canonical._tag === 'Canonical'
-          ? { constant: fact.declaration.canonical.id }
-          : {}),
+        ...constant,
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
       }
@@ -1224,6 +1228,7 @@ const residualExpression = (
         bits: fact.value.bits,
         spelling: fact.value.spelling,
         type: fact.value.type,
+        ...constant,
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
       }
@@ -1232,6 +1237,7 @@ const residualExpression = (
         _tag: 'StaticStringLiteral',
         data: fact.value.data,
         type: Type.string(Lifetime.staticLifetime),
+        ...constant,
         span: options.context.spanOf(fact.anchor),
         origin: Tir.authored(fact.anchor),
       }

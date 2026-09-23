@@ -29,6 +29,7 @@ import * as PhaseReport from '../src/PhaseReport.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
+import * as TestExecution from '../src/TestExecution.js'
 import { independentExecutionFinalizedDestroy, invalidGenericCorpus } from './support/corpus.js'
 import { ecdsaP256WasmSource } from './support/ecdsaP256Acceptance.js'
 import { p256WasmAcceptanceSource } from './support/p256Acceptance.js'
@@ -114,6 +115,170 @@ const expectedPhases = [
   'runtime',
   'link',
 ]
+
+it.effect('consumes a shorthand target when synthesizing the complete profile', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource(
+      'shorthand-target.ll',
+      'pub fn main() -> i32 { return 42 }',
+      {
+        compilation: {
+          root: 'memory/shorthand-target',
+          target: 'wasm32-unknown-unknown',
+        },
+        artifactKind: 'WebAssemblyModule',
+        stage: 'llvm-ir',
+      },
+    )
+
+    assert.strictEqual(outcome._tag, 'Compiled')
+  }),
+)
+
+it.effect('publishes a manifest and execution environment for a discovered-test executable', () =>
+  Effect.gen(function* () {
+    const root = 'memory/driver-tests'
+    const outcome = yield* compileSource(
+      'test-execution-manifest',
+      `test fn alpha() -> () {}
+test fn beta() -> () {}
+pub fn main() -> () {
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`,
+      {
+        compilation: {
+          root,
+          discovery: {
+            root,
+            sources: new Map([
+              [root, { ownership: 'Project', logicalPath: 'tests/driver-tests.silk' }],
+            ]),
+          },
+        },
+      },
+    )
+
+    assert.deepEqual(
+      outcome._tag === 'Rejected' ? outcome.diagnostics.map((diagnostic) => diagnostic.code) : [],
+      [],
+    )
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    assert.deepEqual(
+      outcome.testManifest?.entries.map((entry) => entry.test.name),
+      ['alpha', 'beta'],
+    )
+    assert.deepEqual(
+      outcome.testManifest?.entries.map((entry) => entry.eligibility._tag),
+      ['Eligible', 'Eligible'],
+    )
+
+    const plan = outcome.linkPlan
+    const bindingsIdentity = outcome.nativeBindings?.identity
+    assert.isDefined(plan)
+    assert.isDefined(bindingsIdentity)
+    if (plan === undefined || bindingsIdentity === undefined) return
+    const generated = plan.inputs
+      .filter((input) => input.path.includes('silk-driver-'))
+      .map((input) => input.path)
+    const external = plan.inputs.find((input) => !generated.includes(input.path))
+    assert.isDefined(external)
+    if (external === undefined) return
+    const native = TestExecution.nativeIdentity(plan, generated, bindingsIdentity, 'helper-policy')
+    const generatedChanged = {
+      ...plan,
+      inputs: plan.inputs.map((input) =>
+        generated.includes(input.path) ? { ...input, digest: `changed:${input.digest}` } : input,
+      ),
+    }
+    const externalChanged = {
+      ...plan,
+      inputs: plan.inputs.map((input) =>
+        input.path === external.path ? { ...input, digest: `changed:${input.digest}` } : input,
+      ),
+    }
+    assert.strictEqual(
+      TestExecution.nativeIdentity(generatedChanged, generated, bindingsIdentity, 'helper-policy'),
+      native,
+    )
+    assert.notStrictEqual(
+      TestExecution.nativeIdentity(externalChanged, generated, bindingsIdentity, 'helper-policy'),
+      native,
+    )
+    assert.notStrictEqual(
+      TestExecution.nativeIdentity(
+        {
+          ...plan,
+          supply: {
+            ...plan.supply,
+            target:
+              plan.supply.target.id === Target.aarch64AppleDarwin.id
+                ? Target.x8664UnknownLinuxGnu
+                : Target.aarch64AppleDarwin,
+          },
+        },
+        generated,
+        bindingsIdentity,
+        'helper-policy',
+      ),
+      native,
+    )
+    assert.notStrictEqual(
+      TestExecution.nativeIdentity(
+        {
+          ...plan,
+          supply: {
+            ...plan.supply,
+            compiler: { ...plan.supply.compiler, digest: 'changed-compiler' },
+          },
+        },
+        generated,
+        bindingsIdentity,
+        'helper-policy',
+      ),
+      native,
+    )
+    assert.notStrictEqual(
+      TestExecution.nativeIdentity(plan, generated, bindingsIdentity, 'changed-helper-policy'),
+      native,
+    )
+
+    const distribution = ToolchainIntegrity.installed()
+    const runtime = TestExecution.runtimeIdentity(distribution)
+    const runtimeComponent = distribution.components.find(
+      (component) => component.kind === 'RuntimeSupport',
+    )
+    const sourceComponent = distribution.components.find((component) => component.kind === 'Source')
+    assert.isDefined(runtimeComponent)
+    assert.isDefined(sourceComponent)
+    if (runtimeComponent === undefined || sourceComponent === undefined) return
+    assert.notStrictEqual(
+      TestExecution.runtimeIdentity({
+        ...distribution,
+        components: distribution.components.map((component) =>
+          component.id === runtimeComponent.id
+            ? { ...component, digest: 'changed-runtime' }
+            : component,
+        ),
+      }),
+      runtime,
+    )
+    assert.strictEqual(
+      TestExecution.runtimeIdentity({
+        ...distribution,
+        components: distribution.components.map((component) =>
+          component.id === sourceComponent.id
+            ? { ...component, digest: 'changed-source' }
+            : component,
+        ),
+      }),
+      runtime,
+    )
+  }),
+)
 
 it.effect(
   'forwards semantic persistence and bypasses it when compilation caching is disabled',

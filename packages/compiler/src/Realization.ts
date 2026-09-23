@@ -533,6 +533,7 @@ const discoverAndLowerEffect = Effect.fn('Realization.discoverAndLower')(functio
       frontend: self,
       composition: self.composition,
       profile: completion.profile,
+      instances,
       target: targetLayout.target,
       program,
       diagnostics: finalizedDiagnostics,
@@ -904,6 +905,7 @@ export type Preparation =
       readonly composition: ArtifactComposition.Resolved
       readonly artifactPlan?: ArtifactPlan.ArtifactPlan
       readonly profile: CompilationProfile.CompilationProfile
+      readonly instances: Instances.Discovery
       readonly target: Target.Target
       readonly program: Mir.Module
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>

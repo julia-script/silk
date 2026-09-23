@@ -1171,9 +1171,8 @@ pub effect fn appendHex(output: &mut Vector<u8>, digest: &[u8]) -> ()
 ///
 /// # Gotchas
 ///
-/// `compiler/src/main.silk` does not yet call this, because reaching `Lower.lower` from `main`
-/// aborts bootstrap instance discovery. The dump is exercised through `hir.LoweringCases` until
-/// that bootstrap defect is repaired; see `compiler/BUGS.md`.
+/// `compiler/src/main.silk` now calls this in `hir` mode after lowering the parsed module, so the
+/// CLI dump and `hir.LoweringCases` share the same fingerprint rendering path.
 pub effect fn writeFingerprints(module: &Module) -> () ! OutOfMemoryError | WriterError
 ? &mut Allocator | &mut Writer {
   run Writer.writeString("\nfingerprints ")

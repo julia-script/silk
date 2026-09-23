@@ -574,6 +574,10 @@
       "types": "./dist/TestDiscovery.d.ts",
       "import": "./dist/TestDiscovery.js"
     },
+    "./TestExecution": {
+      "types": "./dist/TestExecution.d.ts",
+      "import": "./dist/TestExecution.js"
+    },
     "./Tir": {
       "types": "./dist/Tir.d.ts",
       "import": "./dist/Tir.js"

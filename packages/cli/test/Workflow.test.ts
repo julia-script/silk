@@ -1,7 +1,10 @@
 import { existsSync } from 'node:fs'
+import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import * as Project from '@silklang/compiler/Project'
+import * as Storage from '@silklang/compiler/Storage'
+import type * as TestExecution from '@silklang/compiler/TestExecution'
 import * as Config from 'effect/Config'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
@@ -10,6 +13,8 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Stream from 'effect/Stream'
 import * as SourceSettlement from '../src/SourceSettlement.js'
+import * as TestExchange from '../src/TestExchange.js'
+import * as TestResult from '../src/TestResult.js'
 import * as Workflow from '../src/Workflow.js'
 import * as CompilerHost from './CompilerHost.js'
 import * as Timeouts from './timeouts.js'
@@ -89,6 +94,357 @@ const options = (workingDirectory: string): Workflow.ProjectSelection => ({
   workingDirectory,
   optimization: 'debug',
 })
+
+const executionIdentity = (ordinal: number): string => ordinal.toString(16).padStart(64, '0')
+
+const testEntry = (
+  ordinal: number,
+  eligibility: TestExecution.Eligibility,
+  declarationIdentity = `tests/Cases::test${ordinal}`,
+): TestExecution.Entry => ({
+  test: {
+    identity: declarationIdentity,
+    name: `test${ordinal}`,
+    module: 'tests/Cases',
+    path: 'tests/Cases.silk',
+    line: ordinal + 1,
+    column: 1,
+    fingerprint: `silk-test-v1:${ordinal}`,
+  },
+  eligibility,
+})
+
+const testManifest = (entries: ReadonlyArray<TestExecution.Entry>): TestExecution.Manifest => ({
+  _tag: 'TestExecutionManifest',
+  catalogIdentity: 'compiler-catalog-identity-is-not-the-exchange-digest',
+  environmentIdentity: 'environment',
+  entries,
+})
+
+const observedStorage = () => {
+  const memory = Storage.memoryService()
+  const reads: Array<string> = []
+  const publications: Array<string> = []
+  return {
+    reads,
+    publications,
+    service: Storage.Storage.of({
+      read: (address, maximumBytes) =>
+        Effect.sync(() => reads.push(address.key)).pipe(
+          Effect.andThen(memory.read(address, maximumBytes)),
+        ),
+      publish: (address, bytes, maximumBytes) =>
+        Effect.sync(() => publications.push(address.key)).pipe(
+          Effect.andThen(memory.publish(address, bytes, maximumBytes)),
+        ),
+    }),
+  }
+}
+
+const exchangeError = new TestExchange.ExchangeError({
+  operation: 'TestExchange.admitReceipt',
+  message: 'injected invalid receipt',
+  reason: { _tag: 'InvalidReceipt', detail: 'injected' },
+})
+
+const counts = {
+  discovered: 3n,
+  selected: 2n,
+  cached: 1n,
+  executed: 1n,
+  passed: 1n,
+  failed: 0n,
+} satisfies TestExchange.Counts
+
+it.effect(
+  'plans the full compiler manifest in catalog order and reuses eligible keys verbatim',
+  () =>
+    Effect.gen(function* () {
+      const observed = observedStorage()
+      const reused = executionIdentity(1)
+      const missing = executionIdentity(2)
+      yield* TestResult.publishPass(reused).pipe(
+        Effect.provideService(Storage.Storage, observed.service),
+      )
+      observed.reads.length = 0
+      observed.publications.length = 0
+      const prepared = yield* Workflow.prepareTestRun(
+        testManifest([
+          testEntry(0, { _tag: 'Eligible', identity: reused }),
+          testEntry(1, { _tag: 'Ineligible', reason: { _tag: 'MissingTestRoot' } }),
+          testEntry(2, { _tag: 'Eligible', identity: missing }),
+        ]),
+      ).pipe(Effect.provideService(Storage.Storage, observed.service))
+
+      assert.strictEqual(prepared.plan._tag, 'PerTest')
+      if (prepared.plan._tag !== 'PerTest') return
+      assert.deepStrictEqual(
+        prepared.plan.entries.map((entry) => ({
+          declarationIdentity: entry.declarationIdentity,
+          executionIdentity: entry.executionIdentity,
+          action: entry.action,
+        })),
+        [
+          {
+            declarationIdentity: 'tests/Cases::test0',
+            executionIdentity: reused,
+            action: 'Cached',
+          },
+          {
+            declarationIdentity: 'tests/Cases::test1',
+            executionIdentity: undefined,
+            action: 'Execute',
+          },
+          {
+            declarationIdentity: 'tests/Cases::test2',
+            executionIdentity: missing,
+            action: 'Execute',
+          },
+        ],
+      )
+      assert.deepStrictEqual(observed.reads, [reused, missing])
+      assert.deepStrictEqual(prepared.events, [])
+    }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('selects compact mode before result lookup for every overflow boundary', () =>
+  Effect.gen(function* () {
+    const observed = observedStorage()
+    const prepare = (manifest: TestExecution.Manifest) =>
+      Workflow.prepareTestRun(manifest).pipe(
+        Effect.provideService(Storage.Storage, observed.service),
+      )
+
+    const receiptOnlyOverflow = yield* prepare(
+      testManifest([
+        testEntry(0, { _tag: 'Eligible', identity: executionIdentity(0) }, 'x'.repeat(4124)),
+      ]),
+    )
+    assert.strictEqual(receiptOnlyOverflow.plan._tag, 'Uncached')
+    assert.deepStrictEqual(observed.reads, [])
+    if (receiptOnlyOverflow.plan._tag !== 'Uncached') return
+    const receiptOnlyCompleted = yield* Workflow.completeTestRun(receiptOnlyOverflow.plan, {
+      _tag: 'Completed',
+      status: 0,
+      receipt: {
+        _tag: 'Uncached',
+        nonce: receiptOnlyOverflow.plan.nonce,
+        planDigest: new Uint8Array(32),
+        counts: {
+          discovered: 1n,
+          selected: 1n,
+          cached: 0n,
+          executed: 1n,
+          passed: 1n,
+          failed: 0n,
+        },
+        status: 0,
+      },
+    }).pipe(Effect.provideService(Storage.Storage, observed.service))
+    assert.strictEqual(receiptOnlyCompleted.status, 0)
+    assert.deepStrictEqual(observed.publications, [])
+
+    const largeCatalog = testManifest(
+      Array.from({ length: 64_000 }, (_, ordinal) =>
+        testEntry(
+          ordinal,
+          { _tag: 'Eligible', identity: executionIdentity(ordinal) },
+          `${ordinal.toString().padStart(8, '0')}:${'x'.repeat(232)}`,
+        ),
+      ),
+    )
+    const compact = yield* prepare(largeCatalog)
+    assert.strictEqual(compact.plan._tag, 'Uncached')
+    assert.deepStrictEqual(observed.reads, [])
+    if (compact.plan._tag !== 'Uncached') return
+    assert.strictEqual(compact.plan.discovered, 64_000n)
+    const expectedDigest = yield* TestExchange.catalogDigest(
+      largeCatalog.entries.map((entry) => entry.test.identity),
+    )
+    assert.deepStrictEqual(compact.plan.catalogDigest, expectedDigest)
+    const zeroSelected = yield* Workflow.completeTestRun(compact.plan, {
+      _tag: 'Completed',
+      status: 0,
+      receipt: {
+        _tag: 'Uncached',
+        nonce: compact.plan.nonce,
+        planDigest: new Uint8Array(32),
+        counts: {
+          discovered: 64_000n,
+          selected: 0n,
+          cached: 0n,
+          executed: 0n,
+          passed: 0n,
+          failed: 0n,
+        },
+        status: 0,
+      },
+    }).pipe(Effect.provideService(Storage.Storage, observed.service))
+    assert.strictEqual(zeroSelected.status, 0)
+    assert.deepStrictEqual(observed.publications, [])
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('bypasses result reads and writes without disturbing an existing pass record', () =>
+  Effect.gen(function* () {
+    const observed = observedStorage()
+    const identity = executionIdentity(3)
+    yield* TestResult.publishPass(identity).pipe(
+      Effect.provideService(Storage.Storage, observed.service),
+    )
+    observed.reads.length = 0
+    observed.publications.length = 0
+    const manifest = testManifest([testEntry(0, { _tag: 'Eligible', identity })])
+    const first = yield* Workflow.prepareTestRun(manifest, false).pipe(
+      Effect.provideService(Storage.Storage, observed.service),
+    )
+    const second = yield* Workflow.prepareTestRun(manifest, false).pipe(
+      Effect.provideService(Storage.Storage, observed.service),
+    )
+    assert.strictEqual(first.plan._tag, 'Uncached')
+    assert.strictEqual(second.plan._tag, 'Uncached')
+    assert.deepStrictEqual(observed.reads, [])
+    assert.isFalse(
+      first.plan.nonce.every((byte, index) => byte === (second.plan.nonce.at(index) ?? -1)),
+    )
+
+    const completed = yield* Workflow.completeTestRun(first.plan, {
+      _tag: 'Completed',
+      status: 0,
+      receipt: {
+        _tag: 'Uncached',
+        nonce: first.plan.nonce,
+        planDigest: new Uint8Array(32),
+        counts: { ...counts, cached: 0n, executed: 2n },
+        status: 0,
+      },
+    }).pipe(Effect.provideService(Storage.Storage, observed.service))
+    assert.strictEqual(completed.status, 0)
+    assert.deepStrictEqual(completed.events, [])
+    assert.deepStrictEqual(observed.publications, [])
+    assert.strictEqual(
+      (yield* TestResult.lookup(identity).pipe(
+        Effect.provideService(Storage.Storage, observed.service),
+      ))._tag,
+      'Hit',
+    )
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('publishes only executed passes by receipt ordinal and preserves abnormal status', () =>
+  Effect.gen(function* () {
+    const observed = observedStorage()
+    const cached = executionIdentity(4)
+    const unselected = executionIdentity(5)
+    const passed = executionIdentity(6)
+    const plan: TestExchange.PerTestPlan = {
+      _tag: 'PerTest',
+      nonce: new Uint8Array(32),
+      entries: [
+        { declarationIdentity: 'cached', executionIdentity: cached, action: 'Cached' },
+        { declarationIdentity: 'unselected', executionIdentity: unselected, action: 'Execute' },
+        { declarationIdentity: 'passed', executionIdentity: passed, action: 'Execute' },
+      ],
+    }
+    const receipt: TestExchange.PerTestReceipt = {
+      _tag: 'PerTest',
+      nonce: plan.nonce,
+      planDigest: new Uint8Array(32),
+      entries: [
+        {
+          ordinal: 0n,
+          declarationIdentity: 'cached',
+          executionIdentity: cached,
+          disposition: 'Cached',
+        },
+        {
+          ordinal: 2n,
+          declarationIdentity: 'passed',
+          executionIdentity: passed,
+          disposition: 'Passed',
+        },
+      ],
+      counts,
+      status: 0,
+    }
+    const completed = yield* Workflow.completeTestRun(plan, {
+      _tag: 'Completed',
+      status: 0,
+      receipt,
+    }).pipe(Effect.provideService(Storage.Storage, observed.service))
+    assert.strictEqual(completed.status, 0)
+    assert.deepStrictEqual(observed.publications, [passed])
+
+    observed.publications.length = 0
+    const invalid = yield* Workflow.completeTestRun(plan, {
+      _tag: 'InvalidReceipt',
+      status: 2,
+      processStatus: 0,
+      reason: { _tag: 'ExchangeFailure', error: exchangeError },
+    }).pipe(Effect.provideService(Storage.Storage, observed.service))
+    assert.strictEqual(invalid.status, 2)
+    const abnormal = yield* Workflow.completeTestRun(plan, { _tag: 'Abnormal', status: 9 }).pipe(
+      Effect.provideService(Storage.Storage, observed.service),
+    )
+    assert.strictEqual(abnormal.status, 9)
+    assert.deepStrictEqual(observed.publications, [])
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('degrades optional cache read and publication failures observably', () =>
+  Effect.gen(function* () {
+    const identity = executionIdentity(7)
+    const failing = Storage.Storage.of({
+      read: (address) =>
+        Effect.fail(
+          new Storage.StorageError({
+            operation: 'Storage.read',
+            namespace: address.namespace,
+            key: address.key,
+            message: 'injected read failure',
+            reason: { _tag: 'ReadFailure', cause: 'injected' },
+          }),
+        ),
+      publish: (address) =>
+        Effect.fail(
+          new Storage.StorageError({
+            operation: 'Storage.publish',
+            namespace: address.namespace,
+            key: address.key,
+            message: 'injected publication failure',
+            reason: { _tag: 'PublishFailure', cause: 'injected' },
+          }),
+        ),
+    })
+    const prepared = yield* Workflow.prepareTestRun(
+      testManifest([testEntry(0, { _tag: 'Eligible', identity })]),
+    ).pipe(Effect.provideService(Storage.Storage, failing))
+    assert.strictEqual(prepared.plan._tag, 'PerTest')
+    assert.strictEqual(prepared.events[0]?._tag, 'ReadSkipped')
+    if (prepared.plan._tag !== 'PerTest') return
+    const completed = yield* Workflow.completeTestRun(prepared.plan, {
+      _tag: 'Completed',
+      status: 0,
+      receipt: {
+        _tag: 'PerTest',
+        nonce: prepared.plan.nonce,
+        planDigest: new Uint8Array(32),
+        entries: [
+          {
+            ordinal: 0n,
+            declarationIdentity: 'tests/Cases::test0',
+            executionIdentity: identity,
+            disposition: 'Passed',
+          },
+        ],
+        counts: { ...counts, discovered: 1n, selected: 1n, cached: 0n, executed: 1n },
+        status: 0,
+      },
+    }).pipe(Effect.provideService(Storage.Storage, failing))
+    assert.strictEqual(completed.status, 0)
+    assert.strictEqual(completed.events[0]?._tag, 'PublicationSkipped')
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
 
 const silentWatchLayer = (fileSystem: FileSystem.FileSystem) =>
   Layer.succeed(FileSystem.FileSystem, {

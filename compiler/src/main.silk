@@ -133,7 +133,9 @@ effect fn program() -> ()
     let module = run Lower.lower(&tree)
     run Hir.write(&module)
     run Fingerprint.writeFingerprints(&module)
-    return run Hir.writeViolations(&module)
+    let result = run Hir.writeViolations(&module)
+    drop module
+    return result
   }
   return run SyntaxTree.write(&tree)
 }

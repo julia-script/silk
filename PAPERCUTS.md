@@ -52,6 +52,15 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
   redirected log · repository
 - 2026-09-21 · A temporary comparison-worktree command was rejected because it began with
   `rm -rf` cleanup · Use a unique temporary path and add the worktree directly · repository
+- 2026-09-22 · Indexing the current Superset workspace with codebase-memory failed because a
+  pre-coordination or unverified generation was active · Inspect the worker log to confirm the
+  guard, leave the unrelated indexer alone, and use direct read-only source inspection · silk
+- 2026-09-22 · Vitest tried to bundle a temporary config beneath a read-only dependency symlink and
+  failed with `EPERM` in `node_modules/.vite-temp` · Pass `--configLoader runner` when using a
+  workspace-local temporary Vitest config · cli
+- 2026-09-22 · The compiler documentation check could not start in a focused workspace because
+  `@silklang/docgen` had neither its workspace dependencies nor a complete build · Run the check in
+  a prepared checkout with the docgen dependency graph built first · compiler, docs
 - 2026-09-22 · A fresh codebase-memory index for the task worktree refused to start because a
   pre-coordination or unverified CBM generation was active · Reuse the indexed main Silk checkout
   for structural discovery and use targeted filesystem inspection only for uncovered task-local or
@@ -68,6 +77,12 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
   nodes, so the failure surfaced as a wrong count far from the cause rather than as a syntax error ·
   Dump a new fixture with `silk-compiler <file>` before asserting against it, and check fixture
   identifiers against the `TokenKind` keyword list · compiler
+- 2026-09-23 · Starting an authorized merge in a linked worktree failed because the sandbox could
+  not create the shared Git worktree's `ORIG_HEAD.lock` · Retry the exact scoped merge with approved
+  Git metadata access instead of changing branches or bypassing the worktree · repository
+- 2026-09-23 · A focused formatter/linter command used repository-root paths after changing its cwd
+  to `packages/compiler`, so formatting matched no files and the package-local binary path was
+  wrong · Keep the repository root as cwd for root-relative file lists and tool binaries · compiler
 - 2026-09-23 · `pnpm exec silk` in a worktree ran the _main checkout's_ CLI: the globally installed
   `silk` shim execs a hard-coded `/Users/.../Documents/dev.nosync/silk/packages/cli/dist/bin.js`, so
   a compiler fix committed only in the worktree was invisible and `silk test` reproduced a bootstrap

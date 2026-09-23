@@ -617,6 +617,8 @@ export type MatchArmBody =
 /** Frontend-owned representation evidence retained directly on executable TIR. */
 export interface ExpressionMetadata {
   readonly representation?: Type.RepresentationArgument
+  /** The resolved static declaration whose selected value produced this executable node. */
+  readonly constant?: DeclarationFacts.CanonicalId
 }
 
 export type Expression = ExpressionNode & Node & ExpressionMetadata
@@ -626,7 +628,6 @@ type ExpressionNode =
       readonly _tag: 'IntegerLiteral'
       readonly value: bigint
       readonly type: DeclarationFacts.SemanticType
-      readonly constant?: DeclarationFacts.CanonicalId
       readonly span: SourceSpan.SourceSpan
       readonly origin: Origin
     }

@@ -950,6 +950,12 @@
     "aliases": ["Arch"]
   },
   {
+    "module": "silk/test_exchange",
+    "path": "silk/test_exchange.silk",
+    "namespace": "TestExchange",
+    "aliases": ["Entry", "Plan", "Receipt"]
+  },
+  {
     "module": "silk/test_runner",
     "path": "silk/test_runner.silk",
     "namespace": "TestRunner"

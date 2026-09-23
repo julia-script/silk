@@ -147,6 +147,60 @@ const contractOf = (symbol: string, target: Target.Target): Contract | undefined
   }
 }
 
+/**
+ * Stable identity of every helper contract/provider the selected profile can admit. This is a
+ * distribution policy identity, deliberately independent of one generated artifact's references.
+ */
+export const policyIdentity = (profile: CompilationProfile.Facts): string => {
+  const symbols = [
+    ...memory.filter(
+      (symbol) =>
+        (symbol !== 'bcmp' || profile.target.operatingSystem === 'linux') &&
+        (symbol !== 'bzero' || profile.target.operatingSystem === 'darwin'),
+    ),
+    ...(profile.libc !== 'none' && profile.target.kind === 'Native' ? arithmetic : []),
+  ]
+  const entries: Array<string> = []
+  for (const symbol of symbols) {
+    const contract = contractOf(symbol, profile.target)
+    if (contract === undefined) continue
+    let kind: Provider['kind'] = 'source'
+    let root = `silk.support.${symbol}`
+    if (contract.family === 'arithmetic') {
+      kind = 'platform'
+      root = profile.target.operatingSystem === 'darwin' ? 'libSystem' : 'm'
+    } else if (profile.target.kind === 'WebAssembly') {
+      kind = 'bootstrap'
+      root = 'llvm-wasm-memory.v1'
+    }
+    let content = 'selected-platform-supply-v1'
+    if (kind === 'source') content = Stdlib.find(root.replaceAll('.', '/'))?.digest ?? 'Missing'
+    else if (kind === 'bootstrap')
+      content = ToolchainIntegrity.contentDigest(LlvmWasmRuntime.source)
+    const providerIdentity = ToolchainIntegrity.contentDigest(
+      Canonical.record(`${kind}:${root}:${symbol}:v1`, [profile.target.id, profile.libc, content]),
+    )
+    entries.push(
+      Canonical.record(symbol, [
+        providerIdentity,
+        contract.family,
+        contract.callingConvention,
+        Canonical.array(contract.parameters),
+        contract.result,
+        String(contract.pointerBits),
+        contract.linkage,
+        contract.visibility,
+        contract.retention,
+        contract.lto,
+        contract.authority,
+      ]),
+    )
+  }
+  return ToolchainIntegrity.contentDigest(
+    Canonical.record('HelperPolicy.v1', [Canonical.array(entries)]),
+  )
+}
+
 /** Selects the initial permanent source/platform and explicit Wasm bootstrap providers. */
 export const provider = Effect.fn('HelperCapability.provider')(function* (
   symbol: string,

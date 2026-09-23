@@ -189,6 +189,15 @@ pub fn main() -> i32 {
     )
     for (const discovery of [nested, direct, mutual, aggregate])
       assert.strictEqual(discovery.counters.residualBodies.requests, discovery.instances.length)
+    const mutualRoot =
+      mutual.instances.find((instance) => instance.key.declaration.name === 'main') ??
+      unreachable('expected mutual-recursion root')
+    const mutualClosure = Instances.executionClosure(mutual, mutualRoot.key)
+    assert.deepEqual(mutualClosure.gaps, [])
+    assert.deepEqual(
+      mutualClosure.instances.map((instance) => instance.key.declaration.name),
+      ['main', 'other'],
+    )
   }),
 )
 
@@ -275,6 +284,12 @@ pub fn main() -> i32 { return ${entries.map((_, index) => `z0(1, e${index})`).jo
     )
     assert.deepEqual(discovery.violations, [])
     assert.strictEqual(discovery.counters.residualBodies.requests, discovery.instances.length)
+    const root =
+      discovery.instances.find((instance) => instance.key.declaration.name === 'main') ??
+      unreachable('expected cycle-projection root')
+    const closure = Instances.executionClosure(discovery, root.key)
+    assert.deepEqual(closure.gaps, [])
+    assert.strictEqual(closure.instances.length, discovery.instances.length)
     // Structural, not a timing: the unprojected guard built over 5000 decision nodes here.
     assert.isBelow(discovery.counters.ancestryNodes, 1000)
   }),
@@ -507,6 +522,20 @@ pub fn main() -> i32 {
       Analysis.instancesOf(result).instances.map((instance) => instance.key.declaration.name),
       ['main', 'Effect.provideMut', 'forward', 'forward', 'impl@0.value'],
     )
+    const discovery = Analysis.instancesOf(result)
+    const root =
+      discovery.instances.find((instance) => instance.key.declaration.name === 'main') ??
+      unreachable('expected provider root')
+    const closure = Instances.executionClosure(discovery, root.key)
+    assert.deepEqual(closure.gaps, [])
+    assert.include(
+      closure.edges.map((edge) => edge.kind),
+      'Provider',
+    )
+    assert.include(
+      closure.instances.map((instance) => instance.key.declaration.name),
+      'impl@0.value',
+    )
   }),
 )
 
@@ -639,6 +668,19 @@ pub fn main() -> () { return run Intrinsic.catchFailure<SomeError>(failWithOwned
     assert.deepEqual(
       discovery.instances.map((instance) => instance.key.declaration.name),
       ['main', 'failWithOwnedError', 'recover', 'makeError', 'drop@impl#0'],
+    )
+    const root =
+      discovery.instances.find((instance) => instance.key.declaration.name === 'main') ??
+      unreachable('expected cleanup root')
+    const closure = Instances.executionClosure(discovery, root.key)
+    assert.deepEqual(closure.gaps, [])
+    assert.include(
+      closure.edges.map((edge) => edge.kind),
+      'Cleanup',
+    )
+    assert.include(
+      closure.instances.map((instance) => instance.key.declaration.name),
+      'drop@impl#0',
     )
   }),
 )

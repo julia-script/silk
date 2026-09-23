@@ -69,6 +69,8 @@ export interface Instance {
   readonly ownership: Ownership.FunctionOwnership
   readonly resultCallable?: Type.CallableIdentityArgument
   readonly resultEffect?: string
+  /** Exact residual application whose compile-time dependency attribution produced this body. */
+  readonly residualApplication: string
   readonly effectSuccesses?: ReadonlyArray<{
     readonly site: Tir.EffectSiteId
     readonly identity: string
@@ -177,6 +179,15 @@ export interface CallInstance {
   readonly providers?: ReadonlyArray<CallProvider>
 }
 
+/** One exact runtime reachability edge used to project a closure from an individual root. */
+export interface ExecutionEdge {
+  readonly _tag: 'ExecutionEdge'
+  readonly kind: 'Runtime' | 'Cleanup' | 'Provider'
+  readonly owner: InstanceKey
+  readonly target: InstanceKey
+  readonly providers?: ReadonlyArray<CallProvider>
+}
+
 /** Tests whether a call's provider-dependent identities belong to the current lexical context. */
 export const callMatchesProviders = (
   call: CallInstance,
@@ -241,6 +252,8 @@ export interface Discovery {
   readonly retention: ReadonlyArray<InstanceKey>
   readonly _tag: 'InstanceDiscovery'
   readonly rootModule: string
+  /** Completed declaration facts used to attribute execution-relevant constants and types. */
+  readonly declarationIndex?: DeclarationIndex.Index
   /** Source and target-specialized anonymous aggregates required by reachable instances. */
   readonly generatedAggregates: ReadonlyMap<string, DeclarationFacts.StructFact>
   readonly instances: ReadonlyArray<Instance>
@@ -249,6 +262,8 @@ export interface Discovery {
   readonly callables: ReadonlyArray<CallableInstance>
   readonly effects: ReadonlyArray<EffectInstance>
   readonly calls: ReadonlyArray<CallInstance>
+  /** Complete concrete reachability, including cleanup and provider-selected implementations. */
+  readonly executionEdges: ReadonlyArray<ExecutionEdge>
   readonly intrinsics: ReadonlyArray<IntrinsicCall>
   /** Reachable foreign declarations in canonical order; each execution surface admits them. */
   readonly foreignCalls: ReadonlyArray<ForeignCall>
@@ -372,6 +387,7 @@ export const invalid = (rootModule: string): Discovery => ({
   callables: [],
   effects: [],
   calls: [],
+  executionEdges: [],
   intrinsics: [],
   foreignCalls: [],
   foreignExports: [],
@@ -973,6 +989,111 @@ const compareInstanceKeys = (left: InstanceKey, right: InstanceKey): number => {
   return 0
 }
 
+export type ExecutionGap =
+  | { readonly _tag: 'MissingRoot'; readonly root: InstanceKey }
+  | { readonly _tag: 'MissingTarget'; readonly edge: ExecutionEdge }
+  | { readonly _tag: 'MissingResidualAttribution'; readonly instance: InstanceKey }
+  | { readonly _tag: 'IncompleteResidualAttribution'; readonly instance: InstanceKey }
+
+/** Complete concrete work reachable from one exact runtime root. */
+export interface ExecutionClosure {
+  readonly _tag: 'ExecutionClosure'
+  readonly root: InstanceKey
+  readonly instances: ReadonlyArray<Instance>
+  readonly edges: ReadonlyArray<ExecutionEdge>
+  readonly callables: ReadonlyArray<CallableInstance>
+  readonly effects: ReadonlyArray<EffectInstance>
+  readonly intrinsics: ReadonlyArray<IntrinsicCall>
+  readonly foreignCalls: ReadonlyArray<ForeignCall>
+  readonly residualBodies: ReadonlyArray<Residualization.Observation>
+  readonly gaps: ReadonlyArray<ExecutionGap>
+}
+
+/** Projects the complete execution graph rooted at one discovered specialization. */
+export const executionClosure = (
+  self: Discovery,
+  root: InstanceKey,
+  excludedDeclarations: ReadonlySet<string> = new Set(),
+): ExecutionClosure => {
+  const instances = new Map(self.instances.map((instance) => [keyText(instance.key), instance]))
+  const byOwner = new Map<string, Array<ExecutionEdge>>()
+  for (const edge of self.executionEdges) {
+    const key = keyText(edge.owner)
+    const owned = byOwner.get(key)
+    if (owned === undefined) byOwner.set(key, [edge])
+    else owned.push(edge)
+  }
+  const selected = new Map<string, Instance>()
+  const selectedEdges = new Map<string, ExecutionEdge>()
+  const gaps: Array<ExecutionGap> = []
+  const pending = [root]
+  while (pending.length > 0) {
+    const key = pending.shift()
+    if (key === undefined) continue
+    const encoded = keyText(key)
+    if (selected.has(encoded)) continue
+    const instance = instances.get(encoded)
+    if (instance === undefined) {
+      if (encoded === keyText(root)) gaps.push({ _tag: 'MissingRoot', root })
+      continue
+    }
+    selected.set(encoded, instance)
+    for (const edge of byOwner.get(encoded) ?? []) {
+      const targetDeclaration = `${edge.target.declaration.module}\u0000${edge.target.declaration.name}`
+      if (excludedDeclarations.has(targetDeclaration)) continue
+      const target = keyText(edge.target)
+      selectedEdges.set(`${encoded}\u0005${edge.kind}\u0005${target}`, edge)
+      if (!instances.has(target)) gaps.push({ _tag: 'MissingTarget', edge })
+      else if (!selected.has(target)) pending.push(edge.target)
+    }
+  }
+  const orderedInstances = [...selected.values()].sort((left, right) =>
+    compareInstanceKeys(left.key, right.key),
+  )
+  const residuals = new Map(self.residualBodies.map((body) => [body.application, body]))
+  const residualBodies: Array<Residualization.Observation> = []
+  for (const instance of orderedInstances) {
+    const residual = residuals.get(instance.residualApplication)
+    if (residual === undefined) {
+      gaps.push({ _tag: 'MissingResidualAttribution', instance: instance.key })
+      continue
+    }
+    residualBodies.push(residual)
+    if (!residual.complete)
+      gaps.push({ _tag: 'IncompleteResidualAttribution', instance: instance.key })
+  }
+  const owners = new Set(orderedInstances.map((instance) => keyText(instance.key)))
+  const spans = new Set(
+    orderedInstances.flatMap((instance) =>
+      instance.function.statements
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
+        .map((expression) => SourceSpan.key(expression.span)),
+    ),
+  )
+  return {
+    _tag: 'ExecutionClosure',
+    root,
+    instances: orderedInstances,
+    edges: [...selectedEdges.values()].sort((left, right) => {
+      const owner = compareInstanceKeys(left.owner, right.owner)
+      if (owner !== 0) return owner
+      const target = compareInstanceKeys(left.target, right.target)
+      return target !== 0 ? target : left.kind.localeCompare(right.kind)
+    }),
+    callables: self.callables
+      .filter((callable) => owners.has(keyText(callable.owner)))
+      .sort((left, right) => callableIdentity(left).localeCompare(callableIdentity(right))),
+    effects: self.effects
+      .filter((effect) => owners.has(keyText(effect.owner)))
+      .sort((left, right) => left.identity.localeCompare(right.identity)),
+    intrinsics: self.intrinsics.filter((call) => spans.has(SourceSpan.key(call.span))),
+    foreignCalls: self.foreignCalls.filter((call) => spans.has(SourceSpan.key(call.callSpan))),
+    residualBodies,
+    gaps,
+  }
+}
+
 type SuspensionIndex = ReadonlyMap<
   SuspensionFact['subject']['_tag'],
   ReadonlyMap<string, SuspensionMode.Summary>
@@ -1309,6 +1430,7 @@ export const discover = (
   }
   const recordedCalls = new Map<string, CallInstance>()
   const providerCalls = new Map<string, CallInstance>()
+  const executionEdges = new Map<string, ExecutionEdge>()
   const scheduledContexts = new Map<string, WorkItem>()
   const queuedContexts = new Set<string>()
   const histories = AncestorHistory.make()
@@ -1850,6 +1972,7 @@ export const discover = (
       () => Residualization.residualize(residualization, application),
       { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
     )
+    const residualApplication = Residualization.applicationIdentity(residualization, application)
     if (residual._tag === 'StaticFailure') {
       report(key, Evaluation.diagnostic(residual.failure, target.id))
       return undefined
@@ -1915,6 +2038,7 @@ export const discover = (
         instance: {
           _tag: 'Instance',
           key,
+          residualApplication,
           function: fn,
           view,
           substitution,
@@ -2020,6 +2144,7 @@ export const discover = (
     recordedContexts.clear()
     recordedCallables.clear()
     providerCalls.clear()
+    executionEdges.clear()
     selections.clear()
     violations.length = 0
     violationKeys.clear()
@@ -2075,6 +2200,13 @@ export const discover = (
             call.staticArguments ?? [],
             call.evidence ?? [],
           )
+          const edgeKind = ordinaryIdentities.has(identity) ? 'Runtime' : 'Cleanup'
+          executionEdges.set(`${keyText(key)}\u0005${edgeKind}\u0005${keyText(targetKey)}`, {
+            _tag: 'ExecutionEdge',
+            kind: edgeKind,
+            owner: key,
+            target: targetKey,
+          })
           addCallEdge(key, targetKey)
           for (const [value, branchHistory] of AncestorHistory.partition(
             histories,
@@ -2166,6 +2298,16 @@ export const discover = (
       }
       let scheduledProvided = false
       for (const provided of currentGraph.providedTargets) {
+        executionEdges.set(
+          `${keyText(provided.owner)}\u0005Provider\u0005${keyText(provided.target)}`,
+          {
+            _tag: 'ExecutionEdge',
+            kind: 'Provider',
+            owner: provided.owner,
+            target: provided.target,
+            ...(provided.providers === undefined ? {} : { providers: provided.providers }),
+          },
+        )
         for (const ownerContext of recordedContexts.get(keyText(provided.owner))?.values() ?? []) {
           addCallEdge(provided.owner, provided.target)
           const declaration = declarationText(provided.target)
@@ -2379,16 +2521,24 @@ export const discover = (
       ? (summaries.get(node) ?? SuspensionMode.direct)
       : unavailableSummary
   const callInstances = [...recordedCalls.values(), ...providerCalls.values()]
+  const generatedAggregates = Residualization.generatedAggregates(residualization)
   return {
     _tag: 'InstanceDiscovery',
     retention: retention,
     rootModule,
-    generatedAggregates: Residualization.generatedAggregates(residualization),
+    declarationIndex: { ...index, generatedAggregates },
+    generatedAggregates,
     instances,
     unavailableOwnership,
     callables: [...recordedCallables.values()],
     effects,
     calls: callInstances,
+    executionEdges: [...executionEdges.values()].sort((left, right) => {
+      const owner = compareInstanceKeys(left.owner, right.owner)
+      if (owner !== 0) return owner
+      const target = compareInstanceKeys(left.target, right.target)
+      return target !== 0 ? target : left.kind.localeCompare(right.kind)
+    }),
     intrinsics: ExecutableOrigin.reachableIntrinsics(instances, index),
     foreignCalls: ExecutableOrigin.reachableForeignCalls(instances, index, registry, target),
     foreignExports,
