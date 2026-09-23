@@ -759,19 +759,36 @@ test fn independent() -> () {}`
 it.effect('invalidates every dependent execution identity after a shared helper revision', () =>
   Effect.gen(function* () {
     const program = (shared: number) => `fn sharedHelper() -> i32 { return ${shared} }
-test fn alpha() -> () { let observed = sharedHelper() + 1 drop observed }
-test fn beta() -> () { let observed = sharedHelper() + 2 drop observed }
+fn alphaHelper() -> i32 { return sharedHelper() + 1 }
+fn betaHelper() -> i32 { return sharedHelper() + 2 }
+test fn alpha() -> () { let observed = alphaHelper() drop observed }
+test fn beta() -> () { let observed = betaHelper() drop observed }
+test fn independent() -> () {}
 pub fn main() -> () {
   static for descriptor in Intrinsic.tests() {
     let body = Intrinsic.testFunction(descriptor)
     body()
   }
 }`
-    const beforeIdentities = eligibleIdentities(yield* executionManifest(program(40)))
-    const sharedIdentities = eligibleIdentities(yield* executionManifest(program(41)))
+    const before = yield* executionManifest(program(40))
+    const sharedChanged = yield* executionManifest(program(41))
+
+    for (const manifest of [before, sharedChanged]) {
+      assert.deepEqual(
+        manifest.entries.map((entry) => entry.test.name),
+        ['alpha', 'beta', 'independent'],
+      )
+      assert.deepEqual(
+        manifest.entries.map((entry) => entry.eligibility._tag),
+        ['Eligible', 'Eligible', 'Eligible'],
+      )
+    }
+    const beforeIdentities = eligibleIdentities(before)
+    const sharedIdentities = eligibleIdentities(sharedChanged)
 
     assert.notStrictEqual(sharedIdentities.get('alpha'), beforeIdentities.get('alpha'))
     assert.notStrictEqual(sharedIdentities.get('beta'), beforeIdentities.get('beta'))
+    assert.strictEqual(sharedIdentities.get('independent'), beforeIdentities.get('independent'))
   }),
 )
 
