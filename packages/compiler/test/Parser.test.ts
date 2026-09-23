@@ -3227,7 +3227,7 @@ pub fn inspect(result: Result<i32, bool>) -> i32 {
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
 
-it('rejects empty field variants and recovers at sibling variants and declarations', () => {
+it('accepts empty field blocks and recovers at sibling variants and declarations', () => {
   const source =
     'union Broken { Empty {}, Good, Bad { value: }, Last { value: i32 } } pub fn after() -> i32 { return 1 }'
   const result = parseText('memory/damaged-nominal-union', source)
@@ -3239,11 +3239,32 @@ it('rejects empty field variants and recovers at sibling variants and declaratio
     variants.map((variant) => directTokenText(result, variant, 'Identifier')),
     ['Empty', 'Good', 'Bad', 'Last'],
   )
-  assert.strictEqual(missingLeaves(variants[0] ?? result.root).length > 0, true)
+  assert.deepEqual(missingLeaves(variants[0] ?? result.root), [])
   assert.strictEqual(missingLeaves(variants[2] ?? result.root).length > 0, true)
   assert.deepEqual(missingLeaves(variants[1] ?? result.root), [])
   assert.deepEqual(missingLeaves(variants[3] ?? result.root), [])
   assert.notStrictEqual(SyntaxTree.directNode(result.root, 'FunctionDeclaration'), undefined)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('parses an empty union variant field block as a braced variant with no fields', () => {
+  const source = 'pub union U { Empty {}, A { x: i32 } }'
+  const result = parseText('memory/empty-union-variant-fields', source)
+  const declaration = SyntaxTree.directNode(result.root, 'UnionDeclaration')
+  const variants =
+    declaration === undefined ? [] : SyntaxTree.directNodes(declaration, 'UnionVariant')
+
+  assert.deepEqual(
+    variants.map((variant) => SyntaxTree.directNodes(variant, 'UnionVariantField').length),
+    [0, 1],
+  )
+  assert.deepEqual(
+    variants.map((variant) => SyntaxTree.directToken(variant, 'LeftBrace') !== undefined),
+    [true, true],
+  )
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.deepEqual(missingLeaves(declaration ?? result.root), [])
   assertOriginalTokenTraversal(result)
   assert.deepEqual(reconstructedBytes(result), ascii(source))
 })
