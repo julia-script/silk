@@ -251,7 +251,9 @@ it.effect(
       assert.deepEqual(instanceKeys(forward), instanceKeys(wasm))
       assert.deepEqual(wasm.diagnostics, [])
     }),
-  30_000,
+  // Three full snapshots over 167 stdlib modules took 86.4s locally on 2026-09-23.
+  // This is the second timeout increase; 180s leaves room for further stdlib growth.
+  180_000,
 )
 
 it.effect('keeps repeated imports valid without hiding parser recovery diagnostics', () =>
