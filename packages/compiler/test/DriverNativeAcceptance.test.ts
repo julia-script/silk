@@ -350,10 +350,14 @@ const selectedWasmCorpus = portableWasmCorpus.filter(({ name }) =>
   selectedNativeCases.size === 0 ? runFixedTests : selectedNativeCases.has(name),
 )
 
+// A requested case may name either corpus: the wasm entries are how a 32-bit regression reaches
+// the PR lane, which sets `SILK_NATIVE_FIXED_TESTS=false`.
 it('finds every requested native corpus case', () => {
   assert.deepStrictEqual(
     [...selectedNativeCases].filter(
-      (name) => !selectedCorpus.some((program) => program.name === name),
+      (name) =>
+        !selectedCorpus.some((program) => program.name === name) &&
+        !selectedWasmCorpus.some((program) => program.name === name),
     ),
     [],
   )

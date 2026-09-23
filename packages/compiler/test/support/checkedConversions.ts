@@ -711,6 +711,10 @@ pub fn main() -> i32 {
     // f32 reaches the same bounds; 2^32 is exact in binary32.
     if !absentUsize(f32.checkedToUsize(4294967296.0)) { return 19 }
     if !absentIsize(f32.checkedToIsize(2147483648.0)) { return 20 }
+    // -2^31 is exact in binary32 and is the inclusive lower bound; -2^31 - 256 is the next
+    // representable value below it, so it must be rejected.
+    if !isIsize(f32.checkedToIsize(-2147483648.0), -2147483648) { return 21 }
+    if !absentIsize(f32.checkedToIsize(-2147483904.0)) { return 22 }
     return 42
   }
 
