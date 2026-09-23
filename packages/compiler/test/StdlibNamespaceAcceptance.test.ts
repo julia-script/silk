@@ -108,6 +108,51 @@ it.effect('resolves JSON conversion contracts with exact allocation boundaries',
       })),
       [],
     )
+    const json = Analysis.declarationIndex(snapshot).modules.find(
+      (candidate) => candidate.module === 'silk/json_value',
+    )
+    const decode = json?.declarations.find(
+      (declaration) => declaration.associatedMember?.name === 'decode',
+    )
+    const deserialize = json?.declarations.find(
+      (declaration) => declaration.associatedMember?.name === 'deserialize',
+    )
+    const serialize = json?.declarations.find(
+      (declaration) => declaration.associatedMember?.name === 'serialize',
+    )
+    assert.isDefined(decode)
+    assert.isDefined(deserialize)
+    assert.isDefined(serialize)
+    if (decode === undefined || deserialize === undefined || serialize === undefined) return
+    const decoded = DeclarationFacts.callableContract(decode).result
+    const deserialized = DeclarationFacts.callableContract(deserialize).result
+    const serialized = DeclarationFacts.callableContract(serialize).result
+    assert.isFalse(Type.isEffect(decoded), 'Json.decode must not require an allocator')
+    assert.isTrue(Type.isEffect(deserialized))
+    assert.isTrue(Type.isEffect(serialized))
+    if (!Type.isEffect(deserialized) || !Type.isEffect(serialized)) return
+    assert.deepEqual(Type.failureMembers(deserialized).map(Type.encode), [
+      'silk/allocator.OutOfMemoryError',
+      'silk/json_scanner.JsonError',
+    ])
+    assert.deepEqual(
+      Type.requirementMembers(deserialized).map((requirement) => ({
+        capability: Type.encode(requirement.capability),
+        access: requirement.access,
+      })),
+      [{ capability: 'silk/allocator.Allocator', access: 'Exclusive' }],
+    )
+    assert.deepEqual(Type.failureMembers(serialized).map(Type.encode), [
+      'silk/json_scanner.JsonError',
+      'silk/writer.WriterError',
+    ])
+    assert.deepEqual(
+      Type.requirementMembers(serialized).map((requirement) => ({
+        capability: Type.encode(requirement.capability),
+        access: requirement.access,
+      })),
+      [{ capability: 'silk/writer.Writer', access: 'Exclusive' }],
+    )
   }),
 )
 
