@@ -44,6 +44,7 @@ import silk.i64
 import silk.i8
 import silk.isize
 import silk.option { Option }
+import silk.target { pointerBits }
 import silk.u16
 import silk.u32
 import silk.u64
@@ -357,6 +358,24 @@ pub fn toU8(value: f64) -> u8 {
   return Intrinsic.f64ToU8(value)
 }
 
+// The pointer-width conversion bounds, as exact powers of two in binary64. They are
+// selected from the target's pointer width rather than converted from `usize.MAX`/`isize.MAX`,
+// which would round outward and admit an overflowing value.
+fn usizeBound() -> f64 {
+  if pointerBits == 32 { return 4294967296.0 }
+  return 18446744073709551616.0
+}
+
+fn isizeUpperBound() -> f64 {
+  if pointerBits == 32 { return 2147483648.0 }
+  return 9223372036854775808.0
+}
+
+fn isizeLowerBound() -> f64 {
+  if pointerBits == 32 { return -2147483648.0 }
+  return -9223372036854775808.0
+}
+
 /// Converts `value` toward zero to `u8`, or returns `None` when the truncated result is out of
 /// range.
 ///
@@ -504,9 +523,13 @@ pub fn toUsize(value: f64) -> usize {
 /// # Details
 ///
 /// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
-/// below one is in range and yields zero. The truncated value is accepted when it is at least zero
-/// and below `2^64`. Both bounds are powers of two and so are exact in binary64; a bound converted
-/// from `usize.MAX` would round outward and wrongly admit an overflowing value.
+/// below one is in range and yields zero. `usize` follows the selected target's pointer width, so
+/// the bounds follow it too. The truncated value is accepted when it is at least zero and below
+/// `2^32` on a 32-bit target or `2^64` on a 64-bit one.
+///
+/// Every bound is a power of two and so is exact in binary64. A bound converted from `usize.MAX`
+/// would round outward and wrongly admit an overflowing value, and a bound fixed at 64-bit width
+/// would admit values that trap on a 32-bit target.
 ///
 /// # Gotchas
 ///
@@ -517,7 +540,7 @@ pub fn checkedToUsize(value: f64) -> Option<usize> {
   if Intrinsic.f64IsInfinite(value) { return Option.none<usize>() }
   let truncated = trunc(value)
   if truncated < 0.0 { return Option.none<usize>() }
-  if truncated >= 18446744073709551616.0 { return Option.none<usize>() }
+  if truncated >= usizeBound() { return Option.none<usize>() }
   return Option.some<usize>(Intrinsic.f64ToUsize(truncated))
 }
 
@@ -674,9 +697,13 @@ pub fn toIsize(value: f64) -> isize {
 /// # Details
 ///
 /// The fraction is discarded first, so the range test applies to the truncated value: a magnitude
-/// below one is in range and yields zero. The truncated value is accepted when it is at least
-/// `-2^63` and below `2^63`. Both bounds are powers of two and so are exact in binary64; a bound
-/// converted from `isize.MAX` would round outward and wrongly admit an overflowing value.
+/// below one is in range and yields zero. `isize` follows the selected target's pointer width, so
+/// the bounds follow it too. The truncated value is accepted when it is at least `-2^31` and below
+/// `2^31` on a 32-bit target, or at least `-2^63` and below `2^63` on a 64-bit one.
+///
+/// Every bound is a power of two and so is exact in binary64. A bound converted from `isize.MAX`
+/// would round outward and wrongly admit an overflowing value, and a bound fixed at 64-bit width
+/// would admit values that trap on a 32-bit target.
 ///
 /// # Gotchas
 ///
@@ -686,7 +713,7 @@ pub fn checkedToIsize(value: f64) -> Option<isize> {
   if Intrinsic.f64IsNaN(value) { return Option.none<isize>() }
   if Intrinsic.f64IsInfinite(value) { return Option.none<isize>() }
   let truncated = trunc(value)
-  if truncated < -9223372036854775808.0 { return Option.none<isize>() }
-  if truncated >= 9223372036854775808.0 { return Option.none<isize>() }
+  if truncated < isizeLowerBound() { return Option.none<isize>() }
+  if truncated >= isizeUpperBound() { return Option.none<isize>() }
   return Option.some<isize>(Intrinsic.f64ToIsize(truncated))
 }
