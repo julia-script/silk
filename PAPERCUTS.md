@@ -104,10 +104,13 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 cover bool` plus a parse error on each arm: `true` and `false` are not patterns, so the arms read
   as binding identifiers · Use an `if` with a `mut` local; `match` is for unions and enums only ·
   compiler
-- 2026-09-23 · Delegating a Codex agent with a model the backend does not serve to this account
-  returns `ok: true` and fails only after the agent starts, with `invalid params: Could not apply
-  Codex model '<slug>': JSON-RPC error -32602`, so an invalid slug looks like a successful
-  delegation; a model named in public docs (`gpt-6-sol`) can still be unserved, and upgrading the
-  CLI does not make it available · Check `~/.codex/models_cache.json`, which refetches live and is
-  the authoritative list of servable slugs, before delegating, and pass effort as the separate
-  `reasoningEffort` argument (`sol-high` is not a model name) · repository
+- 2026-09-23 · A Codex model that works from the shell fails through Intent delegation with
+  `invalid params: Could not apply Codex model 'gpt-6-sol': JSON-RPC error -32602`, because two
+  different Codex clients are involved: the shell CLI is `codex-cli 0.156.1` at
+  `/opt/homebrew/bin/codex`, while Intent routes through the ChatGPT desktop app's embedded
+  `Codex Framework.framework` (`client_version: 0.153.4` in `~/.codex/models_cache.json`), and the
+  backend serves that older client a model list omitting newly released slugs, so Intent rejects the
+  model before it reaches the API; delegation also returns `ok: true` and fails only after the agent
+  starts, so an unsupported slug looks like a successful delegation · Update the ChatGPT desktop app
+  (`npm install -g @openai/codex@latest` upgrades a binary Intent never invokes), and pass effort as
+  the separate `reasoningEffort` argument (`sol-high` is not a model name) · repository
