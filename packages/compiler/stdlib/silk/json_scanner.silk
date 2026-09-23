@@ -64,6 +64,8 @@ pub enum JsonReason {
   InvalidUtf8,
   /// A number does not satisfy the JSON number grammar.
   InvalidNumber,
+  /// An object repeats a decoded member name.
+  DuplicateKey,
   /// The final input ended before the single root value was complete.
   UnexpectedEnd,
   /// The fixed nesting stack is full.

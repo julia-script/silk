@@ -1,4 +1,5 @@
 const zeros = (count: number): string => `[${Array(count).fill(0).join(', ')}]`
+const deepestDocument = `${'['.repeat(64)}0${']'.repeat(64)}`
 
 /** One native program exercises owned JSON parsing, escapes, accessors, and writer round trips. */
 export const jsonValueAcceptanceSource = `import silk.allocator { Allocator, OutOfMemoryError }
@@ -73,7 +74,10 @@ effect fn rejectsDuplicate() -> bool ! OutOfMemoryError ? &mut Allocator {
   }
 }
 
-struct RejectAllocator { calls: i32, rejectAt: i32 }
+struct RejectAllocator {
+  calls: i32
+  rejectAt: i32
+}
 effect fn allocate(self: &mut RejectAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   let ordinal = self.calls
   self.calls = self.calls + 1
@@ -146,6 +150,9 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   if !(run roundTrip(b"[]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 10 }
   if !(run roundTrip(b"{}") |> Effect.provideMut<Allocator>(&mut allocator)) { return 11 }
   if !(run roundTrip(b"[\\\"\\\\n\\\",{\\\"x\\\":[0,1]}]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 12 }
+  if !(run roundTrip(b"[null,true,false,0,\\\"x\\\",[],{}]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 19 }
+  if !(run roundTrip(b" \\t\\r\\n [ true ] \\t") |> Effect.provideMut<Allocator>(&mut allocator)) { return 20 }
+  if !(run roundTrip(b"${deepestDocument}") |> Effect.provideMut<Allocator>(&mut allocator)) { return 21 }
   if !(run rejectsDuplicate() |> Effect.provideMut<Allocator>(&mut allocator)) { return 13 }
   if !(run allocationFailures()) { return 14 }
   if !(run rejectsDepth(&document)) { return 18 }
