@@ -53,6 +53,8 @@ pub struct JsonSpan {
   pub length: usize
 }
 
+impl Copy for JsonSpan {}
+
 /// A stable category for a JSON scanner failure.
 pub enum JsonReason {
   /// A byte cannot begin or continue the expected JSON construct.
@@ -69,6 +71,14 @@ pub enum JsonReason {
   DuplicateKey,
   /// A constructed value contains a child of the wrong container kind.
   InvalidValue,
+  /// A valid JSON value does not have the requested type.
+  TypeMismatch,
+  /// A JSON number cannot fit the requested numeric type.
+  NumberOutOfRange,
+  /// A required object member is absent.
+  MissingField,
+  /// An object member is not part of the requested type.
+  UnknownField,
   /// The final input ended before the single root value was complete.
   UnexpectedEnd,
   /// The fixed nesting stack is full.
@@ -128,6 +138,8 @@ pub union JsonToken {
   /// The complete root value and trailing whitespace have ended.
   EndOfInput,
 }
+
+impl Copy for JsonToken {}
 
 /// The outcome of one resumable scan step.
 pub union JsonScanEvent {
@@ -194,6 +206,9 @@ pub struct JsonScanner<'input> {
   input: &'input [u8]
   state: JsonScanState
   cursor: usize
+  pending: JsonToken
+  hasPending: bool
+  tokenOffset: usize
 }
 
 fn errorAt(reason: JsonReason, offset: usize) -> JsonError {
@@ -647,11 +662,22 @@ impl JsonScanState {
 impl<'input> JsonScanner<'input> {
   /// Borrows a complete input slice and starts a single-document scan.
   pub fn make(input: &'input [u8]) -> JsonScanner<'input> {
-    return JsonScanner<'input> { input: input, state: JsonScanState.make(), cursor: usize.ZERO }
+    return JsonScanner<'input> {
+      input: input,
+      state: JsonScanState.make(),
+      cursor: usize.ZERO,
+      pending: JsonToken.EndOfInput,
+      hasPending: false,
+      tokenOffset: usize.ZERO,
+    }
   }
 
   /// Returns the next token or sticky `EndOfInput` after trailing whitespace.
   pub fn next(self: &mut JsonScanner<'input>) -> Result<JsonToken, JsonError> {
+    if self.hasPending {
+      self.hasPending = false
+      return Result.succeed<JsonToken, JsonError>(self.pending)
+    }
     let remaining = Slice.view<u8>(self.input, self.cursor, self.input.length - self.cursor)
     let result = JsonScanState.step(&mut self.state, remaining, true)
     match move result {
@@ -659,6 +685,7 @@ impl<'input> JsonScanner<'input> {
         return Result.failResult<JsonToken, JsonError>(move error)
       }
       Result<JsonScanStep, JsonError>.Success { value } => {
+        self.tokenOffset = self.cursor + value.fragment.offset
         self.cursor = self.cursor + value.consumed
         match move value.event {
           JsonScanEvent.Token { token } => {
@@ -676,6 +703,25 @@ impl<'input> JsonScanner<'input> {
       }
     }
   }
+
+  /// Returns the next token without consuming it.
+  pub fn peek(self: &mut JsonScanner<'input>) -> Result<JsonToken, JsonError> {
+    if self.hasPending { return Result.succeed<JsonToken, JsonError>(self.pending) }
+    let result = JsonScanner.next(&mut self.*)
+    match move result {
+      Result<JsonToken, JsonError>.Failure { error } => {
+        return Result.failResult<JsonToken, JsonError>(move error)
+      }
+      Result<JsonToken, JsonError>.Success { value } => {
+        self.pending = value
+        self.hasPending = true
+        return Result.succeed<JsonToken, JsonError>(value)
+      }
+    }
+  }
+
+  /// Returns the absolute byte offset of the last token returned by `next` or `peek`.
+  pub fn offset(self: &JsonScanner<'input>) -> usize { return self.tokenOffset }
 
   /// Borrows the raw bytes denoted by a token span from this scanner's complete input.
   pub fn slice(self: &JsonScanner<'input>, span: JsonSpan) -> &'input [u8] {
