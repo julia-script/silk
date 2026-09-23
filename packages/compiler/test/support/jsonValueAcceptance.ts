@@ -137,7 +137,7 @@ effect fn rejectsNonFiniteF32(value: f32) -> bool {
 }
 
 effect fn rejectsDuplicate() -> bool ! OutOfMemoryError ? &mut Allocator {
-  let result = run Effect.result(Json.parse(b"{\\\"a\\\":1,\\\"\\\\u0061\\\":2}"))
+  let result = run Effect.result(Json.parse(b"{\\"a\\":1,\\"\\\\u0061\\":2}"))
   return match move result {
     Result<Value, JsonError | OutOfMemoryError>.Success { value: _ } => false
     Result<Value, JsonError | OutOfMemoryError>.Failure { error } => match move error {
@@ -167,7 +167,7 @@ effect fn allocate(self: &mut RejectAllocator, layout: Layout) -> Allocation ! O
 impl Allocator for RejectAllocator { allocate: RejectAllocator.allocate }
 
 effect fn allocationFailures() -> bool {
-  let input = b"{\\\"outer\\\":[\\\"first\\\",{\\\"number\\\":12.5},\\\"last\\\"]}"
+  let input = b"{\\"outer\\":[\\"first\\",{\\"number\\":12.5},\\"last\\"]}"
   let mut complete = RejectAllocator { calls: 0, rejectAt: 1000000 }
   let initial = run Effect.result(Json.parse(input) |> Effect.provideMut<Allocator>(&mut complete))
   match move initial {
@@ -206,7 +206,7 @@ effect fn rejectsDepth(document: &Value) -> bool {
 
 effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let source = b"{\\\"id\\\":42,\\\"name\\\":\\\"Silk\\\",\\\"music\\\":\\\"\\\\uD834\\\\uDD1E\\\",\\\"list\\\":[null,true,false,1.25e+2]}"
+  let source = b"{\\"id\\":42,\\"name\\":\\"Silk\\",\\"music\\":\\"\\\\uD834\\\\uDD1E\\",\\"list\\":[null,true,false,1.25e+2]}"
   let document = run Json.parse(source) |> Effect.provideMut<Allocator>(&mut allocator)
   let id = Json.field(&document, "id") |> Json.asI32 |> Option.unwrapOr<i32>(0)
   if id != 42 { return 1 }
@@ -228,8 +228,8 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   if !(run roundTrip(b"1E-999") |> Effect.provideMut<Allocator>(&mut allocator)) { return 9 }
   if !(run roundTrip(b"[]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 10 }
   if !(run roundTrip(b"{}") |> Effect.provideMut<Allocator>(&mut allocator)) { return 11 }
-  if !(run roundTrip(b"[\\\"\\\\n\\\",{\\\"x\\\":[0,1]}]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 12 }
-  if !(run roundTrip(b"[null,true,false,0,\\\"x\\\",[],{}]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 19 }
+  if !(run roundTrip(b"[\\"\\\\n\\",{\\"x\\":[0,1]}]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 12 }
+  if !(run roundTrip(b"[null,true,false,0,\\"x\\",[],{}]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 19 }
   if !(run roundTrip(b" \\t\\r\\n [ true ] \\t") |> Effect.provideMut<Allocator>(&mut allocator)) { return 20 }
   if !(run roundTrip(b"${deepestDocument}") |> Effect.provideMut<Allocator>(&mut allocator)) { return 21 }
   if !(run roundTripF64(1.5) |> Effect.provideMut<Allocator>(&mut allocator)) { return 22 }
