@@ -112,7 +112,7 @@ effect fn transport(bytes: &[u8]) -> MemoryByteDuplex
     bytes: move copied,
   })
   return run MemoryByteDuplex.make(
-    move reads, Vector.make<MemoryWriteEvent>(), usize.ONE, 4, Option.none<i32>(),
+    move reads, Vector.make<MemoryWriteEvent>(), usize.ONE, bytes.length + usize.ONE, Option.none<i32>(),
   )
 }
 
@@ -257,13 +257,15 @@ effect fn syntax() -> bool
         drop value
         if end { return false }
       }
-      Result.Failure { error } => return match move error {
-        JsonError { reason, offset, required, available } => {
-          drop required
-          drop available
-          return reason == JsonReason.UnexpectedByte && offsetIs(move offset, 3)
+      Result.Failure { error } => {
+        match move error {
+          JsonError { reason, offset, required, available } => {
+            drop required
+            drop available
+            return reason == JsonReason.UnexpectedByte && offsetIs(move offset, 3)
+          }
+          _ => { return false }
         }
-        _ => false
       }
     }
   }
@@ -293,6 +295,27 @@ effect fn failed(error: OutOfMemoryError | BufferError | JsonError) -> i32 {
       return 30
     }
     OutOfMemoryError {} => 32
+    BufferError.ReadFailed { progress, error: cause } => {
+      drop progress
+      drop cause
+      return 40
+    }
+    BufferError.InvalidReadCount { count, limit } => {
+      drop count
+      drop limit
+      return 41
+    }
+    BufferError.InvalidConsumption { requested, available } => {
+      drop requested
+      drop available
+      return 42
+    }
+    BufferError.BufferTooSmall { requested, capacity } => {
+      drop requested
+      drop capacity
+      return 43
+    }
+    BufferError.Terminal => 44
     _ => 31
   }
 }
