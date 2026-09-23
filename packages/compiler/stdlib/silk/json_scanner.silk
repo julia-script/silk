@@ -66,6 +66,8 @@ pub enum JsonReason {
   InvalidNumber,
   /// An object repeats a decoded member name.
   DuplicateKey,
+  /// A constructed value contains a child of the wrong container kind.
+  InvalidValue,
   /// The final input ended before the single root value was complete.
   UnexpectedEnd,
   /// The fixed nesting stack is full.

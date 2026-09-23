@@ -58,6 +58,18 @@ pub struct JsonEntry {
   pub value: Value
 }
 
+/// One owned child: an array item or an object member with its decoded key.
+///
+/// # Details
+/// Both container kinds use this one recursive storage shape, so cleanup follows one finite
+/// `Box<Vector<JsonChild>>` specialization even when arrays and objects nest in each other.
+pub union JsonChild {
+  /// An array element without a key.
+  Item { pub value: Value },
+  /// An object member with a decoded key.
+  Member { pub entry: JsonEntry },
+}
+
 /// An owned JSON null, boolean, raw number, decoded string, array, or object.
 pub union Value {
   /// JSON `null`.
@@ -69,9 +81,9 @@ pub union Value {
   /// Decoded UTF-8 text.
   String { pub text: String },
   /// Values in source order.
-  Array { pub values: Box<Vector<Value>> },
+  Array { pub values: Box<Vector<JsonChild>> },
   /// Members in source order.
-  Object { pub entries: Box<Vector<JsonEntry>> },
+  Object { pub entries: Box<Vector<JsonChild>> },
 }
 
 /// Operations on owned JSON values.
@@ -110,12 +122,17 @@ impl Json {
   pub fn field<'a>(self: &'a Value, key: string) -> Option<&'a Value> {
     return match &self.* {
       Value.Object { entries } => {
-        let boxed = Box.get<Vector<JsonEntry>>(&entries)
-        let values = Vector.asSlice<JsonEntry>(&boxed[0])
+        let boxed = Box.get<Vector<JsonChild>>(&entries)
+        let values = Vector.asSlice<JsonChild>(&boxed[0])
         let mut index = usize.ZERO
         while index < values.length {
-          if String.view(&values[index].key) == key {
-            return Option.some<&'a Value>(&values[index].value)
+          match &values[index] {
+            JsonChild.Member { entry } => {
+              if String.view(&entry.key) == key {
+                return Option.some<&'a Value>(&entry.value)
+              }
+            }
+            _ => {}
           }
           index = index + usize.ONE
         }
@@ -219,22 +236,22 @@ effect fn parseToken(scanner: &mut JsonScanner, token: JsonToken, end: usize)
 
 effect fn parseArray(scanner: &mut JsonScanner, end: usize)
   -> Value ! JsonError | OutOfMemoryError ? &mut Allocator {
-  let mut values = Vector.make<Value>()
+  let mut values = Vector.make<JsonChild>()
   let mut token = run nextToken(&mut scanner.*)
   match &token {
     JsonToken.ArrayEnd => {
-      let boxed = run Box.make<Vector<Value>>(move values)
+      let boxed = run Box.make<Vector<JsonChild>>(move values)
       return Value.Array { values: move boxed }
     }
     _ => {}
   }
   while true {
     let value = run parseToken(&mut scanner.*, move token, end)
-    run Vector.append<Value>(&mut values, move value)
+    run Vector.append<JsonChild>(&mut values, JsonChild.Item { value: move value })
     let separator = run nextToken(&mut scanner.*)
     match move separator {
       JsonToken.ArrayEnd => {
-        let boxed = run Box.make<Vector<Value>>(move values)
+        let boxed = run Box.make<Vector<JsonChild>>(move values)
         return Value.Array { values: move boxed }
       }
       JsonToken.ValueSeparator => { token = run nextToken(&mut scanner.*) }
@@ -246,11 +263,11 @@ effect fn parseArray(scanner: &mut JsonScanner, end: usize)
 
 effect fn parseObject(scanner: &mut JsonScanner, end: usize)
   -> Value ! JsonError | OutOfMemoryError ? &mut Allocator {
-  let mut entries = Vector.make<JsonEntry>()
+  let mut entries = Vector.make<JsonChild>()
   let mut token = run nextToken(&mut scanner.*)
   match &token {
     JsonToken.ObjectEnd => {
-      let boxed = run Box.make<Vector<JsonEntry>>(move entries)
+      let boxed = run Box.make<Vector<JsonChild>>(move entries)
       return Value.Object { entries: move boxed }
     }
     _ => {}
@@ -263,11 +280,16 @@ effect fn parseObject(scanner: &mut JsonScanner, end: usize)
     let offset = keySpan.offset
     let raw = JsonScanner.slice(&scanner.*, move keySpan)
     let key = run decodeString(raw, offset, true)
-    let old = Vector.asSlice<JsonEntry>(&entries)
+    let old = Vector.asSlice<JsonChild>(&entries)
     let mut index = usize.ZERO
     while index < old.length {
-      if String.view(&old[index].key) == String.view(&key) {
-        fail inputError(JsonReason.DuplicateKey, offset)
+      match &old[index] {
+        JsonChild.Member { entry } => {
+          if String.view(&entry.key) == String.view(&key) {
+            fail inputError(JsonReason.DuplicateKey, offset)
+          }
+        }
+        _ => {}
       }
       index = index + usize.ONE
     }
@@ -278,11 +300,13 @@ effect fn parseObject(scanner: &mut JsonScanner, end: usize)
     }
     let valueToken = run nextToken(&mut scanner.*)
     let value = run parseToken(&mut scanner.*, move valueToken, end)
-    run Vector.append<JsonEntry>(&mut entries, JsonEntry { key: move key, value: move value })
+    run Vector.append<JsonChild>(&mut entries, JsonChild.Member {
+      entry: JsonEntry { key: move key, value: move value }
+    })
     let separator = run nextToken(&mut scanner.*)
     match move separator {
       JsonToken.ObjectEnd => {
-        let boxed = run Box.make<Vector<JsonEntry>>(move entries)
+        let boxed = run Box.make<Vector<JsonChild>>(move entries)
         return Value.Object { entries: move boxed }
       }
       JsonToken.ValueSeparator => { token = run nextToken(&mut scanner.*) }
@@ -410,13 +434,16 @@ effect fn writeNode(document: &Value, options: &JsonOptions)
     Value.String { text } => run JsonOutput.writeString(String.view(&text))
     Value.Array { values } => {
       let child = run JsonOptions.child(options)
-      let boxed = Box.get<Vector<Value>>(&values)
-      let items = Vector.asSlice<Value>(&boxed[0])
+      let boxed = Box.get<Vector<JsonChild>>(&values)
+      let items = Vector.asSlice<JsonChild>(&boxed[0])
       run Writer.writeAll(b"[")
       let mut index = usize.ZERO
       while index < items.length {
         run JsonOutput.separator(&child, index == usize.ZERO)
-        run writeNode(&items[index], &child)
+        match &items[index] {
+          JsonChild.Item { value } => { run writeNode(&value, &child) }
+          _ => { fail outputError(JsonReason.InvalidValue) }
+        }
         index = index + usize.ONE
       }
       if items.length != usize.ZERO { run JsonOutput.line(options) }
@@ -424,15 +451,20 @@ effect fn writeNode(document: &Value, options: &JsonOptions)
     }
     Value.Object { entries } => {
       let child = run JsonOptions.child(options)
-      let boxed = Box.get<Vector<JsonEntry>>(&entries)
-      let members = Vector.asSlice<JsonEntry>(&boxed[0])
+      let boxed = Box.get<Vector<JsonChild>>(&entries)
+      let members = Vector.asSlice<JsonChild>(&boxed[0])
       run Writer.writeAll(b"{")
       let mut index = usize.ZERO
       while index < members.length {
         run JsonOutput.separator(&child, index == usize.ZERO)
-        run JsonOutput.writeString(String.view(&members[index].key))
-        run JsonOutput.colon(&child)
-        run writeNode(&members[index].value, &child)
+        match &members[index] {
+          JsonChild.Member { entry } => {
+            run JsonOutput.writeString(String.view(&entry.key))
+            run JsonOutput.colon(&child)
+            run writeNode(&entry.value, &child)
+          }
+          _ => { fail outputError(JsonReason.InvalidValue) }
+        }
         index = index + usize.ONE
       }
       if members.length != usize.ZERO { run JsonOutput.line(options) }
@@ -445,6 +477,15 @@ fn inputError(reason: JsonReason, offset: usize) -> JsonError {
   return JsonError {
     reason: reason,
     offset: Option.some<usize>(offset),
+    required: Option.none<usize>(),
+    available: Option.none<usize>(),
+  }
+}
+
+fn outputError(reason: JsonReason) -> JsonError {
+  return JsonError {
+    reason: reason,
+    offset: Option.none<usize>(),
     required: Option.none<usize>(),
     available: Option.none<usize>(),
   }
