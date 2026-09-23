@@ -1,0 +1,99 @@
+//! Incremental UTF-8 decoding across byte-chunk boundaries without allocation.
+//!
+//! # When to use
+//! Use [`Utf8Decoder`] when bytes arrive in chunks and a sequence can cross a chunk boundary.
+//! Use `String.fromUtf8` when all bytes are available in one complete slice.
+//!
+//! # Details
+//! Feed bytes in order with [`step`]. A complete scalar resets the decoder for the next byte.
+//! The caller supplies each byte's offset so an invalid result identifies that byte.
+//!
+//! # Gotchas
+//! If input ends while [`pending`] returns true, the caller must report incomplete input.
+//! After an invalid result, create a new decoder before processing more bytes.
+
+import silk.u32
+import silk.u8
+import silk.usize
+
+/// The result of validating one UTF-8 byte.
+pub union Utf8Step {
+  /// A complete Unicode scalar value.
+  Scalar {
+    /// The decoded scalar value.
+    pub value: u32,
+  },
+  /// More continuation bytes are required to complete the scalar.
+  NeedMore,
+  /// The byte cannot complete a valid UTF-8 sequence.
+  Invalid {
+    /// The caller-supplied offset of the invalid byte.
+    pub offset: usize,
+  },
+}
+
+/// Allocation-free state for one UTF-8 scalar at a time across byte chunks.
+///
+/// # Details
+/// A completed scalar leaves this state ready for the next sequence. An incomplete sequence
+/// remains available for the next chunk. This state does not retain a byte slice.
+pub struct Utf8Decoder {
+  remaining: u8
+  value: u32
+  minimum: u32
+}
+
+impl Utf8Decoder {
+  /// Creates a decoder ready for the first byte of a UTF-8 sequence.
+  pub fn make() -> Utf8Decoder {
+    return Utf8Decoder {remaining: 0, value: 0, minimum: 0}
+  }
+  /// Returns true if the current scalar still needs continuation bytes.
+  pub fn pending(self: &Utf8Decoder) -> bool {
+    return self.remaining != 0
+  }
+  /// Validates one byte and returns a scalar, a need-more result, or the invalid byte offset.
+  ///
+  /// # Details
+  /// Supply consecutive bytes in order, including across chunk boundaries. `offset` is the
+  /// absolute position of `byte` in the caller's input. A complete scalar resets the decoder.
+  ///
+  /// # Gotchas
+  /// Overlong sequences, surrogate values, and values above `0x10FFFF` are invalid. If input
+  /// ends while [`pending`] is true, the caller must report incomplete input.
+  pub fn step(self: &mut Utf8Decoder, byte: u8, offset: usize) -> Utf8Step {
+    if self.remaining != 0 {
+      if byte < 128 || byte > 191 {
+        return Utf8Step.Invalid {offset: offset}
+      }
+      self.value = u32.bitOr(u32.shiftLeft(self.value, 6), u8.toU32(byte - 128))
+      self.remaining = self.remaining - 1
+      if self.remaining != 0 {
+        return Utf8Step.NeedMore
+      }
+      if self.value < self.minimum || self.value > 1114111 || (self.value >= 55296 && self.value <= 57343) {
+        return Utf8Step.Invalid {offset: offset}
+      }
+      return Utf8Step.Scalar {value: self.value}
+    }
+    if byte < 128 {
+      return Utf8Step.Scalar {value: u8.toU32(byte)}
+    }
+    if byte >= 194 && byte <= 223 {
+      self.remaining = 1
+      self.value = u8.toU32(byte - 192)
+      self.minimum = 128
+    } else if byte >= 224 && byte <= 239 {
+      self.remaining = 2
+      self.value = u8.toU32(byte - 224)
+      self.minimum = 2048
+    } else if byte >= 240 && byte <= 244 {
+      self.remaining = 3
+      self.value = u8.toU32(byte - 240)
+      self.minimum = 65536
+    } else {
+      return Utf8Step.Invalid {offset: offset}
+    }
+    return Utf8Step.NeedMore
+  }
+}

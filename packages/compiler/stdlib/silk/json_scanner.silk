@@ -39,6 +39,7 @@ import silk.result { Result }
 import silk.slice { Slice }
 import silk.u32
 import silk.u8
+import silk.utf8_decoder { Utf8Decoder, Utf8Step }
 import silk.usize
 
 /// The maximum number of simultaneously open JSON arrays and objects.
@@ -182,9 +183,7 @@ pub struct JsonScanState {
   unicodeDigits: u8
   unicodeValue: u32
   pendingHigh: bool
-  utf8Remaining: u8
-  utf8Value: u32
-  utf8Minimum: u32
+  utf8: Utf8Decoder
   numberMode: NumberMode
   literalKind: u8
   literalIndex: u8
@@ -330,9 +329,7 @@ impl JsonScanState {
       unicodeDigits: 0,
       unicodeValue: 0,
       pendingHigh: false,
-      utf8Remaining: 0,
-      utf8Value: 0,
-      utf8Minimum: 0,
+      utf8: Utf8Decoder.make(),
       numberMode: NumberMode.Integer,
       literalKind: 0,
       literalIndex: 0,
@@ -363,17 +360,14 @@ impl JsonScanState {
 
       if self.mode == ScanMode.String {
         if self.stringMode == StringMode.Text {
-          if self.utf8Remaining != 0 {
-            if byte < 128 || byte > 191 {
-              return failed(&mut self, JsonReason.InvalidUtf8)
-            }
-            self.utf8Value = u32.bitOr(u32.shiftLeft(self.utf8Value, 6), u8.toU32(byte - 128))
-            self.utf8Remaining = self.utf8Remaining - 1
-            if self.utf8Remaining == 0 {
-              if self.utf8Value < self.utf8Minimum || self.utf8Value > 1114111
-                || (self.utf8Value >= 55296 && self.utf8Value <= 57343) {
-                return failed(&mut self, JsonReason.InvalidUtf8)
+          if Utf8Decoder.pending(&self.utf8) || byte >= 128 {
+            let decoded = Utf8Decoder.step(&mut self.utf8, byte, self.offset)
+            match move decoded {
+              Utf8Step.Invalid { offset } => {
+                self.mode = ScanMode.Terminal
+                return Result.failResult<JsonScanStep, JsonError>(errorAt(JsonReason.InvalidUtf8, offset))
               }
+              _ => {}
             }
             consume(&mut self, &mut index)
             continue
@@ -402,25 +396,6 @@ impl JsonScanState {
             continue
           }
           if byte < 32 { return failed(&mut self, JsonReason.UnexpectedByte) }
-          if byte < 128 {
-            consume(&mut self, &mut index)
-            continue
-          }
-          if byte >= 194 && byte <= 223 {
-            self.utf8Remaining = 1
-            self.utf8Value = u8.toU32(byte - 192)
-            self.utf8Minimum = 128
-          } else if byte >= 224 && byte <= 239 {
-            self.utf8Remaining = 2
-            self.utf8Value = u8.toU32(byte - 224)
-            self.utf8Minimum = 2048
-          } else if byte >= 240 && byte <= 244 {
-            self.utf8Remaining = 3
-            self.utf8Value = u8.toU32(byte - 240)
-            self.utf8Minimum = 65536
-          } else {
-            return failed(&mut self, JsonReason.InvalidUtf8)
-          }
           consume(&mut self, &mut index)
           continue
         }
@@ -614,7 +589,7 @@ impl JsonScanState {
         self.mode = ScanMode.String
         self.stringMode = StringMode.Text
         self.escaped = false
-        self.utf8Remaining = 0
+        self.utf8 = Utf8Decoder.make()
         self.pendingHigh = false
         consume(&mut self, &mut index)
         continue
