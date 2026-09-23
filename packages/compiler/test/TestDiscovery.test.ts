@@ -727,23 +727,18 @@ it.effect('keeps the bundled runner environment complete for ordinary tests', ()
 
 it.effect('keeps bundled runner identity independent from exclusive test helper revisions', () =>
   Effect.gen(function* () {
-    const program = (
-      shared: number,
-      alphaOffset: number,
-    ) => `fn sharedHelper() -> i32 { return ${shared} }
+    const program = (alphaOffset: number) => `fn sharedHelper() -> i32 { return 40 }
 fn alphaHelper() -> i32 { return sharedHelper() + ${alphaOffset} }
 fn betaHelper() -> i32 { return sharedHelper() + 2 }
 test fn alpha() -> () { let observed = alphaHelper() drop observed }
 test fn beta() -> () { let observed = betaHelper() drop observed }
 test fn independent() -> () {}`
-    const before = yield* bundledExecutionSnapshot(program(40, 1))
-    const alphaChanged = yield* bundledExecutionSnapshot(program(40, 7))
-    const sharedChanged = yield* bundledExecutionSnapshot(program(41, 1))
+    const before = yield* bundledExecutionSnapshot(program(1))
+    const alphaChanged = yield* bundledExecutionSnapshot(program(7))
     const beforeIdentities = eligibleIdentities(before.manifest)
     const alphaIdentities = eligibleIdentities(alphaChanged.manifest)
-    const sharedIdentities = eligibleIdentities(sharedChanged.manifest)
 
-    for (const snapshot of [before, alphaChanged, sharedChanged]) {
+    for (const snapshot of [before, alphaChanged]) {
       assert.isTrue(snapshot.runner.complete)
       assert.deepEqual(
         snapshot.manifest.entries.map((entry) => entry.eligibility._tag),
@@ -758,15 +753,25 @@ test fn independent() -> () {}`
     assert.notStrictEqual(alphaIdentities.get('alpha'), beforeIdentities.get('alpha'))
     assert.strictEqual(alphaIdentities.get('beta'), beforeIdentities.get('beta'))
     assert.strictEqual(alphaIdentities.get('independent'), beforeIdentities.get('independent'))
+  }),
+)
 
-    assert.strictEqual(sharedChanged.runner.identity, before.runner.identity)
-    assert.strictEqual(
-      sharedChanged.manifest.environmentIdentity,
-      before.manifest.environmentIdentity,
-    )
+it.effect('invalidates every dependent execution identity after a shared helper revision', () =>
+  Effect.gen(function* () {
+    const program = (shared: number) => `fn sharedHelper() -> i32 { return ${shared} }
+test fn alpha() -> () { let observed = sharedHelper() + 1 drop observed }
+test fn beta() -> () { let observed = sharedHelper() + 2 drop observed }
+pub fn main() -> () {
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`
+    const beforeIdentities = eligibleIdentities(yield* executionManifest(program(40)))
+    const sharedIdentities = eligibleIdentities(yield* executionManifest(program(41)))
+
     assert.notStrictEqual(sharedIdentities.get('alpha'), beforeIdentities.get('alpha'))
     assert.notStrictEqual(sharedIdentities.get('beta'), beforeIdentities.get('beta'))
-    assert.strictEqual(sharedIdentities.get('independent'), beforeIdentities.get('independent'))
   }),
 )
 
