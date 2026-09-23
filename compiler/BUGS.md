@@ -216,8 +216,9 @@ re-measurement had actually confirmed. See the entry below.
 
 ## Ancestor-history interning exhausts the V8 heap for the whole `hir` lowering
 
-**Status:** open, and already present at `ea3fbb1a` before the declaration lowering. `silk check`
-succeeds at every commit of this branch; `silk test` does not complete at `ea3fbb1a` or after.
+**Status:** repaired in bootstrap instance discovery by admitting into the ancestry only a
+declaration proved to have more than one instance key. `silk test` and `silk build` both complete
+with the whole `compiler/src/hir` lowering reachable.
 
 `silk test` aborts in instance discovery, in `AncestorHistory` interning reached through
 `Realization.discoverInstances`. It is the same failure mode as the wave-3 entry above, further
@@ -245,3 +246,41 @@ further reshaping of the self-hosted source: the wave-3 experience already showe
 declarations around only shifts the threshold.
 
 Encountered on 2026-09-23 while porting the declaration lowering and assembling the module.
+
+**Repaired on 2026-09-23.** The multiplier was the ancestry's exactness over declarations that
+could never be told apart. Instrumenting the run recorded only 1,720 distinct ancestor values
+spread over 459 declarations — fewer than four each — while the interned decision tree passed
+7,000,000 nodes before the heap gave out. The nodes were not values but correlations between them.
+
+`needsAncestor` already dropped a declaration whose arguments _cannot_ vary, which is a fact about
+its signature. Whether they _do_ vary is a fact about the program, and the `hir` walkers are the
+case that separates the two: every one of them is an `effect fn`, so each carries a hidden Effect
+identity and is retained, yet almost all are monomorphic and realize at exactly one instance key.
+An ancestor of such a declaration is equal to every target of it, so `sameArguments` admits every
+guard below it and its correlation with the rest of the history decides nothing. The projection
+added by `2d4e1c6d` could not remove it either, because the whole lowering is one strongly
+connected component that projects onto itself.
+
+Discovery now records a declaration in the ancestry only after a second instance key proves it
+discriminating, and restarts — the mechanism the component-growth restart already used — so the
+histories built without it are rebuilt with it. The round is abandoned the moment a declaration
+becomes discriminating, so an unbounded specialization cannot expand past the guard that is about
+to be reinstated. Restarts are bounded because the discriminating set only grows.
+
+Measured on this worktree's own build (`node packages/cli/dist/bin.js`) against `01d10be3`:
+
+| Gate                                       | Before                                  | After                         |
+| ------------------------------------------ | --------------------------------------- | ----------------------------- |
+| `test --manifest-path compiler/silk.toml`  | heap OOM, 4.5 GB, 121 s, no test run    | 60 discovered, 4.5 GB, 99 s   |
+| `build --manifest-path compiler/silk.toml` | `RangeError: Map maximum size exceeded` | ok, 901 symbols, 3.1 GB, 32 s |
+
+The regression is `packages/compiler/test/Instances.test.ts`, "bounds ancestry for one mutually
+recursive lowering cycle across modules": twenty-four monomorphic `effect fn` walkers threading one
+`&mut State` and requiring `&mut Allocator` over five modules, forming one component with a second
+cycle reachable from it. It interned 567 decision nodes before the repair and interns none after,
+while discovering the same instances and reporting no violation.
+
+Four `hir/LoweringCases` cases fail on the repaired compiler — `aBroadModuleSatisfiesEveryFlat
+Invariant`, `builtModuleRenders`, `moduleDocumentationIsInterned`, and
+`unionVariantsRecordTheirFieldBlock`. They are self-hosted golden mismatches in the lowering port,
+not discovery defects; they are simply the first cases that were ever able to run.
