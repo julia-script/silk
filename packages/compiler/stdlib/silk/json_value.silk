@@ -65,9 +65,15 @@ pub struct JsonEntry {
 /// `Box<Vector<JsonChild>>` specialization even when arrays and objects nest in each other.
 pub union JsonChild {
   /// An array element without a key.
-  Item { pub value: Value },
+  Item {
+    /// The owned element value.
+    pub value: Value
+  },
   /// An object member with a decoded key.
-  Member { pub entry: JsonEntry },
+  Member {
+    /// The owned key and value.
+    pub entry: JsonEntry
+  },
 }
 
 /// An owned JSON null, boolean, raw number, decoded string, array, or object.
@@ -75,15 +81,30 @@ pub union Value {
   /// JSON `null`.
   Null,
   /// A JSON boolean.
-  Bool { pub value: bool },
+  Bool {
+    /// The boolean value.
+    pub value: bool
+  },
   /// A valid number lexeme retained exactly as read.
-  Number { pub text: String },
+  Number {
+    /// The valid number text in its source spelling.
+    pub text: String
+  },
   /// Decoded UTF-8 text.
-  String { pub text: String },
+  String {
+    /// The decoded UTF-8 text.
+    pub text: String
+  },
   /// Values in source order.
-  Array { pub values: Box<Vector<JsonChild>> },
+  Array {
+    /// The array elements in source order.
+    pub values: Box<Vector<JsonChild>>
+  },
   /// Members in source order.
-  Object { pub entries: Box<Vector<JsonChild>> },
+  Object {
+    /// The object members in source order.
+    pub entries: Box<Vector<JsonChild>>
+  },
 }
 
 /// Operations on owned JSON values.

@@ -12,10 +12,11 @@
 //! ## Configure two-space indentation
 //! ```silk
 //! import silk.json_output { JsonOptions }
+//! import silk.usize
 //!
 //! pub fn main() -> i32 {
 //!   let options = JsonOptions.indented(2)
-//!   return options.indent
+//!   return usize.toI32(options.indent)
 //! }
 //! ```
 
