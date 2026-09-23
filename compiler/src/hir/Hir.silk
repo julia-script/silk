@@ -65,6 +65,8 @@ import silk.allocator {Allocator, OutOfMemoryError, SystemAllocator}
 import silk.effect {Effect}
 import silk.format {Format}
 import silk.result {Result}
+import silk.slice {Slice}
+import silk.string {String}
 import silk.u32
 import silk.u64
 import silk.usize
@@ -854,6 +856,19 @@ pub union Node {
     /// The referenced name.
     pub name: HirId,
     /// The lexical binder this identifier resolves to, absent when no binder is in scope.
+    ///
+    /// # Details
+    ///
+    /// A binder is exactly one of four node kinds:
+    /// [`Parameter`](Node.Parameter) for a callable parameter,
+    /// [`BindingStatement`](Node.BindingStatement) for a `let` or `const`,
+    /// [`BindingPattern`](Node.BindingPattern) for a name a pattern introduces, and
+    /// [`Name`](Node.Name) for a `static for` iteration name. The loop is the odd one out
+    /// because a postorder arena appends its statement only after its body, so the name node is
+    /// the only identity that exists while the body is being lowered.
+    ///
+    /// Absence means unresolved, not unbound: an import, a member, and a type name all stay
+    /// absent here, because lowering resolves lexical scope only.
     pub binding: HirRef,
   },
   /// A `move` expression.
@@ -1464,6 +1479,8 @@ pub union Node {
   Declaration {
     /// The declaration's source-independent logical name.
     pub owner: OwnerKey,
+    /// The interned `///` block the source attached to it, if any.
+    pub documentation: SymbolRef,
     /// The declaration header.
     pub header: HirId,
     /// The declaration body.
@@ -1565,14 +1582,16 @@ impl Module {
 // Debug text form
 // ---------------------------------------------------------------------------
 
-fn accessName(access: Access) -> string<'static> {
+/// Returns the stable spelling of `access`, shared by the debug dump and the canonical encoding.
+pub fn accessName(access: Access) -> string<'static> {
   return match access {
     Access.Shared => "Shared"
     Access.Mutable => "Mutable"
   }
 }
 
-fn callableModeName(mode: CallableMode) -> string<'static> {
+/// Returns the stable spelling of `mode`, shared by the debug dump and the canonical encoding.
+pub fn callableModeName(mode: CallableMode) -> string<'static> {
   return match mode {
     CallableMode.Shared => "Shared"
     CallableMode.Mutable => "Mutable"
@@ -1580,7 +1599,8 @@ fn callableModeName(mode: CallableMode) -> string<'static> {
   }
 }
 
-fn parameterModeName(mode: ParameterMode) -> string<'static> {
+/// Returns the stable spelling of `mode`, shared by the debug dump and the canonical encoding.
+pub fn parameterModeName(mode: ParameterMode) -> string<'static> {
   return match mode {
     ParameterMode.Value => "Value"
     ParameterMode.Mutable => "Mutable"
@@ -1588,7 +1608,8 @@ fn parameterModeName(mode: ParameterMode) -> string<'static> {
   }
 }
 
-fn radixName(radix: Radix) -> string<'static> {
+/// Returns the stable spelling of `radix`, shared by the debug dump and the canonical encoding.
+pub fn radixName(radix: Radix) -> string<'static> {
   return match radix {
     Radix.Binary => "Binary"
     Radix.Octal => "Octal"
@@ -1597,14 +1618,16 @@ fn radixName(radix: Radix) -> string<'static> {
   }
 }
 
-fn signName(sign: Sign) -> string<'static> {
+/// Returns the stable spelling of `sign`, shared by the debug dump and the canonical encoding.
+pub fn signName(sign: Sign) -> string<'static> {
   return match sign {
     Sign.Positive => "Positive"
     Sign.Negative => "Negative"
   }
 }
 
-fn durationUnitName(unit: DurationUnit) -> string<'static> {
+/// Returns the stable spelling of `unit`, shared by the debug dump and the canonical encoding.
+pub fn durationUnitName(unit: DurationUnit) -> string<'static> {
   return match unit {
     DurationUnit.Weeks => "Weeks"
     DurationUnit.Days => "Days"
@@ -1617,14 +1640,16 @@ fn durationUnitName(unit: DurationUnit) -> string<'static> {
   }
 }
 
-fn multiplicityName(multiplicity: Multiplicity) -> string<'static> {
+/// Returns the stable spelling of `multiplicity`, shared by the debug dump and the canonical encoding.
+pub fn multiplicityName(multiplicity: Multiplicity) -> string<'static> {
   return match multiplicity {
     Multiplicity.Single => "Single"
     Multiplicity.Many => "Many"
   }
 }
 
-fn matchAccessName(access: MatchAccess) -> string<'static> {
+/// Returns the stable spelling of `access`, shared by the debug dump and the canonical encoding.
+pub fn matchAccessName(access: MatchAccess) -> string<'static> {
   return match access {
     MatchAccess.Default => "Default"
     MatchAccess.Place => "Place"
@@ -1634,7 +1659,8 @@ fn matchAccessName(access: MatchAccess) -> string<'static> {
   }
 }
 
-fn prefixOperatorName(operator: PrefixOperator) -> string<'static> {
+/// Returns the stable spelling of `operator`, shared by the debug dump and the canonical encoding.
+pub fn prefixOperatorName(operator: PrefixOperator) -> string<'static> {
   return match operator {
     PrefixOperator.Negate => "Negate"
     PrefixOperator.Not => "Not"
@@ -1642,7 +1668,8 @@ fn prefixOperatorName(operator: PrefixOperator) -> string<'static> {
   }
 }
 
-fn infixOperatorName(operator: InfixOperator) -> string<'static> {
+/// Returns the stable spelling of `operator`, shared by the debug dump and the canonical encoding.
+pub fn infixOperatorName(operator: InfixOperator) -> string<'static> {
   return match operator {
     InfixOperator.Add => "Add"
     InfixOperator.Subtract => "Subtract"
@@ -1663,14 +1690,16 @@ fn infixOperatorName(operator: InfixOperator) -> string<'static> {
   }
 }
 
-fn linkageDirectionName(direction: LinkageDirection) -> string<'static> {
+/// Returns the stable spelling of `direction`, shared by the debug dump and the canonical encoding.
+pub fn linkageDirectionName(direction: LinkageDirection) -> string<'static> {
   return match direction {
     LinkageDirection.Import => "Import"
     LinkageDirection.Export => "Export"
   }
 }
 
-fn groupBranchName(branch: GroupBranch) -> string<'static> {
+/// Returns the stable spelling of `branch`, shared by the debug dump and the canonical encoding.
+pub fn groupBranchName(branch: GroupBranch) -> string<'static> {
   return match branch {
     GroupBranch.Then => "Then"
     GroupBranch.Else => "Else"
@@ -1729,10 +1758,46 @@ effect fn writeFieldName(name: string<'static>) -> () ! WriterError ? &mut Write
   return run Writer.writeString(": ")
 }
 
-effect fn writeQuotedSymbol(module: &Module, symbol: Symbol) -> () ! WriterError ? &mut Writer {
+/// Writes `text` between double quotes with `"`, `\`, and the line breaks escaped.
+///
+/// # Details
+///
+/// The dump is read back by `compiler/scripts/lower-corpus.mjs`, which is line oriented: a field
+/// occupies exactly one line and a quoted value ends at the first unescaped `"`. Interned text is
+/// arbitrary source bytes — a module documentation block spans many lines and a text literal may
+/// contain a quote — so writing it raw would let a symbol close a field early or open a line the
+/// reader cannot classify. Every other byte, including non-ASCII UTF-8, passes through unchanged.
+pub effect fn writeQuotedText(text: &[u8]) -> () ! WriterError ? &mut Writer {
   run Writer.writeString("\"")
-  run Writer.writeAll(StringTable.get(&module.strings, symbol))
+  let mut plain = usize.ZERO
+  let mut index = usize.ZERO
+  while index < text.length {
+    let byte = text[index]
+    let mut escape = ""
+    if byte == 34 {
+      escape = "\\\""
+    } else if byte == 92 {
+      escape = "\\\\"
+    } else if byte == 10 {
+      escape = "\\n"
+    } else if byte == 13 {
+      escape = "\\r"
+    } else if byte == 9 {
+      escape = "\\t"
+    }
+    if String.utf8Bytes(escape).length > usize.ZERO {
+      run Writer.writeAll(Slice.view<u8>(text, plain, index - plain))
+      run Writer.writeString(escape)
+      plain = index + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  run Writer.writeAll(Slice.view<u8>(text, plain, text.length - plain))
   return run Writer.writeString("\"")
+}
+
+effect fn writeQuotedSymbol(module: &Module, symbol: Symbol) -> () ! WriterError ? &mut Writer {
+  return run writeQuotedText(StringTable.get(&module.strings, symbol))
 }
 
 effect fn writeIdField(name: string<'static>, id: HirId) -> () ! WriterError ? &mut Writer {
@@ -1937,7 +2002,14 @@ effect fn writeOwnerField(module: &Module, name: string<'static>, owner: OwnerKe
   return run Writer.writeString("\n")
 }
 
-fn nodeKindName(node: Node) -> string<'static> {
+/// Returns the grammar category of `node` as a stable name.
+///
+/// # Details
+///
+/// The name identifies the variant and nothing else: it never depends on a field value, an arena
+/// index, or a span. [`Fingerprint`](hir.Fingerprint) frames it as a node's canonical tag, so
+/// adding or reordering a variant cannot silently collide two kinds the way a numeric tag would.
+pub fn nodeKindName(node: Node) -> string<'static> {
   return match node {
     Node.Name {text: ignored1} => "Name"
     Node.MissingName => "MissingName"
@@ -2070,7 +2142,7 @@ fn nodeKindName(node: Node) -> string<'static> {
     Node.MembersBody {members: ignored1} => "MembersBody"
     Node.ConditionalBody {thenBranch: ignored1, elseBranch: ignored2} => "ConditionalBody"
     Node.InvalidDeclarationBody {retained: ignored1} => "InvalidDeclarationBody"
-    Node.Declaration {owner: ignored1, header: ignored2, body: ignored3} => "Declaration"
+    Node.Declaration {owner: ignored1, documentation: ignored2, header: ignored3, body: ignored4} => "Declaration"
   }
 }
 
@@ -2612,8 +2684,9 @@ effect fn writeNodeFields(module: &Module, node: Node) -> () ! WriterError ? &mu
     Node.InvalidDeclarationBody {retained} => {
       run writeRangeField(module, "retained", retained)
     }
-    Node.Declaration {owner, header, body} => {
+    Node.Declaration {owner, documentation, header, body} => {
       run writeOwnerField(module, "owner", owner)
+      run writeSymbolRefField(module, "documentation", documentation)
       run writeIdField("header", header)
       run writeIdField("body", body)
     }
@@ -2688,8 +2761,9 @@ effect fn writeDiagnostic(module: &Module, index: usize) -> () ! WriterError ? &
 /// The header names the module documentation and the top-level declaration range. Each node writes
 /// `#<id> <Kind> <start>..<end>` followed by one indented `  field: value` line per field. A child
 /// identity prints as `#id`, an absent child as `none`, a child range as `[#a #b]`, an interned
-/// symbol as its quoted text, and a span as `start..end`. The cause and diagnostic sections follow
-/// in storage order.
+/// symbol as quoted text escaped by [`writeQuotedText`], and a span as `start..end`. The cause and
+/// diagnostic sections follow in storage order. Every field occupies exactly one line, so a reader
+/// that walks lines never has to guess where a value ends.
 ///
 /// Output depends only on module content, never on interning order or arena capacity, so two
 /// modules with the same content render identically.
@@ -3425,8 +3499,9 @@ effect fn verifyNode(module: &Module, parent: usize, found: &mut Vector<Defect>)
     Node.InvalidDeclarationBody {retained} => {
       run recordRange(module, parent, retained, &mut found.*)
     }
-    Node.Declaration {owner, header, body} => {
+    Node.Declaration {owner, documentation, header, body} => {
       run recordOwner(module, parent, owner, &mut found.*)
+      run recordSymbolRef(module, parent, documentation, &mut found.*)
       run recordId(module, parent, header, &mut found.*)
       run recordId(module, parent, body, &mut found.*)
     }
@@ -3451,6 +3526,13 @@ effect fn verifyNode(module: &Module, parent: usize, found: &mut Vector<Defect>)
 ///
 /// This verifies arena consistency, not lowering fidelity. A module that lowers the wrong syntax
 /// faithfully into a consistent arena passes.
+///
+/// It also does not prove that the arena is a forest — that one traversal from `declarations`
+/// reaches every node exactly once and that a child's span lies inside its parent's. That needs a
+/// per-node owner count threaded through all 132 arms of the field walk, only to exempt
+/// [`Node.IdentifierExpression`]'s `binding`, which points at a binder some other node owns.
+/// `compiler/scripts/lower-corpus.mjs` proves it from the dump instead, over every fixture,
+/// self-hosted source, and standard-library module.
 pub effect fn verify(module: &Module) -> Vector<Defect> ! OutOfMemoryError ? &mut Allocator {
   let mut found = Vector.make<Defect>()
   if Vector.length<Span>(&module.spans) != Vector.length<Node>(&module.nodes) {
@@ -3501,4 +3583,50 @@ pub effect fn verify(module: &Module) -> Vector<Defect> ! OutOfMemoryError ? &mu
     index = index + usize.ONE
   }
   return move found
+}
+
+/// Returns the stable debug spelling of one violated arena invariant.
+pub fn violationName(violation: Violation) -> string<'static> {
+  return match violation {
+    Violation.SpanCountMismatch => "SpanCountMismatch"
+    Violation.CauseCountMismatch => "CauseCountMismatch"
+    Violation.ChildNotBeforeParent => "ChildNotBeforeParent"
+    Violation.ReferenceOutOfBounds => "ReferenceOutOfBounds"
+    Violation.EmptyRecoveryCauses => "EmptyRecoveryCauses"
+  }
+}
+
+/// Verifies `module` and writes a `violations <count>` section naming every defect it found.
+///
+/// # When to use
+///
+/// Call after [`write`] in a dump. A reader that sees `violations 0` knows the arena the dump
+/// describes is self-consistent, so any disagreement it finds is its own decoding error.
+///
+/// # Details
+///
+/// The section repeats the shape of the `causes` and `diagnostics` sections: a count line, then
+/// one `#<id> <Violation>` line per defect in the order [`verify`] reports them. A defect whose
+/// violation concerns the arena as a whole rather than one node — [`SpanCountMismatch`] and
+/// [`CauseCountMismatch`] — records `#0`, as [`Defect`] documents.
+pub effect fn writeViolations(module: &Module) -> ()
+! WriterError | OutOfMemoryError
+? &mut Writer | &mut Allocator {
+  let defects = run verify(module)
+  run Writer.writeString("\nviolations ")
+  run Format.display(&Vector.length<Defect>(&defects))
+  run Writer.writeString("\n")
+  let found = Vector.asSlice<Defect>(&defects)
+  let mut index = usize.ZERO
+  while index < found.length {
+    let defect = found[index]
+    run Writer.writeString("#")
+    run Format.display(&defect.id.index)
+    run Writer.writeString(" ")
+    run Writer.writeString(violationName(defect.violation))
+    run Writer.writeString("\n")
+    index = index + usize.ONE
+  }
+  drop defects
+  return ()
 }

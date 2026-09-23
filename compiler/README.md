@@ -1,9 +1,10 @@
 # Self-hosted Silk frontend
 
-This directory contains the self-hosted lexer and parser. The current executable reads one Silk
-file and prints its flat AST and syntax diagnostics. It does not yet perform name resolution,
-type checking, lowering, or code generation on that input. The TypeScript bootstrap compiler
-still builds this executable.
+This directory contains the self-hosted lexer, parser, and HIR lowering. The current executable
+reads one Silk file and prints either its flat AST and syntax diagnostics or, in `hir` mode, its
+lowered module and declaration fingerprints. It does not yet perform name resolution, type
+checking, or code generation on that input. The TypeScript bootstrap compiler still builds this
+executable.
 
 ## Inspect a source file
 
@@ -27,6 +28,33 @@ Apple Silicon with the debug LLVM target:
 ```sh
 compiler/build/llvm/aarch64-apple-darwin/debug/silk-compiler compiler/src/main.silk
 ```
+
+## Inspect a lowered module
+
+Prefix the path with `hir` to lower the file instead of dumping its syntax tree:
+
+```sh
+pnpm exec silk run --manifest-path compiler/silk.toml -- hir compiler/src/main.silk
+```
+
+Pass one normalized relative path, as in the syntax mode: `Path.joinUtf8` rejects absolute paths,
+so an absolute argument fails with a file error rather than a lowering error.
+
+The dump opens with the module's `//!` documentation and the declaration range, then lists every
+arena node in postorder: `#<index> <kind> <start>..<end>`, one indented line per field, and a
+`causes` line on any node that recorded recovery. Sections follow in a fixed order — `causes`,
+`diagnostics`, `fingerprints` naming each declaration's owner key with its header and body digests
+as hexadecimal, and `violations` reporting what `Hir.verify` found. Each section opens with its own
+`<name> <count>` line, so a reader can check that a section holds what it announces.
+
+A field occupies exactly one line. A child identity prints as `#id`, an absent child as `none`, a
+child range as `[#a #b]`, a span as `start..end`, and an interned symbol as quoted text with `"`,
+`\`, and the line breaks escaped, so a module documentation block or a text literal containing a
+quote never closes its field early or opens a line the reader cannot classify. A `#<number>` inside
+an owner key counts same-key siblings and is not an arena identity.
+
+The text depends only on module content, so two builds of one file agree byte for byte. This is a
+debug dump; the output is not a stable format.
 
 ## Representation and recovery
 
@@ -60,7 +88,25 @@ comment lists each deliberate difference.
 `Hir.write` dumps a module as indented text and `Hir.render` produces the same bytes in an owned
 buffer, so a test can compare a lowered module against expected text. `Hir.verify` reports the
 arena invariants a module violates rather than asserting them, which replaces the bootstrap's
-structured-clone publication step.
+structured-clone publication step: `spans` and `nodeCauses` have the same length as `nodes`, every
+child identity precedes the node referencing it and stays inside the arena, every child range,
+cause range, symbol, and top-level declaration identity lies inside its storage, and every missing
+or invalid node records at least one cause. `Hir.writeViolations` runs it and prints the result as
+the dump's last section, so the `hir` mode reports a defect instead of printing a broken arena
+silently. It verifies arena consistency, not lowering fidelity.
+
+One reference is deliberately not an ownership edge. `IdentifierExpression.binding` names the
+binder the identifier resolves to, which the block, parameter list, or pattern that declares it
+already owns, so a binder is pointed at once per reader. Following it would reach a node twice.
+Every other reference is an ownership edge, which makes the arena a forest rooted in the
+declaration range.
+
+That forest property — every node reached exactly once from the declaration range, and every
+child's span inside its parent's — is the one arena invariant `Hir.verify` does not check. Proving
+it needs a second traversal carrying a per-node owner count through all 132 variants of the
+exhaustive field walk, only to distinguish the single resolution edge from every ownership edge.
+`lower-corpus.mjs` below proves it instead, over every fixture, self-hosted source, and standard
+library module, which is where an orphan would actually appear.
 
 `hir/Draft.silk` owns the module while it is being built. Every node enters the arena through
 `Draft.append`, which pushes one `nodes`, one `spans`, and one `nodeCauses` entry together, so the
@@ -79,9 +125,46 @@ parentheses in place, so a parenthesized type leaves no node, and retains a life
 requirement, or a damaged region in a type position as an invalid type. `LowerType.rowOperand`
 selects between a type and a written requirement wherever a row admits both.
 `LowerType.callableContract` reads the contract pieces directly off a callable header, because the
-grammar attaches them there rather than to a node of their own. Property clauses are not lowered
-yet; their values are expressions, so `ForeignFunctionType` carries an empty `properties` range
-until the expression lowering lands.
+grammar attaches them there rather than to a node of their own.
+
+`hir/LowerExpression.silk`, `hir/LowerPattern.silk`, and `hir/LowerStatement.silk` lower bodies.
+They import one another the way the parser modules do, because an expression holds blocks, a block
+holds statements, and a statement holds patterns and expressions. `LowerExpression.lowerExpression`
+unwraps grouping parentheses in place, resolves every identifier against the draft's frame stack,
+and leaves an unbound one absent for a later resolution phase. `LowerStatement.lowerBlock` opens
+one frame per block, and a binding statement binds only after its initializer is lowered, so
+`let x = x` reads the outer `x`. An `else if` chain nests: the chained conditional is the
+`elseBranch` of the one before it, never a flat list. `LowerExpression.propertyClauses` lowers the
+`with ns.op(key: value)` clauses a declaration or a foreign function type writes, keeping written
+order and duplicate keys for a later validation phase.
+
+`hir/LowerDeclaration.silk` lowers one declaration into three nodes: a header, a body, and the
+`Declaration` that pairs them with an `OwnerKey`. The key is the declaration's source-independent
+logical name — a category, an interned name, and the occurrence among same-key siblings — so moving
+a declaration within its file does not rename it. Occurrence counting is per parent, not per module:
+a `Scope` holds the keys already issued under one parent, and every members body opens a fresh one,
+so two same-named functions in different implementations both take occurrence zero. A declaration
+also interns the `///` block attached to it, following the bootstrap `DocBlock.ofNode` attachment
+rules: exactly one line break between the block and the declaration, and every comment on its own
+line. A static conditional lowers both arms, including the one its condition will not select.
+
+`hir/Lower.silk` is the one HIR entry point. `Lower.lower(&SyntaxTree)` interns the leading `//!`
+block as the module documentation, lowers every top-level declaration under one key scope, copies
+the lexical and parser diagnostics into module coordinates, and answers a `Module` that refers to
+nothing in the tree, which the caller then drops.
+
+`hir/Fingerprint.silk` turns a lowered declaration into the content key a later incremental cache
+compares. `Fingerprint.header` and `Fingerprint.body` encode a declaration's two halves as a flat
+sequence of tag-and-length frames: a node frames its grammar category and then one frame per field
+in declared order, a symbol frames the bytes it interns rather than its index, a child frames
+inline rather than as an arena identity, a recovery cause frames its code without its span, and a
+binder reference frames the binder's preorder ordinal within the declaration. Spans, `HirId`
+values, sibling declarations, trivia, and the string table's layout never reach the bytes, so
+reordering two declarations or interning extra strings beforehand leaves both encodings untouched.
+`Fingerprint.headerDigest` and `Fingerprint.bodyDigest` are the SHA-256 of those bytes, and
+`Fingerprint.moduleDigest` covers the module documentation and every declaration's two digests in
+written order, which is the one place declaration order does count. The cache itself is out of
+scope; these are its primitives.
 
 CST construction remains postponed. The token vector retains source information, but there is no
 second concrete-syntax tree to maintain.
@@ -113,6 +196,12 @@ available stack in the bootstrap-generated debug executable before recovery coul
 | `hir/Hir.silk`                                 | The flat HIR vocabulary, the `Module` arena, its debug dump writer, and its arena verifier                                                     |
 | `hir/Draft.silk`                               | The in-progress module a lowering builds: arena appends, interning, binder frames, syntax accessors, and the name, path, and literal lowerings |
 | `hir/LowerType.silk`                           | Types, generic parameters, rows, `where` constraints, and callable contracts                                                                   |
+| `hir/LowerExpression.silk`                     | Expressions, match arms, anonymous callables, field initializers, and written property clauses                                                 |
+| `hir/LowerPattern.silk`                        | Patterns, pattern fields and shorthand bindings, and member selectors                                                                          |
+| `hir/LowerStatement.silk`                      | Statements, conditional chains, and the blocks that scope their bindings                                                                       |
+| `hir/LowerDeclaration.silk`                    | Declaration headers and bodies, owner keys and occurrence counting, and attached documentation                                                 |
+| `hir/Lower.silk`                               | The module entry point: documentation, top-level declarations, and copied frontend diagnostics                                                 |
+| `hir/Fingerprint.silk`                         | The canonical content encoding of one declaration, its SHA-256 digests, and the module digest                                                  |
 
 Grammar rules are ordinary Silk functions. They consume `State` and return it with either an
 unfinished element list or a completed node ID. Replacement values are evaluated before assigning
@@ -168,6 +257,22 @@ Each case uses a temporary source file beneath `compiler/fixtures/`, which the h
 after success or failure. The native executable is built once, not once per test. The nesting
 cases exercise both accepted inputs and diagnostic recovery, including depth-budget reuse by
 sibling expressions and a following declaration after unclosed delimiters.
+
+Lower the same corpus and check the arena the lowering produces:
+
+```sh
+node compiler/scripts/lower-corpus.mjs compiler/build/llvm/aarch64-apple-darwin/debug/silk-compiler
+```
+
+This harness reuses one built executable too, and imports nothing from the bootstrap package: every
+assertion is a property of the self-hosted dump alone, never a comparison against
+`AuthoredLowering`. It runs `hir` mode over the grammar fixtures, the self-hosted sources, and the
+standard library, and asserts that the process exits cleanly, that the dump reads back with each
+section holding the number of entries it announces, that `violations` is empty, that every child
+identity precedes its parent, that one traversal from the declaration range reaches every node
+exactly once, that a child's span lies inside its parent's, that every identifier resolves to a
+binder, and that a file the parser accepts lowers without a recovery cause. Extra file paths after
+the executable select a smaller corpus.
 
 `fixtures/parser/` contains syntax-only programs: names need not resolve and operations need not
 typecheck. `recovery.silk` deliberately contains syntax errors. The other files directly under

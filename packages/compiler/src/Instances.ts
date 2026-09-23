@@ -1477,11 +1477,41 @@ export const discover = (
     variableArguments.set(declaration, needed)
     return needed
   }
+  /**
+   * Instance keys seen for one declaration, which is what its ancestry can ever distinguish.
+   *
+   * `needsAncestor` admits a declaration whose arguments *may* vary. Whether they do is a fact
+   * about the program: a declaration discovery only ever realizes at one instance key has one
+   * possible ancestor, equal to every target of it, so every guard below it is admitted and its
+   * correlation with the rest of the history decides nothing. Recording it anyway is what made the
+   * exact history of a few hundred mutually recursive walkers grow past what a process can hold,
+   * because one strongly connected component projects onto itself and nothing else removes it.
+   * A declaration therefore enters the ancestry only once a second instance key proves it
+   * discriminating, and discovery restarts so the histories built without it are rebuilt with it.
+   */
+  const realizedKeys = new Map<string, Set<string>>()
+  const discriminating = new Set<string>()
+  let discriminatingGrew = false
+  const isDiscriminating = (key: InstanceKey): boolean => {
+    const declaration = declarationText(key)
+    if (discriminating.has(declaration)) return true
+    let keys = realizedKeys.get(declaration)
+    if (keys === undefined) {
+      keys = new Set()
+      realizedKeys.set(declaration, keys)
+    }
+    keys.add(keyText(key))
+    if (keys.size < 2) return false
+    discriminating.add(declaration)
+    discriminatingGrew = true
+    return true
+  }
   const withAncestor = (
     history: AncestorHistory.History,
     ancestor: Ancestor,
   ): AncestorHistory.History => {
     if (ancestor.structuralProvider === undefined && !needsAncestor(ancestor.key)) return history
+    if (ancestor.structuralProvider === undefined && !isDiscriminating(ancestor.key)) return history
     const value = JSON.stringify([
       keyText(ancestor.key),
       ancestor.structuralProvider === undefined ? null : Type.key(ancestor.structuralProvider),
@@ -2119,11 +2149,15 @@ export const discover = (
     violations.length = 0
     violationKeys.clear()
     projectedCycleSizes.clear()
+    discriminatingGrew = false
     for (const root of roots) schedule(root)
   }
   trace('Instances.expandWorklist', () => {
     while (true) {
-      for (let cursor = 0; cursor < pending.length; cursor += 1) {
+      // A declaration proved discriminating mid-round leaves the guards below it already taken
+      // without its ancestry, so the round is abandoned rather than expanded further: without that
+      // guard an unbounded specialization would keep scheduling work the restart discards anyway.
+      for (let cursor = 0; cursor < pending.length && !discriminatingGrew; cursor += 1) {
         const context = pending[cursor]
         if (context === undefined) continue
         queuedContexts.delete(context)
@@ -2228,6 +2262,10 @@ export const discover = (
           }
         }
       }
+      if (discriminatingGrew) {
+        restartDiscovery()
+        continue
+      }
       pending.length = 0
 
       const currentInstances = [...prepared]
@@ -2327,7 +2365,7 @@ export const discover = (
         }
       }
       if (!scheduledProvided) {
-        if (!cycleGrewAfterProjection()) break
+        if (!discriminatingGrew && !cycleGrewAfterProjection()) break
         restartDiscovery()
       }
     }

@@ -163,8 +163,15 @@ executable avoids compilation entirely.
 ## Ancestor-history interning exceeds the V8 map limit for the HIR type lowering
 
 **Status:** repaired in bootstrap instance discovery by projecting each successor history onto its
-target's strongly connected component; the self-hosted type lowering now checks, builds, and tests
-without a workaround.
+target's strongly connected component.
+
+The self-hosted side, however, still carries the shape the blowup forced on it: `LowerType.constraints`
+lowers both constraint forms inside one function rather than delegating to a per-form helper, and
+that shape was never re-measured against the fixed compiler. Two things obscured this. The wave-3
+`# Gotchas` block that explained the single-function shape was removed when the compiler fix landed,
+and every self-hosted gate up to `b3298425` was run through `pnpm exec silk`, which is a globally
+installed shim onto the _main checkout's_ older CLI rather than this worktree's build — so the
+"no longer trips" evidence was produced by a compiler that does not contain the fix.
 
 Making both `LowerType.callableContract` and `LowerType.constraints` reachable from the test entry
 point aborted instance discovery with `RangeError: Map maximum size exceeded`, thrown from
@@ -188,3 +195,116 @@ projects it away before it multiplies through generic wrappers such as a test ru
 combinators around many recursive walkers.
 
 Encountered on 2026-09-22 while porting the type, generic, contract, and constraint lowering.
+
+**Re-measured on 2026-09-23** with this worktree's own build
+(`node packages/cli/dist/bin.js`, after
+`CI=true node scripts/turbo.mjs run build --filter=@silklang/cli --filter=@silklang/compiler`),
+which does contain the fix. `LowerType.constraints` was split into the per-form helpers
+`membershipConstraint` and `providerConstraint` that the shape naturally wants, with
+`callableContract`, `constraints`, and the whole expression, pattern, and statement lowering all
+reachable from the test entry point — a strictly larger reachable graph than the one that
+originally blew up. The self-hosted code now carries no residue of the workaround, so no
+`# Gotchas` block explaining the inlined shape is needed.
+
+**Correction, 2026-09-23.** The sentence "discovery completes" that stood here was wrong.
+Discovery does **not** complete from the test entry point at `ea3fbb1a`. Measured by checking out
+`ea3fbb1a` into a detached worktree and running `silk test` against it with this worktree's own
+build — so none of the later declaration lowering is present — the run aborts after roughly 175
+seconds and 4 GB with `FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed -
+JavaScript heap out of memory`. `silk check` passes at that commit, which is what the original
+re-measurement had actually confirmed. See the entry below.
+
+## Ancestor-history interning exhausts the V8 heap for the whole `hir` lowering
+
+**Status:** repaired in bootstrap instance discovery by admitting into the ancestry only a
+declaration proved to have more than one instance key. `silk test` and `silk build` both complete
+with the whole `compiler/src/hir` lowering reachable.
+
+`silk test` aborts in instance discovery, in `AncestorHistory` interning reached through
+`Realization.discoverInstances`. It is the same failure mode as the wave-3 entry above, further
+out, and it survives the `2d4e1c6d` SCC-projection repair: that fix removes dead ancestor
+correlation, but the surviving correlation still grows past what the process can hold once the
+whole lowering is reachable from one root. Two surfaces of the same wall have been observed:
+
+- **`Lower.lower` reachable from `main.program`** — the existing `silk-compiler <file>` path, which
+  also reaches the lexer, the parser, and `SyntaxTree.write` — aborts with `RangeError: Map maximum
+size exceeded` from `AncestorHistory.intern`. Raising `--max-old-space-size` to 12 GB does not
+  help, because that surface is the `Map` entry cap rather than the heap.
+- **`Lower.lower` reachable from the test entry point** — aborts with `FATAL ERROR: CALL_AND_RETRY_
+LAST Allocation failed - JavaScript heap out of memory` through `Builtins_MapPrototypeSet` and
+  `Runtime_MapGrow`, after roughly 125 seconds and 3.7 GB.
+
+**The declaration lowering did not introduce this.** Checking `ea3fbb1a` out into a detached
+worktree and running `silk test` against it with this worktree's own build reproduces the heap
+exhaustion with none of the declaration lowering present: roughly 175 seconds, 4 GB, `Ineffective
+mark-compacts near heap limit`. The wave-4 entry above has been corrected accordingly.
+
+The practical consequence is that `compiler/src/hir` has outgrown what the bootstrap's instance
+discovery can realize in one program, and that `silk check` is currently the only self-hosted gate
+that runs to completion. The next step is a bootstrap-side repair in `packages/compiler`, not a
+further reshaping of the self-hosted source: the wave-3 experience already showed that moving
+declarations around only shifts the threshold.
+
+Encountered on 2026-09-23 while porting the declaration lowering and assembling the module.
+
+**Repaired on 2026-09-23.** The multiplier was the ancestry's exactness over declarations that
+could never be told apart. Instrumenting the run recorded only 1,720 distinct ancestor values
+spread over 459 declarations — fewer than four each — while the interned decision tree passed
+7,000,000 nodes before the heap gave out. The nodes were not values but correlations between them.
+
+`needsAncestor` already dropped a declaration whose arguments _cannot_ vary, which is a fact about
+its signature. Whether they _do_ vary is a fact about the program, and the `hir` walkers are the
+case that separates the two: every one of them is an `effect fn`, so each carries a hidden Effect
+identity and is retained, yet almost all are monomorphic and realize at exactly one instance key.
+An ancestor of such a declaration is equal to every target of it, so `sameArguments` admits every
+guard below it and its correlation with the rest of the history decides nothing. The projection
+added by `2d4e1c6d` could not remove it either, because the whole lowering is one strongly
+connected component that projects onto itself.
+
+Discovery now records a declaration in the ancestry only after a second instance key proves it
+discriminating, and restarts — the mechanism the component-growth restart already used — so the
+histories built without it are rebuilt with it. The round is abandoned the moment a declaration
+becomes discriminating, so an unbounded specialization cannot expand past the guard that is about
+to be reinstated. Restarts are bounded because the discriminating set only grows.
+
+Measured on this worktree's own build (`node packages/cli/dist/bin.js`) against `01d10be3`:
+
+| Gate                                       | Before                                  | After                         |
+| ------------------------------------------ | --------------------------------------- | ----------------------------- |
+| `test --manifest-path compiler/silk.toml`  | heap OOM, 4.5 GB, 121 s, no test run    | 60 discovered, 4.5 GB, 99 s   |
+| `build --manifest-path compiler/silk.toml` | `RangeError: Map maximum size exceeded` | ok, 901 symbols, 3.1 GB, 32 s |
+
+The regression is `packages/compiler/test/Instances.test.ts`, "bounds ancestry for one mutually
+recursive lowering cycle across modules": twenty-four monomorphic `effect fn` walkers threading one
+`&mut State` and requiring `&mut Allocator` over five modules, forming one component with a second
+cycle reachable from it. It interned 567 decision nodes before the repair and interns none after,
+while discovering the same instances and reporting no violation.
+
+Four `hir/LoweringCases` cases fail on the repaired compiler — `aBroadModuleSatisfiesEveryFlat
+Invariant`, `builtModuleRenders`, `moduleDocumentationIsInterned`, and
+`unionVariantsRecordTheirFieldBlock`. They are self-hosted golden mismatches in the lowering port,
+not discovery defects; they are simply the first cases that were ever able to run.
+
+## Empty union variant field block rejected by the bootstrap parser
+
+**Status:** repaired in the bootstrap parser; the self-hosted parser diverged first and the two are
+aligned again as of this commit.
+
+`pub union U { Empty {} }` emitted `PAR0001` and produced a `UnionVariant` carrying a synthesized
+`UnionVariantField` over a `TypePath` that was never written. `Parser/Declaration.ts` inverted the
+field-block branch: on seeing `RightBrace` immediately after the variant's `LeftBrace` it parsed a
+field anyway, instead of closing the block with no fields. Only the empty-brace case differed;
+every other variant shape parsed identically.
+
+A variant that writes braces and declares nothing is well-formed and distinct from a unit variant.
+`AuthoredHir.Variant.braces` already records that the braces were written, so an empty block lowers
+as `braces: true` with zero fields and needs no diagnostic to stay distinguishable.
+
+The self-hosted parser deleted the equivalent arm first, in `compiler/src/parser/Declaration.silk`
+(`cb445b9f`), which left the bootstrap as the only parser still carrying the defect. This commit
+deletes the branch in `Parser/Declaration.ts`; the surrounding field loop already terminates on
+`RightBrace`, so the whole arm was redundant as well as wrong.
+
+The regression lives in `packages/compiler/test/Parser.test.ts`, "parses an empty union variant
+field block as a braced variant with no fields". The neighbouring damaged-union case previously
+asserted the synthesized field as intended recovery and now asserts `Empty {}` parses clean.

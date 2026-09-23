@@ -1,0 +1,1212 @@
+//! The canonical byte encoding of one declaration and the content digests a cache keys on.
+//!
+//! # When to use
+//!
+//! Use [`header`] and [`body`] when a later phase must decide whether a declaration changed. Two
+//! declarations that mean the same thing encode to the same bytes, so comparing the bytes — or the
+//! [`headerDigest`] and [`bodyDigest`] that summarise them — answers the question without the
+//! source, the syntax tree, or the arena the declarations came from.
+//!
+//! # Details
+//!
+//! The encoding is a flat sequence of frames. A frame is one tag byte, a four-byte big-endian
+//! payload length, and the payload; a composite frame's payload is the frames of its parts. The
+//! tags are listed on [`Tag`]. Each encoding opens with a domain frame naming which half of which
+//! artifact it is and a version frame holding [`VERSION`], so bytes produced by two versions of
+//! this module never compare equal.
+//!
+//! A node frames its grammar category — [`Hir.nodeKindName`](hir.Hir.nodeKindName), not a numeric
+//! tag, so adding or reordering a variant cannot silently collide two kinds — followed by one
+//! frame per field in declared order. Every field resolves to content:
+//!
+//! - A [`Symbol`](hir.Intern.Symbol) frames the interned bytes it names, never its index, so two
+//!   modules that interned their strings in different orders still agree.
+//! - A child identity frames the child's own encoding inline, so an arena index never appears.
+//! - A child list frames its length and then each element, so a list and a single child of the
+//!   same shape stay distinguishable.
+//! - An enum frames its stable spelling and a boolean one byte.
+//! - An exact integer frames its decimal digits, which is exact for every magnitude a node holds.
+//! - An omitted child, list, or symbol frames [`Tag.Absent`], so absence never coincides with an
+//!   empty list or an empty string.
+//! - A binder reference frames the binder's preorder ordinal within the declaration being encoded,
+//!   so a binding survives the arena renumbering that reordering two declarations causes. A binder
+//!   outside the encoded subtree frames [`Tag.Absent`].
+//! - A recovery cause frames its [`CauseCode`](hir.Hir.CauseCode) spelling and nothing else, so a
+//!   damaged declaration encodes the same bytes wherever in its file it sits.
+//! - Nested declarations — implementation members, both branches of a static conditional — encode
+//!   inline, in written order, exactly as any other child.
+//!
+//! Spans, [`HirId`](hir.Hir.HirId) values, sibling declarations, module diagnostics, trivia, and
+//! the string table's layout never reach the bytes. A modifier anchor frames only whether it is
+//! present, because that records whether the author wrote the keyword, which is content; its
+//! position is not.
+//!
+//! # Gotchas
+//!
+//! These bytes are a comparison key, not a serialization: nothing decodes them, and [`VERSION`]
+//! rises whenever the layout changes. Do not persist them across compiler versions.
+//!
+//! A frame's length field is four bytes, so a single declaration encoding past four gigabytes
+//! traps. That is a program error rather than input data: no source file produces one.
+//!
+//! A digest answers for the subtree it was asked about. A declaration whose header is unchanged but
+//! whose body changed keeps its header digest, which is the whole point; a caller that wants "did
+//! anything about this declaration change" compares both.
+//!
+//! This is the port of `packages/compiler/src/AuthoredEncoding.ts`. It borrows that module's
+//! framing — domain and version frames, tag plus big-endian length, one walk for both validation
+//! and emission — and none of its byte layout, because the vocabularies differ.
+
+import hir.Hir
+import hir.Hir {CauseCode, HirId, HirRef, Module, Node, OwnerKey, Range, RangeRef}
+import hir.Intern {StringTable, Symbol, SymbolRef}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.sha2 {Sha256}
+import silk.string {String}
+import silk.u32
+import silk.u8
+import silk.u64
+import silk.usize
+import silk.format {Format}
+import silk.vector {Vector}
+import silk.writer {Writer, WriterError}
+
+/// The version of the canonical encoding, framed into every byte sequence this module produces.
+///
+/// # Details
+///
+/// Raise it whenever a tag, a field order, or a field's representation changes. Bytes carrying
+/// different versions never compare equal, so a stale cache entry cannot be mistaken for a match.
+pub const VERSION: u64 = 1
+
+/// The kind of one frame in a canonical encoding.
+///
+/// # Details
+///
+/// The tag is the frame's first byte. It exists so that a frame's meaning does not depend on where
+/// it sits: a caller diffing two encodings can say which part differs without a grammar.
+pub enum Tag {
+  /// Names which artifact and which half of it the following frames describe.
+  Domain,
+  /// Holds the decimal spelling of [`VERSION`].
+  Version,
+  /// An omitted child, list, symbol, or binder reference. Its payload is empty.
+  Absent,
+  /// Interned bytes, framed as the bytes themselves.
+  Text,
+  /// An exact non-negative integer, framed as its decimal digits.
+  Number,
+  /// A boolean, framed as one byte: zero for false, one for true.
+  Boolean,
+  /// An enum value or a node's grammar category, framed as its stable spelling.
+  Name,
+  /// A child list, framed as its length followed by each element.
+  Sequence,
+  /// One node, framed as its category followed by one frame per field.
+  Record,
+  /// One declaration's recovery causes, framed as the code of each.
+  Causes,
+}
+
+fn tagByte(tag: Tag) -> u8 {
+  return match tag {
+    Tag.Domain => 1
+    Tag.Version => 2
+    Tag.Absent => 3
+    Tag.Text => 4
+    Tag.Number => 5
+    Tag.Boolean => 6
+    Tag.Name => 7
+    Tag.Sequence => 8
+    Tag.Record => 9
+    Tag.Causes => 10
+  }
+}
+
+/// Which half of a declaration an encoding describes.
+pub enum Domain {
+  /// The declaration's owner key, documentation, and header subtree.
+  Header,
+  /// The declaration's body subtree.
+  Body,
+  /// A whole module: its documentation and its declarations' digests in written order.
+  ModuleDomain,
+}
+
+fn domainName(domain: Domain) -> string<'static> {
+  return match domain {
+    Domain.Header => "silk.hir.header"
+    Domain.Body => "silk.hir.body"
+    Domain.ModuleDomain => "silk.hir.module"
+  }
+}
+
+/// The traversal state of one encoding: the bytes so far and the binder ordinals of the subtree.
+///
+/// # Details
+///
+/// `ordinals` maps an arena index to its one-based preorder position within the declaration being
+/// encoded, and zero for a node the declaration does not reach. The ordinal pass fills it with
+/// `emit` false, walking exactly the structure the emitting pass walks, so a binder that a use
+/// precedes still resolves.
+struct EncodeState {
+  bytes: Vector<u8>
+  ordinals: Vector<usize>
+  next: usize
+  emit: bool
+}
+
+/// Appends `value` as four big-endian bytes, the width every frame's length field uses.
+effect fn appendLength(state: &mut EncodeState, value: usize) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let wide = usize.toU32(value)
+  run Vector.append<u8>(&mut state.bytes, u32.toU8(u32.shiftRight(wide, 24)))
+  run Vector.append<u8>(&mut state.bytes, u32.toU8(u32.bitAnd(u32.shiftRight(wide, 16), 255)))
+  run Vector.append<u8>(&mut state.bytes, u32.toU8(u32.bitAnd(u32.shiftRight(wide, 8), 255)))
+  return run Vector.append<u8>(&mut state.bytes, u32.toU8(u32.bitAnd(wide, 255)))
+}
+
+/// Opens a frame of `tag` whose length is not yet known, and answers where to patch that length.
+effect fn openFrame(state: &mut EncodeState, tag: Tag) -> usize
+! OutOfMemoryError
+? &mut Allocator {
+  if !state.emit {
+    return usize.ZERO
+  }
+  run Vector.append<u8>(&mut state.bytes, tagByte(tag))
+  let patch = Vector.length<u8>(&state.bytes)
+  run appendLength(&mut state.*, usize.ZERO)
+  return patch
+}
+
+/// Writes the payload length of the frame opened at `patch`, now that its payload is complete.
+fn closeFrame(state: &mut EncodeState, patch: usize) -> () {
+  if !state.emit {
+    return ()
+  }
+  let size = Vector.length<u8>(&state.bytes) - patch - usize.add(0, 4)
+  let wide = usize.toU32(size)
+  Vector.set<u8>(&mut state.bytes, patch, u32.toU8(u32.shiftRight(wide, 24)))
+  Vector.set<u8>(&mut state.bytes, patch + usize.ONE, u32.toU8(u32.bitAnd(u32.shiftRight(wide, 16), 255)))
+  Vector.set<u8>(&mut state.bytes, patch + usize.add(0, 2), u32.toU8(u32.bitAnd(u32.shiftRight(wide, 8), 255)))
+  return Vector.set<u8>(&mut state.bytes, patch + usize.add(0, 3), u32.toU8(u32.bitAnd(wide, 255)))
+}
+
+/// Frames `payload` whole under `tag`, for a leaf whose length is known before it is written.
+effect fn frameBytes(state: &mut EncodeState, tag: Tag, payload: &[u8]) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if !state.emit {
+    return ()
+  }
+  run Vector.append<u8>(&mut state.bytes, tagByte(tag))
+  run appendLength(&mut state.*, payload.length)
+  return run Vector.appendBytes(&mut state.bytes, payload)
+}
+
+/// Frames the empty payload of an omitted child, list, symbol, or binder reference.
+effect fn encodeAbsent(state: &mut EncodeState) -> () ! OutOfMemoryError ? &mut Allocator {
+  return run frameBytes(&mut state.*, Tag.Absent, String.utf8Bytes(""))
+}
+
+/// Frames a stable enum spelling or a node's grammar category.
+effect fn encodeName(state: &mut EncodeState, name: string<'static>) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  return run frameBytes(&mut state.*, Tag.Name, String.utf8Bytes(name))
+}
+
+/// Frames a boolean as one byte, so a written flag never coincides with an absent one.
+effect fn encodeBool(state: &mut EncodeState, value: bool) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if !state.emit {
+    return ()
+  }
+  run Vector.append<u8>(&mut state.bytes, tagByte(Tag.Boolean))
+  run appendLength(&mut state.*, usize.ONE)
+  let mut byte: u8 = 0
+  if value {
+    byte = 1
+  }
+  return run Vector.append<u8>(&mut state.bytes, byte)
+}
+
+/// Appends the decimal digits of `value` to `digits`, most significant first.
+effect fn appendDecimal(digits: &mut Vector<u8>, value: u64) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if value == 0 {
+    return run Vector.append<u8>(&mut digits.*, 48)
+  }
+  let mut reversed = Vector.make<u8>()
+  let mut remaining = value
+  while remaining > 0 {
+    run Vector.append<u8>(&mut reversed, u64.toU8(48 + u64.remainder(remaining, 10)))
+    remaining = u64.divide(remaining, 10)
+  }
+  let mut index = Vector.length<u8>(&reversed)
+  while index > usize.ZERO {
+    index = index - usize.ONE
+    run Vector.append<u8>(&mut digits.*, Vector.get<u8>(&reversed, index))
+  }
+  return ()
+}
+
+/// Frames an exact non-negative integer as its decimal digits.
+effect fn encodeNumber(state: &mut EncodeState, value: u64) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if !state.emit {
+    return ()
+  }
+  let mut digits = Vector.make<u8>()
+  run appendDecimal(&mut digits, value)
+  run frameBytes(&mut state.*, Tag.Number, Vector.asSlice<u8>(&digits))
+  drop digits
+  return ()
+}
+
+/// Frames an integer magnitude a node carries as a `u64`.
+effect fn encodeMagnitude(state: &mut EncodeState, value: u64) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  return run encodeNumber(&mut state.*, value)
+}
+
+/// Frames a character literal's Unicode scalar value.
+effect fn encodeScalar(state: &mut EncodeState, value: u32) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  return run encodeNumber(&mut state.*, u32.toU64(value))
+}
+
+/// Frames the bytes `symbol` interns, never the index that names them.
+effect fn encodeSymbol(state: &mut EncodeState, module: &Module, symbol: Symbol) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  return run frameBytes(&mut state.*, Tag.Text, Module.text(module, symbol))
+}
+
+/// Frames an optional symbol's interned bytes, or [`Tag.Absent`] when it names none.
+effect fn encodeSymbolRef(state: &mut EncodeState, module: &Module, reference: SymbolRef) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if !reference.present {
+    return run encodeAbsent(&mut state.*)
+  }
+  return run encodeSymbol(&mut state.*, module, reference.symbol)
+}
+
+/// Frames a declaration's logical name: its category, its interned name, and its occurrence.
+effect fn encodeOwner(state: &mut EncodeState, module: &Module, owner: OwnerKey) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let patch = run openFrame(&mut state.*, Tag.Record)
+  run encodeName(&mut state.*, Hir.ownerKindName(owner.kind))
+  run encodeSymbolRef(&mut state.*, module, owner.name)
+  run encodeNumber(&mut state.*, usize.toU64(owner.occurrence))
+  closeFrame(&mut state.*, patch)
+  return ()
+}
+
+/// Frames the recovery causes recorded against `id` as their codes, dropping every span.
+effect fn encodeCauses(state: &mut EncodeState, module: &Module, id: HirId) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let range = Module.causeRange(module, id)
+  let patch = run openFrame(&mut state.*, Tag.Causes)
+  let mut index = usize.ZERO
+  while index < range.length {
+    let cause = Vector.get<Hir.Cause>(&module.causes, range.start + index)
+    run encodeName(&mut state.*, Hir.causeCodeName(cause.code))
+    index = index + usize.ONE
+  }
+  closeFrame(&mut state.*, patch)
+  return ()
+}
+
+/// Frames a binder reference as the binder's preorder ordinal inside the declaration.
+///
+/// # Gotchas
+///
+/// A binder the encoded subtree does not reach frames as absent. That happens only for a module
+/// whose binder resolution crossed a declaration boundary, which the lowering does not produce.
+effect fn encodeBinding(state: &mut EncodeState, reference: HirRef) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if !reference.present {
+    return run encodeAbsent(&mut state.*)
+  }
+  if reference.id.index >= Vector.length<usize>(&state.ordinals) {
+    return run encodeAbsent(&mut state.*)
+  }
+  let ordinal = Vector.get<usize>(&state.ordinals, reference.id.index)
+  if ordinal == usize.ZERO {
+    return run encodeAbsent(&mut state.*)
+  }
+  return run encodeNumber(&mut state.*, usize.toU64(ordinal))
+}
+
+/// Frames one node inline: its grammar category, its recovery causes, and its fields in order.
+///
+/// # Details
+///
+/// The pass with `emit` false records `id`'s preorder ordinal and recurses over exactly the same
+/// children, so the two passes agree on every ordinal.
+effect fn encodeNode(state: &mut EncodeState, module: &Module, id: HirId) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if !state.emit {
+    Vector.set<usize>(&mut state.ordinals, id.index, state.next)
+    state.next = state.next + usize.ONE
+  }
+  let node = Module.node(module, id)
+  let patch = run openFrame(&mut state.*, Tag.Record)
+  run encodeName(&mut state.*, Hir.nodeKindName(node))
+  run encodeCauses(&mut state.*, module, id)
+  run encodeFields(&mut state.*, module, node)
+  closeFrame(&mut state.*, patch)
+  return ()
+}
+
+/// Frames the child `id` names inline, so no arena index reaches the bytes.
+effect fn encodeChild(state: &mut EncodeState, module: &Module, id: HirId) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  return run encodeNode(&mut state.*, module, id)
+}
+
+/// Frames an optional child inline, or [`Tag.Absent`] when the construct omitted it.
+effect fn encodeChildRef(state: &mut EncodeState, module: &Module, reference: HirRef) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if !reference.present {
+    return run encodeAbsent(&mut state.*)
+  }
+  return run encodeNode(&mut state.*, module, reference.id)
+}
+
+/// Frames a child list as its length followed by each element inline.
+effect fn encodeChildRange(state: &mut EncodeState, module: &Module, range: Range) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let patch = run openFrame(&mut state.*, Tag.Sequence)
+  run encodeNumber(&mut state.*, usize.toU64(range.length))
+  let mut index = usize.ZERO
+  while index < range.length {
+    run encodeNode(&mut state.*, module, Module.child(module, range, index))
+    index = index + usize.ONE
+  }
+  closeFrame(&mut state.*, patch)
+  return ()
+}
+
+/// Frames an optional child list, keeping a written but empty list distinct from an omitted one.
+effect fn encodeChildRangeRef(state: &mut EncodeState, module: &Module, reference: RangeRef) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if !reference.present {
+    return run encodeAbsent(&mut state.*)
+  }
+  return run encodeChildRange(&mut state.*, module, reference.range)
+}
+
+/// Frames every field of `node` in its declared order.
+///
+/// # Details
+///
+/// The arms mirror [`Hir.write`](hir.Hir.write)'s field order exactly, so the two views of a node
+/// never disagree about what a node holds. A span field contributes nothing, and a modifier anchor
+/// contributes only whether it is present: whether the author wrote a keyword is content, where
+/// they wrote it is not.
+effect fn encodeFields(state: &mut EncodeState, module: &Module, node: Node) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  return match node {
+    Node.Name {text} => {
+      run encodeSymbol(&mut state.*, module, text)
+    }
+    Node.MissingName => ()
+    Node.InvalidName {spelling} => {
+      run encodeSymbol(&mut state.*, module, spelling)
+    }
+    Node.Path {segments} => {
+      run encodeChildRange(&mut state.*, module, segments)
+    }
+    Node.TypeParameter {name, bounds} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeChildRange(&mut state.*, module, bounds)
+    }
+    Node.RowParameter {name} => {
+      run encodeChild(&mut state.*, module, name)
+    }
+    Node.LifetimeParameter {name, bounds} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeChildRange(&mut state.*, module, bounds)
+    }
+    Node.Lifetime {name} => {
+      run encodeChild(&mut state.*, module, name)
+    }
+    Node.RequirementSelector {subject, rolePath} => {
+      run encodeChild(&mut state.*, module, subject)
+      run encodeChild(&mut state.*, module, rolePath)
+    }
+    Node.TypeArguments {arguments, environment, failures, requirements} => {
+      run encodeChildRange(&mut state.*, module, arguments)
+      run encodeChildRangeRef(&mut state.*, module, environment)
+      run encodeChildRef(&mut state.*, module, failures)
+      run encodeChildRef(&mut state.*, module, requirements)
+    }
+    Node.Requirement {hasAccess, access, capability, rolePath} => {
+      run encodeBool(&mut state.*, hasAccess)
+      run encodeName(&mut state.*, Hir.accessName(access))
+      run encodeChild(&mut state.*, module, capability)
+      run encodeChildRef(&mut state.*, module, rolePath)
+    }
+    Node.RequirementRow {members} => {
+      run encodeChildRange(&mut state.*, module, members)
+    }
+    Node.PointerQualifier {name, value} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeChild(&mut state.*, module, value)
+    }
+    Node.NamedType {path, hasMode, mode} => {
+      run encodeChild(&mut state.*, module, path)
+      run encodeBool(&mut state.*, hasMode)
+      run encodeName(&mut state.*, Hir.callableModeName(mode))
+    }
+    Node.AppliedType {target, arguments} => {
+      run encodeChild(&mut state.*, module, target)
+      run encodeChild(&mut state.*, module, arguments)
+    }
+    Node.FixedArrayType {element, length} => {
+      run encodeChild(&mut state.*, module, element)
+      run encodeChild(&mut state.*, module, length)
+    }
+    Node.SliceType {element, access, lifetime} => {
+      run encodeChild(&mut state.*, module, element)
+      run encodeName(&mut state.*, Hir.accessName(access))
+      run encodeChildRef(&mut state.*, module, lifetime)
+    }
+    Node.ReferenceType {referent, access, lifetime, roleName} => {
+      run encodeChild(&mut state.*, module, referent)
+      run encodeName(&mut state.*, Hir.accessName(access))
+      run encodeChildRef(&mut state.*, module, lifetime)
+      run encodeChildRef(&mut state.*, module, roleName)
+    }
+    Node.PointerType {pointee, access, nullable, multiplicity, qualifiers} => {
+      run encodeChild(&mut state.*, module, pointee)
+      run encodeName(&mut state.*, Hir.accessName(access))
+      run encodeBool(&mut state.*, nullable)
+      run encodeName(&mut state.*, Hir.multiplicityName(multiplicity))
+      run encodeChildRange(&mut state.*, module, qualifiers)
+    }
+    Node.CallableType {mode, isUnsafe, binders, environment, parameters, result} => {
+      run encodeName(&mut state.*, Hir.callableModeName(mode))
+      run encodeBool(&mut state.*, isUnsafe)
+      run encodeChildRange(&mut state.*, module, binders)
+      run encodeChildRef(&mut state.*, module, environment)
+      run encodeChildRange(&mut state.*, module, parameters)
+      run encodeChild(&mut state.*, module, result)
+    }
+    Node.ForeignFunctionType {abi, binders, parameters, result, properties} => {
+      run encodeChild(&mut state.*, module, abi)
+      run encodeChildRange(&mut state.*, module, binders)
+      run encodeChildRange(&mut state.*, module, parameters)
+      run encodeChild(&mut state.*, module, result)
+      run encodeChildRange(&mut state.*, module, properties)
+    }
+    Node.ExactRepresentationType {subject} => {
+      run encodeChild(&mut state.*, module, subject)
+    }
+    Node.OpaqueResultType {binders, result} => {
+      run encodeChildRange(&mut state.*, module, binders)
+      run encodeChild(&mut state.*, module, result)
+    }
+    Node.UnitType => ()
+    Node.UnionType {members} => {
+      run encodeChildRange(&mut state.*, module, members)
+    }
+    Node.RowWithout {source, removed} => {
+      run encodeChild(&mut state.*, module, source)
+      run encodeChild(&mut state.*, module, removed)
+    }
+    Node.MissingType => ()
+    Node.InvalidType {retained} => {
+      run encodeChildRange(&mut state.*, module, retained)
+    }
+    Node.MembershipConstraint {subject, source} => {
+      run encodeChild(&mut state.*, module, subject)
+      run encodeChild(&mut state.*, module, source)
+    }
+    Node.ProviderConstraint {provider, selected, source} => {
+      run encodeChild(&mut state.*, module, provider)
+      run encodeChild(&mut state.*, module, selected)
+      run encodeChild(&mut state.*, module, source)
+    }
+    Node.Parameter {name, annotation, mode} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeChild(&mut state.*, module, annotation)
+      run encodeName(&mut state.*, Hir.parameterModeName(mode))
+    }
+    Node.CallableContract {generics, parameters, variadic, result, failures, requirements, constraints, isEffect, isTest, environment, isUnsafe, isStatic, effectAnchor, testAnchor, unsafeAnchor, staticAnchor, genericsAnchor, failuresAnchor, constraintsAnchor} => {
+      run encodeChildRange(&mut state.*, module, generics)
+      run encodeChildRange(&mut state.*, module, parameters)
+      run encodeBool(&mut state.*, variadic)
+      run encodeChildRef(&mut state.*, module, result)
+      run encodeChildRef(&mut state.*, module, failures)
+      run encodeChildRef(&mut state.*, module, requirements)
+      run encodeChildRange(&mut state.*, module, constraints)
+      run encodeBool(&mut state.*, isEffect)
+      run encodeBool(&mut state.*, isTest)
+      run encodeChildRangeRef(&mut state.*, module, environment)
+      run encodeBool(&mut state.*, isUnsafe)
+      run encodeBool(&mut state.*, isStatic)
+      run encodeBool(&mut state.*, effectAnchor.present)
+      run encodeBool(&mut state.*, testAnchor.present)
+      run encodeBool(&mut state.*, unsafeAnchor.present)
+      run encodeBool(&mut state.*, staticAnchor.present)
+      run encodeBool(&mut state.*, genericsAnchor.present)
+      run encodeBool(&mut state.*, failuresAnchor.present)
+      run encodeBool(&mut state.*, constraintsAnchor.present)
+    }
+    Node.Property {name, value} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeChild(&mut state.*, module, value)
+    }
+    Node.PropertyClause {namespace, operation, properties} => {
+      run encodeChild(&mut state.*, module, namespace)
+      run encodeChild(&mut state.*, module, operation)
+      run encodeChildRange(&mut state.*, module, properties)
+    }
+    Node.IntegerLiteral {sign, magnitude, radix, suffix} => {
+      run encodeName(&mut state.*, Hir.signName(sign))
+      run encodeMagnitude(&mut state.*, magnitude)
+      run encodeName(&mut state.*, Hir.radixName(radix))
+      run encodeSymbolRef(&mut state.*, module, suffix)
+    }
+    Node.TextLiteral {value} => {
+      run encodeSymbol(&mut state.*, module, value)
+    }
+    Node.FloatingLiteral {sign, coefficient, exponent, exponentSign, suffix} => {
+      run encodeName(&mut state.*, Hir.signName(sign))
+      run encodeMagnitude(&mut state.*, coefficient)
+      run encodeMagnitude(&mut state.*, exponent)
+      run encodeName(&mut state.*, Hir.signName(exponentSign))
+      run encodeSymbolRef(&mut state.*, module, suffix)
+    }
+    Node.DurationComponent {magnitude, unit} => {
+      run encodeMagnitude(&mut state.*, magnitude)
+      run encodeName(&mut state.*, Hir.durationUnitName(unit))
+    }
+    Node.DurationLiteral {components} => {
+      run encodeChildRange(&mut state.*, module, components)
+    }
+    Node.BytesLiteral {value} => {
+      run encodeSymbol(&mut state.*, module, value)
+    }
+    Node.CharacterLiteral {scalar} => {
+      run encodeScalar(&mut state.*, scalar)
+    }
+    Node.BooleanLiteral {value} => {
+      run encodeBool(&mut state.*, value)
+    }
+    Node.UnitLiteral => ()
+    Node.MissingExpression => ()
+    Node.InvalidExpression {retained} => {
+      run encodeChildRange(&mut state.*, module, retained)
+    }
+    Node.FieldInitializer {name, value} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeChild(&mut state.*, module, value)
+    }
+    Node.MemberSelector {subject, member} => {
+      run encodeChild(&mut state.*, module, subject)
+      run encodeChild(&mut state.*, module, member)
+    }
+    Node.IdentifierExpression {name, binding} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBinding(&mut state.*, binding)
+    }
+    Node.MoveExpression {operand} => {
+      run encodeChild(&mut state.*, module, operand)
+    }
+    Node.BorrowExpression {access, operand} => {
+      run encodeName(&mut state.*, Hir.accessName(access))
+      run encodeChild(&mut state.*, module, operand)
+    }
+    Node.CallableExpression {contract, body} => {
+      run encodeChild(&mut state.*, module, contract)
+      run encodeChild(&mut state.*, module, body)
+    }
+    Node.EffectExpression {body} => {
+      run encodeChild(&mut state.*, module, body)
+    }
+    Node.RunExpression {operand} => {
+      run encodeChild(&mut state.*, module, operand)
+    }
+    Node.UnsafeExpression {operand} => {
+      run encodeChild(&mut state.*, module, operand)
+    }
+    Node.CompileErrorExpression {message} => {
+      run encodeChild(&mut state.*, module, message)
+    }
+    Node.MatchExpression {access, subject, arms} => {
+      run encodeName(&mut state.*, Hir.matchAccessName(access))
+      run encodeChild(&mut state.*, module, subject)
+      run encodeChildRange(&mut state.*, module, arms)
+    }
+    Node.StructExpression {annotation, fields} => {
+      run encodeChild(&mut state.*, module, annotation)
+      run encodeChildRange(&mut state.*, module, fields)
+    }
+    Node.TupleExpression {elements} => {
+      run encodeChildRange(&mut state.*, module, elements)
+    }
+    Node.RecordExpression {fields} => {
+      run encodeChildRange(&mut state.*, module, fields)
+    }
+    Node.ArrayExpression {elements} => {
+      run encodeChildRange(&mut state.*, module, elements)
+    }
+    Node.MemberExpression {selector, fields} => {
+      run encodeChild(&mut state.*, module, selector)
+      run encodeChildRangeRef(&mut state.*, module, fields)
+    }
+    Node.FieldExpression {subject, field} => {
+      run encodeChild(&mut state.*, module, subject)
+      run encodeChild(&mut state.*, module, field)
+    }
+    Node.OrdinalExpression {subject, ordinal} => {
+      run encodeChild(&mut state.*, module, subject)
+      run encodeChild(&mut state.*, module, ordinal)
+    }
+    Node.ReferentExpression {subject} => {
+      run encodeChild(&mut state.*, module, subject)
+    }
+    Node.IndexExpression {subject, index} => {
+      run encodeChild(&mut state.*, module, subject)
+      run encodeChild(&mut state.*, module, index)
+    }
+    Node.CallExpression {callee, generics, arguments} => {
+      run encodeChild(&mut state.*, module, callee)
+      run encodeChildRef(&mut state.*, module, generics)
+      run encodeChildRange(&mut state.*, module, arguments)
+    }
+    Node.PrefixExpression {operator, operatorAnchor: ignored1, operand} => {
+      run encodeName(&mut state.*, Hir.prefixOperatorName(operator))
+      run encodeChild(&mut state.*, module, operand)
+    }
+    Node.InfixExpression {operator, operatorAnchor: ignored1, left, right} => {
+      run encodeName(&mut state.*, Hir.infixOperatorName(operator))
+      run encodeChild(&mut state.*, module, left)
+      run encodeChild(&mut state.*, module, right)
+    }
+    Node.PipelineExpression {input, target} => {
+      run encodeChild(&mut state.*, module, input)
+      run encodeChild(&mut state.*, module, target)
+    }
+    Node.PatternField {name, pattern} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeChild(&mut state.*, module, pattern)
+    }
+    Node.EnumPattern {path} => {
+      run encodeChild(&mut state.*, module, path)
+    }
+    Node.IntegerPattern {value} => {
+      run encodeChild(&mut state.*, module, value)
+    }
+    Node.NominalPattern {annotation, fields} => {
+      run encodeChild(&mut state.*, module, annotation)
+      run encodeChildRange(&mut state.*, module, fields)
+    }
+    Node.BindingPattern {annotation, name} => {
+      run encodeChildRef(&mut state.*, module, annotation)
+      run encodeChild(&mut state.*, module, name)
+    }
+    Node.UniversalPattern {name} => {
+      run encodeChildRef(&mut state.*, module, name)
+    }
+    Node.VariantPattern {selector, fields} => {
+      run encodeChild(&mut state.*, module, selector)
+      run encodeChildRangeRef(&mut state.*, module, fields)
+    }
+    Node.RestPattern => ()
+    Node.MissingPattern => ()
+    Node.InvalidPattern {retained} => {
+      run encodeChildRange(&mut state.*, module, retained)
+    }
+    Node.MatchArm {pattern, guard, result} => {
+      run encodeChild(&mut state.*, module, pattern)
+      run encodeChildRef(&mut state.*, module, guard)
+      run encodeChild(&mut state.*, module, result)
+    }
+    Node.Block {statements} => {
+      run encodeChildRange(&mut state.*, module, statements)
+    }
+    Node.ExpressionStatement {expression} => {
+      run encodeChild(&mut state.*, module, expression)
+    }
+    Node.BindingStatement {name, mutable, isStatic, annotation, initializer} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, mutable)
+      run encodeBool(&mut state.*, isStatic)
+      run encodeChildRef(&mut state.*, module, annotation)
+      run encodeChild(&mut state.*, module, initializer)
+    }
+    Node.PatternBindingStatement {pattern, initializer} => {
+      run encodeChild(&mut state.*, module, pattern)
+      run encodeChild(&mut state.*, module, initializer)
+    }
+    Node.AssignmentStatement {target, value} => {
+      run encodeChild(&mut state.*, module, target)
+      run encodeChild(&mut state.*, module, value)
+    }
+    Node.ConditionalStatement {condition, thenBranch, elseBranch} => {
+      run encodeChild(&mut state.*, module, condition)
+      run encodeChild(&mut state.*, module, thenBranch)
+      run encodeChildRef(&mut state.*, module, elseBranch)
+    }
+    Node.PatternConditionalStatement {pattern, subject, thenBranch, elseBranch} => {
+      run encodeChild(&mut state.*, module, pattern)
+      run encodeChild(&mut state.*, module, subject)
+      run encodeChild(&mut state.*, module, thenBranch)
+      run encodeChildRef(&mut state.*, module, elseBranch)
+    }
+    Node.StaticConditionalStatement {condition, thenBranch, elseBranch} => {
+      run encodeChild(&mut state.*, module, condition)
+      run encodeChild(&mut state.*, module, thenBranch)
+      run encodeChildRef(&mut state.*, module, elseBranch)
+    }
+    Node.StaticForStatement {binding, iterable, body} => {
+      run encodeChild(&mut state.*, module, binding)
+      run encodeChild(&mut state.*, module, iterable)
+      run encodeChild(&mut state.*, module, body)
+    }
+    Node.WhileStatement {condition, body} => {
+      run encodeChild(&mut state.*, module, condition)
+      run encodeChild(&mut state.*, module, body)
+    }
+    Node.BreakStatement => ()
+    Node.ContinueStatement => ()
+    Node.ReturnStatement {value} => {
+      run encodeChildRef(&mut state.*, module, value)
+    }
+    Node.FailStatement {isMove, value} => {
+      run encodeBool(&mut state.*, isMove)
+      run encodeChild(&mut state.*, module, value)
+    }
+    Node.DropStatement {value} => {
+      run encodeChild(&mut state.*, module, value)
+    }
+    Node.UnsafeStatement {body} => {
+      run encodeChild(&mut state.*, module, body)
+    }
+    Node.MissingStatement => ()
+    Node.InvalidStatement {retained} => {
+      run encodeChildRange(&mut state.*, module, retained)
+    }
+    Node.ImportMember {name, alias} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeChildRef(&mut state.*, module, alias)
+    }
+    Node.Field {name, isPublic, annotation} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChild(&mut state.*, module, annotation)
+    }
+    Node.EnumMember {name, value} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeChildRef(&mut state.*, module, value)
+    }
+    Node.Variant {name, fields, braces} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeChildRange(&mut state.*, module, fields)
+      run encodeBool(&mut state.*, braces)
+    }
+    Node.Linkage {direction, abi, symbol} => {
+      run encodeName(&mut state.*, Hir.linkageDirectionName(direction))
+      run encodeChild(&mut state.*, module, abi)
+      run encodeChildRef(&mut state.*, module, symbol)
+    }
+    Node.ImportHeader {isPublic, path, alias, members} => {
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChild(&mut state.*, module, path)
+      run encodeChildRef(&mut state.*, module, alias)
+      run encodeChildRangeRef(&mut state.*, module, members)
+    }
+    Node.ConditionalHeader {condition} => {
+      run encodeChild(&mut state.*, module, condition)
+    }
+    Node.GroupHeader {branch} => {
+      run encodeName(&mut state.*, Hir.groupBranchName(branch))
+    }
+    Node.ModulePropertyHeader {properties} => {
+      run encodeChildRange(&mut state.*, module, properties)
+    }
+    Node.ImplHeader {generics, subject, target} => {
+      run encodeChildRange(&mut state.*, module, generics)
+      run encodeChild(&mut state.*, module, subject)
+      run encodeChildRef(&mut state.*, module, target)
+    }
+    Node.MissingDeclarationHeader => ()
+    Node.InvalidDeclarationHeader {retained} => {
+      run encodeChildRange(&mut state.*, module, retained)
+    }
+    Node.FunctionHeader {name, isPublic, contract, linkage, properties} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChild(&mut state.*, module, contract)
+      run encodeChildRef(&mut state.*, module, linkage)
+      run encodeChildRange(&mut state.*, module, properties)
+    }
+    Node.OperationHeader {name, isPublic, contract, operator, properties} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChild(&mut state.*, module, contract)
+      run encodeChildRef(&mut state.*, module, operator)
+      run encodeChildRange(&mut state.*, module, properties)
+    }
+    Node.ImplAliasHeader {name, isPublic, target} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChild(&mut state.*, module, target)
+    }
+    Node.StructHeader {name, isPublic, generics, genericsAnchor, fields, abi} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChildRange(&mut state.*, module, generics)
+      run encodeBool(&mut state.*, genericsAnchor.present)
+      run encodeChildRange(&mut state.*, module, fields)
+      run encodeChildRef(&mut state.*, module, abi)
+    }
+    Node.TupleHeader {name, isPublic, generics, elements} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChildRange(&mut state.*, module, generics)
+      run encodeChildRange(&mut state.*, module, elements)
+    }
+    Node.EnumHeader {name, isPublic, representation, members} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChildRef(&mut state.*, module, representation)
+      run encodeChildRange(&mut state.*, module, members)
+    }
+    Node.UnionHeader {name, isPublic, generics, variants} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChildRange(&mut state.*, module, generics)
+      run encodeChildRange(&mut state.*, module, variants)
+    }
+    Node.ServiceHeader {name, isPublic, generics} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChildRange(&mut state.*, module, generics)
+    }
+    Node.InterfaceHeader {name, isPublic, generics} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChildRange(&mut state.*, module, generics)
+    }
+    Node.RoleHeader {name, isPublic} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+    }
+    Node.ConstantHeader {name, isPublic, annotation} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChildRef(&mut state.*, module, annotation)
+    }
+    Node.PackageParameterHeader {name, isPublic, annotation} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChild(&mut state.*, module, annotation)
+    }
+    Node.AliasHeader {name, isPublic, generics, target} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChildRange(&mut state.*, module, generics)
+      run encodeChild(&mut state.*, module, target)
+    }
+    Node.StaticHeader {name, isPublic, annotation, mutable, linkage, properties} => {
+      run encodeChild(&mut state.*, module, name)
+      run encodeBool(&mut state.*, isPublic)
+      run encodeChild(&mut state.*, module, annotation)
+      run encodeBool(&mut state.*, mutable)
+      run encodeChild(&mut state.*, module, linkage)
+      run encodeChildRange(&mut state.*, module, properties)
+    }
+    Node.NoBody => ()
+    Node.CallableBody {block} => {
+      run encodeChildRef(&mut state.*, module, block)
+    }
+    Node.InitializerBody {value} => {
+      run encodeChildRef(&mut state.*, module, value)
+    }
+    Node.PackageParameterBody {default, validation} => {
+      run encodeChildRef(&mut state.*, module, default)
+      run encodeChildRef(&mut state.*, module, validation)
+    }
+    Node.MembersBody {members} => {
+      run encodeChildRange(&mut state.*, module, members)
+    }
+    Node.ConditionalBody {thenBranch, elseBranch} => {
+      run encodeChild(&mut state.*, module, thenBranch)
+      run encodeChildRef(&mut state.*, module, elseBranch)
+    }
+    Node.InvalidDeclarationBody {retained} => {
+      run encodeChildRange(&mut state.*, module, retained)
+    }
+    Node.Declaration {owner, documentation, header, body} => {
+      run encodeOwner(&mut state.*, module, owner)
+      run encodeSymbolRef(&mut state.*, module, documentation)
+      run encodeChild(&mut state.*, module, header)
+      run encodeChild(&mut state.*, module, body)
+    }  }
+}
+
+/// Opens an encoding state over `ordinals` and frames its domain and version.
+effect fn beginEncoding(domain: Domain, emit: bool, ordinals: Vector<usize>) -> EncodeState
+! OutOfMemoryError
+? &mut Allocator {
+  let mut state = EncodeState {
+    bytes: Vector.make<u8>(),
+    ordinals: move ordinals,
+    next: usize.ONE,
+    emit: emit,
+  }
+  run frameBytes(&mut state, Tag.Domain, String.utf8Bytes(domainName(domain)))
+  run encodeNumber(&mut state, VERSION)
+  return move state
+}
+
+/// Returns the header identity of the declaration `id` names.
+///
+/// # Gotchas
+///
+/// A caller that hands an identity that is not a declaration gets that node back, which keeps the
+/// encoders total; [`Hir.verify`](hir.Hir.verify) is what proves a module's shape.
+fn headerOf(module: &Module, id: HirId) -> HirId {
+  if let Node.Declaration {header, ..} = Module.node(module, id) {
+    return header
+  }
+  return id
+}
+
+/// Returns the body identity of the declaration `id` names, or `id` when it names no declaration.
+fn bodyOf(module: &Module, id: HirId) -> HirId {
+  if let Node.Declaration {body, ..} = Module.node(module, id) {
+    return body
+  }
+  return id
+}
+
+/// Records the preorder ordinal of every node the declaration `id` reaches, header and body alike.
+///
+/// # Details
+///
+/// The ordinals span the whole declaration, not one half, so a body expression that names a
+/// parameter declared in the header still resolves. The pass emits nothing.
+effect fn ordinalsOf(module: &Module, id: HirId) -> Vector<usize>
+! OutOfMemoryError
+? &mut Allocator {
+  let mut blank = Vector.make<usize>()
+  let mut index = usize.ZERO
+  while index < Module.length(module) {
+    run Vector.append<usize>(&mut blank, usize.ZERO)
+    index = index + usize.ONE
+  }
+  let mut state = run beginEncoding(Domain.Header, false, move blank)
+  run encodeNode(&mut state, module, id)
+  let EncodeState {bytes, ordinals, next: ignored1, emit: ignored2} = move state
+  drop bytes
+  return move ordinals
+}
+
+/// Returns the canonical bytes of the declaration header that `id` names.
+///
+/// # When to use
+///
+/// Use it to decide whether a declaration's *signature* changed — its name, its parameters, its
+/// result, its documentation — independently of what its body does.
+///
+/// # Details
+///
+/// The bytes cover the declaration's owner key, its documentation, and its header subtree. Editing
+/// a function's return expression leaves them identical; changing a parameter type does not.
+///
+/// # Gotchas
+///
+/// Comparing header bytes across two modules is meaningful; comparing them across two versions of
+/// this compiler is not, which is what [`VERSION`] records.
+pub effect fn header(module: &Module, id: HirId) -> Vector<u8>
+! OutOfMemoryError
+? &mut Allocator {
+  let ordinals = run ordinalsOf(module, id)
+  let mut state = run beginEncoding(Domain.Header, true, move ordinals)
+  if let Node.Declaration {owner, documentation, ..} = Module.node(module, id) {
+    run encodeOwner(&mut state, module, owner)
+    run encodeSymbolRef(&mut state, module, documentation)
+  }
+  run encodeNode(&mut state, module, headerOf(module, id))
+  let EncodeState {bytes, ordinals: spent, next: ignored1, emit: ignored2} = move state
+  drop spent
+  return move bytes
+}
+
+/// Returns the canonical bytes of the declaration body that `id` names.
+///
+/// # When to use
+///
+/// Use it to decide whether a declaration's *implementation* changed while its signature did not.
+///
+/// # Details
+///
+/// The bytes cover the body subtree alone. Nested member declarations encode inline, so an
+/// implementation block's bytes change when one of its members does.
+///
+/// # Gotchas
+///
+/// A binder ordinal is counted over the whole declaration, so two bodies compare equal only when
+/// their headers introduced binders at the same preorder positions. A body that reads its second
+/// parameter is not the body that reads its first, which is the intended reading. A header edit
+/// that changes how many nodes precede a binder — replacing `i32` with `Vector<T>` rather than
+/// with `i64` — also shifts that binder's ordinal, so the body bytes change even though the body
+/// was not touched. The comparison stays sound, because a changed body digest only ever means
+/// "recheck"; it costs a spurious recheck, never a missed one.
+pub effect fn body(module: &Module, id: HirId) -> Vector<u8>
+! OutOfMemoryError
+? &mut Allocator {
+  let ordinals = run ordinalsOf(module, id)
+  let mut state = run beginEncoding(Domain.Body, true, move ordinals)
+  run encodeNode(&mut state, module, bodyOf(module, id))
+  let EncodeState {bytes, ordinals: spent, next: ignored1, emit: ignored2} = move state
+  drop spent
+  return move bytes
+}
+
+/// Returns the 32-byte SHA-256 digest of the declaration header that `id` names.
+pub effect fn headerDigest(module: &Module, id: HirId) -> [u8; 32]
+! OutOfMemoryError
+? &mut Allocator {
+  let bytes = run header(module, id)
+  let digest = Sha256.hash(Vector.asSlice<u8>(&bytes))
+  drop bytes
+  return digest
+}
+
+/// Returns the 32-byte SHA-256 digest of the declaration body that `id` names.
+pub effect fn bodyDigest(module: &Module, id: HirId) -> [u8; 32]
+! OutOfMemoryError
+? &mut Allocator {
+  let bytes = run body(module, id)
+  let digest = Sha256.hash(Vector.asSlice<u8>(&bytes))
+  drop bytes
+  return digest
+}
+
+/// Returns the 32-byte SHA-256 digest of `module` as a whole.
+///
+/// # Details
+///
+/// The digest covers the module documentation and then, for each top-level declaration in written
+/// order, its header digest followed by its body digest. Reordering two declarations therefore
+/// changes the module digest while leaving both declarations' own digests alone, which is exactly
+/// the distinction an incremental cache needs.
+pub effect fn moduleDigest(module: &Module) -> [u8; 32] ! OutOfMemoryError ? &mut Allocator {
+  let mut state = run beginEncoding(Domain.ModuleDomain, true, Vector.make<usize>())
+  run encodeSymbolRef(&mut state, module, module.documentation)
+  let patch = run openFrame(&mut state, Tag.Sequence)
+  run encodeNumber(&mut state, usize.toU64(module.declarations.length))
+  let mut index = usize.ZERO
+  while index < module.declarations.length {
+    let id = Module.child(module, module.declarations, index)
+    let headerBytes = run headerDigest(module, id)
+    let bodyBytes = run bodyDigest(module, id)
+    run frameBytes(&mut state, Tag.Text, &headerBytes)
+    run frameBytes(&mut state, Tag.Text, &bodyBytes)
+    index = index + usize.ONE
+  }
+  closeFrame(&mut state, patch)
+  let EncodeState {bytes, ordinals, next: ignored1, emit: ignored2} = move state
+  drop ordinals
+  let digest = Sha256.hash(Vector.asSlice<u8>(&bytes))
+  drop bytes
+  return digest
+}
+
+/// Appends the lowercase hexadecimal spelling of `digest` to `output`.
+///
+/// # When to use
+///
+/// Use it when a digest must be printed or compared as text, such as the executable's `hir` dump.
+pub effect fn appendHex(output: &mut Vector<u8>, digest: &[u8]) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let digits = String.utf8Bytes("0123456789abcdef")
+  let mut index = usize.ZERO
+  while index < digest.length {
+    let byte = digest[index]
+    run Vector.append<u8>(&mut output.*, digits[u8.toUsize(u8.shiftRight(byte, 4))])
+    run Vector.append<u8>(&mut output.*, digits[u8.toUsize(u8.bitAnd(byte, 15))])
+    index = index + usize.ONE
+  }
+  return ()
+}
+
+/// Writes one `<OwnerKind> "<name>" #<occurrence> <header hex> <body hex>` line per declaration.
+///
+/// # When to use
+///
+/// Call it after [`Hir.write`](hir.Hir.write) to complete the executable's `hir <file>` dump: the
+/// node arena says what the file declares, and these lines say what each declaration's content
+/// hashes to.
+///
+/// # Details
+///
+/// The lines follow the module's written declaration order. Each names the declaration by its
+/// owner key rather than by arena index, so the dump stays readable when the arena renumbers.
+///
+/// # Gotchas
+///
+/// `compiler/src/main.silk` does not yet call this, because reaching `Lower.lower` from `main`
+/// aborts bootstrap instance discovery. The dump is exercised through `hir.LoweringCases` until
+/// that bootstrap defect is repaired; see `compiler/BUGS.md`.
+pub effect fn writeFingerprints(module: &Module) -> () ! OutOfMemoryError | WriterError
+? &mut Allocator | &mut Writer {
+  run Writer.writeString("\nfingerprints ")
+  run Format.display(&module.declarations.length)
+  run Writer.writeString("\n")
+  let mut index = usize.ZERO
+  while index < module.declarations.length {
+    let id = Module.child(module, module.declarations, index)
+    run Writer.writeString("  ")
+    if let Node.Declaration {owner, ..} = Module.node(module, id) {
+      run Writer.writeString(Hir.ownerKindName(owner.kind))
+      run Writer.writeString(" ")
+      if owner.name.present {
+        run Hir.writeQuotedText(Module.text(module, owner.name.symbol))
+      } else {
+        run Writer.writeString("anonymous")
+      }
+      run Writer.writeString(" #")
+      run Format.display(&owner.occurrence)
+    } else {
+      run Writer.writeString("not-a-declaration")
+    }
+    let headerBytes = run headerDigest(module, id)
+    let bodyBytes = run bodyDigest(module, id)
+    let mut text = Vector.make<u8>()
+    run Vector.appendBytes(&mut text, String.utf8Bytes(" "))
+    run appendHex(&mut text, &headerBytes)
+    run Vector.appendBytes(&mut text, String.utf8Bytes(" "))
+    run appendHex(&mut text, &bodyBytes)
+    run Vector.appendBytes(&mut text, String.utf8Bytes("\n"))
+    run Writer.writeAll(Vector.asSlice<u8>(&text))
+    drop text
+    index = index + usize.ONE
+  }
+  return ()
+}

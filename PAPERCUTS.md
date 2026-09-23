@@ -83,3 +83,24 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 - 2026-09-23 · A focused formatter/linter command used repository-root paths after changing its cwd
   to `packages/compiler`, so formatting matched no files and the package-local binary path was
   wrong · Keep the repository root as cwd for root-relative file lists and tool binaries · compiler
+- 2026-09-23 · `pnpm exec silk` in a worktree ran the _main checkout's_ CLI: the globally installed
+  `silk` shim execs a hard-coded `/Users/.../Documents/dev.nosync/silk/packages/cli/dist/bin.js`, so
+  a compiler fix committed only in the worktree was invisible and `silk test` reproduced a bootstrap
+  blowup the worktree had already fixed; every self-hosted figure taken this way is a measurement of
+  the wrong compiler · Build locally with
+  `CI=true node scripts/turbo.mjs run build --filter=@silklang/cli --filter=@silklang/compiler`, then
+  run `node packages/cli/dist/bin.js <check|test|build> --manifest-path compiler/silk.toml`, and
+  state which binary produced any self-hosted figure · repository
+- 2026-09-23 · A bare `{ ... }` block inside a function body is not a nested block: the grammar reads
+  the brace as a nominal record literal, so a shadowing fixture silently became a
+  `StructLiteralExpression` with a missing type · Use a construct that owns its block (`if true { }`,
+  `while`, `unsafe`) when a fixture needs a nested scope · compiler
+- 2026-09-23 · `silk format --manifest-path compiler/silk.toml` reformatted every reachable source
+  file, not just the ones the task touched, so a task diff suddenly contained unrelated parser and
+  HIR churn; reverting it with `git checkout --` then also discarded the task's own edits to the
+  same files · Do not run the project formatter on a task branch; if it is run, restore the
+  unrelated files individually and re-apply the task edits from the change set · repository
+- 2026-09-23 · `match value { true => ..., false => ... }` on a `bool` is `SEM0044 Match does not
+cover bool` plus a parse error on each arm: `true` and `false` are not patterns, so the arms read
+  as binding identifiers · Use an `if` with a `mut` local; `match` is for unions and enums only ·
+  compiler
