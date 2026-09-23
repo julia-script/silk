@@ -133,3 +133,10 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
   primary checkout's `vitest` failed to resolve `effect` · Run `pnpm install --frozen-lockfile` in
   the worktree once; the symlink trick from the older papercut does not resolve workspace packages
   · repository
+- 2026-09-23 · Blamed a failing `StdlibResolution` closure assertion on a peer's concurrent edit by
+  reverting only my own file and seeing it still fail; the real cause was a list already stale at
+  the base commit, and reverting one of two concurrent changes never tests a clean base · To
+  attribute a failure in a shared checkout, check out the BASE commit's inputs, `rm -rf
+  packages/compiler/dist`, and rebuild with `turbo run build --force` (a plain build hits the
+  cache); and verify the causal chain you are claiming rather than concluding by elimination —
+  `option.silk` has no imports, so the chain I asserted could not have existed · compiler
