@@ -26,7 +26,7 @@
 //!   let token = JsonScanner.next(&mut scanner)
 //!   return match move token {
 //!     Result<JsonToken, JsonError>.Failure { error } => 1
-//!     Result<JsonToken, JsonError>.Success { value } => match value {
+//!     Result<JsonToken, JsonError>.Success { value } => match move value {
 //!       JsonToken.Number { span: _ } => 0
 //!       _ => 1
 //!     }
