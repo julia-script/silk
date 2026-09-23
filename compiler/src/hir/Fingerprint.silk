@@ -1187,9 +1187,7 @@ pub effect fn writeFingerprints(module: &Module) -> () ! OutOfMemoryError | Writ
       run Writer.writeString(Hir.ownerKindName(owner.kind))
       run Writer.writeString(" ")
       if owner.name.present {
-        run Writer.writeString("\"")
-        run Writer.writeAll(Module.text(module, owner.name.symbol))
-        run Writer.writeString("\"")
+        run Hir.writeQuotedText(Module.text(module, owner.name.symbol))
       } else {
         run Writer.writeString("anonymous")
       }

@@ -2433,3 +2433,67 @@ test effect fn digestsSummariseTheirOwnHalf() -> ()
   let mut allocator = Allocator.systemAllocatorProvider()
   return run checkDigestsAgreeWithBytes() |> Effect.provideMut<Allocator>(&mut allocator)
 }
+
+effect fn checkQuotedTextEscapes() -> ()
+! OutOfMemoryError | WriterError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerSource(
+    "/// One \"quoted\" line.\n/// Second line.\nconst greeting: string = \"say \\\"hi\\\"\\n\"\n",
+  )
+  let rendered = run Hir.render(&module)
+  let expected = String.utf8Bytes(
+    """documentation none
+declarations [#7]
+
+nodes 8
+#0 Name 46..54
+  text: "greeting"
+#1 Name 56..62
+  text: "string"
+#2 Path 56..62
+  segments: [#1]
+#3 NamedType 56..62
+  path: #2
+  hasMode: false
+  mode: Shared
+#4 ConstantHeader 40..79
+  name: #0
+  isPublic: false
+  annotation: #3
+#5 TextLiteral 65..79
+  value: "say \\"hi\\"\\n"
+#6 InitializerBody 40..79
+  value: #5
+#7 Declaration 40..79
+  owner: Constant "greeting" #0
+  documentation: "/// One \\"quoted\\" line.\\n/// Second line."
+  header: #4
+  body: #6
+
+causes 0
+
+diagnostics 0
+""",
+  )
+  run Testing.expect(
+    bytesEqual(Vector.asSlice<u8>(&rendered), expected),
+    "a quote and a line break inside interned text escape, so every field stays on one line",
+  )
+  drop rendered
+  let mut payload = SymbolRef.absent()
+  if let Node.TextLiteral {value: text} = Module.node(&module, HirId {index: usize.add(0, 5)}) {
+    payload = SymbolRef.of(text)
+  }
+  run Testing.expect(
+    symbolIs(&module, payload, "say \"hi\"\n"),
+    "the escape is a property of the dump; the interned bytes stay exactly as decoded",
+  )
+  drop module
+  return ()
+}
+
+test effect fn quotedTextEscapesInTheDump() -> ()
+! OutOfMemoryError | WriterError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkQuotedTextEscapes() |> Effect.provideMut<Allocator>(&mut allocator)
+}

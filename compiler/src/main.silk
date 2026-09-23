@@ -132,7 +132,8 @@ effect fn program() -> ()
   if dumpHir {
     let module = run Lower.lower(&tree)
     run Hir.write(&module)
-    return run Fingerprint.writeFingerprints(&module)
+    run Fingerprint.writeFingerprints(&module)
+    return run Hir.writeViolations(&module)
   }
   return run SyntaxTree.write(&tree)
 }

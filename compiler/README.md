@@ -37,12 +37,24 @@ Prefix the path with `hir` to lower the file instead of dumping its syntax tree:
 pnpm exec silk run --manifest-path compiler/silk.toml -- hir compiler/src/main.silk
 ```
 
+Pass one normalized relative path, as in the syntax mode: `Path.joinUtf8` rejects absolute paths,
+so an absolute argument fails with a file error rather than a lowering error.
+
 The dump opens with the module's `//!` documentation and the declaration range, then lists every
 arena node in postorder: `#<index> <kind> <start>..<end>`, one indented line per field, and a
-`causes` line on any node that recorded recovery. The `causes` and `diagnostics` sections follow,
-then a `fingerprints` section naming each declaration's owner key with its header and body digests
-as hexadecimal. The text depends only on module content, so two builds of one file agree byte for
-byte. This is a debug dump; the output is not a stable format.
+`causes` line on any node that recorded recovery. Sections follow in a fixed order — `causes`,
+`diagnostics`, `fingerprints` naming each declaration's owner key with its header and body digests
+as hexadecimal, and `violations` reporting what `Hir.verify` found. Each section opens with its own
+`<name> <count>` line, so a reader can check that a section holds what it announces.
+
+A field occupies exactly one line. A child identity prints as `#id`, an absent child as `none`, a
+child range as `[#a #b]`, a span as `start..end`, and an interned symbol as quoted text with `"`,
+`\`, and the line breaks escaped, so a module documentation block or a text literal containing a
+quote never closes its field early or opens a line the reader cannot classify. A `#<number>` inside
+an owner key counts same-key siblings and is not an arena identity.
+
+The text depends only on module content, so two builds of one file agree byte for byte. This is a
+debug dump; the output is not a stable format.
 
 ## Representation and recovery
 
@@ -76,7 +88,25 @@ comment lists each deliberate difference.
 `Hir.write` dumps a module as indented text and `Hir.render` produces the same bytes in an owned
 buffer, so a test can compare a lowered module against expected text. `Hir.verify` reports the
 arena invariants a module violates rather than asserting them, which replaces the bootstrap's
-structured-clone publication step.
+structured-clone publication step: `spans` and `nodeCauses` have the same length as `nodes`, every
+child identity precedes the node referencing it and stays inside the arena, every child range,
+cause range, symbol, and top-level declaration identity lies inside its storage, and every missing
+or invalid node records at least one cause. `Hir.writeViolations` runs it and prints the result as
+the dump's last section, so the `hir` mode reports a defect instead of printing a broken arena
+silently. It verifies arena consistency, not lowering fidelity.
+
+One reference is deliberately not an ownership edge. `IdentifierExpression.binding` names the
+binder the identifier resolves to, which the block, parameter list, or pattern that declares it
+already owns, so a binder is pointed at once per reader. Following it would reach a node twice.
+Every other reference is an ownership edge, which makes the arena a forest rooted in the
+declaration range.
+
+That forest property — every node reached exactly once from the declaration range, and every
+child's span inside its parent's — is the one arena invariant `Hir.verify` does not check. Proving
+it needs a second traversal carrying a per-node owner count through all 132 variants of the
+exhaustive field walk, only to distinguish the single resolution edge from every ownership edge.
+`lower-corpus.mjs` below proves it instead, over every fixture, self-hosted source, and standard
+library module, which is where an orphan would actually appear.
 
 `hir/Draft.silk` owns the module while it is being built. Every node enters the arena through
 `Draft.append`, which pushes one `nodes`, one `spans`, and one `nodeCauses` entry together, so the
@@ -227,6 +257,22 @@ Each case uses a temporary source file beneath `compiler/fixtures/`, which the h
 after success or failure. The native executable is built once, not once per test. The nesting
 cases exercise both accepted inputs and diagnostic recovery, including depth-budget reuse by
 sibling expressions and a following declaration after unclosed delimiters.
+
+Lower the same corpus and check the arena the lowering produces:
+
+```sh
+node compiler/scripts/lower-corpus.mjs compiler/build/llvm/aarch64-apple-darwin/debug/silk-compiler
+```
+
+This harness reuses one built executable too, and imports nothing from the bootstrap package: every
+assertion is a property of the self-hosted dump alone, never a comparison against
+`AuthoredLowering`. It runs `hir` mode over the grammar fixtures, the self-hosted sources, and the
+standard library, and asserts that the process exits cleanly, that the dump reads back with each
+section holding the number of entries it announces, that `violations` is empty, that every child
+identity precedes its parent, that one traversal from the declaration range reaches every node
+exactly once, that a child's span lies inside its parent's, that every identifier resolves to a
+binder, and that a file the parser accepts lowers without a recovery cause. Extra file paths after
+the executable select a smaller corpus.
 
 `fixtures/parser/` contains syntax-only programs: names need not resolve and operations need not
 typecheck. `recovery.silk` deliberately contains syntax errors. The other files directly under
