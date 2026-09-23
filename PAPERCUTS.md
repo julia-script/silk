@@ -189,3 +189,5 @@ HEAD...@{u}` before reporting a head, and confirm each claimed deliverable again
   shard 4 timed out eight tests · File count is a poor cost proxy: keep per-test timing artifacts
   and rebalance the shards using measured work · compiler
 - 2026-09-23 · The delegated worktree had no `node_modules`; offline pnpm install lacked cached Changesets packages and online install retried unreachable npm DNS · Reuse the prepared main checkout's dependency links for focused local compiler checks · compiler
+- 2026-09-23 · Codebase memory refused to index this Intent worktree because an unverified generation held its coordination lock · Use the existing indexed Silk checkout to locate symbols, then verify source in the active worktree · compiler
+- 2026-09-23 · A Turbo compiler build invoked pnpm's dependency repair, retried unreachable registry URLs, and recreated `node_modules` after a successful install · Restore dependencies with `CI=true pnpm install --frozen-lockfile`, then run the needed generator, focused Vitest files, and direct `tsc` checks · compiler

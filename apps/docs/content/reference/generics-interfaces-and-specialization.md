@@ -1306,12 +1306,13 @@ result, failure, and requirement contracts for both interfaces and services.
 [interface witness tests](../../../../packages/compiler/test/InterfaceWitnessCompatibility.test.ts),
 [nested Effect contract](effects-and-execution.md#eff-004--nested-effects-are-ordinary-values).
 
-### IMPL-004 — Only the provider's defining module may declare its conformances
+### IMPL-004 — An interface or its nominal provider may own a conformance
 
 **Status:** Confirmed
 
-An `impl` must appear in the module that defines the provider's outer nominal type. The interface
-may come from another visible module.
+An interface implementation for a nominal provider may appear either in the interface's defining
+module or in the module that defines the provider's outer nominal type. The two declarations must
+be visible to the implementing module. A service implementation remains provider-owned.
 
 ```silk,ignore
 // model/User.silk
@@ -1324,27 +1325,41 @@ impl Validatable for User {
 }
 ```
 
-For `Wrapper<T>`, the owning module is the module that declares `Wrapper`, independent of `T`.
-This makes every conformance a canonical fact about one nominal provider rather than behavior
-activated by whichever extension module a caller imports.
+For `Wrapper<T>`, the provider's defining module is the module that declares `Wrapper`, independent
+of `T`.
+The module that declares the interface may also implement it for `Wrapper<T>`, including with
+conditional bounds on `T`. Both locations contribute to the same program-wide coherence check,
+which rejects competing implementations.
 
-Third parties may define ordinary actor functions for any public type. To create a new conformance
+```silk,ignore
+// validation/Validatable.silk
+import model.User
+
+pub interface Validatable { /* ... */ }
+impl Validatable for User { /* ... */ }
+```
+
+Scalar and borrowed `string` providers have no nominal declaration module, so only the contract's
+module may implement an interface for them. The same interface module may also implement that
+interface for an imported owned `String` nominal.
+
+Third parties may define ordinary actor functions for any public type. To create a conformance
 between a foreign interface and foreign type, they define an owned nominal adapter and implement the
 interface for that adapter.
 
-**Boundary:** Defining the interface does not grant permission to implement it for a foreign
-provider. Imports never activate a conformance, and an `impl` in a neighboring directory or package
-does not gain provider ownership.
+**Boundary:** A module that owns neither the interface nor the nominal provider cannot declare
+their implementation. Imports never activate a conformance, and an `impl` in a neighboring directory
+or package gains no ownership. Service and compiler-sealed intrinsic rules do not broaden.
 
-This locality rule does not require implementations to live inside the provider declaration. They
-remain top-level `impl` declarations in the same module, preserving data-only nominal types.
+This locality rule does not require implementations to live inside either declaration. They remain
+top-level `impl` declarations, preserving data-only nominal types.
 
-**Diagnostics:** A foreign-provider `impl` reports a conformance-locality diagnostic at the
-provider type and identifies its defining module. Tooling may suggest an owned adapter; it must not
-offer to move the conformance into a module the author cannot modify.
+**Diagnostics:** An unrelated module's `impl` reports `SEM0083` at the conformance and identifies
+the permitted module or modules. Tooling may suggest an owned adapter; it must not offer to move the
+conformance into a module the author cannot modify.
 
-**Current compiler:** Aligned for source-declared contracts. A conformance is admitted only in the
-module defining its provider's outer nominal type; compiler-sealed intrinsic contracts retain their
+**Current compiler:** Aligned for source-declared contracts. Interface-owned and provider-owned
+nominal implementations share one coherence check; compiler-sealed intrinsic contracts retain their
 own explicitly privileged rules.
 
 **Evidence:** [member and conformance style](style-guide.md#style-002--operations-intrinsic-to-one-type-are-inherent-members-with-the-receiver-first).
@@ -1379,7 +1394,7 @@ not an independently private `impl`. Unsupported `pub impl` syntax receives the 
 for a modifier that has no conformance meaning.
 
 **Current artifacts:** The earlier module direction described public and private conformances. That
-dimension is superseded: provider-local coherence and endpoint visibility already determine every
+dimension is superseded: program-wide coherence and endpoint visibility already determine every
 usable goal, and current source syntax needs no general conformance visibility modifier.
 
 **Evidence:** [current impl parser](../../../../packages/compiler/src/Parser.ts),
@@ -1608,7 +1623,7 @@ does not give any one of those areas a second interface model.
 | Effects                    | Selecting an effectful operation constructs the one Effect layer declared by its contract. Proof does not execute, flatten, handle failures, satisfy requirements, or change a reusable Effect into a consuming one.                                                            |
 | Ownership                  | A proof is compile-time evidence and does not move, borrow, copy, or drop a value. The selected operation still applies its declared owned, shared, or exclusive operands literally.                                                                                            |
 | Operators                  | Operator syntax may invoke only an operation explicitly marked for that operator. Bounds and conformances select its static implementation; operation names and provider types receive no hidden numeric privilege.                                                             |
-| Modules                    | Only the provider's defining module declares conformances. Imports make declarations nameable but never activate, replace, prioritize, or hide an `impl`; endpoint visibility determines whether a goal can be named.                                                           |
+| Modules                    | A nominal interface conformance belongs in the interface's or provider's defining module; service implementations remain provider-owned. Imports make declarations nameable but never activate, replace, prioritize, or hide an `impl`; endpoint visibility determines whether a goal can be named. |
 | Specialization and targets | Every admitted concrete proof selects the same static operation target before LLVM lowering. No target performs interface lookup, receives a witness dictionary, or chooses a different conformance.                                                                            |
 | Static values              | A generic helper such as `Schema.of<User>()` may select `User: SchemaOf` statically, but that fact alone does not execute the call at compile time. Const evaluation and global static composition are not defined by these rules.                                              |
 
@@ -1631,5 +1646,5 @@ selection.
 | Inline implementations  | General `impl` parsing accepts mappings; a narrow hook form accepts one inline function.                     | Implement the already confirmed general inline-or-mapped rule.                                                                               |
 
 IMPL-005 resolves the former conformance-visibility question: conformances have no independently
-written visibility surface. Endpoint visibility and provider-local coherence determine whether a
+written visibility surface. Endpoint visibility and program-wide coherence determine whether a
 goal is usable.

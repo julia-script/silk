@@ -102,14 +102,20 @@ const nominalOwnerDeclaration = (
           member._tag === 'InterfaceDeclaration'),
     )
 
-/** The one source module allowed to own an interface or service implementation. */
-const sourceConformanceOwner = (
+/** Source modules allowed to own an interface or service implementation. */
+const sourceConformanceOwners = (
   capability: Type.Nominal,
   provider: Type.Type,
-): string | undefined => {
-  if (Type.isNominal(provider)) return provider.module
-  if (Type.isBuiltin(provider) || Type.isString(provider)) return capability.module
-  return undefined
+  contract: InterfaceFact | ServiceFact,
+): ReadonlyArray<string> => {
+  if (Type.isNominal(provider))
+    return contract._tag === 'InterfaceDeclaration'
+      ? provider.module === capability.module
+        ? [provider.module]
+        : [provider.module, capability.module]
+      : [provider.module]
+  if (Type.isBuiltin(provider) || Type.isString(provider)) return [capability.module]
+  return []
 }
 
 /** Structural providers whose only coherent source owner is the declaring contract module. */
@@ -1286,7 +1292,11 @@ export const complete = (
       if (
         (contract?._tag === 'InterfaceDeclaration' || contract?._tag === 'ServiceDeclaration') &&
         Type.isNominal(conformance.provider.type) &&
-        conformance.provider.type.module !== module.module
+        !sourceConformanceOwners(
+          conformance.capability.type,
+          conformance.provider.type,
+          contract,
+        ).includes(module.module)
       )
         return { ...conformance, head }
       const failures = ConformanceHead.terminationFailures(head)
@@ -1392,8 +1402,11 @@ export const complete = (
         sourceMember?._tag === 'InterfaceDeclaration' || sourceMember?._tag === 'ServiceDeclaration'
           ? sourceMember
           : undefined
-      const conformanceOwner = sourceConformanceOwner(capability, provider)
-      if (sourceContract !== undefined && conformanceOwner === undefined) {
+      const conformanceOwners =
+        sourceContract === undefined
+          ? []
+          : sourceConformanceOwners(capability, provider, sourceContract)
+      if (sourceContract !== undefined && conformanceOwners.length === 0) {
         diagnostics.push(
           invalidDiagnostic(
             'interface and service providers must be nominal types, scalar types, or string',
@@ -1402,13 +1415,16 @@ export const complete = (
         )
         continue
       }
-      if (sourceContract !== undefined && conformanceOwner !== conformance.module) {
-        const ownership = Type.isNominal(provider)
-          ? "the provider's module"
-          : "the contract's module for scalar and string providers"
+      if (sourceContract !== undefined && !conformanceOwners.includes(conformance.module)) {
+        const ownership =
+          sourceContract._tag === 'InterfaceDeclaration' && Type.isNominal(provider)
+            ? "the interface's or provider's module"
+            : Type.isNominal(provider)
+              ? "the provider's module"
+              : "the contract's module for scalar and string providers"
         diagnostics.push(
           invalidDiagnostic(
-            `implementation for ${Type.encode(provider)} must be declared in ${conformanceOwner}, ${ownership}`,
+            `implementation for ${Type.encode(provider)} must be declared in ${conformanceOwners.join(' or ')}, ${ownership}`,
             Location.at(conformance.anchor),
           ),
         )
