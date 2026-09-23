@@ -203,7 +203,7 @@ impl Json {
     }
   }
 
-  /// Decodes a finite number into `f64`, returning `None` for absence or overflow.
+  /// Decodes a finite `f64`, or returns `None` for absence, wrong type, invalid text, or overflow.
   pub fn asF64(self: Option<&Value>) -> Option<f64> {
     return match move self {
       Option<&Value>.None => Option.none<f64>()
@@ -220,7 +220,7 @@ impl Json {
     }
   }
 
-  /// Decodes a finite number into `f32`, returning `None` for absence or overflow.
+  /// Decodes a finite `f32`, or returns `None` for absence, wrong type, invalid text, or overflow.
   pub fn asF32(self: Option<&Value>) -> Option<f32> {
     return match move self {
       Option<&Value>.None => Option.none<f32>()
