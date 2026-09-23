@@ -124,3 +124,7 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
   match the current `format.silk`; the compiler loaded an older embedded copy from
   `Stdlib.generated.ts` · Run `node scripts/generate-stdlib.mjs` in `packages/compiler` after
   editing stdlib Silk before interpreting diagnostic offsets or runtime results · compiler
+- 2026-09-23 · Documentation generation passed policy checks but silently omitted newly registered
+  stdlib pages because `generate-documentation.mjs` read the built compiler's older manifest · Run
+  `node_modules/.bin/tsc -p packages/compiler/tsconfig.json` after changing the manifest, then
+  regenerate documentation and check that the new pages exist · compiler
