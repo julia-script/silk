@@ -142,3 +142,11 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
 - 2026-09-23 · Focused Vitest matched an untracked `.pnpm-store/v11/projects` duplicate of the
   compiler suite and failed after the intended JSON case passed · Exclude `.pnpm-store/**` from
   focused Vitest runs until the store is outside test discovery · compiler
+- 2026-09-23 · `pnpm lint` aborted before reading any source with "The `options.denyWarnings` option
+  is only supported in the root config", failing `validate` CI and the docs preview; the culprit was
+  a generated `.oxlintrc.json` under the git-tracked `.pnpm-store/` cache, not the root config ·
+  Gitignore and untrack `/.pnpm-store/` (`275516ad`); on any oxlint *configuration* error, search for
+  stray `.oxlintrc.json` under cache or vendored directories first · repository
+- 2026-09-23 · `ws.git.commit` silently restaged an ignored cache file that had just been removed
+  from the index, so the commit still contained it · Use `git rm --cached` plus `git commit --amend`,
+  and verify with `git status` after any commit that removes a path from the index · repository
