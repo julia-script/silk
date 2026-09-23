@@ -40,6 +40,7 @@ effect fn next<'scratch>(
 pub fn main() -> i32 { return 0 }`
 
 const jsonSerdeProgram = `import silk.json_serde { Decode, Deserialize, Serialize }
+import silk.json_value { Json }
 import silk.json_array { JsonArray }
 import silk.json_object { JsonObject }
 import silk.effect { Effect }
@@ -50,6 +51,13 @@ import silk.allocator { Allocator, OutOfMemoryError }
 import silk.writer { Writer, WriterError }
 fn read<T: Decode>(scanner: &mut JsonScanner) -> Result<T, JsonError> {
   return Decode.decode(&mut scanner.*)
+}
+fn decodeDocument(bytes: &[u8]) -> Result<i32, JsonError> {
+  return Json.decode<i32>(bytes)
+}
+effect fn deserializeDocument(bytes: &[u8])
+  -> i32 ! JsonError | OutOfMemoryError ? &mut Allocator {
+  return run Json.deserialize<i32>(bytes)
 }
 effect fn readOwned<T: Deserialize>(scanner: &mut JsonScanner)
   -> T ! JsonError | OutOfMemoryError ? &mut Allocator {

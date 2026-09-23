@@ -679,6 +679,16 @@ pub fn offset<'input, 'life1>(self: &'life1 silk/json_scanner.JsonScanner<'input
 
 Returns the absolute byte offset of the last token returned by `next` or `peek`.
 
+<a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e5363616e6e65722e6c656e677468"></a>
+
+### Method `JsonScanner.length`
+
+```silk
+pub fn length<'input, 'life1>(self: &'life1 silk/json_scanner.JsonScanner<'input>) -> usize
+```
+
+Returns the length of the complete input slice.
+
 <a id="declaration-73696c6b2f6a736f6e5f7363616e6e65723a3a4a736f6e5363616e6e65722e736c696365"></a>
 
 ### Method `JsonScanner.slice`

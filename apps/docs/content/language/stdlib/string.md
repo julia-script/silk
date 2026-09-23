@@ -445,3 +445,19 @@ impl Serialize for String
 ```silk
 serialize = String.impl@0.serialize
 ```
+
+<a id="declaration-73696c6b2f737472696e673a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `Deserialize for String`
+
+```silk
+impl Deserialize for String
+```
+
+<a id="declaration-73696c6b2f737472696e673a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
+
+### Operation `deserialize`
+
+```silk
+deserialize = String.impl@1.deserialize
+```

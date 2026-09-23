@@ -14,8 +14,8 @@ values that need no allocation. Use `Deserialize` when a value can allocate.
 ## Details
 
 Each decode consumes one JSON value from a slice scanner. The caller checks for end of input.
-Integer and Boolean values support all three contracts. Floating-point values decode, but
-they do not serialize until finite-number rendering is available.
+Integer, Boolean, and finite floating-point values support all three contracts. Nonfinite
+floating-point values fail with `JsonError` before any bytes are written.
 
 Import as `Serialize` with `import silk.json_serde { Serialize }`.
 
@@ -683,21 +683,37 @@ deserialize = f32.impl@34.deserialize
 
 <a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a3335"></a>
 
+## Implementation `Serialize for f32`
+
+```silk
+impl Serialize for f32
+```
+
+<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a33353a3a6f7065726174696f6e3a30"></a>
+
+### Operation `serialize`
+
+```silk
+serialize = f32.impl@35.serialize
+```
+
+<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a3336"></a>
+
 ## Implementation `Decode for f64`
 
 ```silk
 impl Decode for f64
 ```
 
-<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a33353a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a33363a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `decode`
 
 ```silk
-decode = f64.impl@35.decode
+decode = f64.impl@36.decode
 ```
 
-<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a3336"></a>
+<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a3337"></a>
 
 ## Implementation `Deserialize for f64`
 
@@ -705,15 +721,31 @@ decode = f64.impl@35.decode
 impl Deserialize for f64
 ```
 
-<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a33363a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a33373a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `deserialize`
 
 ```silk
-deserialize = f64.impl@36.deserialize
+deserialize = f64.impl@37.deserialize
 ```
 
-<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a3337"></a>
+<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a3338"></a>
+
+## Implementation `Serialize for f64`
+
+```silk
+impl Serialize for f64
+```
+
+<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a33383a3a6f7065726174696f6e3a30"></a>
+
+### Operation `serialize`
+
+```silk
+serialize = f64.impl@38.serialize
+```
+
+<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a3339"></a>
 
 ## Implementation `Serialize for string<'a>`
 
@@ -721,10 +753,10 @@ deserialize = f64.impl@36.deserialize
 impl Serialize for string<'a>
 ```
 
-<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a33373a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6a736f6e5f73657264653a3a696d706c656d656e746174696f6e3a33393a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `serialize`
 
 ```silk
-serialize = string.impl@37.serialize
+serialize = string.impl@39.serialize
 ```

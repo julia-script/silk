@@ -279,6 +279,36 @@ Parses one complete strict JSON document into an owned value tree.
 Every allocation is charged to the ambient allocator. On syntax, duplicate-key, or
 allocation failure, the partially built tree is dropped.
 
+<a id="declaration-73696c6b2f6a736f6e5f76616c75653a3a4a736f6e2e6465636f6465"></a>
+
+### Associated function `Json.decode`
+
+```silk
+pub fn decode<T, 'life1>(bytes: &'life1 [u8]) -> silk/result.Result<T, silk/json_scanner.JsonError>
+```
+
+Decodes one complete JSON document without an allocator requirement.
+
+<a id="declaration-73696c6b2f6a736f6e5f76616c75653a3a4a736f6e2e646573657269616c697a65"></a>
+
+### Associated function `Json.deserialize`
+
+```silk
+pub effect<'life1> fn deserialize<T, 'life1>(bytes: &'life1 [u8]) -> T ! JsonError | OutOfMemoryError ? &mut Allocator
+```
+
+Deserializes one complete JSON document, with allocation charged to the ambient allocator.
+
+<a id="declaration-73696c6b2f6a736f6e5f76616c75653a3a4a736f6e2e73657269616c697a65"></a>
+
+### Associated function `Json.serialize`
+
+```silk
+pub effect<'env> fn serialize<T: 'env, 'life1: 'env, 'life2: 'env, 'env>(value: &'life1 T, options: &'life2 silk/json_output.JsonOptions) -> () ! JsonError | WriterError ? &mut Writer
+```
+
+Serializes one value through its static witness and the ambient Writer.
+
 <a id="declaration-73696c6b2f6a736f6e5f76616c75653a3a4a736f6e2e7772697465"></a>
 
 ### Associated function `Json.write`
@@ -378,3 +408,35 @@ pub fn asString<'a>(self: silk/option.Option<&'a silk/json_value.Value>) -> silk
 ```
 
 Borrows decoded string text while its owning tree remains alive.
+
+<a id="declaration-73696c6b2f6a736f6e5f76616c75653a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Serialize for Value`
+
+```silk
+impl Serialize for Value
+```
+
+<a id="declaration-73696c6b2f6a736f6e5f76616c75653a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+
+### Operation `serialize`
+
+```silk
+serialize = Value.impl@0.serialize
+```
+
+<a id="declaration-73696c6b2f6a736f6e5f76616c75653a3a696d706c656d656e746174696f6e3a31"></a>
+
+## Implementation `Deserialize for Value`
+
+```silk
+impl Deserialize for Value
+```
+
+<a id="declaration-73696c6b2f6a736f6e5f76616c75653a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
+
+### Operation `deserialize`
+
+```silk
+deserialize = Value.impl@1.deserialize
+```

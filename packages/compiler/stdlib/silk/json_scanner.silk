@@ -730,6 +730,9 @@ impl<'input> JsonScanner<'input> {
   /// Returns the absolute byte offset of the last token returned by `next` or `peek`.
   pub fn offset(self: &JsonScanner<'input>) -> usize { return self.tokenOffset }
 
+  /// Returns the length of the complete input slice.
+  pub fn length(self: &JsonScanner<'input>) -> usize { return self.input.length }
+
   /// Borrows the raw bytes denoted by a token span from this scanner's complete input.
   pub fn slice(self: &JsonScanner<'input>, span: JsonSpan) -> &'input [u8] {
     return Slice.view<u8>(self.input, span.offset, span.length)

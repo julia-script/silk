@@ -36,18 +36,16 @@
 
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.box { Box }
-import silk.bytes { Bytes }
 import silk.f32
 import silk.f64
 import silk.format { Format, ParseError }
 import silk.json_output { JsonOptions, JsonOutput }
 import silk.json_scanner { JsonError, JsonReason, JsonScanner, JsonSpan, JsonToken }
+import silk.json_serde { Decode, Deserialize, JsonSerde, Serialize }
+import silk.json_text { JsonText }
 import silk.option { Option }
 import silk.result { Result }
-import silk.slice { Slice }
-import silk.string { String, InvalidUtf8 }
-import silk.u32
-import silk.u8
+import silk.string { String }
 import silk.usize
 import silk.vector { Vector }
 import silk.writer { Writer, WriterError }
@@ -128,6 +126,41 @@ impl Json {
       JsonToken.EndOfInput => { return move document }
       _ => { fail inputError(JsonReason.TrailingContent, bytes.length) }
     }
+  }
+
+  /// Decodes one complete JSON document without an allocator requirement.
+  pub fn decode<T: Decode>(bytes: &[u8]) -> Result<T, JsonError> {
+    let mut scanner = JsonScanner.make(bytes)
+    let parsed = JsonSerde.decodeOne<T>(&mut scanner)
+    return match move parsed {
+      Result<T, JsonError>.Failure { error } => Result.failResult<T, JsonError>(move error)
+      Result<T, JsonError>.Success { value } => match move JsonScanner.next(&mut scanner) {
+        Result<JsonToken, JsonError>.Failure { error } => Result.failResult<T, JsonError>(move error)
+        Result<JsonToken, JsonError>.Success { value: tail } => match move tail {
+          JsonToken.EndOfInput => Result.succeed<T, JsonError>(move value)
+          _ => Result.failResult<T, JsonError>(
+            JsonError.at(JsonReason.TrailingContent, JsonScanner.offset(&scanner)))
+        }
+      }
+    }
+  }
+
+  /// Deserializes one complete JSON document, with allocation charged to the ambient allocator.
+  pub effect fn deserialize<T: Deserialize>(bytes: &[u8])
+    -> T ! JsonError | OutOfMemoryError ? &mut Allocator {
+    let mut scanner = JsonScanner.make(bytes)
+    let value = run JsonSerde.deserializeOne<T>(&mut scanner)
+    let tail = run nextToken(&mut scanner)
+    match move tail {
+      JsonToken.EndOfInput => { return move value }
+      _ => { fail JsonError.at(JsonReason.TrailingContent, JsonScanner.offset(&scanner)) }
+    }
+  }
+
+  /// Serializes one value through its static witness and the ambient Writer.
+  pub effect fn serialize<T: Serialize>(value: &T, options: &JsonOptions)
+    -> () ! JsonError | WriterError ? &mut Writer {
+    return run JsonSerde.writeOne<T>(value, options)
   }
 
   /// Writes a tree compactly through the ambient Writer.
@@ -249,6 +282,23 @@ impl Json {
   }
 }
 
+impl Serialize for Value {
+  effect fn serialize(self: &Self, options: &JsonOptions)
+    -> () ! JsonError | WriterError ? &mut Writer {
+    return run Json.writeWith(self, options)
+  }
+}
+
+impl Deserialize for Value {
+  effect fn deserialize(scanner: &mut JsonScanner)
+    -> Self ! JsonError | OutOfMemoryError ? &mut Allocator {
+    let first = run nextToken(&mut scanner.*)
+    let end = JsonScanner.length(&scanner.*)
+    let parsed = run parseToken(&mut scanner.*, move first, end)
+    return run expectValue(move parsed, end)
+  }
+}
+
 fn findMember<'a>(entries: &'a Vector<JsonChild>, key: string) -> Option<&'a Value> {
   let values = Vector.asSlice<JsonChild>(entries)
   let mut index = usize.ZERO
@@ -280,12 +330,14 @@ effect fn parseToken(scanner: &mut JsonScanner, token: JsonToken, end: usize)
     JsonToken.Number { span } => {
       let offset = span.offset
       let raw = JsonScanner.slice(&scanner.*, move span)
-      let text = run copyValidated(raw, offset)
+      let copied = run JsonText.copy(raw)
+      let text = unsafe String.fromBytesUnchecked(move copied)
       return Option.some<Value>(Value.Number { text: move text })
     }
     JsonToken.String { span, escaped } => {
       let offset = span.offset
-      let text = run decodeString(JsonScanner.slice(&scanner.*, move span), offset, escaped)
+      let decoded = run JsonText.decode(JsonScanner.slice(&scanner.*, move span), offset, escaped)
+      let text = unsafe String.fromBytesUnchecked(move decoded)
       return Option.some<Value>(Value.String { text: move text })
     }
     JsonToken.ArrayBegin => Option.some<Value>(run parseArray(&mut scanner.*, end))
@@ -355,7 +407,8 @@ effect fn parseObject(scanner: &mut JsonScanner, end: usize)
     first = false
     let offset = keySpan.offset
     let raw = JsonScanner.slice(&scanner.*, move keySpan)
-    let key = run decodeString(raw, offset, true)
+    let decoded = run JsonText.decode(raw, offset, true)
+    let key = unsafe String.fromBytesUnchecked(move decoded)
     if containsKey(&entries, String.view(&key)) {
       fail inputError(JsonReason.DuplicateKey, offset)
     }
@@ -396,112 +449,6 @@ fn containsKey(entries: &Vector<JsonChild>, key: string) -> bool {
     index = index + usize.ONE
   }
   return false
-}
-
-effect fn copyValidated(raw: &[u8], offset: usize)
-  -> String ! JsonError | OutOfMemoryError ? &mut Allocator {
-  let copied = run String.copyUtf8(raw)
-  return match move copied {
-    Result<String, InvalidUtf8>.Success { value } => move value
-    Result<String, InvalidUtf8>.Failure { error } => {
-      fail inputError(JsonReason.InvalidUtf8, offset + error.offset)
-    }
-  }
-}
-
-effect fn decodeString(raw: &[u8], offset: usize, escaped: bool)
-  -> String ! JsonError | OutOfMemoryError ? &mut Allocator {
-  if raw.length < 2 { fail inputError(JsonReason.UnterminatedString, offset) }
-  let contents = Slice.view<u8>(raw, usize.ONE, raw.length - 2)
-  if !escaped { return run copyValidated(contents, offset + usize.ONE) }
-  let mut output = Bytes.make()
-  run Bytes.reserveExact(&mut output, contents.length)
-  let mut index = usize.ZERO
-  let mut start = usize.ZERO
-  while index < contents.length {
-    if contents[index] != 92 {
-      index = index + usize.ONE
-      continue
-    }
-    if start < index {
-      run Bytes.append(&mut output, Slice.view<u8>(contents, start, index - start))
-    }
-    let escapeStart = index
-    index = index + usize.ONE
-    if index >= contents.length { fail inputError(JsonReason.InvalidEscape, offset + escapeStart + usize.ONE) }
-    let escapedByte = contents[index]
-    if escapedByte == 117 {
-      if index + 4 >= contents.length { fail inputError(JsonReason.InvalidEscape, offset + escapeStart + usize.ONE) }
-      let first = readHex(contents, index + usize.ONE)
-      let mut scalar = first
-      index = index + 5
-      if first >= 55296 && first <= 56319 {
-        if index + 5 >= contents.length || contents[index] != 92 || contents[index + usize.ONE] != 117 {
-          fail inputError(JsonReason.InvalidEscape, offset + escapeStart + usize.ONE)
-        }
-        let low = readHex(contents, index + 2)
-        if low < 56320 || low > 57343 { fail inputError(JsonReason.InvalidEscape, offset + index + usize.ONE) }
-        scalar = 65536 + (first - 55296) * 1024 + (low - 56320)
-        index = index + 6
-      } else if first >= 56320 && first <= 57343 {
-        fail inputError(JsonReason.InvalidEscape, offset + escapeStart + usize.ONE)
-      }
-      run appendScalar(&mut output, scalar)
-    } else {
-      let mut decoded = escapedByte
-      if escapedByte == 98 { decoded = 8 }
-      else if escapedByte == 102 { decoded = 12 }
-      else if escapedByte == 110 { decoded = 10 }
-      else if escapedByte == 114 { decoded = 13 }
-      else if escapedByte == 116 { decoded = 9 }
-      else if escapedByte != 34 && escapedByte != 47 && escapedByte != 92 {
-        fail inputError(JsonReason.InvalidEscape, offset + escapeStart + usize.ONE)
-      }
-      let one = [decoded]
-      run Bytes.append(&mut output, &one)
-      index = index + usize.ONE
-    }
-    start = index
-  }
-  if start < contents.length {
-    run Bytes.append(&mut output, Slice.view<u8>(contents, start, contents.length - start))
-  }
-  // The scanner validated raw UTF-8 and every decoded escape is a Unicode scalar.
-  return unsafe String.fromBytesUnchecked(move output)
-}
-
-fn readHex(raw: &[u8], start: usize) -> u32 {
-  let mut total: u32 = 0
-  let mut index = start
-  while index < start + 4 {
-    let byte = raw[index]
-    let mut digit = u8.toU32(byte - u8.toU8(48))
-    if byte >= 65 && byte <= 70 { digit = u8.toU32(byte - u8.toU8(65)) + 10 }
-    if byte >= 97 && byte <= 102 { digit = u8.toU32(byte - u8.toU8(97)) + 10 }
-    total = total * 16 + digit
-    index = index + usize.ONE
-  }
-  return total
-}
-
-effect fn appendScalar(output: &mut Bytes, scalar: u32) -> () ! OutOfMemoryError ? &mut Allocator {
-  if scalar < 128 {
-    let encoded = [u32.toU8(scalar)]
-    return run Bytes.append(&mut output.*, &encoded)
-  }
-  if scalar < 2048 {
-    let encoded = [u32.toU8(192 + scalar / 64), u32.toU8(128 + scalar % 64)]
-    return run Bytes.append(&mut output.*, &encoded)
-  }
-  if scalar < 65536 {
-    let encoded = [u32.toU8(224 + scalar / 4096),
-      u32.toU8(128 + scalar / 64 % 64), u32.toU8(128 + scalar % 64)]
-    return run Bytes.append(&mut output.*, &encoded)
-  }
-  let encoded = [u32.toU8(240 + scalar / 262144),
-    u32.toU8(128 + scalar / 4096 % 64),
-    u32.toU8(128 + scalar / 64 % 64), u32.toU8(128 + scalar % 64)]
-  return run Bytes.append(&mut output.*, &encoded)
 }
 
 effect fn writeNode(document: &Value, options: &JsonOptions)

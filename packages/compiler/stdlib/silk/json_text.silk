@@ -1,0 +1,127 @@
+//! Decoding validated JSON string tokens into owned UTF-8 bytes.
+//!
+//! # When to use
+//! Use [`JsonText.decode`] after `JsonScanner` has validated a string token. The returned bytes
+//! are valid UTF-8 and can be adopted by `String` without another copy.
+
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.bytes { Bytes }
+import silk.json_scanner { JsonError, JsonReason }
+import silk.slice { Slice }
+import silk.u32
+import silk.u8
+import silk.usize
+
+/// Operations on validated JSON string token text.
+pub struct JsonText {}
+
+impl JsonText {
+  /// Copies scanner-validated UTF-8 or ASCII bytes into owned storage.
+  pub effect fn copy(raw: &[u8]) -> Bytes ! OutOfMemoryError ? &mut Allocator {
+    let mut output = Bytes.make()
+    run Bytes.append(&mut output, raw)
+    return move output
+  }
+
+  /// Decodes one quoted token, including escapes, into owned valid UTF-8 bytes.
+  pub effect fn decode(raw: &[u8], offset: usize, escaped: bool)
+    -> Bytes ! JsonError | OutOfMemoryError ? &mut Allocator {
+    if raw.length < 2 { fail JsonError.at(JsonReason.UnterminatedString, offset) }
+    let contents = Slice.view<u8>(raw, usize.ONE, raw.length - 2)
+    if !escaped { return run JsonText.copy(contents) }
+    let mut output = Bytes.make()
+    run Bytes.reserveExact(&mut output, contents.length)
+    let mut index = usize.ZERO
+    let mut start = usize.ZERO
+    while index < contents.length {
+      if contents[index] != 92 {
+        index = index + usize.ONE
+        continue
+      }
+      if start < index {
+        run Bytes.append(&mut output, Slice.view<u8>(contents, start, index - start))
+      }
+      let escapeStart = index
+      index = index + usize.ONE
+      if index >= contents.length {
+        fail JsonError.at(JsonReason.InvalidEscape, offset + escapeStart + usize.ONE)
+      }
+      let escapedByte = contents[index]
+      if escapedByte == 117 {
+        if index + 4 >= contents.length {
+          fail JsonError.at(JsonReason.InvalidEscape, offset + escapeStart + usize.ONE)
+        }
+        let first = readHex(contents, index + usize.ONE)
+        let mut scalar = first
+        index = index + 5
+        if first >= 55296 && first <= 56319 {
+          if index + 5 >= contents.length || contents[index] != 92 || contents[index + usize.ONE] != 117 {
+            fail JsonError.at(JsonReason.InvalidEscape, offset + escapeStart + usize.ONE)
+          }
+          let low = readHex(contents, index + 2)
+          if low < 56320 || low > 57343 {
+            fail JsonError.at(JsonReason.InvalidEscape, offset + index + usize.ONE)
+          }
+          scalar = 65536 + (first - 55296) * 1024 + (low - 56320)
+          index = index + 6
+        } else if first >= 56320 && first <= 57343 {
+          fail JsonError.at(JsonReason.InvalidEscape, offset + escapeStart + usize.ONE)
+        }
+        run appendScalar(&mut output, scalar)
+      } else {
+        let mut decoded = escapedByte
+        if escapedByte == 98 { decoded = 8 }
+        else if escapedByte == 102 { decoded = 12 }
+        else if escapedByte == 110 { decoded = 10 }
+        else if escapedByte == 114 { decoded = 13 }
+        else if escapedByte == 116 { decoded = 9 }
+        else if escapedByte != 34 && escapedByte != 47 && escapedByte != 92 {
+          fail JsonError.at(JsonReason.InvalidEscape, offset + escapeStart + usize.ONE)
+        }
+        let one = [decoded]
+        run Bytes.append(&mut output, &one)
+        index = index + usize.ONE
+      }
+      start = index
+    }
+    if start < contents.length {
+      run Bytes.append(&mut output, Slice.view<u8>(contents, start, contents.length - start))
+    }
+    // The scanner validated raw UTF-8 and every decoded escape is a Unicode scalar.
+    return move output
+  }
+}
+
+fn readHex(raw: &[u8], start: usize) -> u32 {
+  let mut total: u32 = 0
+  let mut index = start
+  while index < start + 4 {
+    let byte = raw[index]
+    let mut digit = u8.toU32(byte - u8.toU8(48))
+    if byte >= 65 && byte <= 70 { digit = u8.toU32(byte - u8.toU8(65)) + 10 }
+    if byte >= 97 && byte <= 102 { digit = u8.toU32(byte - u8.toU8(97)) + 10 }
+    total = total * 16 + digit
+    index = index + usize.ONE
+  }
+  return total
+}
+
+effect fn appendScalar(output: &mut Bytes, scalar: u32) -> () ! OutOfMemoryError ? &mut Allocator {
+  if scalar < 128 {
+    let encoded = [u32.toU8(scalar)]
+    return run Bytes.append(&mut output.*, &encoded)
+  }
+  if scalar < 2048 {
+    let encoded = [u32.toU8(192 + scalar / 64), u32.toU8(128 + scalar % 64)]
+    return run Bytes.append(&mut output.*, &encoded)
+  }
+  if scalar < 65536 {
+    let encoded = [u32.toU8(224 + scalar / 4096),
+      u32.toU8(128 + scalar / 64 % 64), u32.toU8(128 + scalar % 64)]
+    return run Bytes.append(&mut output.*, &encoded)
+  }
+  let encoded = [u32.toU8(240 + scalar / 262144),
+    u32.toU8(128 + scalar / 4096 % 64),
+    u32.toU8(128 + scalar / 64 % 64), u32.toU8(128 + scalar % 64)]
+  return run Bytes.append(&mut output.*, &encoded)
+}

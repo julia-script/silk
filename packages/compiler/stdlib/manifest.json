@@ -595,6 +595,11 @@
     "aliases": ["Decode", "Deserialize"]
   },
   {
+    "module": "silk/json_text",
+    "path": "silk/json_text.silk",
+    "namespace": "JsonText"
+  },
+  {
     "module": "silk/json_value",
     "path": "silk/json_value.silk",
     "namespace": "Json",
