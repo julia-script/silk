@@ -61,3 +61,22 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 - 2026-09-22 · The compiler documentation check could not start in a focused workspace because
   `@silklang/docgen` had neither its workspace dependencies nor a complete build · Run the check in
   a prepared checkout with the docgen dependency graph built first · compiler, docs
+- 2026-09-22 · A fresh codebase-memory index for the task worktree refused to start because a
+  pre-coordination or unverified CBM generation was active · Reuse the indexed main Silk checkout
+  for structural discovery and use targeted filesystem inspection only for uncovered task-local or
+  ignored files · repository
+- 2026-09-22 · A `cd` into a temporary probe project reset the shell cwd, and every following
+  `pnpm exec silk` call failed with `MODULE_NOT_FOUND` before running · Keep the shell in the
+  repository root and address probe projects only through `--manifest-path` · repository
+- 2026-09-22 · A large union failed to parse with a misleading `Expected }` at an unrelated later
+  variant because one field was named after the contextual keyword `role`; keyword fields such as
+  `type` and `unsafe` reported clearly, but `role` did not · Check a new field name against the
+  `TokenKind` keyword list before debugging the enclosing declaration · compiler
+- 2026-09-22 · A lowering test asserted zero generic parameters because its fixture source named the
+  function `run`, a keyword; the parser recovered the whole signature into a flat run of `Error`
+  nodes, so the failure surfaced as a wrong count far from the cause rather than as a syntax error ·
+  Dump a new fixture with `silk-compiler <file>` before asserting against it, and check fixture
+  identifiers against the `TokenKind` keyword list · compiler
+- 2026-09-23 · Starting an authorized merge in a linked worktree failed because the sandbox could
+  not create the shared Git worktree's `ORIG_HEAD.lock` · Retry the exact scoped merge with approved
+  Git metadata access instead of changing branches or bypassing the worktree · repository

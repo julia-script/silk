@@ -19,6 +19,7 @@ import type * as LifetimeFlow from './LifetimeFlow.js'
 import * as ExecutableOrigin from './ExecutableOrigin.js'
 import * as Tir from './Tir.js'
 import * as FunctionIndex from './internal/FunctionIndex.js'
+import * as Graph from './internal/Graph.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import type * as NameResolution from './NameResolution.js'
@@ -242,6 +243,8 @@ export interface Counters {
   readonly _tag: 'InstanceDiscoveryCounters'
   readonly residualBodies: Residualization.Counters
   readonly residualOwnership: ResidualOwnership.Counters
+  /** Interned ancestor-history decision nodes the recursion guard built. */
+  readonly ancestryNodes: number
 }
 
 /** The deterministic discovery result and work actually performed to obtain it. */
@@ -400,6 +403,7 @@ export const invalid = (rootModule: string): Discovery => ({
     _tag: 'InstanceDiscoveryCounters',
     residualBodies: Residualization.noWork,
     residualOwnership: ResidualOwnership.counters(ResidualOwnership.make()),
+    ancestryNodes: 0,
   },
   residualBodies: [],
   residualOwnership: [],
@@ -1485,6 +1489,90 @@ export const discover = (
     ancestorValues.set(value, ancestor)
     return AncestorHistory.set(histories, history, declarationText(ancestor.key), value)
   }
+  /**
+   * A guard below a call to `T` consults only the ancestors of declarations called beneath `T`.
+   * An ancestor declaration `V` already reaches `T`, so it can be consulted again only if `T` also
+   * reaches `V`: both lie in one strongly connected component of the declaration call graph. Every
+   * other ancestor's correlation is dead to the guard, yet keeping it multiplies exact histories
+   * through generic wrappers outside any cycle, such as a test runner's Effect combinators around
+   * many recursive walkers. Each successor history is therefore projected onto its target's
+   * component.
+   *
+   * The graph is the declaration-level image of the edges this discovery evaluates, so it covers
+   * every dynamic selection (witnesses, callables, Effects, cleanup hooks, providers) without
+   * restating how each is chosen. A component can grow after a projection used its smaller
+   * predecessor, and that attempt may have missed a guard; discovery then restarts from the roots
+   * with the complete graph until no projected component grows. Only the final attempt publishes.
+   */
+  const callEdges = new Map<string, Set<string>>()
+  let cycles = new Map<string, ReadonlySet<string>>()
+  let cyclesCurrent = true
+  const projectedCycleSizes = new Map<string, number>()
+  const reaches = (from: string, to: string): boolean => {
+    const seen = new Set([from])
+    const stack = [from]
+    for (let current = stack.pop(); current !== undefined; current = stack.pop())
+      for (const next of callEdges.get(current) ?? []) {
+        if (next === to) return true
+        if (seen.has(next)) continue
+        seen.add(next)
+        stack.push(next)
+      }
+    return false
+  }
+  const addCallEdge = (caller: InstanceKey, target: InstanceKey): void => {
+    const from = declarationText(caller)
+    const to = declarationText(target)
+    let targets = callEdges.get(from)
+    if (targets === undefined) {
+      targets = new Set()
+      callEdges.set(from, targets)
+    }
+    if (targets.has(to)) return
+    targets.add(to)
+    // A new edge merges components only when its target already reaches its caller.
+    if (!callEdges.has(to)) {
+      callEdges.set(to, new Set())
+      return
+    }
+    if (!cyclesCurrent || from === to) return
+    const component = cycles.get(from)
+    if (component !== undefined && component === cycles.get(to)) return
+    if (reaches(to, from)) cyclesCurrent = false
+  }
+  const cycleOf = (declaration: string): ReadonlySet<string> => {
+    if (!cyclesCurrent) {
+      cyclesCurrent = true
+      cycles = new Map()
+      for (const component of Graph.stronglyConnected(
+        callEdges.keys(),
+        (from) => callEdges.get(from) ?? [],
+      )) {
+        const members = new Set(component)
+        for (const member of component) cycles.set(member, members)
+      }
+    }
+    let members = cycles.get(declaration)
+    if (members === undefined) {
+      members = new Set([declaration])
+      cycles.set(declaration, members)
+    }
+    return members
+  }
+  const successorHistory = (
+    history: AncestorHistory.History,
+    ancestor: Ancestor,
+  ): AncestorHistory.History => {
+    const declaration = declarationText(ancestor.key)
+    const cycle = cycleOf(declaration)
+    if (!projectedCycleSizes.has(declaration)) projectedCycleSizes.set(declaration, cycle.size)
+    return withAncestor(AncestorHistory.project(histories, history, cycle), ancestor)
+  }
+  const cycleGrewAfterProjection = (): boolean => {
+    for (const [declaration, size] of projectedCycleSizes)
+      if (cycleOf(declaration).size > size) return true
+    return false
+  }
   const sameArguments = (left: InstanceKey, right: InstanceKey): boolean =>
     left.typeArguments.length === right.typeArguments.length &&
     left.typeArguments.every((argument, index) => {
@@ -1740,15 +1828,15 @@ export const discover = (
     readonly key: string
     readonly diagnostic: Diagnostic.Located
   }> = []
+  /** Body diagnostics wait for the final discovery attempt, which decides the reached keys. */
+  const reported: Array<{
+    readonly key: string
+    readonly diagnostic: Diagnostic.Located
+    readonly published: Diagnostic.Diagnostic
+  }> = []
   const report = (key: InstanceKey, diagnostic: Diagnostic.Located): Diagnostic.Diagnostic => {
     const published = Diagnostic.publish(diagnostic, registry)
-    if (Location.isShared(diagnostic.span))
-      sharedDiagnostics.push({ key: keyText(key), diagnostic })
-    else
-      residualizationDiagnostics.set(
-        `${published.code}:${published.span.sourceId}:${published.span.start}:${published.span.end}`,
-        published,
-      )
+    reported.push({ key: keyText(key), diagnostic, published })
     return published
   }
   const schedule = (item: WorkItem): boolean => {
@@ -2019,6 +2107,20 @@ export const discover = (
     }
     return { fn, view, substitution, calls, identityOfCall, ordinaryIdentities, cleanupRoots }
   }
+  const restartDiscovery = (): void => {
+    scheduledContexts.clear()
+    queuedContexts.clear()
+    pending.length = 0
+    recordedContexts.clear()
+    recordedCallables.clear()
+    providerCalls.clear()
+    executionEdges.clear()
+    selections.clear()
+    violations.length = 0
+    violationKeys.clear()
+    projectedCycleSizes.clear()
+    for (const root of roots) schedule(root)
+  }
   trace('Instances.expandWorklist', () => {
     while (true) {
       for (let cursor = 0; cursor < pending.length; cursor += 1) {
@@ -2071,6 +2173,7 @@ export const discover = (
             owner: key,
             target: targetKey,
           })
+          addCallEdge(key, targetKey)
           for (const [value, branchHistory] of AncestorHistory.partition(
             histories,
             item.ancestors,
@@ -2112,7 +2215,7 @@ export const discover = (
               ...(call.staticArgumentOrigins === undefined
                 ? {}
                 : { staticArgumentOrigins: call.staticArgumentOrigins, selectedBy: key }),
-              ancestors: withAncestor(branchHistory, {
+              ancestors: successorHistory(branchHistory, {
                 key: targetKey,
                 ...(call.structuralProvider === undefined
                   ? {}
@@ -2127,7 +2230,9 @@ export const discover = (
       }
       pending.length = 0
 
-      const currentInstances = [...prepared.values()].map((candidate) => candidate.instance)
+      const currentInstances = [...prepared]
+        .filter(([text]) => recordedContexts.has(text))
+        .map(([, candidate]) => candidate.instance)
       const currentGraph = trace('Instances.rebuildSuspensionGraph', () =>
         suspensionGraph(currentInstances, results, index, [...recordedCallables.values()]),
       )
@@ -2166,6 +2271,7 @@ export const discover = (
           },
         )
         for (const ownerContext of recordedContexts.get(keyText(provided.owner))?.values() ?? []) {
+          addCallEdge(provided.owner, provided.target)
           const declaration = declarationText(provided.target)
           for (const [value, branchHistory] of AncestorHistory.partition(
             histories,
@@ -2211,7 +2317,7 @@ export const discover = (
                     staticArgumentOrigins: provided.staticArgumentOrigins,
                     selectedBy: provided.owner,
                   }),
-              ancestors: withAncestor(branchHistory, { key: provided.target }),
+              ancestors: successorHistory(branchHistory, { key: provided.target }),
               ...(cleanupSpecialization && cleanup !== undefined
                 ? { cleanupMeasure: cleanup }
                 : {}),
@@ -2221,10 +2327,29 @@ export const discover = (
         }
       }
       if (!scheduledProvided) {
-        break
+        if (!cycleGrewAfterProjection()) break
+        restartDiscovery()
       }
     }
   })
+  // Earlier attempts may have analyzed keys the final attempt does not reach.
+  const reached = (text: string): boolean => recordedContexts.has(text)
+  for (const text of prepared.keys()) if (!reached(text)) prepared.delete(text)
+  for (const text of preparedUnavailableOwnership.keys())
+    if (!reached(text)) preparedUnavailableOwnership.delete(text)
+  for (const text of specializationFailures.keys())
+    if (!reached(text)) specializationFailures.delete(text)
+  for (const [text, call] of recordedCalls)
+    if (!reached(keyText(call.owner))) recordedCalls.delete(text)
+  for (const { key, diagnostic, published } of reported) {
+    if (!reached(key)) continue
+    if (Location.isShared(diagnostic.span)) sharedDiagnostics.push({ key, diagnostic })
+    else
+      residualizationDiagnostics.set(
+        `${published.code}:${published.span.sourceId}:${published.span.start}:${published.span.end}`,
+        published,
+      )
+  }
   // A failure in a shared body is one fact about the application; each call that selects it is a
   // distinct authored mistake, reported at what that call wrote.
   for (const { key, diagnostic } of sharedDiagnostics) {
@@ -2425,6 +2550,7 @@ export const discover = (
       _tag: 'InstanceDiscoveryCounters',
       residualBodies: Residualization.counters(residualization),
       residualOwnership: ResidualOwnership.counters(residualOwnership),
+      ancestryNodes: histories.nodes.size,
     },
     residualBodies: Residualization.observations(residualization),
     residualOwnership: ResidualOwnership.observations(residualOwnership),

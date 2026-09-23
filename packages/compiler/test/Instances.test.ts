@@ -236,6 +236,62 @@ pub fn main() -> i32 { return helper() + generic<i32>() }`)
       })),
       [{ caller: 'helper', target: ['bool'] }],
     )
+    // `middle` joins the cycle only once its call back to `generic` is evaluated, after the
+    // history entering it was projected without `generic`; the guard must still fire there.
+    const late = Analysis.instancesOf(
+      yield* snapshot(`fn generic<T>(value: T) -> i32 { return middle<T>(move value) }
+fn middle<T>(value: T) -> i32 { return generic<[T; 1]>([move value]) }
+pub fn main() -> i32 { return generic<i32>(1) }`),
+    )
+    assert.deepEqual(
+      late.violations.map((violation) => ({
+        caller: violation.caller.declaration.name,
+        target: violation.target.typeArguments.map(Type.encodeGenericArgument),
+      })),
+      [{ caller: 'middle', target: ['Array<i32, 1>'] }],
+    )
+    assert.deepEqual(
+      late.instances.map((instance) => instance.key.declaration.name),
+      ['main', 'generic', 'middle'],
+    )
+  }),
+)
+
+it.effect('forgets ancestors outside the recursive cycle a call enters', () =>
+  Effect.gen(function* () {
+    // Callable wrappers `z*` each see every entry, while every entry reaches the same recursive
+    // walkers `a*`. Correlating wrapper identities with walker paths the guard never compares
+    // multiplied the exact histories; only the walkers' own cycle is retained below them.
+    const walkers = Array.from(
+      { length: 8 },
+      (_, index) => `fn a${index}(depth: i32, visit: fn(i32) -> i32) -> i32 {
+  if depth == 0 { return visit(depth) }
+  return a${(index + 1) % 8}(depth - 1, visit) + a${(index + 2) % 8}(depth - 1, visit)
+}`,
+    )
+    const entries = Array.from(
+      { length: 8 },
+      (_, index) => `fn e${index}(depth: i32) -> i32 { return a${index}(depth, leaf) }`,
+    )
+    const discovery = Analysis.instancesOf(
+      yield* snapshot(`fn leaf(value: i32) -> i32 { return value }
+${walkers.join('\n')}
+${entries.join('\n')}
+fn z0(depth: i32, entry: fn(i32) -> i32) -> i32 { return z1(depth, entry) }
+fn z1(depth: i32, entry: fn(i32) -> i32) -> i32 { return z2(depth, entry) }
+fn z2(depth: i32, entry: fn(i32) -> i32) -> i32 { return entry(depth) }
+pub fn main() -> i32 { return ${entries.map((_, index) => `z0(1, e${index})`).join(' + ')} }`),
+    )
+    assert.deepEqual(discovery.violations, [])
+    assert.strictEqual(discovery.counters.residualBodies.requests, discovery.instances.length)
+    const root =
+      discovery.instances.find((instance) => instance.key.declaration.name === 'main') ??
+      unreachable('expected cycle-projection root')
+    const closure = Instances.executionClosure(discovery, root.key)
+    assert.deepEqual(closure.gaps, [])
+    assert.strictEqual(closure.instances.length, discovery.instances.length)
+    // Structural, not a timing: the unprojected guard built over 5000 decision nodes here.
+    assert.isBelow(discovery.counters.ancestryNodes, 1000)
   }),
 )
 

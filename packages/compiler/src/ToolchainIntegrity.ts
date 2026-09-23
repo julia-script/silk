@@ -38,12 +38,6 @@ export interface IntegrityFailure {
     | { readonly _tag: 'MissingComponent'; readonly kind: ComponentKind; readonly id: string }
     | { readonly _tag: 'UnexpectedComponent'; readonly kind: ComponentKind; readonly id: string }
     | {
-        readonly _tag: 'UnreadableComponent'
-        readonly kind: ComponentKind
-        readonly id: string
-        readonly detail: string
-      }
-    | {
         readonly _tag: 'DependencyMismatch'
         readonly kind: ComponentKind
         readonly id: string
@@ -278,15 +272,6 @@ const failure = (
   reason: IntegrityFailure['reason'],
 ): IntegrityFailure => ({ _tag: 'ToolchainIntegrityFailure', boundary, reason })
 
-/** Classifies failure to read one promised packaged source at the distribution boundary. */
-export const unreadableSource = (module: string, detail: string): IntegrityFailure =>
-  failure('Frontend', {
-    _tag: 'UnreadableComponent',
-    kind: 'Source',
-    id: sourceId(module),
-    detail,
-  })
-
 const componentKey = (component: Pick<Component, 'kind' | 'id'>): string =>
   `${component.kind}:${component.id}`
 
@@ -392,10 +377,7 @@ const compareSelection = (
 }
 
 /** Validates the compiler/catalog/source/intrinsic set before user source resolution begins. */
-export const validateFrontend = (
-  candidate: Graph,
-  sources: ReadonlyMap<string, Uint8Array> = Stdlib.sources,
-): Validation => {
+export const validateFrontend = (candidate: Graph): Validation => {
   const failures = [
     ...validateShape(candidate, 'Frontend'),
     ...compareSelection(
@@ -404,35 +386,6 @@ export const validateFrontend = (
       'Frontend',
     ),
   ]
-  for (const entry of Stdlib.manifest) {
-    const bytes = sources.get(entry.module)
-    if (bytes === undefined) {
-      failures.push(
-        failure('Frontend', {
-          _tag: 'MissingComponent',
-          kind: 'Source',
-          id: sourceId(entry.module),
-        }),
-      )
-      continue
-    }
-    const observed = contentDigest(bytes)
-    if (observed !== entry.digest)
-      failures.push(
-        failure('Frontend', {
-          _tag: 'DigestMismatch',
-          kind: 'Source',
-          id: sourceId(entry.module),
-          expected: entry.digest,
-          observed,
-        }),
-      )
-  }
-  for (const module of sources.keys())
-    if (Stdlib.find(module) === undefined)
-      failures.push(
-        failure('Frontend', { _tag: 'UnexpectedComponent', kind: 'Source', id: sourceId(module) }),
-      )
   return failures.length === 0
     ? { _tag: 'Matched', graph: candidate }
     : { _tag: 'Invalid', failures: failures }
@@ -519,8 +472,6 @@ export const formatFailure = (self: IntegrityFailure): string => {
       return `missing ${self.reason.kind} ${self.reason.id}`
     case 'UnexpectedComponent':
       return `unexpected ${self.reason.kind} ${self.reason.id}`
-    case 'UnreadableComponent':
-      return `cannot read ${self.reason.kind} ${self.reason.id}: ${self.reason.detail}`
     case 'DependencyMismatch':
       return `${self.reason.kind} ${self.reason.id} dependency mismatch: expected ${self.reason.expected.join(', ')}, observed ${self.reason.observed.join(', ')}`
     case 'DigestMismatch':

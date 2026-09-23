@@ -716,19 +716,31 @@ test fn runsAfterFailure() -> () {
             stderr: second.stderr,
           }),
         )
-        assert.include(first.stdout, 'fail tests/Cases::failsBeforeContinuation')
-        assert.include(first.stdout, 'pass tests/Cases::cleanupExactlyOnce')
-        assert.include(first.stdout, 'pass tests/Cases::runsAfterFailure')
+        assert.match(first.stdout, /  tests\/Cases::cacheablePass\n    PASS  (?:<1|\d+) (?:us|ms)/)
+        assert.match(
+          first.stdout,
+          /  tests\/Cases::failsBeforeContinuation\n    FAIL  (?:<1|\d+) (?:us|ms)/,
+        )
+        assert.match(
+          first.stdout,
+          /  tests\/Cases::cleanupExactlyOnce\n    PASS  (?:<1|\d+) (?:us|ms)/,
+        )
+        assert.match(
+          first.stdout,
+          /  tests\/Cases::runsAfterFailure\n    PASS  (?:<1|\d+) (?:us|ms)/,
+        )
         assert.include(
           first.stdout,
-          'summary: 5 discovered, 4 selected, 0 cached, 4 executed, 3 passed, 1 failed',
+          'Tests  3 passed, 1 failed (0 cached, 4 executed, 4 selected, 5 discovered)',
         )
-        assert.include(second.stdout, 'cached tests/Cases::cacheablePass')
-        assert.notInclude(second.stdout, 'test tests/Cases::cacheablePass')
+        assert.include(second.stdout, '  tests/Cases::cacheablePass\n    CACHED')
+        assert.notMatch(second.stdout, /tests\/Cases::cacheablePass\n    PASS/)
         assert.include(
           second.stdout,
-          'summary: 5 discovered, 4 selected, 1 cached, 3 executed, 3 passed, 1 failed',
+          'Tests  3 passed, 1 failed (1 cached, 3 executed, 4 selected, 5 discovered)',
         )
+        assert.match(first.stdout, /^Time   (?:<1|\d+) (?:us|ms)$/m)
+        assert.match(second.stdout, /^Time   (?:<1|\d+) (?:us|ms)$/m)
         assert.deepEqual(runnerReceipt(firstInvocation.resultPath, firstPlan), {
           mode: 1,
           dispositions: [1, 1, 2, 1],
@@ -743,8 +755,8 @@ test fn runsAfterFailure() -> () {
         })
         assert.match(first.stderr, /ExpectedFailure/)
         assert.isBelow(
-          first.stdout.indexOf('fail tests/Cases::failsBeforeContinuation'),
-          first.stdout.indexOf('pass tests/Cases::runsAfterFailure'),
+          first.stdout.indexOf('tests/Cases::failsBeforeContinuation'),
+          first.stdout.indexOf('tests/Cases::runsAfterFailure'),
         )
 
         const filteredPlan = runnerPerTestPlan(manifest)
@@ -756,10 +768,13 @@ test fn runsAfterFailure() -> () {
         ])
         const filtered = yield* runCompiled(outcome.path, filteredInvocation)
         assert.strictEqual(filtered.status, 0, filtered.stderr)
-        assert.include(filtered.stdout, 'pass tests/Cases::cleanupExactlyOnce')
+        assert.match(
+          filtered.stdout,
+          /  tests\/Cases::cleanupExactlyOnce\n    PASS  (?:<1|\d+) (?:us|ms)/,
+        )
         assert.include(
           filtered.stdout,
-          'summary: 5 discovered, 1 selected, 0 cached, 1 executed, 1 passed, 0 failed',
+          'Tests  1 passed, 0 failed (0 cached, 1 executed, 1 selected, 5 discovered)',
         )
         assert.deepEqual(runnerReceipt(filteredInvocation.resultPath, filteredPlan).counts, [
           5n,
@@ -776,7 +791,7 @@ test fn runsAfterFailure() -> () {
         assert.strictEqual(empty.status, 0, empty.stderr)
         assert.include(
           empty.stdout,
-          'summary: 5 discovered, 0 selected, 0 cached, 0 executed, 0 passed, 0 failed',
+          'Tests  0 passed, 0 failed (0 cached, 0 executed, 0 selected, 5 discovered)',
         )
         assert.deepEqual(runnerReceipt(emptyInvocation.resultPath, emptyPlan).counts, [
           5n,
@@ -813,7 +828,7 @@ test fn runsAfterFailure() -> () {
         assert.strictEqual(uncached.status, 1, uncached.stderr)
         assert.include(
           uncached.stdout,
-          'summary: 5 discovered, 4 selected, 0 cached, 4 executed, 3 passed, 1 failed',
+          'Tests  3 passed, 1 failed (0 cached, 4 executed, 4 selected, 5 discovered)',
         )
         assert.deepEqual(runnerReceipt(uncachedInvocation.resultPath, uncachedPlan), {
           mode: 2,
@@ -859,8 +874,8 @@ test fn runsAfterFailure() -> () {
           true,
           `expected fatal test trap, native exited ${trapped.status}`,
         )
-        assert.include(trapped.stdout, 'test tests/Trap::fatalTrap')
-        assert.notInclude(trapped.stdout, 'summary:')
+        assert.include(trapped.stdout, '  tests/Trap::fatalTrap')
+        assert.notInclude(trapped.stdout, 'Tests  ')
         assert.isFalse(existsSync(trappedInvocation.resultPath))
       }),
     ),

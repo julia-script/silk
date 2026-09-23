@@ -335,26 +335,13 @@ export const compile = Effect.fn('Driver.compile')(
             Effect.provide(NodeServices.layer),
           )))
 
-    // 2. Check the compiler distribution against the toolchain sources supplied by the resolver.
-    // Unreadable toolchain sources become integrity failures, so a broken installation stops here.
+    // 2. Validate distribution metadata without checking source files on disk. Source resolution
+    // reads the current files when they are needed, so local standard-library edits work directly.
     const frontendIntegrity = yield* PhaseReport.measureEffectInto(
       report,
       'toolchain-integrity',
       distribution.components.length,
-      SourceResolver.toolchainSources().pipe(
-        Effect.map((sources) =>
-          ToolchainIntegrity.validateFrontend(
-            distribution,
-            new Map([...sources].map(([module, source]) => [module, source.bytes] as const)),
-          ),
-        ),
-        Effect.catchTag('SourceResolverError', (error) =>
-          Effect.succeed({
-            _tag: 'Invalid' as const,
-            failures: [ToolchainIntegrity.unreadableSource(error.module, error.message)],
-          }),
-        ),
-      ),
+      Effect.sync(() => ToolchainIntegrity.validateFrontend(distribution)),
       (result) => (result._tag === 'Matched' ? distribution.components.length : 0),
       (result) => (result._tag === 'Invalid' ? result.failures.length : 0),
       { heapBytes },

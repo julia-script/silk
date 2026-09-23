@@ -178,3 +178,29 @@ export const partition = (
   }
   return visit(history)
 }
+
+/** Forgets every declaration outside `keep`, uniting the assignments that differed only there. */
+export const project = (
+  self: AncestorHistory,
+  history: History,
+  keep: ReadonlySet<string>,
+): History => {
+  const memo = new Map<number, History>()
+  const visit = (current: History): History => {
+    if (current.variable === undefined) return current
+    const prior = memo.get(current.id)
+    if (prior !== undefined) return prior
+    let result: History
+    if (keep.has(current.variable)) {
+      const branches = new Map<string | undefined, History>()
+      for (const [branch, child] of current.branches) branches.set(branch, visit(child))
+      result = node(self, current.variable, branches, true)
+    } else {
+      result = self.empty
+      for (const child of current.branches.values()) result = union(self, result, visit(child))
+    }
+    memo.set(current.id, result)
+    return result
+  }
+  return visit(history)
+}

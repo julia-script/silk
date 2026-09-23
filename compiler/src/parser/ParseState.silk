@@ -411,15 +411,34 @@ pub fn peek(state: &State, offset: usize) -> TokenKind {
   return TokenKind.EndOfFile
 }
 
-/// Tests a contextual identifier against its exact source spelling.
+/// Tests a contextual identifier at one significant-token offset against its exact source spelling.
 ///
 /// Keywords remain lexer tokens; words such as `where` are identifiers outside their grammar slot.
 /// The supplied source and token spans must describe the same file.
-pub fn word(state: &State, expected: string) -> bool {
-  if currentKind(state) != TokenKind.Identifier {
+pub fn wordAt(state: &State, expected: string, offset: usize) -> bool {
+  let mut tokenIndex = significantIndex(state)
+  let mut remaining = offset
+  while tokenIndex < Vector.length<Token>(&state.tokens) {
+    let candidate = &state.tokens
+      |> Vector.get<Token>(tokenIndex)
+      |> kind
+    if !isTrivia(candidate) {
+      if remaining == usize.ZERO {
+        break
+      }
+      remaining = usize.subtract(remaining, usize.ONE)
+    }
+    tokenIndex = usize.add(tokenIndex, usize.ONE)
+  }
+  if tokenIndex >= Vector.length<Token>(&state.tokens) {
     return false
   }
-  let tokenIndex = significantIndex(state)
+  let tokenKind = &state.tokens
+    |> Vector.get<Token>(tokenIndex)
+    |> kind
+  if tokenKind != TokenKind.Identifier {
+    return false
+  }
   let location = &state.tokens
     |> Vector.get<Token>(tokenIndex)
     |> span
@@ -436,6 +455,11 @@ pub fn word(state: &State, expected: string) -> bool {
     index = usize.add(index, 1)
   }
   return true
+}
+
+/// Tests the current contextual identifier against its exact source spelling.
+pub fn word(state: &State, expected: string) -> bool {
+  return wordAt(state, expected, usize.ZERO)
 }
 
 /// Reports whether skipped trivia contains a line feed before the next significant token.

@@ -218,10 +218,12 @@ effect fn readWithFixedClock() -> () {
 test fn readsFixedClock() -> () { return run readWithFixedClock() }
 ```
 
-The summary reports discovered, selected, cached, executed, passed, and failed counts. A cached
-pass contributes to `cached` and `passed`, but not `executed`. Completed runs return 0 when all
-selected tests pass, including zero selected tests; they return 1 when a typed test failure occurs.
-Runner or cache-exchange operational failures return 2. Abnormal termination remains abnormal.
+The runner identifies each selected test, prints elapsed time for each executed result, identifies
+cached passes without invoking them, and reports discovered, selected, cached, executed, passed,
+and failed counts plus total run time. A cached pass contributes to `cached` and `passed`, but not
+`executed`. Completed runs return 0 when all selected tests pass, including zero selected tests;
+they return 1 when a typed test failure occurs. Runner or cache-exchange operational failures
+return 2. Abnormal termination remains abnormal.
 
 **Boundary:** The runner has no parallelism, retries, sharding, isolation, watch mode, shared
 fixtures, or configurable hosts.

@@ -113,14 +113,6 @@ const program = Effect.gen(function* () {
             Option.map((entry) => SourceResolver.resolved(entry.bytes, SourceOrigin.memory())),
           ),
         ),
-      toolchainSources: Effect.succeed(
-        new Map(
-          sources.map((entry) => [
-            entry.root.id,
-            SourceResolver.resolved(entry.bytes, SourceOrigin.memory()),
-          ]),
-        ),
-      ),
     }),
   )
   const project = DocumentationProject.fromProjectAnalysis(analysis)

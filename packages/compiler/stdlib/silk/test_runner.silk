@@ -12,11 +12,14 @@ import silk.effect { Effect }
 import silk.filesystem { DirectoryInfo, FileError, FileInfo, FileSystem, Path }
 import silk.format { Format }
 import silk.host_input { HostInput, HostInputError }
+import silk.monotonic_clock { MonotonicClock }
 import silk.os_filesystem { OsFileSystem }
+import silk.os_monotonic_clock { OsMonotonicClock }
 import silk.os_writer { StdoutWriter }
 import silk.result { Result }
 import silk.sha2 { Sha256 }
 import silk.string { InvalidUtf8, String }
+import silk.system_clock { Instant, SystemClock }
 import silk.test_exchange as TestExchange
 import silk.testing { Testing }
 import silk.u32
@@ -58,12 +61,34 @@ fn completeTest<T, P: CompleteTest<T>>(value: T, provider: P) -> bool {
   return CompleteTest<T>.passed(move value)
 }
 
-effect fn writeResult(module: string, name: string, passed: bool) -> () ! WriterError ? &mut Writer {
-  let identity = .{module: module, name: name}
-  if passed {
-    return run Format.format("pass {module}::{name}\n", &identity)
+fn elapsedNanoseconds(start: &Instant, end: &Instant) -> i64 {
+  let seconds = SystemClock.seconds(end) - SystemClock.seconds(start)
+  let nanoseconds = SystemClock.nanoseconds(end) - SystemClock.nanoseconds(start)
+  return seconds * 1000000000 + nanoseconds
+}
+
+effect fn writeDuration(nanoseconds: i64) -> () ! WriterError ? &mut Writer {
+  if nanoseconds < 1000 {
+    return run Writer.writeString("<1 us")
   }
-  return run Format.format("fail {module}::{name}\n", &identity)
+  if nanoseconds < 1000000 {
+    let microseconds = nanoseconds / 1000
+    run Format.display(&microseconds)
+    return run Writer.writeString(" us")
+  }
+  let milliseconds = nanoseconds / 1000000
+  run Format.display(&milliseconds)
+  return run Writer.writeString(" ms")
+}
+
+effect fn writeResult(passed: bool, nanoseconds: i64) -> () ! WriterError ? &mut Writer {
+  if passed {
+    run Writer.writeString("    PASS  ")
+  } else {
+    run Writer.writeString("    FAIL  ")
+  }
+  run writeDuration(nanoseconds)
+  return run Writer.writeString("\n")
 }
 
 fn discoveredCount() -> u64 {
@@ -144,6 +169,9 @@ effect fn runSelected<'file, 'name>(
   let mut executed: u64 = 0
   let mut passed: u64 = 0
   let mut failed: u64 = 0
+  let mut clock = OsMonotonicClock.make()
+  let started = run MonotonicClock.now()
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
   static for descriptor in Intrinsic.tests() {
     let declaration = String.utf8Bytes(Intrinsic.testInfo(descriptor).identity)
     let entry = TestExchange.readEntry(&mut plan, ordinal, declaration)
@@ -156,8 +184,9 @@ effect fn runSelected<'file, 'name>(
       let module = Intrinsic.testInfo(descriptor).module
       let name = Intrinsic.testInfo(descriptor).name
       let identity = .{module: module, name: name}
+      run Format.format("  {module}::{name}\n", &identity)
       if perTest && TestExchange.cached(&entry) {
-        run Format.format("cached {module}::{name}\n", &identity)
+        run Writer.writeString("    CACHED\n")
         run TestExchange.appendResult(
           &mut receipt,
           ordinal,
@@ -168,12 +197,15 @@ effect fn runSelected<'file, 'name>(
         cached = cached + 1
         passed = passed + 1
       } else {
-        run Format.format("test {module}::{name}\n", &identity)
         let body = Intrinsic.testFunction(descriptor)
+        let testStarted = run MonotonicClock.now()
+          |> Effect.provideMut<MonotonicClock>(&mut clock)
         let value = body()
         let provider = selectOutcome(&value)
         let ok = completeTest(move value, move provider)
-        run writeResult(module, name, ok)
+        let testFinished = run MonotonicClock.now()
+          |> Effect.provideMut<MonotonicClock>(&mut clock)
+        run writeResult(ok, elapsedNanoseconds(&testStarted, &testFinished))
         executed = executed + 1
         if ok { passed = passed + 1 } else { failed = failed + 1 }
         if perTest {
@@ -200,10 +232,16 @@ effect fn runSelected<'file, 'name>(
     passed: passed,
     failed: failed,
   }
+  let finished = run MonotonicClock.now()
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+  run Writer.writeString("\n")
   run Format.format(
-    "summary: {discovered} discovered, {selected} selected, {cached} cached, {executed} executed, {passed} passed, {failed} failed\n",
+    "Tests  {passed} passed, {failed} failed ({cached} cached, {executed} executed, {selected} selected, {discovered} discovered)\n",
     &summary,
   )
+  run Writer.writeString("Time   ")
+  run writeDuration(elapsedNanoseconds(&started, &finished))
+  run Writer.writeString("\n")
   let mut status: u32 = 1
   if failed == 0 { status = 0 }
   let bytes = run TestExchange.finishReceipt(

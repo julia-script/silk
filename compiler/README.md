@@ -47,6 +47,42 @@ problems are result values, not effect failures; allocation failure is still an 
 The AST inspection executable intentionally prints the recovered result instead of stopping at
 its first syntax diagnostic. A future compilation driver can stop on that diagnostic.
 
+## Lowered representation
+
+`hir/Hir.silk` defines the target of lowering: a `Module` is one postorder node arena where a
+`HirId` is exactly an index and children precede parents. A node owns no heap vector — single
+children are `HirId`, optional children are `HirRef`, and lists are `Range` runs into one shared
+child vector. Every byte string is interned through `hir/Intern.silk`, so a module holds no source
+bytes and no `SyntaxTree`; `spans` and `nodeCauses` run parallel to `nodes` and keep coordinates
+only. Every tagged record of the bootstrap `AuthoredHir` has a counterpart variant; the module doc
+comment lists each deliberate difference.
+
+`Hir.write` dumps a module as indented text and `Hir.render` produces the same bytes in an owned
+buffer, so a test can compare a lowered module against expected text. `Hir.verify` reports the
+arena invariants a module violates rather than asserting them, which replaces the bootstrap's
+structured-clone publication step.
+
+`hir/Draft.silk` owns the module while it is being built. Every node enters the arena through
+`Draft.append`, which pushes one `nodes`, one `spans`, and one `nodeCauses` entry together, so the
+three parallel vectors cannot drift. Child lists and recovery-cause runs are collected on scratch
+vectors and copied into the module's shared storage when they close. Lexical binders use one flat
+vector with a frame-start stack, so opening and closing a scope truncates rather than allocates.
+The syntax accessors, the recovery-cause selection, and the name, path, and literal lowerings port
+the bootstrap `AuthoredLowering` helpers of the same names; the literal decoders port
+`internal/IntegerLiteral`, `internal/DurationLiteral`, `LiteralForm`, `StaticText`, and
+`internal/Escape`. A magnitude that no `u64` can hold lowers to an invalid expression with an
+overflow cause rather than widening the vocabulary.
+
+`hir/LowerType.silk` lowers every type operand, generic binder list, row, `where` constraint, and
+callable contract. `LowerType.lowerType` is the one type entry point: it unwraps grouping
+parentheses in place, so a parenthesized type leaves no node, and retains a lifetime, a bare
+requirement, or a damaged region in a type position as an invalid type. `LowerType.rowOperand`
+selects between a type and a written requirement wherever a row admits both.
+`LowerType.callableContract` reads the contract pieces directly off a callable header, because the
+grammar attaches them there rather than to a node of their own. Property clauses are not lowered
+yet; their values are expressions, so `ForeignFunctionType` carries an empty `properties` range
+until the expression lowering lands.
+
 CST construction remains postponed. The token vector retains source information, but there is no
 second concrete-syntax tree to maintain.
 
@@ -59,20 +95,24 @@ available stack in the bootstrap-generated debug executable before recovery coul
 
 ## Grammar modules
 
-| Module                                         | Responsibility                                                                                                                              |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/lexer/`                                   | Pull-based byte scanner, tokens, spans, and lexical diagnostics                                                                             |
-| `parser/ParseState.silk`                       | Ownership-threaded cursor, node construction, contextual spelling, and recovery primitives                                                  |
-| `parser/Parser.silk`                           | Source-file loop and final tree assembly                                                                                                    |
-| `parser/Import.silk`                           | Module paths, aliases, selected members, and public imports                                                                                 |
-| `parser/Declaration.silk`                      | Nominal declarations, functions, constants, parameters, services/interfaces, implementations, native headers, and static declaration groups |
-| `parser/Type.silk`                             | Type paths, generics, lifetimes, references, arrays, pointers, callable types, effect rows, and constraints                                 |
-| `parser/Expression.silk`                       | Literals, constructors, calls, projections, prefix/infix precedence, pipelines, effects, anonymous callables, and matches                   |
-| `parser/Pattern.silk`                          | Nominal/applied patterns, whole-value bindings, field shorthand/rest, enum/integer cases, and wildcards                                     |
-| `parser/Statement.silk`                        | Bindings, assignments, control flow, transfers, static loops, unsafe blocks, and block recovery                                             |
-| `parser/Property.silk`                         | Sealed function/module property syntax                                                                                                      |
-| `parser/Grammar.silk`, `parser/Lookahead.silk` | Shared boundaries, precedence, and non-consuming ambiguity checks                                                                           |
-| `parser/SyntaxTree.silk`                       | Tree ownership and flat AST printing                                                                                                        |
+| Module                                         | Responsibility                                                                                                                                 |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lexer/`                                   | Pull-based byte scanner, tokens, spans, and lexical diagnostics                                                                                |
+| `parser/ParseState.silk`                       | Ownership-threaded cursor, node construction, contextual spelling, and recovery primitives                                                     |
+| `parser/Parser.silk`                           | Source-file loop and final tree assembly                                                                                                       |
+| `parser/Import.silk`                           | Module paths, aliases, selected members, and public imports                                                                                    |
+| `parser/Declaration.silk`                      | Nominal declarations, functions, constants, parameters, services/interfaces, implementations, native headers, and static declaration groups    |
+| `parser/Type.silk`                             | Type paths, generics, lifetimes, references, arrays, pointers, callable types, effect rows, and constraints                                    |
+| `parser/Expression.silk`                       | Literals, constructors, calls, projections, prefix/infix precedence, pipelines, effects, anonymous callables, and matches                      |
+| `parser/Pattern.silk`                          | Nominal/applied patterns, whole-value bindings, field shorthand/rest, enum/integer cases, and wildcards                                        |
+| `parser/Statement.silk`                        | Bindings, assignments, control flow, transfers, static loops, unsafe blocks, and block recovery                                                |
+| `parser/Property.silk`                         | Sealed function/module property syntax                                                                                                         |
+| `parser/Grammar.silk`, `parser/Lookahead.silk` | Shared boundaries, precedence, and non-consuming ambiguity checks                                                                              |
+| `parser/SyntaxTree.silk`                       | Tree ownership and flat AST printing                                                                                                           |
+| `hir/Intern.silk`                              | Deduplicated byte-string storage: `Symbol` identities and the `StringTable` that produces them                                                 |
+| `hir/Hir.silk`                                 | The flat HIR vocabulary, the `Module` arena, its debug dump writer, and its arena verifier                                                     |
+| `hir/Draft.silk`                               | The in-progress module a lowering builds: arena appends, interning, binder frames, syntax accessors, and the name, path, and literal lowerings |
+| `hir/LowerType.silk`                           | Types, generic parameters, rows, `where` constraints, and callable contracts                                                                   |
 
 Grammar rules are ordinary Silk functions. They consume `State` and return it with either an
 unfinished element list or a completed node ID. Replacement values are evaluated before assigning
@@ -85,6 +125,17 @@ Check the self-hosted program with the bootstrap compiler:
 ```sh
 pnpm exec silk check --manifest-path compiler/silk.toml
 ```
+
+Run the source-written parser tests with the default project root:
+
+```sh
+pnpm exec silk test --manifest-path compiler/silk.toml
+```
+
+These tests parse source strings, including malformed syntax, and assert self-hosted parser
+behavior. `src/main.silk` imports them for test discovery; normal builds do not execute tests.
+They are not invoked by CI. The JavaScript harness below remains the
+TypeScript-versus-self-hosted comparison.
 
 After building the executable, run the parser corpus with its path:
 

@@ -32,7 +32,6 @@ it.effect(
       ])
       const resolver = Layer.succeed(SourceResolver.SourceResolver, {
         resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
-        toolchainSources: SourceResolver.embeddedToolchainSources,
         resolve: Effect.fn('SelectionFixture.resolve')((module: string) =>
           Effect.sync(() => {
             calls.push(module)
@@ -379,7 +378,6 @@ it.effect('loads a diamond once per module and excludes unreachable sources', ()
     ])
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
-      toolchainSources: SourceResolver.embeddedToolchainSources,
       resolve: (module: string) =>
         Effect.sync(() => {
           calls.push(module)
@@ -449,7 +447,6 @@ it.effect('retains partial closure facts around ordered operational failures', (
   Effect.gen(function* () {
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
-      toolchainSources: SourceResolver.embeddedToolchainSources,
       resolve: (module: string) => {
         if (module === 'readable') {
           return Effect.succeedSome(SourceResolver.resolved(ascii(fn), SourceOrigin.memory()))
@@ -552,7 +549,6 @@ it.effect('resolves root origins and reuses the root on an import back edge', ()
     const origin = SourceOrigin.projectFile('/project/app/Main.silk')
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
-      toolchainSources: SourceResolver.embeddedToolchainSources,
       resolve: (module: string) =>
         Effect.sync(() => {
           calls.push(module)
@@ -582,7 +578,6 @@ it.effect('fails unavailable required roots before returning a partial project',
     })
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
-      toolchainSources: SourceResolver.embeddedToolchainSources,
       resolve: Effect.fnUntraced(function* (module: string) {
         calls.push(module)
         if (module === 'broken') return yield* failure
@@ -629,7 +624,6 @@ it.effect('shares root, composition, and import outcomes across selected discove
     ])
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
-      toolchainSources: SourceResolver.embeddedToolchainSources,
       resolve: (module: string) =>
         Effect.sync(() => {
           calls.push(module)

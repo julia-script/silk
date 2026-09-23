@@ -1,7 +1,12 @@
+import hir.Draft
+import hir.Hir
+import hir.LoweringCases
+import hir.LowerType
 import lexer.Lexer {Lexer}
 import Stream {Stream}
 import lexer.Token {Token}
 import parser.Parser
+import parser.ParserCases
 import parser.SyntaxTree
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}

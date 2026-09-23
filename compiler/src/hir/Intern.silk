@@ -1,0 +1,229 @@
+//! Deduplicated byte-string storage that turns repeated names into comparable integers.
+//!
+//! # When to use
+//!
+//! Use [`StringTable`] while lowering a syntax tree into a [`Module`](hir.Hir.Module). Every name,
+//! identifier spelling, literal suffix, decoded literal payload, and documentation text is interned
+//! so the module never retains source bytes.
+//!
+//! # Details
+//!
+//! One `Bytes` arena holds every distinct byte string end to end. An entry table records the
+//! `(offset, length)` of each distinct string, and a [`Symbol`] is exactly an index into that entry
+//! table. An open-addressed index over FNV-1a maps byte content back to an existing symbol, so
+//! equal bytes always intern to the same symbol and unequal bytes never share one.
+//!
+//! The index has a power-of-two capacity and grows when it passes three quarters full. Growth
+//! rehashes existing entries; it never moves arena bytes, so every previously returned symbol stays
+//! valid and keeps resolving to the same bytes.
+//!
+//! # Gotchas
+//!
+//! A symbol is valid only for the table that produced it. Comparing symbols across two tables is
+//! meaningless even when both tables interned the same text.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.slice {Slice}
+import silk.usize
+import silk.u8
+import silk.u64
+import silk.vector {Vector}
+
+/// The identity of one distinct interned byte string within one [`StringTable`].
+///
+/// # Details
+///
+/// The value is the zero-based position of the string's entry in the table's entry vector. Equal
+/// byte strings share one symbol, so later phases compare names by integer rather than by bytes.
+///
+/// # Gotchas
+///
+/// A symbol carries no reference to its table. Resolve it only against the table that created it.
+pub struct Symbol {
+  /// The zero-based entry position of the interned byte string.
+  pub index: usize
+}
+
+impl Copy for Symbol {}
+
+/// An optionally present [`Symbol`], used where a name or payload may be absent.
+///
+/// # Details
+///
+/// Absence is explicit rather than encoded as a reserved index, so no symbol value is reserved and
+/// every index the table hands out is usable.
+pub struct SymbolRef {
+  /// Whether [`symbol`](SymbolRef.symbol) identifies an interned byte string.
+  pub present: bool
+  /// The interned symbol; meaningful only when [`present`](SymbolRef.present) is `true`.
+  pub symbol: Symbol
+}
+
+impl Copy for SymbolRef {}
+
+impl SymbolRef {
+  /// Constructs the absent reference.
+  pub fn absent() -> SymbolRef {
+    return SymbolRef {present: false, symbol: Symbol {index: usize.ZERO}}
+  }
+
+  /// Constructs a present reference to `symbol`.
+  pub fn of(symbol: Symbol) -> SymbolRef {
+    return SymbolRef {present: true, symbol: symbol}
+  }
+}
+
+/// The arena location of one distinct interned byte string.
+pub struct Entry {
+  /// The byte offset of the string's first byte in the table's arena.
+  pub offset: usize
+  /// The byte length of the string.
+  pub length: usize
+}
+
+impl Copy for Entry {}
+
+/// Owns one byte arena, its entry table, and the content index that deduplicates interning.
+///
+/// # Details
+///
+/// The arena only ever grows by appending. The index stores `slot + 1` so that a zero slot means an
+/// empty bucket, which keeps a freshly grown index correct without a separate occupancy vector.
+/// Every bucket holds one entry, so the entry count is also the occupied-bucket count.
+pub struct StringTable {
+  /// Every distinct interned byte string, concatenated in interning order.
+  arena: Bytes
+  /// One entry per distinct interned byte string, in interning order.
+  entries: Vector<Entry>
+  /// Open-addressed buckets holding `entry index + 1`, or zero for an empty bucket.
+  buckets: Vector<usize>
+}
+
+/// The initial bucket count; a power of two so masking replaces a modulo.
+const INITIAL_BUCKETS: usize = 64
+
+fn hashBytes(values: &[u8]) -> u64 {
+  let mut hash: u64 = 14695981039346656037
+  let mut index = usize.ZERO
+  while index < values.length {
+    hash = u64.bitXor(hash, u8.toU64(values[index]))
+    hash = u64.wrappingMultiply(hash, 1099511628211)
+    index = index + usize.ONE
+  }
+  return hash
+}
+
+fn entryEquals(table: &StringTable, entry: Entry, values: &[u8]) -> bool {
+  if entry.length != values.length {
+    return false
+  }
+  let arena = Bytes.asSlice(&table.arena)
+  let mut index = usize.ZERO
+  while index < values.length {
+    if arena[entry.offset + index] != values[index] {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+effect fn growIndex(table: &mut StringTable) -> () ! OutOfMemoryError ? &mut Allocator {
+  let previous = Vector.length<usize>(&table.buckets)
+  let mut next = previous + previous
+  if next == usize.ZERO {
+    next = INITIAL_BUCKETS
+  }
+  let mut fresh = Vector.make<usize>()
+  run Vector.reserveExact<usize>(&mut fresh, next)
+  let mut slot = usize.ZERO
+  while slot < next {
+    run Vector.append<usize>(&mut fresh, usize.ZERO)
+    slot = slot + usize.ONE
+  }
+  let mask = next - usize.ONE
+  let mut index = usize.ZERO
+  while index < Vector.length<Entry>(&table.entries) {
+    let entry = Vector.get<Entry>(&table.entries, index)
+    let arena = Bytes.asSlice(&table.arena)
+    let content = Slice.view<u8>(arena, entry.offset, entry.length)
+    let hash = hashBytes(content)
+    drop content
+    let mut bucket = u64.toUsize(u64.bitAnd(hash, usize.toU64(mask)))
+    while Vector.get<usize>(&fresh, bucket) != usize.ZERO {
+      bucket = (bucket + usize.ONE) & mask
+    }
+    Vector.set<usize>(&mut fresh, bucket, index + usize.ONE)
+    index = index + usize.ONE
+  }
+  let replaced = Intrinsic.replace(table.buckets, move fresh)
+  drop replaced
+  return ()
+}
+
+impl StringTable {
+  /// Creates an empty table that has not yet allocated an arena or an index.
+  pub fn make() -> StringTable {
+    return StringTable {
+      arena: Bytes.make(),
+      entries: Vector.make<Entry>(),
+      buckets: Vector.make<usize>(),
+    }
+  }
+
+  /// Returns the number of distinct interned byte strings.
+  pub fn length(self: &Self) -> usize {
+    return Vector.length<Entry>(&self.entries)
+  }
+
+  /// Returns the interned bytes that `symbol` identifies.
+  ///
+  /// # Gotchas
+  ///
+  /// The symbol must come from this table. An index beyond the entry table is a defect, not a
+  /// recoverable failure.
+  pub fn get(self: &Self, symbol: Symbol) -> &[u8] {
+    let entry = Vector.get<Entry>(&self.entries, symbol.index)
+    return Slice.view<u8>(Bytes.asSlice(&self.arena), entry.offset, entry.length)
+  }
+
+  /// Returns the symbol for `values`, appending the bytes only when they are new.
+  ///
+  /// # Details
+  ///
+  /// Equal byte sequences always answer with the same symbol, including across index growth. The
+  /// empty sequence is an ordinary string and interns like any other.
+  pub effect fn intern(self: &mut Self, values: &[u8]) -> Symbol
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    if Vector.length<usize>(&self.buckets) == usize.ZERO {
+      run growIndex(&mut self.*)
+    }
+    let mask = Vector.length<usize>(&self.buckets) - usize.ONE
+    let hash = hashBytes(values)
+    let mut bucket = u64.toUsize(u64.bitAnd(hash, usize.toU64(mask)))
+    while true {
+      let occupant = Vector.get<usize>(&self.buckets, bucket)
+      if occupant == usize.ZERO {
+        break
+      }
+      let candidate = occupant - usize.ONE
+      if entryEquals(&self.*, Vector.get<Entry>(&self.entries, candidate), values) {
+        return Symbol {index: candidate}
+      }
+      bucket = (bucket + usize.ONE) & mask
+    }
+    let offset = Bytes.length(&self.arena)
+    run Bytes.append(&mut self.arena, values)
+    let index = Vector.length<Entry>(&self.entries)
+    run Vector.append<Entry>(&mut self.entries, Entry {offset: offset, length: values.length})
+    Vector.set<usize>(&mut self.buckets, bucket, index + usize.ONE)
+    let occupied = Vector.length<Entry>(&self.entries)
+    let capacity = Vector.length<usize>(&self.buckets)
+    if usize.multiply(occupied, 4) >= usize.multiply(capacity, 3) {
+      run growIndex(&mut self.*)
+    }
+    return Symbol {index: index}
+  }
+}

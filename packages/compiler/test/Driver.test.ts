@@ -439,7 +439,6 @@ it.effect('gates source rejection and operational resolution failure before back
 
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
-      toolchainSources: SourceResolver.embeddedToolchainSources,
       resolve: (module: string) =>
         Effect.fail(
           new SourceResolver.SourceResolverError({
@@ -496,7 +495,6 @@ it.effect('rejects a mismatched distribution before resolving user imports', () 
     )
     let projectResolutions = 0
     const resolver = Layer.succeed(SourceResolver.SourceResolver, {
-      toolchainSources: SourceResolver.embeddedToolchainSources,
       resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
       resolve: () => {
         projectResolutions += 1

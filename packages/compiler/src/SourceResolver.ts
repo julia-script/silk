@@ -73,11 +73,6 @@ export class SourceResolver extends Context.Service<
     readonly resolveStandardLibrary: (
       module: string,
     ) => Effect.Effect<Option.Option<ResolvedSource>, SourceResolverError>
-    /** Reads the complete compiler-shipped source set for distribution integrity preflight. */
-    readonly toolchainSources: Effect.Effect<
-      ReadonlyMap<string, ResolvedSource>,
-      SourceResolverError
-    >
   }
 >()('@silklang/compiler/SourceResolver') {}
 
@@ -111,30 +106,6 @@ export const resolveEmbeddedStandardLibrary = Effect.fn(
   )
 })
 
-/** Returns immutable embedded bytes for every source promised by the generated catalog. */
-export const embeddedToolchainSources: Effect.Effect<ReadonlyMap<string, ResolvedSource>> =
-  Effect.sync(
-    () =>
-      new Map(
-        Stdlib.manifest.map((entry) => [
-          entry.module,
-          resolved(entry.bytes, SourceOrigin.memory()),
-        ]),
-      ),
-  )
-
-/** Reads the active resolver's complete compiler-shipped source set. */
-export const toolchainSources = Effect.fn('SourceResolver.toolchainSources')(
-  function* (): Effect.fn.Return<
-    ReadonlyMap<string, ResolvedSource>,
-    SourceResolverError,
-    SourceResolver
-  > {
-    const resolver = yield* SourceResolver
-    return yield* resolver.toolchainSources
-  },
-)
-
 /** An immutable in-memory resolver layer suitable for browsers, tooling, and tests. */
 export const memory = (sources: ReadonlyMap<string, Uint8Array>): Layer.Layer<SourceResolver> => {
   const snapshot = new Map(
@@ -148,7 +119,6 @@ export const memory = (sources: ReadonlyMap<string, Uint8Array>): Layer.Layer<So
       )
     }),
     resolveStandardLibrary: resolveEmbeddedStandardLibrary,
-    toolchainSources: embeddedToolchainSources,
   })
 }
 
