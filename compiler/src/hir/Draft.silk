@@ -564,7 +564,8 @@ pub fn contextualModifier(tree: &SyntaxTree, parent: NodeId, spelling: string<'s
 // Damage
 // ---------------------------------------------------------------------------
 
-fn diagnosticSpan(diagnostic: Diagnostic) -> Span {
+/// Returns the source position one parser diagnostic describes.
+pub fn diagnosticSpan(diagnostic: Diagnostic) -> Span {
   return match move diagnostic {
     Diagnostic.MissingToken {expected: ignoredExpected, span} => span
     Diagnostic.UnexpectedToken {actual: ignoredActual, span} => span
@@ -572,7 +573,8 @@ fn diagnosticSpan(diagnostic: Diagnostic) -> Span {
   }
 }
 
-fn diagnosticCode(diagnostic: Diagnostic) -> CauseCode {
+/// Returns the HIR cause code one parser diagnostic kind maps to.
+pub fn diagnosticCode(diagnostic: Diagnostic) -> CauseCode {
   return match move diagnostic {
     Diagnostic.MissingToken {expected: ignoredExpected, span: ignoredSpan} => CauseCode.MissingToken
     Diagnostic.UnexpectedToken {actual: ignoredActual, span: ignoredSpan} =>
@@ -644,6 +646,19 @@ pub effect fn damage(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> Ra
 ! OutOfMemoryError
 ? &mut Allocator {
   let mark = beginCauses(&draft.*)
+  run damageInto(&mut draft.*, tree, parent)
+  return run finishCauses(&mut draft.*, mark)
+}
+
+/// Collects the causes `parent` inherits from its own damage into the open cause run.
+///
+/// # When to use
+///
+/// Use when one node's causes come from more than one syntax node, such as an import header that
+/// also answers for the damage of its member list. [`damage`] is the single-node shortcut.
+pub effect fn damageInto(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> ()
+! OutOfMemoryError
+? &mut Allocator {
   let count = elementCount(tree, parent)
   let mut index = usize.ZERO
   while index < count {
@@ -661,7 +676,7 @@ pub effect fn damage(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> Ra
     }
     index = index + usize.ONE
   }
-  return run finishCauses(&mut draft.*, mark)
+  return ()
 }
 
 // ---------------------------------------------------------------------------

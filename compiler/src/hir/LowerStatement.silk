@@ -121,9 +121,11 @@ pub effect fn conditional(draft: &mut DraftState, tree: &SyntaxTree, syntax: Nod
   let span = Draft.nodeSpan(tree, syntax)
   let kind = Draft.kindOf(tree, syntax)
   if kind == NodeKind.PatternConditionalStatement {
+    // The subject is lowered in the enclosing scope, before the pattern's frame opens, so
+    // `if let Option.Some {value} = value` reads the outer `value` rather than binding to itself.
+    let subject = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
     run Draft.pushFrame(&mut draft.*)
     let pattern = run LowerPattern.patternIn(&mut draft.*, tree, syntax, span)
-    let subject = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
     let thenBranch = run blockAt(&mut draft.*, tree, syntax, usize.ZERO, span)
     Draft.popFrame(&mut draft.*)
     let elseBranch = run elseBranchOf(&mut draft.*, tree, syntax, span)

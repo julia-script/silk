@@ -1464,6 +1464,8 @@ pub union Node {
   Declaration {
     /// The declaration's source-independent logical name.
     pub owner: OwnerKey,
+    /// The interned `///` block the source attached to it, if any.
+    pub documentation: SymbolRef,
     /// The declaration header.
     pub header: HirId,
     /// The declaration body.
@@ -2070,7 +2072,7 @@ fn nodeKindName(node: Node) -> string<'static> {
     Node.MembersBody {members: ignored1} => "MembersBody"
     Node.ConditionalBody {thenBranch: ignored1, elseBranch: ignored2} => "ConditionalBody"
     Node.InvalidDeclarationBody {retained: ignored1} => "InvalidDeclarationBody"
-    Node.Declaration {owner: ignored1, header: ignored2, body: ignored3} => "Declaration"
+    Node.Declaration {owner: ignored1, documentation: ignored2, header: ignored3, body: ignored4} => "Declaration"
   }
 }
 
@@ -2612,8 +2614,9 @@ effect fn writeNodeFields(module: &Module, node: Node) -> () ! WriterError ? &mu
     Node.InvalidDeclarationBody {retained} => {
       run writeRangeField(module, "retained", retained)
     }
-    Node.Declaration {owner, header, body} => {
+    Node.Declaration {owner, documentation, header, body} => {
       run writeOwnerField(module, "owner", owner)
+      run writeSymbolRefField(module, "documentation", documentation)
       run writeIdField("header", header)
       run writeIdField("body", body)
     }
@@ -3425,8 +3428,9 @@ effect fn verifyNode(module: &Module, parent: usize, found: &mut Vector<Defect>)
     Node.InvalidDeclarationBody {retained} => {
       run recordRange(module, parent, retained, &mut found.*)
     }
-    Node.Declaration {owner, header, body} => {
+    Node.Declaration {owner, documentation, header, body} => {
       run recordOwner(module, parent, owner, &mut found.*)
+      run recordSymbolRef(module, parent, documentation, &mut found.*)
       run recordId(module, parent, header, &mut found.*)
       run recordId(module, parent, body, &mut found.*)
     }

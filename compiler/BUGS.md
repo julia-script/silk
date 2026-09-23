@@ -205,3 +205,37 @@ which does contain the fix. `LowerType.constraints` was split into the per-form 
 reachable from the test entry point — a strictly larger reachable graph than the one that
 originally blew up. Discovery completes; the self-hosted code now carries no residue of the
 workaround, so no `# Gotchas` block explaining the inlined shape is needed.
+
+## Ancestor-history interning exhausts the V8 heap for the HIR declaration lowering
+
+**Status:** open and blocking. `silk check` succeeds; `silk test` cannot complete.
+
+Wiring `Lower.lower` into `main.program` — the existing `silk-compiler <file>` path, which already
+reaches the lexer, the parser, and `SyntaxTree.write` — aborts instance discovery with
+`RangeError: Map maximum size exceeded`, thrown from `AncestorHistory.intern` through
+`Realization.discoverInstances`. This is the same failure mode as the wave-3 entry above, one
+scale further out, and it survives the `2d4e1c6d` SCC-projection repair: that fix removes dead
+ancestor correlation, but the surviving correlation still interns past what a JavaScript `Map` can
+hold once the whole lowering (types, expressions, patterns, statements, declarations) is reachable
+from the same root as the parser and the writer.
+
+The blowup is about _which root_ reaches the lowering, not about the lowering itself. With
+`Lower.lower` reachable only from the test entry point, `silk check` succeeds and the full suite
+runs; the identical code reached from `main.program` does not survive discovery. Raising
+`--max-old-space-size` to 12 GB does not help, because the limit is the `Map` entry cap rather
+than the heap.
+
+The wall is not confined to the executable. After the declaration lowering landed, `silk test` also
+fails, with the same interning growth reaching the heap limit rather than the `Map` entry cap:
+`Builtins_MapPrototypeSet` to `Runtime_MapGrow` to `FATAL ERROR: CALL_AND_RETRY_LAST Allocation
+failed - JavaScript heap out of memory`, after roughly 125 seconds and 3.7 GB. So the test entry
+point, which carried waves 1-4, no longer survives discovery either. `silk check` still passes,
+which is why the failure is invisible until a native build is attempted.
+
+The practical consequence is that `compiler/src/hir` has outgrown what the bootstrap's instance
+discovery can realize in one program. The next step is a bootstrap-side repair in
+`packages/compiler` (the `2d4e1c6d` SCC projection removed dead correlation but not enough of it),
+not a further reshaping of the self-hosted source: the wave-3 experience already showed that
+moving declarations around only shifts the threshold.
+
+Encountered on 2026-09-23 while porting the declaration lowering and assembling the module.

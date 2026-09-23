@@ -1,0 +1,1630 @@
+//! Lowering of declaration headers, bodies, owner keys, and attached documentation.
+//!
+//! # When to use
+//!
+//! Call [`lowerDeclaration`] for one declaration syntax node. [`Lower.lower`](hir.Lower.lower)
+//! calls it for every top-level declaration of a source file; a declaration form that holds
+//! members calls it again for each member.
+//!
+//! # Details
+//!
+//! This is the port of the declaration section of the bootstrap `AuthoredLowering`
+//! (`packages/compiler/src/AuthoredLowering.ts`, from `identifierSpellings` through
+//! `declaration`), plus `packages/compiler/src/DocBlock.ts` for the attached `///` block.
+//!
+//! One declaration lowers into three nodes: a header, a body, and the
+//! [`Node.Declaration`](hir.Hir.Node) that pairs them with an
+//! [`OwnerKey`](hir.Hir.OwnerKey). The key is the declaration's source-independent logical name,
+//! so moving a declaration within its file does not rename it. Same-key siblings are told apart by
+//! their `occurrence`, which counts the earlier siblings of the same kind and name.
+//!
+//! A callable declaration opens one binding frame around its contract and its body, so a parameter
+//! is visible to the body and to nothing after it.
+//!
+//! # Gotchas
+//!
+//! Occurrence counting is **per parent**, not per module: [`Scope`] holds the keys already issued
+//! under one parent and is passed down by each members body, so two same-named functions in
+//! different impls both take occurrence zero.
+//!
+//! The bootstrap owner key spells an import as its dotted path with the alias as a separate role
+//! field. A flat [`OwnerKey`](hir.Hir.OwnerKey) has one name symbol, so the import key interns the
+//! path, and the alias is recovered from the header rather than from the key.
+
+import hir.Draft
+import hir.Draft {Draft as DraftState}
+import hir.Hir {
+  CauseCode,
+  GroupBranch,
+  HirId,
+  HirRef,
+  LinkageDirection,
+  Node,
+  OwnerKey,
+  OwnerKind,
+  Range,
+  RangeRef,
+  SpanRef,
+}
+import hir.Intern {SymbolRef}
+import hir.LowerExpression
+import hir.LowerStatement
+import hir.LowerType
+import hir.LowerType {NodeRef}
+import lexer.Span {Span}
+import lexer.Token {Token, TokenKind, kind as tokenKind, span as tokenSpan}
+import parser.Element {Element}
+import parser.Node {Node as SyntaxNode, NodeKind}
+import parser.NodeId {NodeId}
+import parser.SyntaxTree {SyntaxTree}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.string {String}
+import silk.usize
+import silk.vector {Vector}
+
+// ---------------------------------------------------------------------------
+// Owner keys and occurrence counting
+// ---------------------------------------------------------------------------
+
+/// The owner keys already issued under one parent, so a repeated key takes the next occurrence.
+///
+/// # Details
+///
+/// This replaces the bootstrap's `ownerChild`, which appended a role and an occurrence to a parent
+/// identity path. A flat module records only the finished key, so the count lives here for the
+/// duration of one parent's member list and is then dropped.
+pub struct Scope {
+  issued: Vector<OwnerKey>
+}
+
+impl Scope {
+  /// Creates an empty scope, which issues occurrence zero for every first key.
+  pub fn make() -> Scope {
+    return Scope {issued: Vector.make<OwnerKey>()}
+  }
+
+  /// Releases the issued keys.
+  pub fn finish(self: Self) -> () {
+    let Scope {issued} = move self
+    drop issued
+    return ()
+  }
+}
+
+/// Answers `kind`/`name` with the occurrence that follows the same-key siblings issued so far.
+pub effect fn issue(scope: &mut Scope, kind: OwnerKind, name: SymbolRef) -> OwnerKey
+! OutOfMemoryError
+? &mut Allocator {
+  let mut occurrence = usize.ZERO
+  let mut index = usize.ZERO
+  while index < Vector.length<OwnerKey>(&scope.issued) {
+    let seen = Vector.get<OwnerKey>(&scope.issued, index)
+    let sameName = (!seen.name.present && !name.present) || (seen.name.present && name.present && seen.name.symbol.index == name.symbol.index)
+    if seen.kind == kind && sameName {
+      occurrence = occurrence + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  let key = OwnerKey {kind: kind, name: name, occurrence: occurrence}
+  run Vector.append<OwnerKey>(&mut scope.issued, key)
+  return key
+}
+
+/// Returns the owner-key category of `kind`, or `Damaged` for source that cannot be a declaration.
+fn ownerKindOf(kind: NodeKind) -> OwnerKind {
+  return match kind {
+    NodeKind.ImportDeclaration => OwnerKind.Import
+    NodeKind.StaticConditionalDeclaration => OwnerKind.Conditional
+    NodeKind.DeclarationGroup => OwnerKind.Conditional
+    NodeKind.ModulePropertyDeclaration => OwnerKind.ModuleProperty
+    NodeKind.ConstantDeclaration => OwnerKind.Constant
+    NodeKind.PackageParameterDeclaration => OwnerKind.PackageParameter
+    NodeKind.ForeignStaticDeclaration => OwnerKind.Static
+    NodeKind.ExportStaticDeclaration => OwnerKind.Static
+    NodeKind.TypeAliasDeclaration => OwnerKind.Alias
+    NodeKind.RoleDeclaration => OwnerKind.Role
+    NodeKind.EnumDeclaration => OwnerKind.Enumeration
+    NodeKind.StructDeclaration => OwnerKind.Struct
+    NodeKind.TupleDeclaration => OwnerKind.Tuple
+    NodeKind.UnionDeclaration => OwnerKind.Union
+    NodeKind.ServiceDeclaration => OwnerKind.Service
+    NodeKind.InterfaceDeclaration => OwnerKind.Interface
+    NodeKind.ServiceOperation => OwnerKind.Function
+    NodeKind.ImplDeclaration => OwnerKind.Implementation
+    NodeKind.ImplOperation => OwnerKind.Alias
+    NodeKind.FunctionDeclaration => OwnerKind.Function
+    NodeKind.ForeignFunctionDeclaration => OwnerKind.Function
+    _ => OwnerKind.Damaged
+  }
+}
+
+/// Reports whether a token of `kind` spells a declaration's own name.
+fn namesDeclaration(kind: TokenKind) -> bool {
+  return kind == TokenKind.Identifier || kind == TokenKind.DropKeyword
+}
+
+/// Returns the interned name a declaration spells for itself, absent when it names nothing.
+///
+/// # Details
+///
+/// This is the bootstrap `declarationName`. A callable takes the first naming token *after* `fn`,
+/// because `extern "C" fn` writes an ABI literal first and a contextual modifier before the
+/// keyword; every other form takes the first naming token it writes.
+effect fn declarationName(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> SymbolRef
+! OutOfMemoryError
+? &mut Allocator {
+  let kind = Draft.kindOf(tree, syntax)
+  let callable = kind == NodeKind.FunctionDeclaration || kind == NodeKind.ForeignFunctionDeclaration
+  let mut afterFn = !callable
+  let count = Draft.elementCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    match Draft.elementAt(tree, syntax, index) {
+      Element.Token {id} => {
+        let token = Vector.get<Token>(&tree.tokens, id.index)
+        let tokenKindValue = tokenKind(token)
+        if tokenKindValue == TokenKind.FnKeyword {
+          afterFn = true
+        } else {
+          if afterFn && namesDeclaration(tokenKindValue) {
+            let symbol = run Draft.intern(&mut draft.*, tree, tokenSpan(token))
+            return SymbolRef.of(symbol)
+          }
+        }
+      }
+      Element.MissingToken {expected, span: ignoredSpan} => {
+        if afterFn && expected == TokenKind.Identifier {
+          return SymbolRef.absent()
+        }
+      }
+      Element.Node {id: ignoredId} => {}
+    }
+    index = index + usize.ONE
+  }
+  return SymbolRef.absent()
+}
+
+/// Appends the source bytes of `span` to `out`.
+effect fn appendSpan(tree: &SyntaxTree, span: Span, out: &mut Vector<u8>) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let source = Bytes.asSlice(&tree.source)
+  let mut index = span.start
+  while index < span.end {
+    run Vector.append<u8>(&mut out.*, source[index])
+    index = index + usize.ONE
+  }
+  return ()
+}
+
+/// Appends the dot-joined identifier spellings written directly in `syntax` to `out`.
+///
+/// # Details
+///
+/// This is the bootstrap `identifierSpellings`, used to name an import by its path and an
+/// implementation by its subject and target. The caller interns the finished bytes as one symbol,
+/// so two imports of the same module share a key without any string comparison later.
+effect fn appendIdentifiers(tree: &SyntaxTree, syntax: NodeId, out: &mut Vector<u8>) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let count = Draft.elementCount(tree, syntax)
+  let mut written = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    if let Element.Token {id} = Draft.elementAt(tree, syntax, index) {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      if tokenKind(token) == TokenKind.Identifier {
+        if written > usize.ZERO {
+          run Vector.append<u8>(&mut out.*, 46)
+        }
+        run appendSpan(tree, tokenSpan(token), &mut out.*)
+        written = written + usize.ONE
+      }
+    }
+    index = index + usize.ONE
+  }
+  return ()
+}
+
+/// Interns the owner name of an implementation: its subject, or `subject for target`.
+effect fn implementationName(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> SymbolRef
+! OutOfMemoryError
+? &mut Allocator {
+  let subject = LowerType.typeChildAt(tree, syntax, usize.ZERO, true)
+  let target = LowerType.typeChildAt(tree, syntax, usize.ONE, true)
+  if !subject.present {
+    return SymbolRef.absent()
+  }
+  let mut spelling = Vector.make<u8>()
+  run appendIdentifiers(tree, subject.id, &mut spelling)
+  if target.present {
+    run Vector.appendBytes(&mut spelling, String.utf8Bytes(" for "))
+    run appendIdentifiers(tree, target.id, &mut spelling)
+  }
+  let symbol = run Draft.internBytes(&mut draft.*, Vector.asSlice<u8>(&spelling))
+  drop spelling
+  return SymbolRef.of(symbol)
+}
+
+/// Returns the owner key `syntax` claims, before its occurrence among siblings is counted.
+effect fn ownerNameOf(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> SymbolRef
+! OutOfMemoryError
+? &mut Allocator {
+  let kind = Draft.kindOf(tree, syntax)
+  if kind == NodeKind.ImportDeclaration {
+    let path = LowerType.firstChildOf(tree, syntax, NodeKind.ImportPath)
+    if !path.present {
+      return SymbolRef.absent()
+    }
+    let mut spelling = Vector.make<u8>()
+    run appendIdentifiers(tree, path.id, &mut spelling)
+    let symbol = run Draft.internBytes(&mut draft.*, Vector.asSlice<u8>(&spelling))
+    drop spelling
+    return SymbolRef.of(symbol)
+  }
+  if kind == NodeKind.ImplDeclaration {
+    return run implementationName(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.StaticConditionalDeclaration || kind == NodeKind.DeclarationGroup || kind == NodeKind.ModulePropertyDeclaration || kind == NodeKind.ServiceInvalidMember {
+    return SymbolRef.absent()
+  }
+  if ownerKindOf(kind) == OwnerKind.Damaged {
+    return SymbolRef.absent()
+  }
+  return run declarationName(&mut draft.*, tree, syntax)
+}
+
+// ---------------------------------------------------------------------------
+// Documentation
+// ---------------------------------------------------------------------------
+
+/// Reports whether `kind` participates in Silk's documentation model.
+///
+/// # Details
+///
+/// This is the bootstrap `DocBlock.isDocumentableKind`. A form outside this set never carries a
+/// `///` block, so its leading trivia is not even inspected.
+pub fn isDocumentableKind(kind: NodeKind) -> bool {
+  return match kind {
+    NodeKind.StructDeclaration => true
+    NodeKind.EnumDeclaration => true
+    NodeKind.UnionDeclaration => true
+    NodeKind.ServiceDeclaration => true
+    NodeKind.InterfaceDeclaration => true
+    NodeKind.RoleDeclaration => true
+    NodeKind.ConstantDeclaration => true
+    NodeKind.PackageParameterDeclaration => true
+    NodeKind.TypeAliasDeclaration => true
+    NodeKind.ImplDeclaration => true
+    NodeKind.FunctionDeclaration => true
+    NodeKind.ForeignFunctionDeclaration => true
+    NodeKind.StructField => true
+    NodeKind.EnumMember => true
+    NodeKind.UnionVariant => true
+    NodeKind.UnionVariantField => true
+    NodeKind.TypeParameter => true
+    NodeKind.ParameterDeclaration => true
+    NodeKind.ServiceOperation => true
+    NodeKind.ImplOperation => true
+    _ => false
+  }
+}
+
+fn isTriviaKind(kind: TokenKind) -> bool {
+  return match kind {
+    TokenKind.Whitespace => true
+    TokenKind.LineComment => true
+    TokenKind.DocComment => true
+    TokenKind.ModuleDocComment => true
+    _ => false
+  }
+}
+
+/// Returns the number of line breaks the source bytes of `span` contain.
+fn lineBreaks(tree: &SyntaxTree, span: Span) -> usize {
+  let source = Bytes.asSlice(&tree.source)
+  let mut count = usize.ZERO
+  let mut index = span.start
+  while index < span.end {
+    let byte = source[index]
+    if byte == 13 {
+      count = count + usize.ONE
+      if index + usize.ONE < span.end && source[index + usize.ONE] == 10 {
+        index = index + usize.ONE
+      }
+    } else {
+      if byte == 10 {
+        count = count + usize.ONE
+      }
+    }
+    index = index + usize.ONE
+  }
+  return count
+}
+
+/// Reports whether only horizontal space separates `span` from the start of its line.
+fn startsLine(tree: &SyntaxTree, span: Span) -> bool {
+  let source = Bytes.asSlice(&tree.source)
+  let mut index = span.start
+  while index > usize.ZERO {
+    let byte = source[index - usize.ONE]
+    if byte == 10 || byte == 13 {
+      return true
+    }
+    if byte != 32 && byte != 9 {
+      return false
+    }
+    index = index - usize.ONE
+  }
+  return true
+}
+
+/// Collects the leading trivia tokens of `syntax` into `out`, recursing into its first child node.
+///
+/// # Details
+///
+/// This is the bootstrap `directLeadingTrivia`. The parser attaches a declaration's leading trivia
+/// to whichever node opens the region, so a declaration whose first element is a child node
+/// inherits that child's leading trivia and nothing else.
+effect fn leadingTrivia(tree: &SyntaxTree, syntax: NodeId, out: &mut Vector<Token>) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let count = Draft.elementCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    match Draft.elementAt(tree, syntax, index) {
+      Element.Token {id} => {
+        let token = Vector.get<Token>(&tree.tokens, id.index)
+        if !isTriviaKind(tokenKind(token)) {
+          return ()
+        }
+        run Vector.append<Token>(&mut out.*, token)
+      }
+      Element.Node {id} => {
+        if Vector.length<Token>(&out.*) == usize.ZERO {
+          run leadingTrivia(tree, id, &mut out.*)
+        }
+        return ()
+      }
+      Element.MissingToken {expected: ignoredExpected, span: ignoredSpan} => {
+        return ()
+      }
+    }
+    index = index + usize.ONE
+  }
+  return ()
+}
+
+/// The source extent of one attached documentation block.
+struct DocSpan {
+  present: bool
+  span: Span
+}
+
+impl Copy for DocSpan {}
+
+/// Finds the `///` block that ends `leading`, which is the block attached to the coming node.
+///
+/// # Details
+///
+/// This is the bootstrap `attachedAtEnd`. The block must be separated from the declaration by
+/// exactly one line break and each comment must start its own line, so a comment followed by a
+/// blank line documents nothing.
+fn attachedAtEnd(tree: &SyntaxTree, leading: &Vector<Token>, wanted: TokenKind) -> DocSpan {
+  let absent = DocSpan {present: false, span: Span {start: usize.ZERO, end: usize.ZERO}}
+  let length = Vector.length<Token>(leading)
+  if length < 2 {
+    return absent
+  }
+  let trailing = Vector.get<Token>(leading, length - usize.ONE)
+  if tokenKind(trailing) != TokenKind.Whitespace || lineBreaks(tree, tokenSpan(trailing)) != usize.ONE {
+    return absent
+  }
+  let mut index = length - 2
+  let last = Vector.get<Token>(leading, index)
+  if tokenKind(last) != wanted || !startsLine(tree, tokenSpan(last)) {
+    return absent
+  }
+  let mut first = tokenSpan(last)
+  while index >= 2 {
+    let whitespace = Vector.get<Token>(leading, index - usize.ONE)
+    let comment = Vector.get<Token>(leading, index - 2)
+    if tokenKind(whitespace) != TokenKind.Whitespace || lineBreaks(tree, tokenSpan(whitespace)) != usize.ONE {
+      break
+    }
+    if tokenKind(comment) != wanted {
+      break
+    }
+    if !startsLine(tree, tokenSpan(comment)) {
+      return absent
+    }
+    first = tokenSpan(comment)
+    index = index - 2
+  }
+  return DocSpan {present: true, span: Span {start: first.start, end: tokenSpan(last).end}}
+}
+
+/// Interns the `///` block attached to `syntax`, absent when it wrote none.
+pub effect fn documentationOf(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId)
+-> SymbolRef
+! OutOfMemoryError
+? &mut Allocator {
+  if !isDocumentableKind(Draft.kindOf(tree, syntax)) {
+    return SymbolRef.absent()
+  }
+  let mut leading = Vector.make<Token>()
+  run leadingTrivia(tree, syntax, &mut leading)
+  let found = attachedAtEnd(tree, &leading, TokenKind.DocComment)
+  drop leading
+  if !found.present {
+    return SymbolRef.absent()
+  }
+  let symbol = run Draft.intern(&mut draft.*, tree, found.span)
+  return SymbolRef.of(symbol)
+}
+
+/// Interns the leading `//!` block of the whole file, absent when it wrote none.
+///
+/// # Details
+///
+/// This is the bootstrap `DocBlock.ofModule`. Module documentation opens the file, so the scan
+/// runs over the tree's own token order rather than over any node's elements.
+pub effect fn moduleDocumentation(draft: &mut DraftState, tree: &SyntaxTree) -> SymbolRef
+! OutOfMemoryError
+? &mut Allocator {
+  let tokens = Vector.asSlice<Token>(&tree.tokens)
+  if tokens.length == usize.ZERO {
+    return SymbolRef.absent()
+  }
+  let first = tokens[usize.ZERO]
+  if tokenKind(first) != TokenKind.ModuleDocComment || !startsLine(tree, tokenSpan(first)) {
+    return SymbolRef.absent()
+  }
+  let mut last = tokenSpan(first)
+  let mut index = usize.ONE
+  while index + usize.ONE < tokens.length {
+    let whitespace = tokens[index]
+    let comment = tokens[index + usize.ONE]
+    if tokenKind(whitespace) != TokenKind.Whitespace || lineBreaks(tree, tokenSpan(whitespace)) != usize.ONE {
+      break
+    }
+    if tokenKind(comment) != TokenKind.ModuleDocComment {
+      break
+    }
+    if !startsLine(tree, tokenSpan(comment)) {
+      return SymbolRef.absent()
+    }
+    last = tokenSpan(comment)
+    index = index + 2
+  }
+  let symbol = run Draft.intern(
+    &mut draft.*,
+    tree,
+    Span {start: tokenSpan(first).start, end: last.end},
+  )
+  return SymbolRef.of(symbol)
+}
+
+// ---------------------------------------------------------------------------
+// Shared header pieces
+// ---------------------------------------------------------------------------
+
+/// Reports whether `syntax` writes the `pub` marker.
+fn isPublicIn(tree: &SyntaxTree, syntax: NodeId) -> bool {
+  return Draft.hasToken(tree, syntax, TokenKind.PubKeyword)
+}
+
+/// Lowers the text literal of `syntax` at `offset` among its direct text tokens.
+///
+/// # Details
+///
+/// This is the bootstrap `textLiteralToken`. An ABI and a foreign symbol are header tokens rather
+/// than expression nodes, so they are read straight off the declaration's own elements.
+effect fn textLiteralAt(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, offset: usize)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let count = Draft.elementCount(tree, syntax)
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    if let Element.Token {id} = Draft.elementAt(tree, syntax, index) {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      if tokenKind(token) == TokenKind.TextLiteral {
+        if seen == offset {
+          return run Draft.textFromToken(&mut draft.*, tree, tokenSpan(token))
+        }
+        seen = seen + usize.ONE
+      }
+    }
+    index = index + usize.ONE
+  }
+  let missing = Draft.missingToken(tree, syntax, TokenKind.TextLiteral)
+  let mut span = Draft.nodeSpan(tree, syntax)
+  if missing.present {
+    span = missing.span
+  }
+  return run Draft.missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
+}
+
+/// Lowers the foreign linkage clause of `syntax`, whose `direction` its keyword already decided.
+effect fn linkage(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  syntax: NodeId,
+  direction: LinkageDirection,
+) -> HirId ! OutOfMemoryError ? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let abi = run textLiteralAt(&mut draft.*, tree, syntax, usize.ZERO)
+  let mut symbol = HirRef.absent()
+  if Draft.hasToken(tree, syntax, TokenKind.AsKeyword) {
+    symbol = HirRef.of(run textLiteralAt(&mut draft.*, tree, syntax, usize.ONE))
+  }
+  return run Draft.appendHealthy(
+    &mut draft.*,
+    Node.Linkage {direction: direction, abi: abi, symbol: symbol},
+    span,
+  )
+}
+
+/// Returns the linkage direction `syntax` writes, absent when it writes neither keyword.
+fn linkageDirectionOf(tree: &SyntaxTree, syntax: NodeId) -> LinkageRef {
+  if Draft.hasToken(tree, syntax, TokenKind.ExternKeyword) {
+    return LinkageRef {present: true, direction: LinkageDirection.Import}
+  }
+  if Draft.hasToken(tree, syntax, TokenKind.ExportKeyword) {
+    return LinkageRef {present: true, direction: LinkageDirection.Export}
+  }
+  return LinkageRef {present: false, direction: LinkageDirection.Import}
+}
+
+/// An optionally written linkage direction.
+struct LinkageRef {
+  present: bool
+  direction: LinkageDirection
+}
+
+impl Copy for LinkageRef {}
+
+/// Lowers every `kind` field written directly in `parent`, answering their range.
+///
+/// # Details
+///
+/// This is the bootstrap `fields`, shared by a struct declaration and a union variant. A field
+/// whose type the parser never produced keeps its name and records a missing type.
+effect fn fields(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId, wanted: NodeKind)
+-> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parent, index)
+    if Draft.kindOf(tree, child) == wanted {
+      let lowered = run field(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+effect fn field(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let annotation = run LowerType.typeOrMissing(
+    &mut draft.*,
+    tree,
+    LowerType.typeChildAt(tree, syntax, usize.ZERO, false),
+    span,
+  )
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.Field {name: name, isPublic: isPublicIn(tree, syntax), annotation: annotation},
+    span,
+    causes,
+  )
+}
+
+/// Lowers the written generic binder list of `syntax`, and its span for a later diagnostic.
+effect fn genericsIn(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Generics
+! OutOfMemoryError
+? &mut Allocator {
+  let list = LowerType.firstChildOf(tree, syntax, NodeKind.TypeParameterList)
+  if !list.present {
+    return Generics {parameters: Range.empty(), anchor: SpanRef.absent()}
+  }
+  let parameters = run LowerType.genericParameters(&mut draft.*, tree, list.id)
+  return Generics {parameters: parameters, anchor: SpanRef.of(Draft.nodeSpan(tree, list.id))}
+}
+
+/// A written generic binder list with the span of the list itself.
+struct Generics {
+  parameters: Range
+  anchor: SpanRef
+}
+
+impl Copy for Generics {}
+
+/// Lowers the first initializing expression written in `syntax`, absent when it wrote none.
+effect fn initializerIn(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirRef
+! OutOfMemoryError
+? &mut Allocator {
+  let value = LowerExpression.expressionChildAt(tree, syntax, usize.ZERO)
+  if !value.present || Draft.kindOf(tree, value.id) == NodeKind.Error {
+    return HirRef.absent()
+  }
+  return HirRef.of(run LowerExpression.lowerExpression(&mut draft.*, tree, value.id))
+}
+
+// ---------------------------------------------------------------------------
+// Header and body pairs
+// ---------------------------------------------------------------------------
+
+/// The two nodes one declaration form contributes before its [`Node.Declaration`](hir.Hir.Node).
+pub struct Parts {
+  /// The declaration header.
+  pub header: HirId
+  /// The declaration body.
+  pub body: HirId
+}
+
+impl Copy for Parts {}
+
+/// Lowers a header position holding source that cannot be a header, retaining nothing.
+effect fn invalidHeader(draft: &mut DraftState, tree: &SyntaxTree, span: Span, fallback: CauseCode)
+-> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let causes = run Draft.recoveryCauses(&mut draft.*, tree, span, fallback)
+  return run Draft.append(
+    &mut draft.*,
+    Node.InvalidDeclarationHeader {retained: Range.empty()},
+    span,
+    causes,
+  )
+}
+
+/// Lowers the body form that has no body.
+effect fn noBody(draft: &mut DraftState, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  return run Draft.appendHealthy(&mut draft.*, Node.NoBody, span)
+}
+
+// ---------------------------------------------------------------------------
+// Imports
+// ---------------------------------------------------------------------------
+
+/// Lowers the selected members of an import, answering their range.
+effect fn importMembers(draft: &mut DraftState, tree: &SyntaxTree, list: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, list)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, list, index)
+    if Draft.kindOf(tree, child) == NodeKind.ImportMember {
+      let lowered = run importMember(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+effect fn importMember(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let aliasSyntax = LowerType.firstChildOf(tree, syntax, NodeKind.ImportAlias)
+  let mut alias = HirRef.absent()
+  if aliasSyntax.present {
+    alias = HirRef.of(run Draft.nameIn(&mut draft.*, tree, aliasSyntax.id, true))
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(&mut draft.*, Node.ImportMember {name: name, alias: alias}, span, causes)
+}
+
+/// Lowers the path of an import, or a one-segment missing path when the parser produced none.
+effect fn importPath(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let path = LowerType.firstChildOf(tree, syntax, NodeKind.ImportPath)
+  if path.present {
+    return run Draft.pathOf(&mut draft.*, tree, path.id, false)
+  }
+  let mark = Draft.beginChildren(&draft.*)
+  let segment = run Draft.missingName(&mut draft.*, tree, span, CauseCode.MissingToken)
+  run Draft.pushChild(&mut draft.*, segment)
+  let segments = run Draft.finishChildren(&mut draft.*, mark)
+  return run Draft.appendHealthy(&mut draft.*, Node.Path {segments: segments}, span)
+}
+
+effect fn importParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let path = run importPath(&mut draft.*, tree, syntax, span)
+  let aliasSyntax = LowerType.firstChildOf(tree, syntax, NodeKind.ImportAlias)
+  let mut alias = HirRef.absent()
+  if aliasSyntax.present {
+    alias = HirRef.of(run Draft.nameIn(&mut draft.*, tree, aliasSyntax.id, true))
+  }
+  let listSyntax = LowerType.firstChildOf(tree, syntax, NodeKind.ImportMemberList)
+  let mut members = RangeRef.absent()
+  if listSyntax.present {
+    members = RangeRef.of(run importMembers(&mut draft.*, tree, listSyntax.id))
+  }
+  // The member list is a child node, so its own damage would otherwise be lost: the bootstrap
+  // concatenates it onto the header's causes, which one open cause run reproduces here.
+  let mark = Draft.beginCauses(&draft.*)
+  run Draft.damageInto(&mut draft.*, tree, syntax)
+  if listSyntax.present {
+    run Draft.damageInto(&mut draft.*, tree, listSyntax.id)
+  }
+  let causes = run Draft.finishCauses(&mut draft.*, mark)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.ImportHeader {
+      isPublic: isPublicIn(tree, syntax),
+      path: path,
+      alias: alias,
+      members: members,
+    },
+    span,
+    causes,
+  )
+  let body = run noBody(&mut draft.*, span)
+  return Parts {header: header, body: body}
+}
+
+// ---------------------------------------------------------------------------
+// Nominal type declarations
+// ---------------------------------------------------------------------------
+
+effect fn structParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let generics = run genericsIn(&mut draft.*, tree, syntax)
+  let declared = run fields(&mut draft.*, tree, syntax, NodeKind.StructField)
+  let mut abi = HirRef.absent()
+  if Draft.hasToken(tree, syntax, TokenKind.ExternKeyword) {
+    abi = HirRef.of(run textLiteralAt(&mut draft.*, tree, syntax, usize.ZERO))
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.StructHeader {
+      name: name,
+      isPublic: isPublicIn(tree, syntax),
+      generics: generics.parameters,
+      genericsAnchor: generics.anchor,
+      fields: declared,
+      abi: abi,
+    },
+    span,
+    causes,
+  )
+  let body = run noBody(&mut draft.*, span)
+  return Parts {header: header, body: body}
+}
+
+effect fn tupleParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let generics = run genericsIn(&mut draft.*, tree, syntax)
+  let mark = Draft.beginChildren(&draft.*)
+  let count = LowerType.typeChildCount(tree, syntax, true)
+  let mut index = usize.ZERO
+  while index < count {
+    let element = LowerType.typeChildAt(tree, syntax, index, true)
+    if element.present {
+      let lowered = run LowerType.lowerType(&mut draft.*, tree, element.id)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  let elements = run Draft.finishChildren(&mut draft.*, mark)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.TupleHeader {
+      name: name,
+      isPublic: isPublicIn(tree, syntax),
+      generics: generics.parameters,
+      elements: elements,
+    },
+    span,
+    causes,
+  )
+  let body = run noBody(&mut draft.*, span)
+  return Parts {header: header, body: body}
+}
+
+effect fn enumMembers(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    if Draft.kindOf(tree, child) == NodeKind.EnumMember {
+      let lowered = run enumMember(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+effect fn enumMember(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let literal = LowerType.firstChildOf(tree, syntax, NodeKind.IntegerLiteralExpression)
+  let mut value = HirRef.absent()
+  if literal.present {
+    value = HirRef.of(run LowerExpression.lowerExpression(&mut draft.*, tree, literal.id))
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(&mut draft.*, Node.EnumMember {name: name, value: value}, span, causes)
+}
+
+effect fn enumParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let written = LowerType.typeChildAt(tree, syntax, usize.ZERO, false)
+  let mut representation = HirRef.absent()
+  if written.present {
+    representation = HirRef.of(run LowerType.lowerType(&mut draft.*, tree, written.id))
+  }
+  let members = run enumMembers(&mut draft.*, tree, syntax)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.EnumHeader {
+      name: name,
+      isPublic: isPublicIn(tree, syntax),
+      representation: representation,
+      members: members,
+    },
+    span,
+    causes,
+  )
+  let body = run noBody(&mut draft.*, span)
+  return Parts {header: header, body: body}
+}
+
+effect fn variants(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    if Draft.kindOf(tree, child) == NodeKind.UnionVariant {
+      let lowered = run variant(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+effect fn variant(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let payload = run fields(&mut draft.*, tree, syntax, NodeKind.UnionVariantField)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.Variant {
+      name: name,
+      fields: payload,
+      braces: Draft.hasToken(tree, syntax, TokenKind.LeftBrace),
+    },
+    span,
+    causes,
+  )
+}
+
+effect fn unionParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let generics = run genericsIn(&mut draft.*, tree, syntax)
+  let declared = run variants(&mut draft.*, tree, syntax)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.UnionHeader {
+      name: name,
+      isPublic: isPublicIn(tree, syntax),
+      generics: generics.parameters,
+      variants: declared,
+    },
+    span,
+    causes,
+  )
+  let body = run noBody(&mut draft.*, span)
+  return Parts {header: header, body: body}
+}
+
+effect fn roleParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.RoleHeader {name: name, isPublic: isPublicIn(tree, syntax)},
+    span,
+    causes,
+  )
+  let body = run noBody(&mut draft.*, span)
+  return Parts {header: header, body: body}
+}
+
+effect fn aliasParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let generics = run genericsIn(&mut draft.*, tree, syntax)
+  let target = run LowerType.typeOrMissing(
+    &mut draft.*,
+    tree,
+    LowerType.typeChildAt(tree, syntax, usize.ZERO, false),
+    span,
+  )
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.AliasHeader {
+      name: name,
+      isPublic: isPublicIn(tree, syntax),
+      generics: generics.parameters,
+      target: target,
+    },
+    span,
+    causes,
+  )
+  let body = run noBody(&mut draft.*, span)
+  return Parts {header: header, body: body}
+}
+
+// ---------------------------------------------------------------------------
+// Value declarations
+// ---------------------------------------------------------------------------
+
+effect fn constantParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let written = LowerType.typeChildAt(tree, syntax, usize.ZERO, false)
+  let mut annotation = HirRef.absent()
+  if written.present {
+    annotation = HirRef.of(run LowerType.lowerType(&mut draft.*, tree, written.id))
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.ConstantHeader {
+      name: name,
+      isPublic: isPublicIn(tree, syntax),
+      annotation: annotation,
+    },
+    span,
+    causes,
+  )
+  let value = run initializerIn(&mut draft.*, tree, syntax)
+  let body = run Draft.appendHealthy(&mut draft.*, Node.InitializerBody {value: value}, span)
+  return Parts {header: header, body: body}
+}
+
+effect fn packageParameterParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let annotation = run LowerType.typeOrMissing(
+    &mut draft.*,
+    tree,
+    LowerType.typeChildAt(tree, syntax, usize.ZERO, false),
+    span,
+  )
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.PackageParameterHeader {
+      name: name,
+      isPublic: isPublicIn(tree, syntax),
+      annotation: annotation,
+    },
+    span,
+    causes,
+  )
+  let value = run initializerIn(&mut draft.*, tree, syntax)
+  let clause = LowerType.firstChildOf(tree, syntax, NodeKind.PackageParameterValidation)
+  let mut validation = HirRef.absent()
+  if clause.present {
+    let predicate = LowerExpression.expressionChildAt(tree, clause.id, usize.ZERO)
+    if predicate.present {
+      validation = HirRef.of(
+        run LowerExpression.lowerExpression(&mut draft.*, tree, predicate.id),
+      )
+    }
+  }
+  let body = run Draft.appendHealthy(
+    &mut draft.*,
+    Node.PackageParameterBody {default: value, validation: validation},
+    span,
+  )
+  return Parts {header: header, body: body}
+}
+
+/// Lowers a foreign or exported static; `exported` decides its linkage and whether it initializes.
+effect fn staticParts(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  syntax: NodeId,
+  exported: bool,
+) -> Parts ! OutOfMemoryError ? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let annotation = run LowerType.typeOrMissing(
+    &mut draft.*,
+    tree,
+    LowerType.typeChildAt(tree, syntax, usize.ZERO, false),
+    span,
+  )
+  let mut direction = LinkageDirection.Import
+  if exported {
+    direction = LinkageDirection.Export
+  }
+  let clause = run linkage(&mut draft.*, tree, syntax, direction)
+  let properties = run LowerExpression.propertyClauses(&mut draft.*, tree, syntax)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.StaticHeader {
+      name: name,
+      isPublic: isPublicIn(tree, syntax),
+      annotation: annotation,
+      mutable: false,
+      linkage: clause,
+      properties: properties,
+    },
+    span,
+    causes,
+  )
+  if !exported {
+    let body = run noBody(&mut draft.*, span)
+    return Parts {header: header, body: body}
+  }
+  let value = run initializerIn(&mut draft.*, tree, syntax)
+  let body = run Draft.appendHealthy(&mut draft.*, Node.InitializerBody {value: value}, span)
+  return Parts {header: header, body: body}
+}
+
+effect fn modulePropertyParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let properties = run LowerExpression.propertyClauses(&mut draft.*, tree, syntax)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.ModulePropertyHeader {properties: properties},
+    span,
+    causes,
+  )
+  let body = run noBody(&mut draft.*, span)
+  return Parts {header: header, body: body}
+}
+
+// ---------------------------------------------------------------------------
+// Callables
+// ---------------------------------------------------------------------------
+
+/// Lowers the operator marker of a service operation, absent when the operation wrote none.
+///
+/// # Details
+///
+/// This is the bootstrap `operatorOf`. The marker holds the `operator` word and then the operator
+/// token; a marker whose operator the parser could not accept records a missing name instead, so
+/// `operator` with nothing after it stays distinguishable from an ordinary operation.
+effect fn operatorMarker(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirRef
+! OutOfMemoryError
+? &mut Allocator {
+  let marker = LowerType.firstChildOf(tree, syntax, NodeKind.OperatorMarker)
+  if !marker.present {
+    return HirRef.absent()
+  }
+  let span = Draft.nodeSpan(tree, marker.id)
+  let count = Draft.elementCount(tree, marker.id)
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    if let Element.Token {id} = Draft.elementAt(tree, marker.id, index) {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      if seen > usize.ZERO {
+        return HirRef.of(run Draft.nameFromToken(&mut draft.*, tree, token))
+      }
+      seen = seen + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  return HirRef.of(run Draft.missingName(&mut draft.*, tree, span, CauseCode.MissingToken))
+}
+
+/// Lowers one callable declaration: a named function, a foreign function, or a service operation.
+///
+/// # Details
+///
+/// This is the bootstrap `callableParts`. One frame spans the contract and the body, so a
+/// parameter binds every identifier expression beneath the body and nothing after it.
+effect fn callableParts(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  syntax: NodeId,
+  operation: bool,
+) -> Parts ! OutOfMemoryError ? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  run Draft.pushFrame(&mut draft.*)
+  let name = run Draft.callableNameIn(&mut draft.*, tree, syntax)
+  let contract = run LowerType.callableContract(&mut draft.*, tree, syntax, true)
+  let properties = run LowerExpression.propertyClauses(&mut draft.*, tree, syntax)
+  let mut operator = HirRef.absent()
+  let mut clause = HirRef.absent()
+  if operation {
+    operator = run operatorMarker(&mut draft.*, tree, syntax)
+  } else {
+    let direction = linkageDirectionOf(tree, syntax)
+    if direction.present {
+      clause = HirRef.of(run linkage(&mut draft.*, tree, syntax, direction.direction))
+    }
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let mut header = HirId {index: usize.ZERO}
+  if operation {
+    header = run Draft.append(
+      &mut draft.*,
+      Node.OperationHeader {
+        name: name,
+        isPublic: isPublicIn(tree, syntax),
+        contract: contract,
+        operator: operator,
+        properties: properties,
+      },
+      span,
+      causes,
+    )
+  } else {
+    header = run Draft.append(
+      &mut draft.*,
+      Node.FunctionHeader {
+        name: name,
+        isPublic: isPublicIn(tree, syntax),
+        contract: contract,
+        linkage: clause,
+        properties: properties,
+      },
+      span,
+      causes,
+    )
+  }
+  let blockSyntax = LowerType.firstChildOf(tree, syntax, NodeKind.Block)
+  let mut block = HirRef.absent()
+  if blockSyntax.present {
+    block = HirRef.of(run LowerStatement.lowerBlock(&mut draft.*, tree, blockSyntax.id))
+  }
+  Draft.popFrame(&mut draft.*)
+  let body = run Draft.appendHealthy(&mut draft.*, Node.CallableBody {block: block}, span)
+  return Parts {header: header, body: body}
+}
+
+effect fn implAliasParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let path = LowerType.firstChildOf(tree, syntax, NodeKind.TypePath)
+  let mut target = HirId {index: usize.ZERO}
+  if path.present {
+    target = run Draft.pathOf(&mut draft.*, tree, path.id, true)
+  } else {
+    let mark = Draft.beginChildren(&draft.*)
+    let segment = run Draft.missingName(&mut draft.*, tree, span, CauseCode.MissingToken)
+    run Draft.pushChild(&mut draft.*, segment)
+    let segments = run Draft.finishChildren(&mut draft.*, mark)
+    target = run Draft.appendHealthy(&mut draft.*, Node.Path {segments: segments}, span)
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.ImplAliasHeader {
+      name: name,
+      isPublic: isPublicIn(tree, syntax),
+      target: target,
+    },
+    span,
+    causes,
+  )
+  let body = run noBody(&mut draft.*, span)
+  return Parts {header: header, body: body}
+}
+
+// ---------------------------------------------------------------------------
+// Declaration forms holding members
+// ---------------------------------------------------------------------------
+
+/// Reports whether `kind` is a member a service or interface body accepts.
+fn isServiceMemberKind(kind: NodeKind) -> bool {
+  return kind == NodeKind.ServiceOperation || kind == NodeKind.ServiceInvalidMember
+}
+
+/// Reports whether `kind` is a member an implementation body accepts.
+fn isImplMemberKind(kind: NodeKind) -> bool {
+  return kind == NodeKind.ImplOperation || kind == NodeKind.FunctionDeclaration || kind == NodeKind.ForeignFunctionDeclaration
+}
+
+/// The member-kind filter one members body applies.
+enum MemberFilter {
+  /// Service and interface bodies: operations and invalid members.
+  Service,
+  /// Implementation bodies: aliases and functions.
+  Implementation,
+  /// Static conditional groups: every declaration the group holds.
+  Group,
+}
+
+fn accepts(filter: MemberFilter, kind: NodeKind) -> bool {
+  return match filter {
+    MemberFilter.Service => isServiceMemberKind(kind)
+    MemberFilter.Implementation => isImplMemberKind(kind)
+    MemberFilter.Group => true
+  }
+}
+
+/// Lowers every accepted member of `parent` into a body holding them, under a fresh key scope.
+///
+/// # Details
+///
+/// This is the bootstrap `members`. The scope is fresh per parent, so occurrence numbering starts
+/// again inside every service, implementation, and conditional branch.
+effect fn membersBody(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  parent: NodeId,
+  filter: MemberFilter,
+  span: Span,
+) -> HirId ! OutOfMemoryError ? &mut Allocator {
+  let mut scope = Scope.make()
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parent, index)
+    if accepts(filter, Draft.kindOf(tree, child)) {
+      let lowered = run lowerDeclaration(&mut draft.*, tree, child, &mut scope)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  let members = run Draft.finishChildren(&mut draft.*, mark)
+  Scope.finish(move scope)
+  return run Draft.appendHealthy(&mut draft.*, Node.MembersBody {members: members}, span)
+}
+
+/// Lowers a service or interface declaration; `isInterface` selects which header it writes.
+effect fn contractParts(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  syntax: NodeId,
+  isInterface: bool,
+) -> Parts ! OutOfMemoryError ? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let generics = run genericsIn(&mut draft.*, tree, syntax)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let isPublic = isPublicIn(tree, syntax)
+  let mut header = HirId {index: usize.ZERO}
+  if isInterface {
+    header = run Draft.append(
+      &mut draft.*,
+      Node.InterfaceHeader {name: name, isPublic: isPublic, generics: generics.parameters},
+      span,
+      causes,
+    )
+  } else {
+    header = run Draft.append(
+      &mut draft.*,
+      Node.ServiceHeader {name: name, isPublic: isPublic, generics: generics.parameters},
+      span,
+      causes,
+    )
+  }
+  let body = run membersBody(&mut draft.*, tree, syntax, MemberFilter.Service, span)
+  return Parts {header: header, body: body}
+}
+
+effect fn implParts(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Parts
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let generics = run genericsIn(&mut draft.*, tree, syntax)
+  let subject = run LowerType.typeOrMissing(
+    &mut draft.*,
+    tree,
+    LowerType.typeChildAt(tree, syntax, usize.ZERO, true),
+    span,
+  )
+  // A written `for` names a target even when the parser lost it, which is what separates an
+  // inherent implementation from a damaged interface implementation.
+  let mut target = HirRef.absent()
+  if Draft.hasToken(tree, syntax, TokenKind.ForKeyword) {
+    target = HirRef.of(
+      run LowerType.typeOrMissing(
+        &mut draft.*,
+        tree,
+        LowerType.typeChildAt(tree, syntax, usize.ONE, true),
+        span,
+      ),
+    )
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.ImplHeader {generics: generics.parameters, subject: subject, target: target},
+    span,
+    causes,
+  )
+  let body = run membersBody(&mut draft.*, tree, syntax, MemberFilter.Implementation, span)
+  return Parts {header: header, body: body}
+}
+
+// ---------------------------------------------------------------------------
+// Static conditionals
+// ---------------------------------------------------------------------------
+
+/// Lowers one arm of a static conditional into the declaration that arm selects.
+///
+/// # Details
+///
+/// This is the bootstrap `branch`. A chained `else static if` is lowered as an ordinary nested
+/// conditional declaration; an ordinary `{ ... }` arm becomes a group declaration whose body holds
+/// the arm's members. An arm the parser never produced becomes a group with an invalid header, so
+/// the conditional still names both of its branches.
+effect fn conditionalBranch(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  arm: NodeRef,
+  branch: GroupBranch,
+  scope: &mut Scope,
+  span: Span,
+) -> HirId ! OutOfMemoryError ? &mut Allocator {
+  if arm.present && Draft.kindOf(tree, arm.id) == NodeKind.StaticConditionalDeclaration {
+    return run lowerDeclaration(&mut draft.*, tree, arm.id, &mut scope.*)
+  }
+  let key = run issue(&mut scope.*, OwnerKind.Conditional, SymbolRef.absent())
+  if !arm.present || Draft.kindOf(tree, arm.id) != NodeKind.DeclarationGroup {
+    let header = run invalidHeader(&mut draft.*, tree, span, CauseCode.MissingToken)
+    let body = run noBody(&mut draft.*, span)
+    return run Draft.appendHealthy(
+      &mut draft.*,
+      Node.Declaration {
+        owner: key,
+        documentation: SymbolRef.absent(),
+        header: header,
+        body: body,
+      },
+      span,
+    )
+  }
+  let armSpan = Draft.nodeSpan(tree, arm.id)
+  let causes = run Draft.damage(&mut draft.*, tree, arm.id)
+  let header = run Draft.append(&mut draft.*, Node.GroupHeader {branch: branch}, armSpan, causes)
+  let body = run membersBody(&mut draft.*, tree, arm.id, MemberFilter.Group, armSpan)
+  return run Draft.appendHealthy(
+    &mut draft.*,
+    Node.Declaration {
+        owner: key,
+        documentation: SymbolRef.absent(),
+        header: header,
+        body: body,
+      },
+    armSpan,
+  )
+}
+
+/// Returns the group or nested conditional arm of `syntax` at `offset` among its arms.
+fn armAt(tree: &SyntaxTree, syntax: NodeId, offset: usize) -> NodeRef {
+  let count = Draft.childCount(tree, syntax)
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    let kind = Draft.kindOf(tree, child)
+    if kind == NodeKind.DeclarationGroup || kind == NodeKind.StaticConditionalDeclaration {
+      if seen == offset {
+        return NodeRef.of(child)
+      }
+      seen = seen + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  return NodeRef.absent()
+}
+
+effect fn conditionalParts(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  syntax: NodeId,
+  scope: &mut Scope,
+) -> Parts ! OutOfMemoryError ? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let condition = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let header = run Draft.append(
+    &mut draft.*,
+    Node.ConditionalHeader {condition: condition},
+    span,
+    causes,
+  )
+  let thenArm = armAt(tree, syntax, usize.ZERO)
+  let elseArm = armAt(tree, syntax, usize.ONE)
+  let thenBranch = run conditionalBranch(
+    &mut draft.*,
+    tree,
+    thenArm,
+    GroupBranch.Then,
+    &mut scope.*,
+    span,
+  )
+  let mut elseBranch = HirRef.absent()
+  if elseArm.present {
+    elseBranch = HirRef.of(
+      run conditionalBranch(&mut draft.*, tree, elseArm, GroupBranch.Else, &mut scope.*, span),
+    )
+  }
+  let body = run Draft.appendHealthy(
+    &mut draft.*,
+    Node.ConditionalBody {thenBranch: thenBranch, elseBranch: elseBranch},
+    span,
+  )
+  return Parts {header: header, body: body}
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch
+// ---------------------------------------------------------------------------
+
+/// Lowers the header and body of `syntax` according to its grammar category.
+///
+/// # Details
+///
+/// This is the bootstrap `declarationParts`. `scope` is the enclosing parent's key scope, which
+/// only a static conditional needs: it issues the keys of its two branch declarations itself,
+/// because both are siblings of the conditional rather than members of a body.
+effect fn declarationParts(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  syntax: NodeId,
+  scope: &mut Scope,
+) -> Parts ! OutOfMemoryError ? &mut Allocator {
+  let kind = Draft.kindOf(tree, syntax)
+  if kind == NodeKind.ImportDeclaration {
+    return run importParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.StaticConditionalDeclaration {
+    return run conditionalParts(&mut draft.*, tree, syntax, &mut scope.*)
+  }
+  if kind == NodeKind.ModulePropertyDeclaration {
+    return run modulePropertyParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.ConstantDeclaration {
+    return run constantParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.PackageParameterDeclaration {
+    return run packageParameterParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.ForeignStaticDeclaration {
+    return run staticParts(&mut draft.*, tree, syntax, false)
+  }
+  if kind == NodeKind.ExportStaticDeclaration {
+    return run staticParts(&mut draft.*, tree, syntax, true)
+  }
+  if kind == NodeKind.TypeAliasDeclaration {
+    return run aliasParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.RoleDeclaration {
+    return run roleParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.EnumDeclaration {
+    return run enumParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.StructDeclaration {
+    return run structParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.TupleDeclaration {
+    return run tupleParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.UnionDeclaration {
+    return run unionParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.ServiceDeclaration {
+    return run contractParts(&mut draft.*, tree, syntax, false)
+  }
+  if kind == NodeKind.InterfaceDeclaration {
+    return run contractParts(&mut draft.*, tree, syntax, true)
+  }
+  if kind == NodeKind.ServiceOperation {
+    return run callableParts(&mut draft.*, tree, syntax, true)
+  }
+  if kind == NodeKind.ImplDeclaration {
+    return run implParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.ImplOperation {
+    return run implAliasParts(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.FunctionDeclaration || kind == NodeKind.ForeignFunctionDeclaration {
+    return run callableParts(&mut draft.*, tree, syntax, false)
+  }
+  let span = Draft.nodeSpan(tree, syntax)
+  let header = run invalidHeader(&mut draft.*, tree, span, CauseCode.UnexpectedToken)
+  let body = run noBody(&mut draft.*, span)
+  return Parts {header: header, body: body}
+}
+
+/// Lowers one declaration, issuing its owner key in `scope` and answering its identity.
+///
+/// # Details
+///
+/// This is the bootstrap `declaration`. The key is issued *before* the parts are lowered, so
+/// sibling declarations take their occurrence numbers in written order even though their subtrees
+/// append nodes in between.
+pub effect fn lowerDeclaration(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  syntax: NodeId,
+  scope: &mut Scope,
+) -> HirId ! OutOfMemoryError ? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let name = run ownerNameOf(&mut draft.*, tree, syntax)
+  let owner = run issue(&mut scope.*, ownerKindOf(Draft.kindOf(tree, syntax)), name)
+  let documentation = run documentationOf(&mut draft.*, tree, syntax)
+  let parts = run declarationParts(&mut draft.*, tree, syntax, &mut scope.*)
+  return run Draft.appendHealthy(
+    &mut draft.*,
+    Node.Declaration {
+      owner: owner,
+      documentation: documentation,
+      header: parts.header,
+      body: parts.body,
+    },
+    span,
+  )
+}

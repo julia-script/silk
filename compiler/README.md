@@ -92,6 +92,21 @@ one frame per block, and a binding statement binds only after its initializer is
 `with ns.op(key: value)` clauses a declaration or a foreign function type writes, keeping written
 order and duplicate keys for a later validation phase.
 
+`hir/LowerDeclaration.silk` lowers one declaration into three nodes: a header, a body, and the
+`Declaration` that pairs them with an `OwnerKey`. The key is the declaration's source-independent
+logical name — a category, an interned name, and the occurrence among same-key siblings — so moving
+a declaration within its file does not rename it. Occurrence counting is per parent, not per module:
+a `Scope` holds the keys already issued under one parent, and every members body opens a fresh one,
+so two same-named functions in different implementations both take occurrence zero. A declaration
+also interns the `///` block attached to it, following the bootstrap `DocBlock.ofNode` attachment
+rules: exactly one line break between the block and the declaration, and every comment on its own
+line. A static conditional lowers both arms, including the one its condition will not select.
+
+`hir/Lower.silk` is the one HIR entry point. `Lower.lower(&SyntaxTree)` interns the leading `//!`
+block as the module documentation, lowers every top-level declaration under one key scope, copies
+the lexical and parser diagnostics into module coordinates, and answers a `Module` that refers to
+nothing in the tree, which the caller then drops.
+
 CST construction remains postponed. The token vector retains source information, but there is no
 second concrete-syntax tree to maintain.
 
@@ -125,6 +140,8 @@ available stack in the bootstrap-generated debug executable before recovery coul
 | `hir/LowerExpression.silk`                     | Expressions, match arms, anonymous callables, field initializers, and written property clauses                                                 |
 | `hir/LowerPattern.silk`                        | Patterns, pattern fields and shorthand bindings, and member selectors                                                                          |
 | `hir/LowerStatement.silk`                      | Statements, conditional chains, and the blocks that scope their bindings                                                                       |
+| `hir/LowerDeclaration.silk`                    | Declaration headers and bodies, owner keys and occurrence counting, and attached documentation                                                 |
+| `hir/Lower.silk`                               | The module entry point: documentation, top-level declarations, and copied frontend diagnostics                                                 |
 
 Grammar rules are ordinary Silk functions. They consume `State` and return it with either an
 unfinished element list or a completed node ID. Replacement values are evaluated before assigning
