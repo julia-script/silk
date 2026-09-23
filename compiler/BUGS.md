@@ -163,8 +163,15 @@ executable avoids compilation entirely.
 ## Ancestor-history interning exceeds the V8 map limit for the HIR type lowering
 
 **Status:** repaired in bootstrap instance discovery by projecting each successor history onto its
-target's strongly connected component; the self-hosted type lowering now checks, builds, and tests
-without a workaround.
+target's strongly connected component.
+
+The self-hosted side, however, still carries the shape the blowup forced on it: `LowerType.constraints`
+lowers both constraint forms inside one function rather than delegating to a per-form helper, and
+that shape was never re-measured against the fixed compiler. Two things obscured this. The wave-3
+`# Gotchas` block that explained the single-function shape was removed when the compiler fix landed,
+and every self-hosted gate up to `b3298425` was run through `pnpm exec silk`, which is a globally
+installed shim onto the *main checkout's* older CLI rather than this worktree's build — so the
+"no longer trips" evidence was produced by a compiler that does not contain the fix.
 
 Making both `LowerType.callableContract` and `LowerType.constraints` reachable from the test entry
 point aborted instance discovery with `RangeError: Map maximum size exceeded`, thrown from
@@ -188,3 +195,13 @@ projects it away before it multiplies through generic wrappers such as a test ru
 combinators around many recursive walkers.
 
 Encountered on 2026-09-22 while porting the type, generic, contract, and constraint lowering.
+
+**Re-measured on 2026-09-23** with this worktree's own build
+(`node packages/cli/dist/bin.js`, after
+`CI=true node scripts/turbo.mjs run build --filter=@silklang/cli --filter=@silklang/compiler`),
+which does contain the fix. `LowerType.constraints` was split into the per-form helpers
+`membershipConstraint` and `providerConstraint` that the shape naturally wants, with
+`callableContract`, `constraints`, and the whole expression, pattern, and statement lowering all
+reachable from the test entry point — a strictly larger reachable graph than the one that
+originally blew up. Discovery completes; the self-hosted code now carries no residue of the
+workaround, so no `# Gotchas` block explaining the inlined shape is needed.

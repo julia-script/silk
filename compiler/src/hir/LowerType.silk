@@ -24,6 +24,7 @@
 
 import hir.Draft
 import hir.Draft {Draft as DraftState}
+import hir.LowerExpression
 import hir.Hir {
   Access,
   CallableMode,
@@ -594,8 +595,8 @@ pub effect fn bindersIn(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeI
 ///
 /// This is the bootstrap `constraints`. A membership constraint's two operands are row positions,
 /// so a written requirement is admitted there; a provider's first operand is an ordinary type.
-/// Both constraint forms are lowered here, because the two share every operand rule but the one
-/// leading type a provider adds.
+/// Each form has its own helper: wave 3 inlined both into this loop to stay under a bootstrap
+/// discovery limit, which the fix at `2d4e1c6d` removed.
 pub effect fn constraints(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Range
 ! OutOfMemoryError
 ? &mut Allocator {
@@ -605,62 +606,74 @@ pub effect fn constraints(draft: &mut DraftState, tree: &SyntaxTree, syntax: Nod
   while index < count {
     let child = Draft.childAt(tree, syntax, index)
     let kind = Draft.kindOf(tree, child)
-    let membership = kind == NodeKind.MembershipConstraint
-    if membership || kind == NodeKind.ProviderConstraint {
-      let span = Draft.nodeSpan(tree, child)
-      let mut lowered = HirId {index: usize.ZERO}
-      if membership {
-        let subject = run rowOperandOrMissing(
-          &mut draft.*,
-          tree,
-          typeChildAt(tree, child, usize.ZERO, false),
-          span,
-        )
-        let source = run rowOperandOrMissing(
-          &mut draft.*,
-          tree,
-          typeChildAt(tree, child, usize.ONE, false),
-          span,
-        )
-        let causes = run Draft.damage(&mut draft.*, tree, child)
-        lowered = run Draft.append(
-          &mut draft.*,
-          Node.MembershipConstraint {subject: subject, source: source},
-          span,
-          causes,
-        )
-      } else {
-        let provider = run typeOrMissing(
-          &mut draft.*,
-          tree,
-          typeChildAt(tree, child, usize.ZERO, false),
-          span,
-        )
-        let selected = run rowOperandOrMissing(
-          &mut draft.*,
-          tree,
-          typeChildAt(tree, child, usize.ONE, false),
-          span,
-        )
-        let source = run rowOperandOrMissing(
-          &mut draft.*,
-          tree,
-          typeChildAt(tree, child, usize.add(usize.ONE, usize.ONE), false),
-          span,
-        )
-        let causes = run Draft.damage(&mut draft.*, tree, child)
-        lowered = run Draft.append(
-          &mut draft.*,
-          Node.ProviderConstraint {provider: provider, selected: selected, source: source},
-          span,
-          causes,
-        )
-      }
+    if kind == NodeKind.MembershipConstraint {
+      let lowered = run membershipConstraint(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    } else if kind == NodeKind.ProviderConstraint {
+      let lowered = run providerConstraint(&mut draft.*, tree, child)
       run Draft.pushChild(&mut draft.*, lowered)
     }
     index = index + usize.ONE
   }
   return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+/// Lowers one `T in Interface` constraint; both operands are row positions.
+effect fn membershipConstraint(draft: &mut DraftState, tree: &SyntaxTree, child: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, child)
+  let subject = run rowOperandOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, child, usize.ZERO, false),
+    span,
+  )
+  let source = run rowOperandOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, child, usize.ONE, false),
+    span,
+  )
+  let causes = run Draft.damage(&mut draft.*, tree, child)
+  return run Draft.append(
+    &mut draft.*,
+    Node.MembershipConstraint {subject: subject, source: source},
+    span,
+    causes,
+  )
+}
+
+/// Lowers one provider constraint; only its leading provider is an ordinary type position.
+effect fn providerConstraint(draft: &mut DraftState, tree: &SyntaxTree, child: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, child)
+  let provider = run typeOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, child, usize.ZERO, false),
+    span,
+  )
+  let selected = run rowOperandOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, child, usize.ONE, false),
+    span,
+  )
+  let source = run rowOperandOrMissing(
+    &mut draft.*,
+    tree,
+    typeChildAt(tree, child, usize.add(usize.ONE, usize.ONE), false),
+    span,
+  )
+  let causes = run Draft.damage(&mut draft.*, tree, child)
+  return run Draft.append(
+    &mut draft.*,
+    Node.ProviderConstraint {provider: provider, selected: selected, source: source},
+    span,
+    causes,
+  )
 }
 
 /// Lowers `operand` as a row position, and a missing type over `span` when it is absent.
@@ -1173,9 +1186,9 @@ effect fn callableType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId
   } else {
     result = run typeOrMissing(&mut draft.*, tree, resultSyntax, span)
   }
-  let causes = run Draft.damage(&mut draft.*, tree, syntax)
   if foreign {
-    // wave 4: properties lowered with LowerExpression
+    let properties = run LowerExpression.propertyClauses(&mut draft.*, tree, syntax)
+    let foreignCauses = run Draft.damage(&mut draft.*, tree, syntax)
     return run Draft.append(
       &mut draft.*,
       Node.ForeignFunctionType {
@@ -1183,12 +1196,13 @@ effect fn callableType(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId
         binders: binders,
         parameters: parameters,
         result: result,
-        properties: Range.empty(),
+        properties: properties,
       },
       span,
-      causes,
+      foreignCauses,
     )
   }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
   let mode = callableModeOf(tree, syntax)
   return run Draft.append(
     &mut draft.*,

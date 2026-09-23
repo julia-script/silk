@@ -79,9 +79,18 @@ parentheses in place, so a parenthesized type leaves no node, and retains a life
 requirement, or a damaged region in a type position as an invalid type. `LowerType.rowOperand`
 selects between a type and a written requirement wherever a row admits both.
 `LowerType.callableContract` reads the contract pieces directly off a callable header, because the
-grammar attaches them there rather than to a node of their own. Property clauses are not lowered
-yet; their values are expressions, so `ForeignFunctionType` carries an empty `properties` range
-until the expression lowering lands.
+grammar attaches them there rather than to a node of their own.
+
+`hir/LowerExpression.silk`, `hir/LowerPattern.silk`, and `hir/LowerStatement.silk` lower bodies.
+They import one another the way the parser modules do, because an expression holds blocks, a block
+holds statements, and a statement holds patterns and expressions. `LowerExpression.lowerExpression`
+unwraps grouping parentheses in place, resolves every identifier against the draft's frame stack,
+and leaves an unbound one absent for a later resolution phase. `LowerStatement.lowerBlock` opens
+one frame per block, and a binding statement binds only after its initializer is lowered, so
+`let x = x` reads the outer `x`. An `else if` chain nests: the chained conditional is the
+`elseBranch` of the one before it, never a flat list. `LowerExpression.propertyClauses` lowers the
+`with ns.op(key: value)` clauses a declaration or a foreign function type writes, keeping written
+order and duplicate keys for a later validation phase.
 
 CST construction remains postponed. The token vector retains source information, but there is no
 second concrete-syntax tree to maintain.
@@ -113,6 +122,9 @@ available stack in the bootstrap-generated debug executable before recovery coul
 | `hir/Hir.silk`                                 | The flat HIR vocabulary, the `Module` arena, its debug dump writer, and its arena verifier                                                     |
 | `hir/Draft.silk`                               | The in-progress module a lowering builds: arena appends, interning, binder frames, syntax accessors, and the name, path, and literal lowerings |
 | `hir/LowerType.silk`                           | Types, generic parameters, rows, `where` constraints, and callable contracts                                                                   |
+| `hir/LowerExpression.silk`                     | Expressions, match arms, anonymous callables, field initializers, and written property clauses                                                 |
+| `hir/LowerPattern.silk`                        | Patterns, pattern fields and shorthand bindings, and member selectors                                                                          |
+| `hir/LowerStatement.silk`                      | Statements, conditional chains, and the blocks that scope their bindings                                                                       |
 
 Grammar rules are ordinary Silk functions. They consume `State` and return it with either an
 unfinished element list or a completed node ID. Replacement values are evaluated before assigning

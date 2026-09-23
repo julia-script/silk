@@ -1274,9 +1274,11 @@ fn recognizeUnit(values: &[u8], start: usize, end: usize) -> UnitRef {
 ///
 /// This is `internal/DurationLiteral.parse` reduced to what the HIR keeps. The accepted shape is
 /// one or more `<digits><unit>` components whose units are distinct and written from coarsest to
-/// finest; a separator may only sit between digits. The bootstrap's subordinate-range rule and its
-/// total nanosecond count are elaboration concerns, not lowering ones, so they are not repeated
-/// here. A rejected literal lowers to an invalid expression that retains the components already
+/// finest; a separator may only sit between digits. The bootstrap's subordinate-range rule (`1h90m`
+/// names a remainder beyond its unit) belongs to the lexer here, which already rejects such a
+/// literal as `InvalidDurationLiteral`, so it is checked once rather than twice; the bootstrap's
+/// total nanosecond count is an elaboration concern, not a lowering one. A rejected literal lowers
+/// to an invalid expression that retains the components already
 /// decoded, so the healthy prefix of a damaged literal survives as the bootstrap's recovery policy
 /// requires. A component magnitude beyond `u64` carries [`CauseCode.DurationOverflow`].
 pub effect fn durationLiteral(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> HirId

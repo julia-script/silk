@@ -68,3 +68,20 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
   nodes, so the failure surfaced as a wrong count far from the cause rather than as a syntax error ·
   Dump a new fixture with `silk-compiler <file>` before asserting against it, and check fixture
   identifiers against the `TokenKind` keyword list · compiler
+- 2026-09-23 · `pnpm exec silk` in a worktree ran the *main checkout's* CLI: the globally installed
+  `silk` shim execs a hard-coded `/Users/.../Documents/dev.nosync/silk/packages/cli/dist/bin.js`, so
+  a compiler fix committed only in the worktree was invisible and `silk test` reproduced a bootstrap
+  blowup the worktree had already fixed; every self-hosted figure taken this way is a measurement of
+  the wrong compiler · Build locally with
+  `CI=true node scripts/turbo.mjs run build --filter=@silklang/cli --filter=@silklang/compiler`, then
+  run `node packages/cli/dist/bin.js <check|test|build> --manifest-path compiler/silk.toml`, and
+  state which binary produced any self-hosted figure · repository
+- 2026-09-23 · A bare `{ ... }` block inside a function body is not a nested block: the grammar reads
+  the brace as a nominal record literal, so a shadowing fixture silently became a
+  `StructLiteralExpression` with a missing type · Use a construct that owns its block (`if true { }`,
+  `while`, `unsafe`) when a fixture needs a nested scope · compiler
+- 2026-09-23 · `silk format --manifest-path compiler/silk.toml` reformatted every reachable source
+  file, not just the ones the task touched, so a task diff suddenly contained unrelated parser and
+  HIR churn; reverting it with `git checkout --` then also discarded the task's own edits to the
+  same files · Do not run the project formatter on a task branch; if it is run, restore the
+  unrelated files individually and re-apply the task edits from the change set · repository

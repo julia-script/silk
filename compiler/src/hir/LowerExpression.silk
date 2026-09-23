@@ -1,0 +1,879 @@
+//! Lowering of expressions, match arms, anonymous callables, and written property clauses.
+//!
+//! # When to use
+//!
+//! Call [`lowerExpression`] wherever the grammar admits an expression operand, [`operandAt`] when
+//! the operand is one of several positional children that may be missing, and [`propertyClauses`]
+//! for the `with ns.op(key: value)` clauses a declaration or foreign type writes.
+//!
+//! # Details
+//!
+//! This is the port of the `expression`, `matchArm`, `callableExpression`, `fieldInitializers`, and
+//! `propertyClause` section of the bootstrap `AuthoredLowering`
+//! (`packages/compiler/src/AuthoredLowering.ts`). Children are appended before their parent, so the
+//! arena stays postorder.
+//!
+//! An identifier expression resolves its binder through the draft's frame stack and keeps an absent
+//! reference when nothing is in scope, which is decision 7 of the port: lowering records lexical
+//! binders and resolves nothing else.
+//!
+//! # Gotchas
+//!
+//! Grouping parentheses carry no meaning: a `GroupedExpression` lowers its operand in place and
+//! leaves no node of its own, exactly as a parenthesized type does.
+
+import hir.Draft
+import hir.Draft {Draft as DraftState, TokenRef}
+import hir.Hir {
+  Access,
+  CauseCode,
+  HirId,
+  HirRef,
+  InfixOperator,
+  MatchAccess,
+  Module,
+  Node,
+  PrefixOperator,
+  Range,
+  RangeRef,
+}
+import hir.LowerPattern
+import hir.LowerStatement
+import hir.LowerType
+import hir.LowerType {NodeRef}
+import lexer.Span {Span}
+import lexer.Token {Token, TokenKind, kind as tokenKind, span as tokenSpan}
+import parser.Element {Element}
+import parser.Node {NodeKind}
+import parser.NodeId {NodeId}
+import parser.SyntaxTree {SyntaxTree}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.usize
+import silk.vector {Vector}
+
+// ---------------------------------------------------------------------------
+// Syntax classification
+// ---------------------------------------------------------------------------
+
+/// Reports whether `kind` may occupy one expression-operand position.
+///
+/// # Details
+///
+/// This is the bootstrap `expressionKinds`. `Error` belongs to it because a damaged operand is
+/// retained in place rather than deleted.
+pub fn isExpressionKind(kind: NodeKind) -> bool {
+  return match kind {
+    NodeKind.UnsafeExpression => true
+    NodeKind.CompileErrorExpression => true
+    NodeKind.IntegerLiteralExpression => true
+    NodeKind.DurationLiteralExpression => true
+    NodeKind.FloatingLiteralExpression => true
+    NodeKind.StaticTextLiteralExpression => true
+    NodeKind.CharacterLiteralExpression => true
+    NodeKind.UnitExpression => true
+    NodeKind.BooleanLiteralExpression => true
+    NodeKind.IdentifierExpression => true
+    NodeKind.MoveExpression => true
+    NodeKind.AnonymousCallableExpression => true
+    NodeKind.EffectExpression => true
+    NodeKind.RunExpression => true
+    NodeKind.BorrowExpression => true
+    NodeKind.MatchExpression => true
+    NodeKind.StructLiteralExpression => true
+    NodeKind.TupleLiteralExpression => true
+    NodeKind.ContextualRecordLiteralExpression => true
+    NodeKind.ArrayLiteralExpression => true
+    NodeKind.FieldProjectionExpression => true
+    NodeKind.OrdinalProjectionExpression => true
+    NodeKind.ReferentProjectionExpression => true
+    NodeKind.IndexProjectionExpression => true
+    NodeKind.CallExpression => true
+    NodeKind.GroupedExpression => true
+    NodeKind.PrefixExpression => true
+    NodeKind.InfixExpression => true
+    NodeKind.PipelineExpression => true
+    NodeKind.AppliedMemberExpression => true
+    NodeKind.Error => true
+    _ => false
+  }
+}
+
+/// Returns the expression operand of `parent` at `offset` among its expression-kind children.
+pub fn expressionChildAt(tree: &SyntaxTree, parent: NodeId, offset: usize) -> NodeRef {
+  let count = Draft.childCount(tree, parent)
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parent, index)
+    if isExpressionKind(Draft.kindOf(tree, child)) {
+      if seen == offset {
+        return NodeRef.of(child)
+      }
+      seen = seen + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  return NodeRef.absent()
+}
+
+/// Lowers the expression operand of `parent` at `offset`, or a missing one over its span.
+///
+/// # Details
+///
+/// This is the bootstrap `operandAt`. A construct whose operand the parser never produced keeps its
+/// shape and records [`Node.MissingExpression`](hir.Hir.Node) in its place.
+pub effect fn operandAt(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId, offset: usize) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let operand = expressionChildAt(tree, parent, offset)
+  if !operand.present {
+    return run Draft.missingExpression(
+      &mut draft.*,
+      tree,
+      Draft.nodeSpan(tree, parent),
+      CauseCode.MissingToken,
+    )
+  }
+  return run lowerExpression(&mut draft.*, tree, operand.id)
+}
+
+fn prefixOperatorOf(tree: &SyntaxTree, syntax: NodeId) -> PrefixOperator {
+  if Draft.hasToken(tree, syntax, TokenKind.Bang) {
+    return PrefixOperator.Not
+  }
+  if Draft.hasToken(tree, syntax, TokenKind.Tilde) {
+    return PrefixOperator.BitwiseNot
+  }
+  return PrefixOperator.Negate
+}
+
+/// A written infix operator, or the absence of one in a damaged expression.
+struct InfixRef {
+  present: bool
+  operator: InfixOperator
+}
+
+impl Copy for InfixRef {}
+
+fn infixOperatorFor(kind: TokenKind) -> InfixRef {
+  return match kind {
+    TokenKind.Star => InfixRef {present: true, operator: InfixOperator.Multiply}
+    TokenKind.Slash => InfixRef {present: true, operator: InfixOperator.Divide}
+    TokenKind.Percent => InfixRef {present: true, operator: InfixOperator.Remainder}
+    TokenKind.Plus => InfixRef {present: true, operator: InfixOperator.Add}
+    TokenKind.Minus => InfixRef {present: true, operator: InfixOperator.Subtract}
+    TokenKind.Ampersand => InfixRef {present: true, operator: InfixOperator.BitAnd}
+    TokenKind.Caret => InfixRef {present: true, operator: InfixOperator.BitXor}
+    TokenKind.Pipe => InfixRef {present: true, operator: InfixOperator.BitOr}
+    TokenKind.Less => InfixRef {present: true, operator: InfixOperator.LessThan}
+    TokenKind.LessEqual => InfixRef {present: true, operator: InfixOperator.LessOrEqual}
+    TokenKind.Greater => InfixRef {present: true, operator: InfixOperator.GreaterThan}
+    TokenKind.GreaterEqual => InfixRef {present: true, operator: InfixOperator.GreaterOrEqual}
+    TokenKind.EqualEqual => InfixRef {present: true, operator: InfixOperator.Equals}
+    TokenKind.BangEqual => InfixRef {present: true, operator: InfixOperator.NotEquals}
+    TokenKind.AmpersandAmpersand => InfixRef {present: true, operator: InfixOperator.And}
+    TokenKind.PipePipe => InfixRef {present: true, operator: InfixOperator.Or}
+    _ => InfixRef {present: false, operator: InfixOperator.Add}
+  }
+}
+
+fn writtenInfixOperator(tree: &SyntaxTree, syntax: NodeId) -> InfixRef {
+  let count = Draft.elementCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    if let Element.Token {id} = Draft.elementAt(tree, syntax, index) {
+      let found = infixOperatorFor(tokenKind(Vector.get<Token>(&tree.tokens, id.index)))
+      if found.present {
+        return found
+      }
+    }
+    index = index + usize.ONE
+  }
+  return InfixRef {present: false, operator: InfixOperator.Add}
+}
+
+/// Returns where the operator token of `syntax` is written, or the expression's own span.
+///
+/// # Details
+///
+/// This is the bootstrap `operatorAnchor`. A damaged expression whose operator token is gone falls
+/// back to the expression itself, so a diagnostic about the operator always underlines something.
+fn operatorAnchor(tree: &SyntaxTree, syntax: NodeId, fallback: Span) -> Span {
+  let count = Draft.elementCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    if let Element.Token {id} = Draft.elementAt(tree, syntax, index) {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      let kind = tokenKind(token)
+      let isPrefix = kind == TokenKind.Minus || kind == TokenKind.Bang || kind == TokenKind.Tilde
+      if isPrefix || infixOperatorFor(kind).present {
+        return tokenSpan(token)
+      }
+    }
+    index = index + usize.ONE
+  }
+  return fallback
+}
+
+/// Reads the written value selection of a `match` expression.
+///
+/// # Details
+///
+/// This is the bootstrap `matchAccess`. `place` is a contextual keyword, so it is recognized by
+/// spelling; the parser always writes a `MatchAccess` node, which is empty when nothing was
+/// selected.
+fn matchAccessOf(tree: &SyntaxTree, parent: NodeId) -> MatchAccess {
+  let found = LowerType.firstChildOf(tree, parent, NodeKind.MatchAccess)
+  if !found.present {
+    return MatchAccess.Default
+  }
+  let syntax = found.id
+  if Draft.hasToken(tree, syntax, TokenKind.MoveKeyword) {
+    return MatchAccess.Move
+  }
+  if Draft.hasToken(tree, syntax, TokenKind.Ampersand) {
+    if Draft.hasToken(tree, syntax, TokenKind.MutKeyword) {
+      return MatchAccess.Mutable
+    }
+    return MatchAccess.Shared
+  }
+  if Draft.spelledToken(tree, syntax, "place").present {
+    return MatchAccess.Place
+  }
+  return MatchAccess.Default
+}
+
+// ---------------------------------------------------------------------------
+// Field initializers and property clauses
+// ---------------------------------------------------------------------------
+
+/// Lowers the `name: value` initializers written in `parent`, answering their range.
+pub effect fn fieldInitializers(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parent, index)
+    if Draft.kindOf(tree, child) == NodeKind.StructFieldInitializer {
+      let span = Draft.nodeSpan(tree, child)
+      let name = run Draft.nameIn(&mut draft.*, tree, child, true)
+      let value = run operandAt(&mut draft.*, tree, child, usize.ZERO)
+      let causes = run Draft.damage(&mut draft.*, tree, child)
+      let lowered = run Draft.append(
+        &mut draft.*,
+        Node.FieldInitializer {name: name, value: value},
+        span,
+        causes,
+      )
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+/// Lowers every `with ns.op(key: value)` clause written in `parent`, answering their range.
+///
+/// # Details
+///
+/// This is the bootstrap `propertyClauses`. Order and duplicate keys are preserved exactly as
+/// written, because deciding which clause a declaration accepts is a later phase's work.
+pub effect fn propertyClauses(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parent, index)
+    if Draft.kindOf(tree, child) == NodeKind.FunctionPropertyClause {
+      let lowered = run propertyClause(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+/// Returns the identifier token of `parent` at `offset` among its direct identifier tokens.
+fn identifierAt(tree: &SyntaxTree, parent: NodeId, offset: usize) -> TokenRef {
+  let count = Draft.elementCount(tree, parent)
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    if let Element.Token {id} = Draft.elementAt(tree, parent, index) {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      if tokenKind(token) == TokenKind.Identifier {
+        if seen == offset {
+          return TokenRef.of(token)
+        }
+        seen = seen + usize.ONE
+      }
+    }
+    index = index + usize.ONE
+  }
+  return TokenRef.absent()
+}
+
+/// Lowers a name from `token` when it was written, and a missing name over `span` otherwise.
+effect fn nameOrMissing(draft: &mut DraftState, tree: &SyntaxTree, token: TokenRef, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  if token.present {
+    return run Draft.nameFromToken(&mut draft.*, tree, token.token)
+  }
+  return run Draft.missingName(&mut draft.*, tree, span, CauseCode.MissingToken)
+}
+
+effect fn propertyClause(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  // `with` is itself a contextual identifier, so the namespace and operation follow it.
+  let namespace = run nameOrMissing(&mut draft.*, tree, identifierAt(tree, syntax, usize.ONE), span)
+  let operation = run nameOrMissing(
+    &mut draft.*,
+    tree,
+    identifierAt(tree, syntax, usize.add(usize.ONE, usize.ONE)),
+    span,
+  )
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    if Draft.kindOf(tree, child) == NodeKind.FunctionProperty {
+      let propertySpan = Draft.nodeSpan(tree, child)
+      let name = run Draft.nameIn(&mut draft.*, tree, child, true)
+      let value = run operandAt(&mut draft.*, tree, child, usize.ZERO)
+      let propertyCauses = run Draft.damage(&mut draft.*, tree, child)
+      let lowered = run Draft.append(
+        &mut draft.*,
+        Node.Property {name: name, value: value},
+        propertySpan,
+        propertyCauses,
+      )
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  let properties = run Draft.finishChildren(&mut draft.*, mark)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.PropertyClause {namespace: namespace, operation: operation, properties: properties},
+    span,
+    causes,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Match arms and anonymous callables
+// ---------------------------------------------------------------------------
+
+/// Lowers one match arm, binding its pattern's names for the guard and the result.
+///
+/// # Details
+///
+/// This is the bootstrap `matchArm`. The arm opens its own frame, so a binder the pattern
+/// introduces is visible to the guard and the result and to nothing after the arm.
+pub effect fn matchArm(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  run Draft.pushFrame(&mut draft.*)
+  let pattern = run LowerPattern.patternIn(&mut draft.*, tree, syntax, span)
+  let hasGuard = Draft.hasToken(tree, syntax, TokenKind.IfKeyword)
+  let first = armOperandAt(tree, syntax, usize.ZERO)
+  let mut guard = HirRef.absent()
+  let mut resultSyntax = first
+  if hasGuard {
+    resultSyntax = armOperandAt(tree, syntax, usize.ONE)
+    if first.present && Draft.kindOf(tree, first.id) != NodeKind.Block {
+      guard = HirRef.of(run lowerExpression(&mut draft.*, tree, first.id))
+    }
+  }
+  let result = run armResult(&mut draft.*, tree, syntax, resultSyntax, span)
+  Draft.popFrame(&mut draft.*)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.MatchArm {pattern: pattern, guard: guard, result: result},
+    span,
+    causes,
+  )
+}
+
+/// Returns the guard-or-result operand of an arm at `offset`; a block counts as one operand.
+fn armOperandAt(tree: &SyntaxTree, syntax: NodeId, offset: usize) -> NodeRef {
+  let count = Draft.childCount(tree, syntax)
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    let kind = Draft.kindOf(tree, child)
+    if isExpressionKind(kind) || kind == NodeKind.Block {
+      if seen == offset {
+        return NodeRef.of(child)
+      }
+      seen = seen + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  return NodeRef.absent()
+}
+
+effect fn armResult(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  syntax: NodeId,
+  resultSyntax: NodeRef,
+  span: Span,
+) -> HirId ! OutOfMemoryError ? &mut Allocator {
+  if !resultSyntax.present {
+    let missing = Draft.missingToken(tree, syntax, TokenKind.FatArrow)
+    let mut where = span
+    if missing.present {
+      where = missing.span
+    }
+    return run Draft.missingExpression(&mut draft.*, tree, where, CauseCode.MissingToken)
+  }
+  if Draft.kindOf(tree, resultSyntax.id) == NodeKind.Block {
+    return run LowerStatement.lowerBlock(&mut draft.*, tree, resultSyntax.id)
+  }
+  return run lowerExpression(&mut draft.*, tree, resultSyntax.id)
+}
+
+/// Lowers one anonymous callable expression, opening the frame its parameters bind into.
+pub effect fn callableExpression(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  run Draft.pushFrame(&mut draft.*)
+  let contract = run LowerType.callableContract(&mut draft.*, tree, syntax, true)
+  let body = run LowerStatement.blockIn(&mut draft.*, tree, syntax, span)
+  Draft.popFrame(&mut draft.*)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.CallableExpression {contract: contract, body: body},
+    span,
+    causes,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Expressions
+// ---------------------------------------------------------------------------
+
+/// Lowers one expression node in one operand position.
+///
+/// # Details
+///
+/// This is the bootstrap `expression`. A grouped expression lowers its operand in place; every
+/// other category answers with its own node. Source that cannot be an expression is retained as
+/// [`Node.InvalidExpression`](hir.Hir.Node).
+pub effect fn lowerExpression(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let kind = Draft.kindOf(tree, syntax)
+  let span = Draft.nodeSpan(tree, syntax)
+  if kind == NodeKind.GroupedExpression {
+    let inner = expressionChildAt(tree, syntax, usize.ZERO)
+    if !inner.present {
+      return run Draft.missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
+    }
+    return run lowerExpression(&mut draft.*, tree, inner.id)
+  }
+  if kind == NodeKind.IntegerLiteralExpression {
+    return run Draft.integerLiteral(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.FloatingLiteralExpression {
+    return run Draft.floatingLiteral(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.DurationLiteralExpression {
+    return run Draft.durationLiteral(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.StaticTextLiteralExpression {
+    return run Draft.staticTextLiteral(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.CharacterLiteralExpression {
+    return run Draft.characterLiteral(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.UnitExpression {
+    return run Draft.unitLiteral(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.BooleanLiteralExpression {
+    return run Draft.booleanLiteral(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.IdentifierExpression {
+    return run identifierExpression(&mut draft.*, tree, syntax, span)
+  }
+  if kind == NodeKind.MoveExpression {
+    let operand = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.MoveExpression {operand: operand}, span, causes)
+  }
+  if kind == NodeKind.BorrowExpression {
+    let operand = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let mut access = Access.Shared
+    if Draft.hasToken(tree, syntax, TokenKind.MutKeyword) {
+      access = Access.Mutable
+    }
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.BorrowExpression {access: access, operand: operand},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.RunExpression {
+    let operand = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.RunExpression {operand: operand}, span, causes)
+  }
+  if kind == NodeKind.UnsafeExpression {
+    let operand = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.UnsafeExpression {operand: operand}, span, causes)
+  }
+  if kind == NodeKind.CompileErrorExpression {
+    let message = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.CompileErrorExpression {message: message},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.EffectExpression {
+    let body = run LowerStatement.blockIn(&mut draft.*, tree, syntax, span)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.EffectExpression {body: body}, span, causes)
+  }
+  if kind == NodeKind.AnonymousCallableExpression {
+    return run callableExpression(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.MatchExpression {
+    return run matchExpression(&mut draft.*, tree, syntax, span)
+  }
+  if kind == NodeKind.StructLiteralExpression {
+    let target = LowerType.typeChildAt(tree, syntax, usize.ZERO, false)
+    let annotation = run LowerType.typeOrMissing(&mut draft.*, tree, target, span)
+    let fields = run fieldInitializers(&mut draft.*, tree, syntax)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.StructExpression {annotation: annotation, fields: fields},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.ContextualRecordLiteralExpression {
+    let fields = run fieldInitializers(&mut draft.*, tree, syntax)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.RecordExpression {fields: fields}, span, causes)
+  }
+  if kind == NodeKind.AppliedMemberExpression {
+    let selector = run LowerPattern.memberSelector(&mut draft.*, tree, syntax, span)
+    let mut fields = RangeRef.absent()
+    if Draft.hasToken(tree, syntax, TokenKind.LeftBrace) {
+      fields = RangeRef.of(run fieldInitializers(&mut draft.*, tree, syntax))
+    }
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.MemberExpression {selector: selector, fields: fields},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.TupleLiteralExpression || kind == NodeKind.ArrayLiteralExpression {
+    let elements = run elementsOf(&mut draft.*, tree, syntax)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    if kind == NodeKind.TupleLiteralExpression {
+      return run Draft.append(&mut draft.*, Node.TupleExpression {elements: elements}, span, causes)
+    }
+    return run Draft.append(&mut draft.*, Node.ArrayExpression {elements: elements}, span, causes)
+  }
+  if kind == NodeKind.FieldProjectionExpression {
+    let subject = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let field = run projectedName(&mut draft.*, tree, syntax, span)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.FieldExpression {subject: subject, field: field},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.OrdinalProjectionExpression {
+    let subject = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let digits = Draft.directToken(tree, syntax, TokenKind.DecimalInteger)
+    let mut ordinal = HirId {index: usize.ZERO}
+    if digits.present {
+      let digitSpan = tokenSpan(digits.token)
+      ordinal = run Draft.integerFromToken(&mut draft.*, tree, digitSpan, digitSpan, false)
+    } else {
+      ordinal = run Draft.missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
+    }
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.OrdinalExpression {subject: subject, ordinal: ordinal},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.ReferentProjectionExpression {
+    let subject = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.ReferentExpression {subject: subject}, span, causes)
+  }
+  if kind == NodeKind.IndexProjectionExpression {
+    let subject = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let index = run operandAt(&mut draft.*, tree, syntax, usize.ONE)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.IndexExpression {subject: subject, index: index},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.CallExpression {
+    return run callExpression(&mut draft.*, tree, syntax, span)
+  }
+  if kind == NodeKind.PrefixExpression {
+    let operand = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.PrefixExpression {
+        operator: prefixOperatorOf(tree, syntax),
+        operatorAnchor: operatorAnchor(tree, syntax, span),
+        operand: operand,
+      },
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.InfixExpression {
+    return run infixExpression(&mut draft.*, tree, syntax, span)
+  }
+  if kind == NodeKind.PipelineExpression {
+    let input = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let target = run operandAt(&mut draft.*, tree, syntax, usize.ONE)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.PipelineExpression {input: input, target: target},
+      span,
+      causes,
+    )
+  }
+  return run Draft.invalidExpression(
+    &mut draft.*,
+    tree,
+    span,
+    CauseCode.UnexpectedToken,
+    Range.empty(),
+  )
+}
+
+effect fn identifierExpression(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  syntax: NodeId,
+  span: Span,
+) -> HirId ! OutOfMemoryError ? &mut Allocator {
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let mut binding = HirRef.absent()
+  if let Node.Name {text} = Module.node(&draft.module, name) {
+    binding = Draft.lookup(&draft.*, text)
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.IdentifierExpression {name: name, binding: binding},
+    span,
+    causes,
+  )
+}
+
+/// Lowers every expression operand of `parent` in written order, answering their range.
+effect fn elementsOf(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parent, index)
+    if isExpressionKind(Draft.kindOf(tree, child)) {
+      let lowered = run lowerExpression(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+/// Lowers the projected member name of `.field`, which may also be the `drop` keyword.
+effect fn projectedName(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let count = Draft.elementCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let element = Draft.elementAt(tree, syntax, index)
+    match element {
+      Element.Token {id} => {
+        let token = Vector.get<Token>(&tree.tokens, id.index)
+        let kind = tokenKind(token)
+        if kind == TokenKind.Identifier || kind == TokenKind.DropKeyword {
+          return run Draft.nameFromToken(&mut draft.*, tree, token)
+        }
+      }
+      Element.MissingToken {expected, span: missingSpan} => {
+        if expected == TokenKind.Identifier || expected == TokenKind.DropKeyword {
+          return run Draft.missingName(&mut draft.*, tree, missingSpan, CauseCode.MissingToken)
+        }
+      }
+      Element.Node {id: ignoredId} => {}
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.missingName(&mut draft.*, tree, span, CauseCode.MissingToken)
+}
+
+effect fn matchExpression(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let access = matchAccessOf(tree, syntax)
+  let subject = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    if Draft.kindOf(tree, child) == NodeKind.MatchArm {
+      let lowered = run matchArm(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  let arms = run Draft.finishChildren(&mut draft.*, mark)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.MatchExpression {access: access, subject: subject, arms: arms},
+    span,
+    causes,
+  )
+}
+
+/// Lowers one call, keeping the damage of its argument list as one extra invalid argument.
+///
+/// # Details
+///
+/// This is the bootstrap `withCausesList`: a damaged argument region must not silently disappear,
+/// and the call itself already records only its own damage, so the list's damage becomes one
+/// trailing [`Node.InvalidExpression`](hir.Hir.Node) after the healthy arguments.
+effect fn callExpression(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let callee = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+  let genericSyntax = LowerType.firstChildOf(tree, syntax, NodeKind.CallTypeArgumentList)
+  let mut generics = HirRef.absent()
+  if genericSyntax.present {
+    generics = HirRef.of(run LowerType.typeArguments(&mut draft.*, tree, genericSyntax.id))
+  }
+  let listSyntax = LowerType.firstChildOf(tree, syntax, NodeKind.ArgumentList)
+  let mut arguments = Range.empty()
+  if listSyntax.present {
+    arguments = run argumentsOf(&mut draft.*, tree, listSyntax.id)
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.CallExpression {callee: callee, generics: generics, arguments: arguments},
+    span,
+    causes,
+  )
+}
+
+effect fn argumentsOf(draft: &mut DraftState, tree: &SyntaxTree, list: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, list)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, list, index)
+    let kind = Draft.kindOf(tree, child)
+    if isExpressionKind(kind) && kind != NodeKind.Error {
+      let lowered = run lowerExpression(&mut draft.*, tree, child)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  let listCauses = run Draft.damage(&mut draft.*, tree, list)
+  if listCauses.length > usize.ZERO {
+    let damaged = run Draft.append(
+      &mut draft.*,
+      Node.InvalidExpression {retained: Range.empty()},
+      Draft.nodeSpan(tree, list),
+      listCauses,
+    )
+    run Draft.pushChild(&mut draft.*, damaged)
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+/// Lowers one infix expression, or an invalid expression retaining both operands.
+///
+/// # Details
+///
+/// The parser only completes an `InfixExpression` after consuming a precedence-bearing token, and
+/// every such token but `|>` (which builds a pipeline) names an operator here, so this branch is
+/// unreachable from a parsed tree. It exists because the node has no operator to record without
+/// one: the bootstrap keeps both operands instead of the operator-less shape, and so does this.
+effect fn infixExpression(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let operator = writtenInfixOperator(tree, syntax)
+  if !operator.present {
+    let mark = Draft.beginChildren(&draft.*)
+    let left = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    run Draft.pushChild(&mut draft.*, left)
+    let right = run operandAt(&mut draft.*, tree, syntax, usize.ONE)
+    run Draft.pushChild(&mut draft.*, right)
+    let retained = run Draft.finishChildren(&mut draft.*, mark)
+    return run Draft.invalidExpression(
+      &mut draft.*,
+      tree,
+      span,
+      CauseCode.UnexpectedToken,
+      retained,
+    )
+  }
+  let left = run operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+  let right = run operandAt(&mut draft.*, tree, syntax, usize.ONE)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.InfixExpression {
+      operator: operator.operator,
+      operatorAnchor: operatorAnchor(tree, syntax, span),
+      left: left,
+      right: right,
+    },
+    span,
+    causes,
+  )
+}
