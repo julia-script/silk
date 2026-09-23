@@ -108,7 +108,7 @@ import silk.layout {Layout}
 import silk.layout {LayoutOverflow}
 import silk.json_output { JsonOptions, JsonOutput }
 import silk.json_scanner { JsonError, JsonReason, JsonScanner, JsonToken }
-import silk.json_serde { Deserialize, JsonSerde, Serialize }
+import silk.json_serde { Deserialize, Serialize }
 import silk.option {Option}
 import silk.order {Order}
 import silk.raw_buffer {RawBuffer}
@@ -973,7 +973,7 @@ impl<T: Deserialize> Deserialize for Vector<T> {
       _ => {}
     }
     while true {
-      let value = run JsonSerde.deserializeOne<T>(&mut scanner.*)
+      let value = run Deserialize.deserialize(&mut scanner.*)
       run Vector.append<T>(&mut values, move value)
       let separator = run jsonVectorToken(&mut scanner.*, false)
       match move separator {

@@ -40,7 +40,7 @@
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.json_output { JsonOptions }
 import silk.json_scanner { JsonError, JsonScanner, JsonToken }
-import silk.json_serde { Decode, Deserialize, JsonSerde, Serialize }
+import silk.json_serde { Decode, Deserialize, Serialize }
 import silk.result { Result }
 import silk.writer { Writer, WriterError }
 
@@ -180,7 +180,7 @@ impl<T: Decode> Decode for Option<T> {
               Result.succeed<Option<T>, JsonError>(Option.none<T>())
           }
         }
-        _ => match move JsonSerde.decodeOne<T>(&mut scanner.*) {
+        _ => match move Decode.decode(&mut scanner.*) {
           Result<T, JsonError>.Success { value: decoded } =>
             Result.succeed<Option<T>, JsonError>(Option.some<T>(move decoded))
           Result<T, JsonError>.Failure { error } =>
@@ -200,7 +200,7 @@ impl<T: Deserialize> Deserialize for Option<T> {
         let consumed = run jsonToken(&mut scanner.*, false)
         return Option.none<T>()
       }
-      _ => Option.some<T>(run JsonSerde.deserializeOne<T>(&mut scanner.*))
+      _ => Option.some<T>(run Deserialize.deserialize(&mut scanner.*))
     }
   }
 }
