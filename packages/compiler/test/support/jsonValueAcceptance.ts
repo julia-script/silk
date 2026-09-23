@@ -4,6 +4,9 @@ const deepestDocument = `${'['.repeat(64)}0${']'.repeat(64)}`
 /** One native program exercises owned JSON parsing, escapes, accessors, and writer round trips. */
 export const jsonValueAcceptanceSource = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
+import silk.f32
+import silk.f64
+import silk.format { Format }
 import silk.json_output { JsonOptions }
 import silk.json_scanner { JsonError, JsonReason }
 import silk.json_value { Json, Value }
@@ -55,6 +58,38 @@ effect fn roundTrip(input: &[u8]) -> bool
   let mut again = capture()
   run Json.write(&second) |> Effect.provideMut<Writer>(&mut again)
   return equal(serialized, Slice.view<u8>(&again.bytes, usize.ZERO, again.count))
+}
+
+effect fn roundTripF64(value: f64) -> bool
+! JsonError | OutOfMemoryError | WriterError ? &mut Allocator {
+  let mut output = capture()
+  let rendered = run Effect.result(Format.display(&value) |> Effect.provideMut<Writer>(&mut output))
+  match move rendered {
+    Result<(), WriterError>.Success { value: _ } => {}
+    Result<(), WriterError>.Failure { error: _ } => { return false }
+  }
+  let serialized = Slice.view<u8>(&output.bytes, usize.ZERO, output.count)
+  let document = run Json.parse(serialized)
+  return match move Json.asF64(Option.some<&Value>(&document)) {
+    Option<f64>.None => false
+    Option<f64>.Some { value: parsed } => f64.toBits(parsed) == f64.toBits(value)
+  }
+}
+
+effect fn roundTripF32(value: f32) -> bool
+! JsonError | OutOfMemoryError | WriterError ? &mut Allocator {
+  let mut output = capture()
+  let rendered = run Effect.result(Format.display(&value) |> Effect.provideMut<Writer>(&mut output))
+  match move rendered {
+    Result<(), WriterError>.Success { value: _ } => {}
+    Result<(), WriterError>.Failure { error: _ } => { return false }
+  }
+  let serialized = Slice.view<u8>(&output.bytes, usize.ZERO, output.count)
+  let document = run Json.parse(serialized)
+  return match move Json.asF32(Option.some<&Value>(&document)) {
+    Option<f32>.None => false
+    Option<f32>.Some { value: parsed } => f32.toBits(parsed) == f32.toBits(value)
+  }
 }
 
 effect fn rejectsDuplicate() -> bool ! OutOfMemoryError ? &mut Allocator {
@@ -161,6 +196,36 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   if !(run roundTrip(b"[null,true,false,0,\\\"x\\\",[],{}]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 19 }
   if !(run roundTrip(b" \\t\\r\\n [ true ] \\t") |> Effect.provideMut<Allocator>(&mut allocator)) { return 20 }
   if !(run roundTrip(b"${deepestDocument}") |> Effect.provideMut<Allocator>(&mut allocator)) { return 21 }
+  if !(run roundTripF64(1.5) |> Effect.provideMut<Allocator>(&mut allocator)) { return 22 }
+  if !(run roundTripF64(f64.fromBits(1)) |> Effect.provideMut<Allocator>(&mut allocator)) { return 23 }
+  if !(run roundTripF64(f64.fromBits(9223372036854775808)) |> Effect.provideMut<Allocator>(&mut allocator)) { return 24 }
+  if !(run roundTripF64(f64.MAX) |> Effect.provideMut<Allocator>(&mut allocator)) { return 25 }
+  if !(run roundTripF64(1.2345678901234567) |> Effect.provideMut<Allocator>(&mut allocator)) { return 26 }
+  if !(run roundTripF32(f32.fromBits(1)) |> Effect.provideMut<Allocator>(&mut allocator)) { return 27 }
+  if !(run roundTripF32(1.234567) |> Effect.provideMut<Allocator>(&mut allocator)) { return 28 }
+  let overflow = run Json.parse(b"1e999") |> Effect.provideMut<Allocator>(&mut allocator)
+  match move Json.asF64(Option.some<&Value>(&overflow)) {
+    Option<f64>.Some { value: _ } => { return 29 }
+    Option<f64>.None => {}
+  }
+  match move Json.asF64(Option.none<&Value>()) {
+    Option<f64>.Some { value: _ } => { return 30 }
+    Option<f64>.None => {}
+  }
+  let fractional = run Json.parse(b"1.25e+2") |> Effect.provideMut<Allocator>(&mut allocator)
+  match move Json.asF64(Option.some<&Value>(&fractional)) {
+    Option<f64>.None => { return 31 }
+    Option<f64>.Some { value } => { if f64.toBits(value) != f64.toBits(125.0) { return 31 } }
+  }
+  let nullValue = run Json.parse(b"null") |> Effect.provideMut<Allocator>(&mut allocator)
+  match move Json.asF64(Option.some<&Value>(&nullValue)) {
+    Option<f64>.Some { value: _ } => { return 32 }
+    Option<f64>.None => {}
+  }
+  match move Json.asF64(Option.some<&Value>(&document)) {
+    Option<f64>.Some { value: _ } => { return 33 }
+    Option<f64>.None => {}
+  }
   if !(run rejectsDuplicate() |> Effect.provideMut<Allocator>(&mut allocator)) { return 13 }
   if !(run allocationFailures()) { return 14 }
   if !(run rejectsDepth(&document)) { return 18 }
