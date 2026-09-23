@@ -218,16 +218,17 @@ jobs:
           restore-keys: silk-native-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: node scripts/turbo.mjs run build
-      # Mirrors test:parallel's flags; `pnpm --filter … run script -- args` drops the args
-      # (observed in run 33014303799: every shard ran the full suite), so invoke vitest directly.
-      - run: >
-          pnpm --filter @silklang/compiler exec vitest run
-          --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts
-          --exclude test/DriverTlsClientWasmAcceptance.test.ts
-          --exclude test/DriverTlsConnectionWasmAcceptance.test.ts
-          --shard=${{ matrix.shard }}/4
-          --reporter=default --reporter=json
-          --outputFile.json=compiler-shard-${{ matrix.shard }}.json
+      # Select each file once by reviewed CI timings; the selector assigns new files a median cost.
+      # Invoke vitest directly because `pnpm --filter … run script -- args` drops the args.
+      - run: |
+          compiler_tests=$(node scripts/compiler-shards.mjs --shard=${{ matrix.shard }}/4)
+          readarray -t compiler_tests <<< "$compiler_tests"
+          pnpm --filter @silklang/compiler exec vitest run "${compiler_tests[@]}" \
+            --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts \
+            --exclude test/DriverTlsClientWasmAcceptance.test.ts \
+            --exclude test/DriverTlsConnectionWasmAcceptance.test.ts \
+            --reporter=default --reporter=json \
+            --outputFile.json=compiler-shard-${{ matrix.shard }}.json
         env:
           # The composite HTTP witness retains one full provider graph; its cold worker exceeds 4 GiB.
           NODE_OPTIONS: --max-old-space-size=6144
