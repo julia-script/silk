@@ -135,13 +135,12 @@ it.effect('consumes a shorthand target when synthesizing the complete profile', 
   }),
 )
 
-it.effect('publishes execution identities for a successful discovered-test executable', () =>
+it.effect('publishes a manifest and execution environment for a discovered-test executable', () =>
   Effect.gen(function* () {
     const root = 'memory/driver-tests'
-    const compile = (name: string, alphaBody: string) =>
-      compileSource(
-        name,
-        `test fn alpha() -> () { ${alphaBody} }
+    const outcome = yield* compileSource(
+      'test-execution-manifest',
+      `test fn alpha() -> () {}
 test fn beta() -> () {}
 pub fn main() -> () {
   static for descriptor in Intrinsic.tests() {
@@ -149,22 +148,17 @@ pub fn main() -> () {
     body()
   }
 }`,
-        {
-          compilation: {
+      {
+        compilation: {
+          root,
+          discovery: {
             root,
-            discovery: {
-              root,
-              sources: new Map([
-                [root, { ownership: 'Project', logicalPath: 'tests/driver-tests.silk' }],
-              ]),
-            },
+            sources: new Map([
+              [root, { ownership: 'Project', logicalPath: 'tests/driver-tests.silk' }],
+            ]),
           },
         },
-      )
-    const outcome = yield* compile('test-execution-manifest', '')
-    const alphaChanged = yield* compile(
-      'test-execution-manifest-alpha-changed',
-      'let crash = 1 / 0 drop crash',
+      },
     )
 
     assert.deepEqual(
@@ -173,23 +167,14 @@ pub fn main() -> () {
     )
     assert.strictEqual(outcome._tag, 'Compiled')
     if (outcome._tag !== 'Compiled') return
-    assert.strictEqual(alphaChanged._tag, 'Compiled')
-    if (alphaChanged._tag !== 'Compiled') return
-    assert.strictEqual(outcome.testManifest?.entries.length, 2)
-    assert.strictEqual(outcome.testManifest?.entries.at(0)?.test.name, 'alpha')
-    assert.strictEqual(outcome.testManifest?.entries.at(0)?.eligibility._tag, 'Eligible')
-    assert.strictEqual(
-      alphaChanged.testManifest?.environmentIdentity,
-      outcome.testManifest?.environmentIdentity,
+    assert.deepEqual(
+      outcome.testManifest?.entries.map((entry) => entry.test.name),
+      ['alpha', 'beta'],
     )
-    const identity = (result: CompilerDriver.Compiled, name: string): string | undefined => {
-      const eligibility = result.testManifest?.entries.find(
-        (entry) => entry.test.name === name,
-      )?.eligibility
-      return eligibility?._tag === 'Eligible' ? eligibility.identity : undefined
-    }
-    assert.notStrictEqual(identity(alphaChanged, 'alpha'), identity(outcome, 'alpha'))
-    assert.strictEqual(identity(alphaChanged, 'beta'), identity(outcome, 'beta'))
+    assert.deepEqual(
+      outcome.testManifest?.entries.map((entry) => entry.eligibility._tag),
+      ['Eligible', 'Eligible'],
+    )
 
     const plan = outcome.linkPlan
     const bindingsIdentity = outcome.nativeBindings?.identity

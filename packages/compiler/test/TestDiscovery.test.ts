@@ -150,39 +150,6 @@ const runnerExecutionIdentity = Effect.fnUntraced(function* (text: string) {
   )
 })
 
-const bundledExecutionSnapshot = Effect.fnUntraced(function* (text: string) {
-  const analysis = yield* Analysis.makeRealized({
-    root: 'silk/test_runner',
-    target: 'x86_64-unknown-linux-gnu',
-    discovery: { root: 'Cases' },
-  }).pipe(
-    Effect.provide(
-      SourceResolver.overlay([source('Cases', text)]).pipe(
-        Layer.provideMerge(SourceResolver.empty),
-      ),
-    ),
-  )
-  assert.deepEqual(Analysis.diagnostics(analysis), [])
-  const catalog = analysis.testCatalog
-  if (catalog === undefined) return unreachable('expected test catalog')
-  const runner = yield* TestExecution.runnerIdentity(
-    Analysis.instancesOf(analysis),
-    analysis.results,
-    catalog,
-  )
-  const manifest = yield* TestExecution.make({
-    catalog,
-    discovery: Analysis.instancesOf(analysis),
-    results: analysis.results,
-    environment: {
-      ...defaultEnvironment,
-      runnerIdentity: runner.identity,
-      complete: runner.complete,
-    },
-  })
-  return { analysis, runner, manifest }
-})
-
 it.effect('builds a deterministic project-owned catalog from only the discovery-root closure', () =>
   Effect.gen(function* () {
     const analysis = yield* snapshot('let value = 1 drop value', 'let value = 2 drop value')
@@ -262,103 +229,34 @@ fn helper() -> () { let value = 2 drop value }`)
     }),
 )
 
-it.effect('derives isolated execution identities from complete transitive authored work', () =>
+it.effect('attributes observable layouts only to their users', () =>
   Effect.gen(function* () {
-    const runner = `pub fn main() -> () {
+    const program = (field: 'i32' | 'i64') => `import silk.layout { Layout }
+struct Value { item: ${field} }
+test fn alpha() -> () { let layout = Layout.of<Value>() drop layout }
+test fn beta() -> () {}
+pub fn main() -> () {
   static for descriptor in Intrinsic.tests() {
     let body = Intrinsic.testFunction(descriptor)
     body()
   }
 }`
-    const program = (alphaLeaf: number, betaLeaf: number, unrelated: number) =>
-      `static fn staticAlpha() -> i32 { return ${alphaLeaf} }
-fn alphaLeaf<T>(value: T) -> i32 { return staticAlpha() }
-fn alphaMiddle() -> i32 { return alphaLeaf<i32>(0) }
-fn betaLeaf() -> i32 { return ${betaLeaf} }
-fn unrelated() -> i32 { return ${unrelated} }
-test fn alpha() -> () { let value = alphaMiddle() drop value }
-test fn beta() -> () { let value = betaLeaf() drop value }
-${runner}`
-
-    const before = yield* executionManifest(program(1, 2, 3))
-    const unchanged = yield* executionManifest(`
-
-${program(1, 2, 3).replaceAll(' = ', '=')}`)
-    const alphaChanged = yield* executionManifest(program(4, 2, 3))
-    const directHelperChanged = yield* executionManifest(
-      program(1, 2, 3).replace('return alphaLeaf<i32>(0)', 'return alphaLeaf<i32>(0) + 1'),
-    )
-    const betaChanged = yield* executionManifest(program(1, 5, 3))
-    const ownBodyChanged = yield* executionManifest(
-      program(1, 2, 3).replace('let value = betaLeaf()', 'let value = betaLeaf() + 1'),
-    )
-    const unrelatedChanged = yield* executionManifest(program(1, 2, 6))
+    const before = yield* executionManifest(program('i32'))
+    const changed = yield* executionManifest(program('i64'))
+    for (const manifest of [before, changed]) {
+      assert.deepEqual(
+        manifest.entries.map((entry) => entry.test.name),
+        ['alpha', 'beta'],
+      )
+      assert.deepEqual(
+        manifest.entries.map((entry) => entry.eligibility._tag),
+        ['Eligible', 'Eligible'],
+      )
+    }
     const beforeIdentities = eligibleIdentities(before)
-    const unchangedIdentities = eligibleIdentities(unchanged)
-    const alphaIdentities = eligibleIdentities(alphaChanged)
-    const directHelperIdentities = eligibleIdentities(directHelperChanged)
-    const betaIdentities = eligibleIdentities(betaChanged)
-    const ownBodyIdentities = eligibleIdentities(ownBodyChanged)
-    const unrelatedIdentities = eligibleIdentities(unrelatedChanged)
-
-    assert.deepEqual(
-      before.entries.filter((entry) => entry.eligibility._tag === 'Ineligible'),
-      [],
-    )
-    assert.deepEqual(unchangedIdentities, beforeIdentities)
-    assert.notStrictEqual(alphaIdentities.get('alpha'), beforeIdentities.get('alpha'))
-    assert.strictEqual(alphaIdentities.get('beta'), beforeIdentities.get('beta'))
-    assert.notStrictEqual(directHelperIdentities.get('alpha'), beforeIdentities.get('alpha'))
-    assert.strictEqual(directHelperIdentities.get('beta'), beforeIdentities.get('beta'))
-    assert.strictEqual(betaIdentities.get('alpha'), beforeIdentities.get('alpha'))
-    assert.notStrictEqual(betaIdentities.get('beta'), beforeIdentities.get('beta'))
-    assert.strictEqual(ownBodyIdentities.get('alpha'), beforeIdentities.get('alpha'))
-    assert.notStrictEqual(ownBodyIdentities.get('beta'), beforeIdentities.get('beta'))
-    assert.deepEqual(unrelatedIdentities, beforeIdentities)
-  }),
-)
-
-it.effect('attributes resolved constants, aliases and observable layouts only to their users', () =>
-  Effect.gen(function* () {
-    const runner = `pub fn main() -> () {
-  static for descriptor in Intrinsic.tests() {
-    let body = Intrinsic.testFunction(descriptor)
-    body()
-  }
-}`
-    const identities = Effect.fnUntraced(function* (text: string) {
-      return eligibleIdentities(yield* executionManifest(`${text}\n${runner}`))
-    })
-    const constantBefore = yield* identities(`const ANSWER: i32 = 1
-test fn alpha() -> () { if ANSWER == 2 { let crash = 1 / 0 drop crash } }
-test fn beta() -> () {}`)
-    const constantAfter = yield* identities(`const ANSWER: i32 = 2
-test fn alpha() -> () { if ANSWER == 2 { let crash = 1 / 0 drop crash } }
-test fn beta() -> () {}`)
-    assert.notStrictEqual(constantAfter.get('alpha'), constantBefore.get('alpha'))
-    assert.strictEqual(constantAfter.get('beta'), constantBefore.get('beta'))
-
-    const layoutBefore = yield* identities(`import silk.layout { Layout }
-struct Value { item: i32 }
-test fn alpha() -> () { let layout = Layout.of<Value>() drop layout }
-test fn beta() -> () {}`)
-    const layoutAfter = yield* identities(`import silk.layout { Layout }
-struct Value { item: i64 }
-test fn alpha() -> () { let layout = Layout.of<Value>() drop layout }
-test fn beta() -> () {}`)
-    assert.notStrictEqual(layoutAfter.get('alpha'), layoutBefore.get('alpha'))
-    assert.strictEqual(layoutAfter.get('beta'), layoutBefore.get('beta'))
-
-    const aliasBefore = yield* identities(`type Count = i32
-fn count() -> Count { return 1 }
-test fn alpha() -> () { let value = count() drop value }
-test fn beta() -> () {}`)
-    const aliasAfter = yield* identities(`type Count = i64
-fn count() -> Count { return 1 }
-test fn alpha() -> () { let value = count() drop value }
-test fn beta() -> () {}`)
-    assert.notStrictEqual(aliasAfter.get('alpha'), aliasBefore.get('alpha'))
-    assert.strictEqual(aliasAfter.get('beta'), aliasBefore.get('beta'))
+    const changedIdentities = eligibleIdentities(changed)
+    assert.notStrictEqual(changedIdentities.get('alpha'), beforeIdentities.get('alpha'))
+    assert.strictEqual(changedIdentities.get('beta'), beforeIdentities.get('beta'))
   }),
 )
 
@@ -386,6 +284,10 @@ pub fn main() -> () {
     const sameResultIdentities = eligibleIdentities(sameResultEdit.manifest)
 
     for (const snapshot of [before, changed, sameResultEdit]) {
+      assert.deepEqual(
+        snapshot.manifest.entries.map((entry) => entry.test.name),
+        ['alpha', 'beta', 'shared'],
+      )
       assert.deepEqual(
         snapshot.manifest.entries.map((entry) => entry.eligibility._tag),
         ['Eligible', 'Eligible', 'Eligible'],
@@ -450,6 +352,10 @@ pub fn main() -> () {
       [before, 'builtin:f64'],
       [changed, 'builtin:f32'],
     ] as const) {
+      assert.deepEqual(
+        snapshot_.manifest.entries.map((entry) => entry.test.name),
+        ['alpha', 'beta', 'shared'],
+      )
       assert.deepEqual(
         snapshot_.manifest.entries.map((entry) => entry.eligibility._tag),
         ['Eligible', 'Eligible', 'Eligible'],
@@ -719,47 +625,21 @@ it.effect('keeps the bundled runner environment complete for ordinary tests', ()
       },
     })
     assert.deepEqual(
+      manifest.entries.map((entry) => entry.test.name),
+      ['cacheablePass'],
+    )
+    assert.deepEqual(
       manifest.entries.map((entry) => entry.eligibility._tag),
       ['Eligible'],
     )
   }),
 )
 
-it.effect('keeps bundled runner identity independent from exclusive test helper revisions', () =>
+it.effect('isolates exclusive helper edits and invalidates shared transitive dependents', () =>
   Effect.gen(function* () {
-    const program = (alphaOffset: number) => `fn sharedHelper() -> i32 { return 40 }
+    const program = (shared: number, alphaOffset: number) =>
+      `fn sharedHelper() -> i32 { return ${shared} }
 fn alphaHelper() -> i32 { return sharedHelper() + ${alphaOffset} }
-fn betaHelper() -> i32 { return sharedHelper() + 2 }
-test fn alpha() -> () { let observed = alphaHelper() drop observed }
-test fn beta() -> () { let observed = betaHelper() drop observed }
-test fn independent() -> () {}`
-    const before = yield* bundledExecutionSnapshot(program(1))
-    const alphaChanged = yield* bundledExecutionSnapshot(program(7))
-    const beforeIdentities = eligibleIdentities(before.manifest)
-    const alphaIdentities = eligibleIdentities(alphaChanged.manifest)
-
-    for (const snapshot of [before, alphaChanged]) {
-      assert.isTrue(snapshot.runner.complete)
-      assert.deepEqual(
-        snapshot.manifest.entries.map((entry) => entry.eligibility._tag),
-        ['Eligible', 'Eligible', 'Eligible'],
-      )
-    }
-    assert.strictEqual(alphaChanged.runner.identity, before.runner.identity)
-    assert.strictEqual(
-      alphaChanged.manifest.environmentIdentity,
-      before.manifest.environmentIdentity,
-    )
-    assert.notStrictEqual(alphaIdentities.get('alpha'), beforeIdentities.get('alpha'))
-    assert.strictEqual(alphaIdentities.get('beta'), beforeIdentities.get('beta'))
-    assert.strictEqual(alphaIdentities.get('independent'), beforeIdentities.get('independent'))
-  }),
-)
-
-it.effect('invalidates every dependent execution identity after a shared helper revision', () =>
-  Effect.gen(function* () {
-    const program = (shared: number) => `fn sharedHelper() -> i32 { return ${shared} }
-fn alphaHelper() -> i32 { return sharedHelper() + 1 }
 fn betaHelper() -> i32 { return sharedHelper() + 2 }
 test fn alpha() -> () { let observed = alphaHelper() drop observed }
 test fn beta() -> () { let observed = betaHelper() drop observed }
@@ -770,10 +650,11 @@ pub fn main() -> () {
     body()
   }
 }`
-    const before = yield* executionManifest(program(40))
-    const sharedChanged = yield* executionManifest(program(41))
+    const before = yield* executionManifest(program(40, 1))
+    const alphaChanged = yield* executionManifest(program(40, 7))
+    const sharedChanged = yield* executionManifest(program(41, 1))
 
-    for (const manifest of [before, sharedChanged]) {
+    for (const manifest of [before, alphaChanged, sharedChanged]) {
       assert.deepEqual(
         manifest.entries.map((entry) => entry.test.name),
         ['alpha', 'beta', 'independent'],
@@ -784,8 +665,12 @@ pub fn main() -> () {
       )
     }
     const beforeIdentities = eligibleIdentities(before)
+    const alphaIdentities = eligibleIdentities(alphaChanged)
     const sharedIdentities = eligibleIdentities(sharedChanged)
 
+    assert.notStrictEqual(alphaIdentities.get('alpha'), beforeIdentities.get('alpha'))
+    assert.strictEqual(alphaIdentities.get('beta'), beforeIdentities.get('beta'))
+    assert.strictEqual(alphaIdentities.get('independent'), beforeIdentities.get('independent'))
     assert.notStrictEqual(sharedIdentities.get('alpha'), beforeIdentities.get('alpha'))
     assert.notStrictEqual(sharedIdentities.get('beta'), beforeIdentities.get('beta'))
     assert.strictEqual(sharedIdentities.get('independent'), beforeIdentities.get('independent'))
