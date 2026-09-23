@@ -3,9 +3,12 @@ const zeros = (count: number): string => `[${Array(count).fill(0).join(', ')}]`
 /** One native program exercises owned JSON parsing, escapes, accessors, and writer round trips. */
 export const jsonValueAcceptanceSource = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
-import silk.json_scanner { JsonError }
-import silk.json_value { Json }
+import silk.json_output { JsonOptions }
+import silk.json_scanner { JsonError, JsonReason }
+import silk.json_value { Json, Value }
+import silk.layout { Layout }
 import silk.option { Option }
+import silk.result { Result }
 import silk.slice { Slice }
 import silk.u8
 import silk.usize
@@ -53,6 +56,58 @@ effect fn roundTrip(input: &[u8]) -> bool
   return equal(serialized, Slice.view<u8>(&again.bytes, usize.ZERO, again.count))
 }
 
+effect fn rejectsDuplicate() -> bool ! OutOfMemoryError ? &mut Allocator {
+  let result = run Effect.result(Json.parse(b"{\\\"a\\\":1,\\\"\\\\u0061\\\":2}"))
+  return match move result {
+    Result<Value, JsonError | OutOfMemoryError>.Success { value: _ } => false
+    Result<Value, JsonError | OutOfMemoryError>.Failure { error } => match move error {
+      JsonError problem => {
+        let atSecondKey = match move problem.offset {
+          Option<usize>.Some { value } => value == 7
+          Option<usize>.None => false
+        }
+        return problem.reason == JsonReason.DuplicateKey && atSecondKey
+      }
+      OutOfMemoryError other => false
+    }
+  }
+}
+
+struct RejectAllocator { calls: i32, rejectAt: i32 }
+effect fn allocate(self: &mut RejectAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  let ordinal = self.calls
+  self.calls = self.calls + 1
+  if ordinal == self.rejectAt { return run Allocator.outOfMemory() }
+  let mut inner = Allocator.systemAllocatorProvider()
+  return run Allocator.allocate(move layout) |> Effect.provideMut<Allocator>(&mut inner)
+}
+impl Allocator for RejectAllocator { allocate: RejectAllocator.allocate }
+
+effect fn allocationFailures() -> bool {
+  let input = b"{\\\"outer\\\":[\\\"first\\\",{\\\"number\\\":12.5},\\\"last\\\"]}"
+  let mut complete = RejectAllocator { calls: 0, rejectAt: 1000000 }
+  let initial = run Effect.result(Json.parse(input) |> Effect.provideMut<Allocator>(&mut complete))
+  match move initial {
+    Result<Value, JsonError | OutOfMemoryError>.Success { value: _ } => {}
+    Result<Value, JsonError | OutOfMemoryError>.Failure { error: _ } => { return false }
+  }
+  let mut ordinal = 0
+  while ordinal < complete.calls {
+    let mut rejected = RejectAllocator { calls: 0, rejectAt: ordinal }
+    let attempted = run Effect.result(Json.parse(input) |> Effect.provideMut<Allocator>(&mut rejected))
+    match move attempted {
+      Result<Value, JsonError | OutOfMemoryError>.Success { value: _ } => { return false }
+      Result<Value, JsonError | OutOfMemoryError>.Failure { error } => match move error {
+        OutOfMemoryError out => {}
+        JsonError problem => { return false }
+      }
+    }
+    if rejected.calls != ordinal + 1 { return false }
+    ordinal = ordinal + 1
+  }
+  return true
+}
+
 effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let source = b"{\\\"id\\\":42,\\\"name\\\":\\\"Silk\\\",\\\"music\\\":\\\"\\\\uD834\\\\uDD1E\\\",\\\"list\\\":[null,true,false,1.25e+2]}"
@@ -74,6 +129,12 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   if !(run roundTrip(b"[]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 10 }
   if !(run roundTrip(b"{}") |> Effect.provideMut<Allocator>(&mut allocator)) { return 11 }
   if !(run roundTrip(b"[\\\"\\\\n\\\",{\\\"x\\\":[0,1]}]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 12 }
+  if !(run rejectsDuplicate() |> Effect.provideMut<Allocator>(&mut allocator)) { return 13 }
+  if !(run allocationFailures()) { return 14 }
+  let options = JsonOptions.indented(2)
+  let mut indented = capture()
+  run Json.writeWith(&document, &options) |> Effect.provideMut<Writer>(&mut indented)
+  if indented.count <= source.length { return 15 }
   return 0
 }
 
