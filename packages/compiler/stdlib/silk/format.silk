@@ -4,12 +4,15 @@
 //!
 //! Use [`display`] for one value. Use [`format`] for a static template and a borrowed argument
 //! pack. Use [`displayWith`] when presentation needs explicit options. Integer `parse` operations
-//! are the allocation-free inverse of their default presentation.
+//! and [`f64Value`]/[`f32Value`] are allocation-free inverses of their default presentation.
 //!
 //! # Details
 //!
 //! A [`Formatter`] carries presentation policy while the ambient [`Writer`] owns byte transport.
-//! Formatter and the shipped integer presentations do not allocate an intermediate `String`.
+//! Formatter and the shipped numeric presentations do not allocate an intermediate `String`.
+//! Finite floats use the shortest decimal significand that parses back to identical IEEE bits.
+//! Nonfinite floats display as `NaN` or `Infinity`; formats requiring finite values must check
+//! with `f64.isFinite` or `f32.isFinite` before display.
 //! Width counts Unicode scalars rather than UTF-8 bytes or terminal cells. A Writer failure
 //! preserves any prefix that the provider accepted. Formatter does not roll output back.
 //! Template parsing, field selection, and `Display` selection occur during compilation.

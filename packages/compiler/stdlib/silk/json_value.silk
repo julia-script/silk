@@ -7,7 +7,7 @@
 //!
 //! # Details
 //! Arrays and objects retain source order. Numbers retain valid source spelling and decode into
-//! integers only when accessed. String escapes are decoded into owned UTF-8 storage. A failed
+//! integers or floats only when accessed. String escapes are decoded into owned UTF-8 storage. A failed
 //! parse releases every partially built value.
 //!
 //! # Gotchas
@@ -37,6 +37,8 @@
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.box { Box }
 import silk.bytes { Bytes }
+import silk.f32
+import silk.f64
 import silk.format { Format, ParseError }
 import silk.json_output { JsonOptions, JsonOutput }
 import silk.json_scanner { JsonError, JsonReason, JsonScanner, JsonSpan, JsonToken }
@@ -201,13 +203,16 @@ impl Json {
     }
   }
 
-  /// Decodes a number into `f64`, returning `None` for absence or invalid text.
+  /// Decodes a finite number into `f64`, returning `None` for absence or overflow.
   pub fn asF64(self: Option<&Value>) -> Option<f64> {
     return match move self {
       Option<&Value>.None => Option.none<f64>()
       Option<&Value>.Some { value } => match &value.* {
         Value.Number { text } => match move Format.f64Value(String.view(&text)) {
-          Result<f64, ParseError>.Success { value: parsed } => Option.some<f64>(parsed)
+          Result<f64, ParseError>.Success { value: parsed } => {
+            if !f64.isFinite(parsed) { return Option.none<f64>() }
+            return Option.some<f64>(parsed)
+          }
           Result<f64, ParseError>.Failure { error: _ } => Option.none<f64>()
         }
         _ => Option.none<f64>()
@@ -215,13 +220,16 @@ impl Json {
     }
   }
 
-  /// Decodes a number into `f32`, returning `None` for absence or invalid text.
+  /// Decodes a finite number into `f32`, returning `None` for absence or overflow.
   pub fn asF32(self: Option<&Value>) -> Option<f32> {
     return match move self {
       Option<&Value>.None => Option.none<f32>()
       Option<&Value>.Some { value } => match &value.* {
         Value.Number { text } => match move Format.f32Value(String.view(&text)) {
-          Result<f32, ParseError>.Success { value: parsed } => Option.some<f32>(parsed)
+          Result<f32, ParseError>.Success { value: parsed } => {
+            if !f32.isFinite(parsed) { return Option.none<f32>() }
+            return Option.some<f32>(parsed)
+          }
           Result<f32, ParseError>.Failure { error: _ } => Option.none<f32>()
         }
         _ => Option.none<f32>()

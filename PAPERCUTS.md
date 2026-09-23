@@ -120,3 +120,7 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
 - 2026-09-23 · Native acceptance reached `ArtifactCache.set` but failed with `EPERM` because its
   default cache writes under `~/.cache`, outside this worktree's writable sandbox · Set
   `SILK_NATIVE_CACHE_DIR` to a dedicated directory under `/private/tmp` for local tests · compiler
+- 2026-09-23 · A focused native test reported an ownership error at a source offset that did not
+  match the current `format.silk`; the compiler loaded an older embedded copy from
+  `Stdlib.generated.ts` · Run `node scripts/generate-stdlib.mjs` in `packages/compiler` after
+  editing stdlib Silk before interpreting diagnostic offsets or runtime results · compiler
