@@ -108,12 +108,29 @@ effect fn allocationFailures() -> bool {
   return true
 }
 
+effect fn rejectsDepth(document: &Value) -> bool {
+  let options = JsonOptions { indent: 0, depth: 0, depthLimit: 0 }
+  let mut output = capture()
+  let result = run Effect.result(Json.writeWith(document, &options) |> Effect.provideMut<Writer>(&mut output))
+  return match move result {
+    Result<(), JsonError | WriterError>.Success { value: _ } => false
+    Result<(), JsonError | WriterError>.Failure { error } => match move error {
+      JsonError problem => problem.reason == JsonReason.DepthExceeded && output.count == 0
+      WriterError problem => false
+    }
+  }
+}
+
 effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let source = b"{\\\"id\\\":42,\\\"name\\\":\\\"Silk\\\",\\\"music\\\":\\\"\\\\uD834\\\\uDD1E\\\",\\\"list\\\":[null,true,false,1.25e+2]}"
   let document = run Json.parse(source) |> Effect.provideMut<Allocator>(&mut allocator)
   let id = Json.field(&document, "id") |> Json.asI32 |> Option.unwrapOr<i32>(0)
   if id != 42 { return 1 }
+  let signed = Json.field(&document, "id") |> Json.asI64 |> Option.unwrapOr<i64>(0)
+  if signed != 42 { return 16 }
+  let unsigned = Json.field(&document, "id") |> Json.asU64 |> Option.unwrapOr<u64>(0)
+  if unsigned != 42 { return 17 }
   let name = Json.field(&document, "name") |> Json.asString |> Option.unwrapOr<string>("")
   if name != "Silk" { return 2 }
   let music = Json.field(&document, "music") |> Json.asString |> Option.unwrapOr<string>("")
@@ -131,6 +148,7 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   if !(run roundTrip(b"[\\\"\\\\n\\\",{\\\"x\\\":[0,1]}]") |> Effect.provideMut<Allocator>(&mut allocator)) { return 12 }
   if !(run rejectsDuplicate() |> Effect.provideMut<Allocator>(&mut allocator)) { return 13 }
   if !(run allocationFailures()) { return 14 }
+  if !(run rejectsDepth(&document)) { return 18 }
   let options = JsonOptions.indented(2)
   let mut indented = capture()
   run Json.writeWith(&document, &options) |> Effect.provideMut<Writer>(&mut indented)

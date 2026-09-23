@@ -13,6 +13,26 @@
 //! # Gotchas
 //! A borrowed field or string cannot outlive its owning [`Value`]. JSON output can leave an
 //! accepted prefix if `Writer` fails; it does not flush the writer.
+//!
+//! # Examples
+//! ## Read an integer member
+//! ```silk
+//! import silk.allocator { Allocator, OutOfMemoryError }
+//! import silk.effect { Effect }
+//! import silk.json_scanner { JsonError }
+//! import silk.json_value { Json }
+//! import silk.option { Option }
+//!
+//! effect fn read() -> i32 ! JsonError | OutOfMemoryError {
+//!   let mut allocator = Allocator.systemAllocatorProvider()
+//!   let document = run Json.parse(b"{\"id\":42}")
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   return Json.field(&document, "id") |> Json.asI32 |> Option.unwrapOr<i32>(0)
+//! }
+//!
+//! effect fn recover(error: JsonError | OutOfMemoryError) -> i32 { return 0 }
+//! pub fn main() -> i32 { return run Effect.catchAll(read(), recover) }
+//! ```
 
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.box { Box }

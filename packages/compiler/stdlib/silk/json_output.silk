@@ -7,6 +7,17 @@
 //! # Details
 //! Each operation writes directly to `Writer`. A failed write may leave an accepted prefix; no
 //! operation flushes the provider or allocates JSON-owned storage.
+//!
+//! # Examples
+//! ## Configure two-space indentation
+//! ```silk
+//! import silk.json_output { JsonOptions }
+//!
+//! pub fn main() -> i32 {
+//!   let options = JsonOptions.indented(2)
+//!   return options.indent
+//! }
+//! ```
 
 import silk.json_scanner { JsonError, JsonReason, JsonScanner, JsonToken }
 import silk.option { Option }
