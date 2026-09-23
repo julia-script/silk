@@ -116,3 +116,7 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
 - 2026-09-23 · The codebase-memory index worker refused this worktree because another generation
   was active, so graph discovery could not start · Inspect its log, then use targeted source reads
   for the workflow and report script until indexing is available · compiler CI
+- 2026-09-23 · Focused Oxlint on script paths passed, but CI's full type-aware lint found floating
+  Node test promises and direct process environment reads · Await Node test registrations, pass
+  the GitHub summary path as an argument, and verify against full-root lint when dependencies are
+  complete · compiler CI

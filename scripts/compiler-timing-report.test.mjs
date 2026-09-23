@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -26,7 +26,7 @@ const result = (assertions, startTime = 1000, endTime = 126000) => ({
 })
 const options = { shard: 2, defaultTimeoutMs: 60_000, readSource: () => source }
 
-test('reads explicit test budgets and reports real headroom and shard totals', () => {
+await test('reads explicit test budgets and reports real headroom and shard totals', () => {
   assert.deepEqual(
     [...testBudgets(source, 60_000)],
     [
@@ -46,7 +46,7 @@ test('reads explicit test budgets and reports real headroom and shard totals', (
   assert.match(report, /extended \| 100\.0s \| 120\.0s \| 20\.0s/)
 })
 
-test('reports timed-out tests and tolerates partial valid JSON', () => {
+await test('reports timed-out tests and tolerates partial valid JSON', () => {
   const report = renderReport(
     {
       success: false,
@@ -64,15 +64,19 @@ test('reports timed-out tests and tolerates partial valid JSON', () => {
   assert.match(renderReport({ success: false }, options), /Timing JSON has no test results/)
 })
 
-test('missing and malformed artifacts keep the reporting step successful', (context) => {
+await test('missing and malformed artifacts keep the reporting step successful', (context) => {
   const directory = mkdtempSync(join(tmpdir(), 'silk-compiler-report-'))
   context.after(() => rmSync(directory, { recursive: true, force: true }))
   const script = fileURLToPath(new URL('./compiler-timing-report.mjs', import.meta.url))
-  const missing = spawnSync(process.execPath, [script, join(directory, 'missing.json'), '4'], {
-    encoding: 'utf8',
-  })
+  const summary = join(directory, 'summary.md')
+  const missing = spawnSync(
+    process.execPath,
+    [script, join(directory, 'missing.json'), '4', summary],
+    { encoding: 'utf8' },
+  )
   assert.equal(missing.status, 0, missing.stderr)
   assert.match(missing.stdout, /Timing JSON is missing/)
+  assert.match(readFileSync(summary, 'utf8'), /Timing JSON is missing/)
 
   const malformedPath = join(directory, 'partial.json')
   writeFileSync(malformedPath, '{"testResults": [')

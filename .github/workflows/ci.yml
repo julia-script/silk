@@ -236,7 +236,7 @@ jobs:
           SILK_VERIFY_CORPUS_LIMIT: ${{ github.event_name == 'pull_request' && '2' || '' }}
       - name: Report compiler shard timings
         if: always()
-        run: node scripts/compiler-timing-report.mjs packages/compiler/compiler-shard-${{ matrix.shard }}.json ${{ matrix.shard }}
+        run: node scripts/compiler-timing-report.mjs packages/compiler/compiler-shard-${{ matrix.shard }}.json ${{ matrix.shard }} "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

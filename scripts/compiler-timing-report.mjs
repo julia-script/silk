@@ -157,7 +157,7 @@ export const renderReport = (
   return lines.join('\n') + '\n'
 }
 
-export const reportArtifact = (path, shard) => {
+export const reportArtifact = (path, shard, summaryPath) => {
   let output
   if (!existsSync(path)) {
     output = `### Compiler shard ${shard} timing report\nTiming JSON is missing; inspect the Vitest output above for the original failure.\n`
@@ -169,9 +169,9 @@ export const reportArtifact = (path, shard) => {
     }
   }
   process.stdout.write(output)
-  if (process.env.GITHUB_STEP_SUMMARY) {
+  if (summaryPath) {
     try {
-      appendFileSync(process.env.GITHUB_STEP_SUMMARY, output + '\n')
+      appendFileSync(summaryPath, output + '\n')
     } catch (error) {
       process.stderr.write(
         `Could not write timing summary: ${error instanceof Error ? error.message : String(error)}\n`,
@@ -181,5 +181,5 @@ export const reportArtifact = (path, shard) => {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  reportArtifact(process.argv[2], process.argv[3] ?? '?')
+  reportArtifact(process.argv[2], process.argv[3] ?? '?', process.argv[4])
 }

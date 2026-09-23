@@ -11,7 +11,7 @@ const baseline = JSON.parse(
   readFileSync(new URL('./compiler-shard-timings.json', import.meta.url), 'utf8'),
 )
 
-test('the CI assignment covers every eligible compiler file once, including a new file', () => {
+await test('the CI assignment covers every eligible compiler file once, including a new file', () => {
   const files = discoverTests()
   const added = 'test/NewCompilerFeature.test.ts'
   const { shards, unmeasured } = assignTests([...files, added], baseline.timings)
@@ -25,7 +25,7 @@ test('the CI assignment covers every eligible compiler file once, including a ne
   assert.ok(shards.every((shard) => shard.files.length > 0))
 })
 
-test('measured-cost assignment is stable and balances the reviewed baseline', () => {
+await test('measured-cost assignment is stable and balances the reviewed baseline', () => {
   const files = discoverTests()
   const first = assignTests(files, baseline.timings)
   const reversed = assignTests([...files].reverse(), baseline.timings)
@@ -35,7 +35,7 @@ test('measured-cost assignment is stable and balances the reviewed baseline', ()
   assert.ok(Math.max(...totals) - Math.min(...totals) < 1_000)
 })
 
-test('Vitest selects same-stem test files on only their assigned shards', (context) => {
+await test('Vitest selects same-stem test files on only their assigned shards', (context) => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'silk-compiler-shards-')))
   context.after(() => rmSync(directory, { recursive: true, force: true }))
   mkdirSync(join(directory, 'test'))
