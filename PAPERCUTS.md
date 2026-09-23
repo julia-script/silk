@@ -109,3 +109,7 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 cover bool` plus a parse error on each arm: `true` and `false` are not patterns, so the arms read
   as binding identifiers · Use an `if` with a `mut` local; `match` is for unions and enums only ·
   compiler
+- 2026-09-23 · A filtered `pnpm exec vitest list` probe unexpectedly started recreating root
+  `node_modules`, then registry DNS failures left `.bin` missing · Stop the install, move the
+  incomplete directory aside, link the prepared main checkout's `node_modules`, and invoke its
+  binaries directly for focused local checks · compiler CI
