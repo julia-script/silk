@@ -376,16 +376,23 @@ const executionEncoding = Effect.fnUntraced(function* (
     )
   }
 
-  const typeEncodings = new Map<string, string>()
+  const semanticTypeEncodings = new Map<string, string>()
+  const nominalTypeEncodings = new Map<string, string>()
+  const addSemanticTypeEncoding = (type: Type.Type): void => {
+    const key = Type.key(type)
+    semanticTypeEncodings.set(key, Canonical.record('SemanticType', [key]))
+  }
   const pending = [...types.values()]
   while (pending.length > 0) {
     const type = pending.pop()
     if (type === undefined) continue
+    addSemanticTypeEncoding(type)
     for (const nominal of Type.nominalTypes(type)) {
       const key = Type.key(nominal)
-      if (typeEncodings.has(key)) continue
+      addSemanticTypeEncoding(nominal)
+      if (nominalTypeEncodings.has(key)) continue
       if (Type.isIntrinsicNominal(nominal) || Type.equals(nominal, Type.unit)) {
-        typeEncodings.set(key, Canonical.record('SealedType', [key]))
+        nominalTypeEncodings.set(key, Canonical.record('SealedType', [key]))
         continue
       }
       const declaration: DeclarationFacts.CanonicalId = {
@@ -404,7 +411,7 @@ const executionEncoding = Effect.fnUntraced(function* (
           reason: 'MissingTypeDependency',
           declaration,
         }
-      typeEncodings.set(
+      nominalTypeEncodings.set(
         key,
         Canonical.record('ResolvedType', [
           declarationIdentity(declaration),
@@ -419,7 +426,7 @@ const executionEncoding = Effect.fnUntraced(function* (
 
   return {
     _tag: 'Complete',
-    encoding: Canonical.record('ExecutionClosure.v2', [
+    encoding: Canonical.record('ExecutionClosure.v3', [
       Canonical.array(
         closure.instances.map((instance) =>
           instanceEncoding(instance, authored.get(Instances.keyText(instance.key)) ?? ''),
@@ -444,7 +451,8 @@ const executionEncoding = Effect.fnUntraced(function* (
       ),
       Canonical.array(closure.residualBodies.map(residualEncoding)),
       Canonical.array(constantEncodings),
-      Canonical.array([...typeEncodings.values()].sort(Canonical.compare)),
+      Canonical.array([...semanticTypeEncodings.values()].sort(Canonical.compare)),
+      Canonical.array([...nominalTypeEncodings.values()].sort(Canonical.compare)),
     ]),
   }
 })

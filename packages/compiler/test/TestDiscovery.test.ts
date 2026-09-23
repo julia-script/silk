@@ -10,6 +10,7 @@ import * as SourceOrigin from '../src/SourceOrigin.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as TestExecution from '../src/TestExecution.js'
 import * as Tir from '../src/Tir.js'
+import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
@@ -389,6 +390,110 @@ pub fn main() -> () {
   }),
 )
 
+it.effect('retains resolved scalar types for shared memoized static helpers', () =>
+  Effect.gen(function* () {
+    const program = (number: 'f32' | 'f64') => `type Number = ${number}
+static fn leaf() -> bool {
+  let value: Number = 16777216.0
+  return value + 1.0 == value
+}
+test fn alpha() -> () {
+  if leaf() { let crash = 1 / 0 drop crash }
+}
+test fn shared() -> () { let rounded = leaf() drop rounded }
+test fn beta() -> () {}
+pub fn main() -> () {
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`
+    const before = yield* executionSnapshot(program('f64'))
+    const changed = yield* executionSnapshot(program('f32'))
+    const beforeIdentities = eligibleIdentities(before.manifest)
+    const changedIdentities = eligibleIdentities(changed.manifest)
+
+    for (const [snapshot_, type] of [
+      [before, 'builtin:f64'],
+      [changed, 'builtin:f32'],
+    ] as const) {
+      assert.deepEqual(
+        snapshot_.manifest.entries.map((entry) => entry.eligibility._tag),
+        ['Eligible', 'Eligible', 'Eligible'],
+      )
+      const dependencies = new Map(
+        Analysis.instancesOf(snapshot_.analysis).residualBodies.flatMap((body) =>
+          body.declaration.module === 'Cases'
+            ? body.dependencies
+                .filter((dependency) => dependency.declaration.name === 'leaf')
+                .map((dependency) => [body.declaration.name, dependency] as const)
+            : [],
+        ),
+      )
+      const alpha = dependencies.get('alpha')
+      const shared = dependencies.get('shared')
+      assert.isDefined(alpha)
+      assert.isDefined(shared)
+      if (alpha === undefined || shared === undefined)
+        return unreachable('expected shared static helper dependencies')
+      assert.strictEqual(alpha.application, shared.application)
+      for (const dependency of [alpha, shared]) {
+        assert.include(dependency.resolvedTypes.map(Type.key), 'builtin:bool')
+        assert.include(dependency.resolvedTypes.map(Type.key), type)
+      }
+    }
+
+    for (const name of ['alpha', 'shared'])
+      assert.notStrictEqual(changedIdentities.get(name), beforeIdentities.get(name))
+    assert.strictEqual(changedIdentities.get('beta'), beforeIdentities.get('beta'))
+  }),
+)
+
+it.effect('projects non-nominal composite types into static execution identities', () =>
+  Effect.gen(function* () {
+    const program = (values: '[i32; 0]' | '[[i32; 1]; 0]') => `type Values = ${values}
+static fn leaf() -> bool {
+  let values: Values = []
+  drop values
+  return false
+}
+test fn alpha() -> () {
+  if leaf() { let crash = 1 / 0 drop crash }
+}
+test fn beta() -> () {}
+pub fn main() -> () {
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`
+    const before = yield* executionSnapshot(program('[i32; 0]'))
+    const changed = yield* executionSnapshot(program('[[i32; 1]; 0]'))
+    const beforeIdentities = eligibleIdentities(before.manifest)
+    const changedIdentities = eligibleIdentities(changed.manifest)
+
+    for (const [snapshot_, type] of [
+      [before, 'array:0<builtin:i32>'],
+      [changed, 'array:0<array:1<builtin:i32>>'],
+    ] as const) {
+      assert.deepEqual(
+        snapshot_.manifest.entries.map((entry) => entry.eligibility._tag),
+        ['Eligible', 'Eligible'],
+      )
+      const dependency = Analysis.instancesOf(snapshot_.analysis)
+        .residualBodies.find(
+          (body) => body.declaration.module === 'Cases' && body.declaration.name === 'alpha',
+        )
+        ?.dependencies.find((candidate) => candidate.declaration.name === 'leaf')
+      assert.isDefined(dependency)
+      assert.include(dependency?.resolvedTypes.map(Type.key) ?? [], type)
+    }
+
+    assert.notStrictEqual(changedIdentities.get('alpha'), beforeIdentities.get('alpha'))
+    assert.strictEqual(changedIdentities.get('beta'), beforeIdentities.get('beta'))
+  }),
+)
+
 it.effect('retains folded constant provenance in custom runner work', () =>
   Effect.gen(function* () {
     const program = (initializer: string) => `const ANSWER: i32 = ${initializer}
@@ -438,6 +543,84 @@ pub fn main() -> () {
     assert.deepEqual(runnerDependency?.resolvedConstants, [
       { _tag: 'CanonicalDeclarationId', module: 'Cases', name: 'ANSWER' },
     ])
+  }),
+)
+
+it.effect('propagates custom runner resolved types into effective test identities', () =>
+  Effect.gen(function* () {
+    const program = (number: 'f32' | 'f64') => `type Number = ${number}
+static fn leaf() -> bool {
+  let value: Number = 16777216.0
+  return value + 1.0 == value
+}
+test fn alpha() -> () {}
+test fn beta() -> () {}
+pub fn main() -> () {
+  if leaf() { let crash = 1 / 0 drop crash }
+  static for descriptor in Intrinsic.tests() {
+    let body = Intrinsic.testFunction(descriptor)
+    body()
+  }
+}`
+    const before = yield* executionSnapshot(program('f64'))
+    const changed = yield* executionSnapshot(program('f32'))
+    const runnerOf = Effect.fnUntraced(function* (snapshot_: typeof before) {
+      const catalog = snapshot_.analysis.testCatalog
+      if (catalog === undefined) return unreachable('expected test catalog')
+      return yield* TestExecution.runnerIdentity(
+        Analysis.instancesOf(snapshot_.analysis),
+        snapshot_.analysis.results,
+        catalog,
+      )
+    })
+    const effectiveManifest = Effect.fnUntraced(function* (
+      snapshot_: typeof before,
+      runner: { readonly identity: string; readonly complete: boolean },
+    ) {
+      const catalog = snapshot_.analysis.testCatalog
+      if (catalog === undefined) return unreachable('expected test catalog')
+      return yield* TestExecution.make({
+        catalog,
+        discovery: Analysis.instancesOf(snapshot_.analysis),
+        results: snapshot_.analysis.results,
+        environment: {
+          ...defaultEnvironment,
+          runnerIdentity: runner.identity,
+          complete: runner.complete,
+        },
+      })
+    })
+    const beforeRunner = yield* runnerOf(before)
+    const changedRunner = yield* runnerOf(changed)
+    const beforeEffective = yield* effectiveManifest(before, beforeRunner)
+    const changedEffective = yield* effectiveManifest(changed, changedRunner)
+
+    assert.isTrue(beforeRunner.complete)
+    assert.isTrue(changedRunner.complete)
+    assert.notStrictEqual(changedRunner.identity, beforeRunner.identity)
+    assert.deepEqual(
+      beforeEffective.entries.map((entry) => entry.eligibility._tag),
+      ['Eligible', 'Eligible'],
+    )
+    assert.deepEqual(
+      changedEffective.entries.map((entry) => entry.eligibility._tag),
+      ['Eligible', 'Eligible'],
+    )
+    for (const [name, identity] of eligibleIdentities(beforeEffective))
+      assert.notStrictEqual(eligibleIdentities(changedEffective).get(name), identity)
+
+    const beforeDependency = Analysis.instancesOf(before.analysis)
+      .residualBodies.find(
+        (body) => body.declaration.module === 'Cases' && body.declaration.name === 'main',
+      )
+      ?.dependencies.find((dependency) => dependency.declaration.name === 'leaf')
+    const changedDependency = Analysis.instancesOf(changed.analysis)
+      .residualBodies.find(
+        (body) => body.declaration.module === 'Cases' && body.declaration.name === 'main',
+      )
+      ?.dependencies.find((dependency) => dependency.declaration.name === 'leaf')
+    assert.include(beforeDependency?.resolvedTypes.map(Type.key) ?? [], 'builtin:f64')
+    assert.include(changedDependency?.resolvedTypes.map(Type.key) ?? [], 'builtin:f32')
   }),
 )
 
