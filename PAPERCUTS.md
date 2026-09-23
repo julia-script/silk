@@ -104,3 +104,10 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 cover bool` plus a parse error on each arm: `true` and `false` are not patterns, so the arms read
   as binding identifiers · Use an `if` with a `mut` local; `match` is for unions and enums only ·
   compiler
+- 2026-09-23 · Delegating a Codex agent with a model the backend does not serve returns `ok: true`
+  and fails only after the agent starts, with `invalid params: Could not apply Codex model
+  '<slug>'`; an installed CLI older than the backend's expected client version
+  (`@openai/codex@0.1.2505172129` vs `client_version 0.153.4`) refuses newly released slugs like
+  `gpt-6-sol` while older ones work · Check the served slugs in `~/.codex/models_cache.json` before
+  delegating, pass effort as the separate `reasoningEffort` argument (`sol-high` is not a model), and
+  `npm install -g @openai/codex@latest` if a documented model is missing · repository
