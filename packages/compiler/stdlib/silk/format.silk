@@ -10,7 +10,10 @@
 //!
 //! A [`Formatter`] carries presentation policy while the ambient [`Writer`] owns byte transport.
 //! Formatter and the shipped numeric presentations do not allocate an intermediate `String`.
-//! Finite floats use the shortest decimal significand that parses back to identical IEEE bits.
+//! Finite floats use the shortest decimal significand that parses back to identical IEEE bits,
+//! preserving negative zero as `-0`. Supplying `precision` replaces that default with exactly
+//! that many fractional digits, rounded ties-to-even against the value's exact decimal
+//! expansion; a fixed presentation is therefore not required to round-trip.
 //! Nonfinite floats display as `NaN` or `Infinity`; formats requiring finite values must check
 //! with `f64.isFinite` or `f32.isFinite` before display.
 //! Width counts Unicode scalars rather than UTF-8 bytes or terminal cells. A Writer failure
@@ -164,7 +167,8 @@ impl Format {
   pub fn alternate(self: &Formatter) -> bool { return self.options.alternate }
 
   /// Reports whether width-driven integer zero padding is requested. A supplied precision disables
-  /// that padding when presenting an integer.
+  /// that padding when presenting an integer. Float presentations pad with the fill scalar and
+  /// never with zeroes.
   pub fn zeroPad(self: &Formatter) -> bool { return self.options.zeroPad }
 
   /// Reports whether a numeric precision was supplied.
@@ -175,8 +179,12 @@ impl Format {
     }
   }
 
-  /// Returns the requested minimum digit count, or zero when no numeric precision was supplied. For
-  /// integers, a supplied precision disables width-driven zero padding.
+  /// Returns the requested digit count, or zero when no numeric precision was supplied.
+  ///
+  /// # Details
+  ///
+  /// For integers this is a minimum digit count and disables width-driven zero padding. For floats
+  /// it is the exact number of fractional digits.
   pub fn precision(self: &Formatter) -> usize {
     return match &self.options.precision {
       Option<usize>.Some { value } => value
@@ -313,10 +321,12 @@ impl Format {
   ///
   /// # Details
   ///
-  /// Width counts Unicode scalars. For integers, precision disables width-driven zero padding.
-  /// Alternate form and color do not change integer output. This operation does not require
-  /// Allocator. If Writer fails, an accepted prefix remains written and the original `WriterError`
-  /// is preserved.
+  /// Width counts Unicode scalars. For integers, precision is a minimum digit count and disables
+  /// width-driven zero padding. For floats, precision is the exact number of fractional digits
+  /// rounded ties-to-even, replacing the shortest round-tripping default; float padding always
+  /// uses the fill scalar. Alternate form and color do not change numeric output. This operation
+  /// does not require Allocator. If Writer fails, an accepted prefix remains written and the
+  /// original `WriterError` is preserved.
   pub effect fn displayWith<T: Display>(
     value: &T,
     options: FormatOptions
@@ -860,8 +870,9 @@ pub enum Sign {
 ///
 /// [`defaultOptions`] uses no width, default alignment, a space fill, negative-only signs, no
 /// alternate form, no zero padding, no precision, and no color. Width counts Unicode scalars.
-/// For integers, precision disables width-driven zero padding. Alternate form and color do not
-/// change integer output.
+/// For integers, precision disables width-driven zero padding. For floats, precision selects
+/// fixed fractional digits instead of the shortest round-tripping form. Alternate form and color
+/// do not change numeric output.
 pub struct FormatOptions {
   /// Optional minimum visible width in Unicode scalars, not UTF-8 bytes or terminal cells.
   pub width: Option<usize>
@@ -877,8 +888,10 @@ pub struct FormatOptions {
   /// Whether integer width padding uses zeroes after the sign. A supplied precision disables this
   /// width-driven zero padding.
   pub zeroPad: bool
-  /// Optional minimum digit count for numeric presentations. For integers, supplying precision
-  /// disables width-driven zero padding.
+  /// Optional digit count for numeric presentations. For integers this is a minimum digit count,
+  /// and supplying it disables width-driven zero padding. For floats it is the exact number of
+  /// fractional digits, rounded ties-to-even, which replaces the shortest round-tripping default
+  /// and so may not parse back to the original bits. Nonfinite floats ignore it.
   pub precision: Option<usize>
   /// Permission, not a requirement, to emit balanced ANSI styling.
   pub color: bool
@@ -1819,6 +1832,8 @@ fn exactFloat(bits: u64, binary32: bool) -> BoundaryDecimal {
   return boundaryDecimal(coefficient, exponent2)
 }
 
+// Cost is bounded by the digit limit, not by the value: at most 34 parses for f64 and 18 for
+// f32, because each digit count tests both adjacent decimals whenever a nonzero tail remains.
 fn shortestFloat(exact: &BoundaryDecimal, bits: u64, binary32: bool) -> Option<FloatCandidate> {
   let mut limit: usize = 17
   if binary32 { limit = 9 }
@@ -1871,8 +1886,141 @@ effect fn writeExactFloat(formatter: &mut Formatter, exact: &BoundaryDecimal, ne
   return run Format.writeTrailingPadding(&mut formatter, width)
 }
 
+// Fixed-precision rendering rounds the exact terminating decimal expansion of the binary value,
+// so the decision is exact integer arithmetic rather than a second floating-point step. The
+// expansion's digit `k` carries place value `10^(order - k)` where `order` is the exponent of the
+// leading digit; `cut` is the first index dropped. A retained tie keeps the last digit even,
+// which is the same rule the parser applies, so re-parsing a tie never drifts.
+struct FixedRounding {
+  /// Index of the leftmost retained digit the carry increments; `cut` when nothing is carried.
+  carryStart: usize
+  /// True when the carry escapes the retained window, making the result one power of ten wider.
+  overflow: bool
+}
+
+fn fixedDigit(exact: &BoundaryDecimal, count: usize, index: usize) -> u8 {
+  if index < count { return boundaryDigit(exact, index) }
+  return 0
+}
+
+fn fixedRounding(exact: &BoundaryDecimal, count: usize, cut: usize) -> FixedRounding {
+  if cut >= count { return FixedRounding { carryStart: cut, overflow: false } }
+  let mut roundUp = false
+  let next = boundaryDigit(exact, cut)
+  if next > 5 { roundUp = true }
+  else if next == 5 {
+    let mut tail = cut + usize.ONE
+    while tail < count {
+      if boundaryDigit(exact, tail) != 0 { roundUp = true break }
+      tail = tail + usize.ONE
+    }
+    if !roundUp && cut > usize.ZERO {
+      roundUp = u8.bitAnd(fixedDigit(exact, count, cut - usize.ONE), 1) != 0
+    }
+  }
+  if !roundUp { return FixedRounding { carryStart: cut, overflow: false } }
+  let mut position = cut
+  while position > usize.ZERO {
+    position = position - usize.ONE
+    if fixedDigit(exact, count, position) < 9 {
+      return FixedRounding { carryStart: position, overflow: false }
+    }
+  }
+  return FixedRounding { carryStart: usize.ZERO, overflow: true }
+}
+
+fn fixedRoundedDigit(
+  exact: &BoundaryDecimal,
+  count: usize,
+  rounding: &FixedRounding,
+  cut: usize,
+  index: usize
+) -> u8 {
+  if index >= cut { return 0 }
+  if index < rounding.carryStart { return fixedDigit(exact, count, index) }
+  if rounding.overflow { return 0 }
+  if index == rounding.carryStart { return fixedDigit(exact, count, index) + 1 }
+  return 0
+}
+
+effect fn writeFixedZero(
+  formatter: &mut Formatter,
+  negative: bool,
+  precision: usize
+) -> () ! WriterError ? &mut Writer {
+  let mut width = usize.ONE + signWidth(&formatter, negative)
+  if precision > usize.ZERO { width = width + usize.ONE + precision }
+  run Format.writeLeadingPadding(&mut formatter, width)
+  run writeSign(&mut formatter, negative)
+  run Format.write(&mut formatter, b"0")
+  if precision > usize.ZERO {
+    run Format.write(&mut formatter, b".")
+    run writeZeroes(&mut formatter, precision)
+  }
+  return run Format.writeTrailingPadding(&mut formatter, width)
+}
+
+effect fn writeFixedFloat(
+  formatter: &mut Formatter,
+  exact: &BoundaryDecimal,
+  negative: bool,
+  precision: usize
+) -> () ! WriterError ? &mut Writer {
+  let count = boundaryDigits(exact)
+  // Digits left of the point in the exact expansion. Zero or less means the value is below one.
+  let integerDigits = usize.toI64(count) - exact.scale
+  // First expansion index dropped. Below one, the leading absent places consume the budget.
+  let mut cut = usize.ZERO
+  let retained = integerDigits + usize.toI64(precision)
+  if retained > 0 { cut = i64.toUsize(retained) }
+  let rounding = fixedRounding(exact, count, cut)
+  // The carry adds one integer digit only when it escapes a window that reached the point.
+  let mut wholeCount: usize = 1
+  if integerDigits > 0 { wholeCount = i64.toUsize(integerDigits) }
+  if rounding.overflow && integerDigits > 0 { wholeCount = wholeCount + usize.ONE }
+  let mut width = wholeCount + signWidth(&formatter, negative)
+  if precision > usize.ZERO { width = width + usize.ONE + precision }
+  run Format.writeLeadingPadding(&mut formatter, width)
+  run writeSign(&mut formatter, negative)
+  if integerDigits > 0 {
+    if rounding.overflow { run Format.write(&mut formatter, b"1") }
+    let mut index = usize.ZERO
+    while index < i64.toUsize(integerDigits) {
+      let byte = [fixedRoundedDigit(exact, count, &rounding, cut, index) + 48]
+      run Format.write(&mut formatter, &byte)
+      index = index + usize.ONE
+    }
+  } else if rounding.overflow {
+    run Format.write(&mut formatter, b"1")
+  } else {
+    run Format.write(&mut formatter, b"0")
+  }
+  if precision > usize.ZERO {
+    run Format.write(&mut formatter, b".")
+    let mut place = usize.ZERO
+    while place < precision {
+      let position = usize.toI64(place) + integerDigits
+      let mut digit: u8 = 0
+      if position >= 0 && !rounding.overflow {
+        digit = fixedRoundedDigit(exact, count, &rounding, cut, i64.toUsize(position))
+      }
+      let byte = [digit + 48]
+      run Format.write(&mut formatter, &byte)
+      place = place + usize.ONE
+    }
+  }
+  return run Format.writeTrailingPadding(&mut formatter, width)
+}
+
 effect fn floatDisplay(formatter: &mut Formatter, magnitude: u64, negative: bool, binary32: bool)
   -> () ! WriterError ? &mut Writer {
+  if Format.hasPrecision(&formatter) {
+    let precision = Format.precision(&formatter)
+    // Zero has no exponent to expand, so it renders its fixed places directly.
+    if magnitude == 0 { return run writeFixedZero(&mut formatter, negative, precision) }
+    let exact = exactFloat(magnitude, binary32)
+    return run writeFixedFloat(&mut formatter, &exact, negative, precision)
+  }
   let mut candidate = emptyFloatCandidate()
   if magnitude == 0 { appendFloatByte(&mut candidate, 48) }
   else {
@@ -1890,6 +2038,20 @@ effect fn floatDisplay(formatter: &mut Formatter, magnitude: u64, negative: bool
 }
 
 impl Display for f64 {
+  /// Writes the shortest decimal that parses back to these exact bits, or fixed fractional digits
+  /// when precision is supplied.
+  ///
+  /// # Details
+  ///
+  /// The default presentation is the shortest significand whose correctly rounded parse returns
+  /// the original bits, so `f64Value` recovers the value exactly. Negative zero displays as `-0`.
+  /// A supplied precision instead emits exactly that many fractional digits, rounded ties-to-even
+  /// against the value's exact decimal expansion, which is not required to round-trip.
+  ///
+  /// # Gotchas
+  ///
+  /// `NaN` and `Infinity` ignore precision and width-driven zero padding; only the sign policy
+  /// applies, and it applies to `Infinity` alone. Float padding always uses the fill scalar.
   effect fn display(self: &Self, formatter: &mut Formatter) -> () ! WriterError ? &mut Writer {
     if f64.isNaN(self.*) { return run Format.writeText(&mut formatter, "NaN") }
     if f64.isInfinite(self.*) {
@@ -1903,6 +2065,19 @@ impl Display for f64 {
 }
 
 impl Display for f32 {
+  /// Writes the shortest decimal that parses back to these exact bits, or fixed fractional digits
+  /// when precision is supplied.
+  ///
+  /// # Details
+  ///
+  /// Rounding reads the binary32 expansion, so the result can differ from the binary64 nearest to
+  /// the same literal. Negative zero displays as `-0`. A supplied precision emits exactly that
+  /// many fractional digits, rounded ties-to-even, which is not required to round-trip.
+  ///
+  /// # Gotchas
+  ///
+  /// `NaN` and `Infinity` ignore precision and width-driven zero padding; only the sign policy
+  /// applies, and it applies to `Infinity` alone. Float padding always uses the fill scalar.
   effect fn display(self: &Self, formatter: &mut Formatter) -> () ! WriterError ? &mut Writer {
     if f32.isNaN(self.*) { return run Format.writeText(&mut formatter, "NaN") }
     if f32.isInfinite(self.*) {

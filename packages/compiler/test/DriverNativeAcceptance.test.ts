@@ -32,6 +32,7 @@ import * as Linker from '../src/Linker.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { httpRedirectCorpusProgram, nativeCorpus, type NativeRun } from './support/corpus.js'
+import { checkedConversionPrograms } from './support/checkedConversions.js'
 import { base64AcceptanceSource } from './support/base64Acceptance.js'
 import { httpClientAcceptanceSource } from './support/httpClientAcceptance.js'
 import { httpClientContentAcceptanceSource } from './support/httpClientContentAcceptance.js'
@@ -337,15 +338,26 @@ const portableWasmCorpus = [
     source: networkAddressResolutionCorpusProgram.source,
     expected: 42,
   },
+  // wasm32 is the only 32-bit target in the suite, so it is where a pointer-width conversion bound
+  // fixed at 64 bits becomes observable.
+  ...checkedConversionPrograms.map((program) => ({
+    name: `${program.name}-wasm`,
+    source: program.source,
+    expected: 42,
+  })),
 ] as const
 const selectedWasmCorpus = portableWasmCorpus.filter(({ name }) =>
   selectedNativeCases.size === 0 ? runFixedTests : selectedNativeCases.has(name),
 )
 
+// A requested case may name either corpus: the wasm entries are how a 32-bit regression reaches
+// the PR lane, which sets `SILK_NATIVE_FIXED_TESTS=false`.
 it('finds every requested native corpus case', () => {
   assert.deepStrictEqual(
     [...selectedNativeCases].filter(
-      (name) => !selectedCorpus.some((program) => program.name === name),
+      (name) =>
+        !selectedCorpus.some((program) => program.name === name) &&
+        !selectedWasmCorpus.some((program) => program.name === name),
     ),
     [],
   )

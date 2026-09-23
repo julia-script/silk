@@ -200,12 +200,14 @@ pub fn checkedToIsize(value: i32) -> Option<isize> {
   return Intrinsic.i32CheckedToIsize<Option<isize>>(value, Option.some, Option.none)
 }
 
-/// Converts `value` to the nearest `f32` value, with ties to even.
+/// Converts `value` to the nearest `f32` value, with ties to even. Only magnitudes below `2^24` are
+/// exactly representable, so a larger `i32` rounds.
 pub fn toF32(value: i32) -> f32 {
   return Intrinsic.i32ToF32(value)
 }
 
-/// Converts `value` to the nearest `f64` value, with ties to even.
+/// Converts `value` exactly to `f64`. Every `i32` magnitude is below `2^53` and so is exactly
+/// representable.
 pub fn toF64(value: i32) -> f64 {
   return Intrinsic.i32ToF64(value)
 }
