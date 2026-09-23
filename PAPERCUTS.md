@@ -145,8 +145,11 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
 - 2026-09-23 · `pnpm lint` aborted before reading any source with "The `options.denyWarnings` option
   is only supported in the root config", failing `validate` CI and the docs preview; the culprit was
   a generated `.oxlintrc.json` under the git-tracked `.pnpm-store/` cache, not the root config ·
-  Gitignore and untrack `/.pnpm-store/` (`275516ad`); on any oxlint *configuration* error, search for
+  Gitignore and untrack `/.pnpm-store/` (`275516ad`); on any oxlint _configuration_ error, search for
   stray `.oxlintrc.json` under cache or vendored directories first · repository
 - 2026-09-23 · `ws.git.commit` silently restaged an ignored cache file that had just been removed
   from the index, so the commit still contained it · Use `git rm --cached` plus `git commit --amend`,
   and verify with `git status` after any commit that removes a path from the index · repository
+- 2026-09-23 · The fresh-snapshot determinism canary timed out at 30s after stdlib growth, with no
+  indication whether cost or output changed · A focused run passed all assertions in 86.4s with a
+  120s limit; its three full snapshots scale with the stdlib's 167 modules · compiler
