@@ -55,3 +55,9 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 - 2026-09-22 · Indexing the current Superset workspace with codebase-memory failed because a
   pre-coordination or unverified generation was active · Inspect the worker log to confirm the
   guard, leave the unrelated indexer alone, and use direct read-only source inspection · silk
+- 2026-09-22 · Vitest tried to bundle a temporary config beneath a read-only dependency symlink and
+  failed with `EPERM` in `node_modules/.vite-temp` · Pass `--configLoader runner` when using a
+  workspace-local temporary Vitest config · cli
+- 2026-09-22 · The compiler documentation check could not start in a focused workspace because
+  `@silklang/docgen` had neither its workspace dependencies nor a complete build · Run the check in
+  a prepared checkout with the docgen dependency graph built first · compiler, docs

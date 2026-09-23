@@ -12,9 +12,12 @@ import type * as NativeLinkInput from '@silklang/compiler/NativeLinkInput'
 import * as Project from '@silklang/compiler/Project'
 import * as SourceEntry from '@silklang/compiler/SourceEntry'
 import * as SourceFile from '@silklang/compiler/SourceFile'
+import * as Storage from '@silklang/compiler/Storage'
 import type * as Target from '@silklang/compiler/Target'
+import type * as TestExecution from '@silklang/compiler/TestExecution'
 import type * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
 import * as Console from 'effect/Console'
+import type * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
@@ -31,6 +34,8 @@ import * as Program from './Program.js'
 import type * as ProjectOptions from './ProjectOptions.js'
 import * as Report from './Report.js'
 import * as SourceSettlement from './SourceSettlement.js'
+import * as TestExchange from './TestExchange.js'
+import * as TestResult from './TestResult.js'
 
 export type ExitStatus = 0 | 1 | 2
 
@@ -41,6 +46,7 @@ export type BuildAttempt =
       readonly artifact: string
       readonly artifactKind: Driver.Compiled['artifactKind']
       readonly libraryInterface?: NativeToolchain.LibraryInterfaceArtifacts
+      readonly testManifest?: TestExecution.Manifest
     }
   | { readonly _tag: 'NotBuilt'; readonly status: 1 | 2 }
 
@@ -210,6 +216,7 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       ...(outcome.libraryInterface === undefined
         ? {}
         : { libraryInterface: outcome.libraryInterface }),
+      ...(outcome.testManifest === undefined ? {} : { testManifest: outcome.testManifest }),
     }
   }
   return { _tag: 'NotBuilt', status: outcomeStatus(outcome) }
@@ -637,7 +644,134 @@ export interface TestSelection extends ProjectSelection {
   readonly file?: string
   /** Literal ASCII case-insensitive test-name substring selected at runtime. */
   readonly filter?: string
+  /** Persistent completed-pass reuse policy; enabled when omitted. */
+  readonly cacheResults?: boolean
 }
+
+export type TestCacheEvent =
+  | {
+      readonly _tag: 'ReadSkipped'
+      readonly declarationIdentity: string
+      readonly reason: Exclude<TestResult.MissReason, { readonly _tag: 'Missing' }>
+    }
+  | {
+      readonly _tag: 'PublicationSkipped'
+      readonly declarationIdentity: string
+      readonly publication: Extract<TestResult.Publication, { readonly _tag: 'Skipped' }>
+    }
+
+export interface PreparedTestRun {
+  readonly plan: TestExchange.Plan
+  readonly events: ReadonlyArray<TestCacheEvent>
+}
+
+export interface CompletedTestRun {
+  readonly status: number
+  readonly events: ReadonlyArray<TestCacheEvent>
+}
+
+const planEntry = (entry: TestExecution.Entry): TestExchange.PlanEntry => ({
+  declarationIdentity: entry.test.identity,
+  executionIdentity: entry.eligibility._tag === 'Eligible' ? entry.eligibility.identity : undefined,
+  action: 'Execute',
+})
+
+/** Prepares one full-catalog runner plan, selecting compact mode before optional result lookup. */
+export const prepareTestRun = Effect.fn('Workflow.prepareTestRun')(function* (
+  manifest: TestExecution.Manifest,
+  cacheResults = true,
+): Effect.fn.Return<PreparedTestRun, TestExchange.ExchangeError, Crypto.Crypto | Storage.Storage> {
+  const entries = manifest.entries.map(planEntry)
+  const invocationNonce = yield* TestExchange.nonce()
+  if (!cacheResults || TestExchange.selectMode(entries) === 'Uncached') {
+    return {
+      plan: {
+        _tag: 'Uncached',
+        nonce: invocationNonce,
+        catalogDigest: yield* TestExchange.catalogDigest(
+          manifest.entries.map((entry) => entry.test.identity),
+        ),
+        discovered: BigInt(entries.length),
+      },
+      events: [],
+    }
+  }
+
+  const events: Array<TestCacheEvent> = []
+  const plannedEntries = yield* Effect.forEach(
+    entries,
+    Effect.fnUntraced(function* (entry) {
+      if (entry.executionIdentity === undefined) return entry
+      const lookup = yield* TestResult.lookup(entry.executionIdentity)
+      if (lookup._tag === 'Hit') return { ...entry, action: 'Cached' as const }
+      if (lookup.reason._tag !== 'Missing') {
+        events.push({
+          _tag: 'ReadSkipped',
+          declarationIdentity: entry.declarationIdentity,
+          reason: lookup.reason,
+        })
+      }
+      return entry
+    }),
+    { concurrency: 1 },
+  )
+  return { plan: { _tag: 'PerTest', nonce: invocationNonce, entries: plannedEntries }, events }
+})
+
+/** Publishes only executed passes from one admitted completed per-test receipt. */
+export const publishTestPasses = Effect.fn('Workflow.publishTestPasses')(function* (
+  plan: TestExchange.Plan,
+  receipt: TestExchange.Receipt,
+): Effect.fn.Return<ReadonlyArray<TestCacheEvent>, never, Crypto.Crypto | Storage.Storage> {
+  if (plan._tag !== 'PerTest' || receipt._tag !== 'PerTest') return []
+  const events: Array<TestCacheEvent> = []
+  yield* Effect.forEach(
+    receipt.entries,
+    Effect.fnUntraced(function* (entry) {
+      if (entry.disposition !== 'Passed') return
+      const ordinal = Number(entry.ordinal)
+      if (!Number.isSafeInteger(ordinal)) return
+      const planned = plan.entries.at(ordinal)
+      if (
+        planned === undefined ||
+        planned.action !== 'Execute' ||
+        planned.executionIdentity === undefined
+      )
+        return
+      const publication = yield* TestResult.publishPass(planned.executionIdentity)
+      if (publication._tag === 'Skipped') {
+        events.push({
+          _tag: 'PublicationSkipped',
+          declarationIdentity: planned.declarationIdentity,
+          publication,
+        })
+      }
+    }),
+    { concurrency: 1 },
+  )
+  return events
+})
+
+/** Finishes an admitted test run without publishing abnormal or invalid executions. */
+export const completeTestRun = Effect.fn('Workflow.completeTestRun')(function* (
+  plan: TestExchange.Plan,
+  run: Program.TestRun,
+): Effect.fn.Return<CompletedTestRun, never, Crypto.Crypto | Storage.Storage> {
+  if (run._tag !== 'Completed') return { status: run.status, events: [] }
+  return { status: run.status, events: yield* publishTestPasses(plan, run.receipt) }
+})
+
+const reportTestCacheEvent = Effect.fnUntraced(function* (event: TestCacheEvent) {
+  if (event._tag === 'ReadSkipped') {
+    yield* Console.error(
+      `Test result cache read skipped for ${event.declarationIdentity}: ${event.reason._tag}`,
+    )
+    return
+  }
+  yield* Console.error(
+    `Test result cache publication skipped for ${event.declarationIdentity}: ${event.publication.reason._tag}`,
+  )
+})
 
 /** Builds the bundled source runner for one explicit discovery root and preserves its exit status. */
 export const test = Effect.fn('Workflow.test')(function* (
@@ -646,6 +780,7 @@ export const test = Effect.fn('Workflow.test')(function* (
   number,
   never,
   | ChildProcessSpawner.ChildProcessSpawner
+  | Crypto.Crypto
   | FileSystem.FileSystem
   | HeapObservation.HeapObservation
   | Path.Path
@@ -707,13 +842,34 @@ export const test = Effect.fn('Workflow.test')(function* (
     yield* Console.error('The compiler did not produce a runnable test executable')
     return 2
   }
+  if (attempted.testManifest === undefined) {
+    yield* Console.error('The compiler did not publish a test execution manifest')
+    return 2
+  }
   const arguments_: Array<string> = []
   if (file !== undefined) arguments_.push('--file', file)
   if (options.filter !== undefined) arguments_.push('--filter', options.filter)
-  const executed = yield* Effect.result(Program.run(attempted.artifact, arguments_))
+  const resultStorage = TestResult.fileSystem(project.build.outputDirectory)
+  const prepared = yield* Effect.result(
+    prepareTestRun(attempted.testManifest, options.cacheResults ?? true).pipe(
+      Effect.provide(resultStorage),
+    ),
+  )
+  if (Result.isFailure(prepared)) {
+    yield* Console.error(prepared.failure.message)
+    return 2
+  }
+  yield* Effect.forEach(prepared.success.events, reportTestCacheEvent, { discard: true })
+  const executed = yield* Effect.result(
+    Program.runTest(attempted.artifact, prepared.success.plan, arguments_),
+  )
   if (Result.isFailure(executed)) {
     yield* Console.error(executed.failure.message)
     return 2
   }
-  return executed.success
+  const completed = yield* completeTestRun(prepared.success.plan, executed.success).pipe(
+    Effect.provide(resultStorage),
+  )
+  yield* Effect.forEach(completed.events, reportTestCacheEvent, { discard: true })
+  return completed.status
 })

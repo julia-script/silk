@@ -139,6 +139,32 @@ the project default profile wins, followed by manifest targets and explicit host
 See [compilation profiles](../../apps/docs/content/reference/compilation-profiles.md) for the TOML
 schema, binding provenance, and the matching LSP `profile`, `profileInput`, and `target` settings.
 
+## Test
+
+`silk test` compiles every test discovered from the package root, then lets the bundled source
+runner apply `--file` and `--filter` selection. Completed passing tests are reused by default through
+compiler-issued execution identities; failures always execute again.
+
+```bash
+silk test
+silk test --root src/tests.silk --file src/parser_tests.silk --filter invalid
+silk test --no-cache
+```
+
+The summary reports discovered, selected, cached, executed, passed, and failed counts. Result
+records live in `test-results-v1` beneath `<build.output-dir>/.silk-cache`. `--no-cache` bypasses all
+test-result reads and writes for that invocation without disabling compiler or native-artifact
+caches. There is no test watch option.
+
+An execution identity includes compiler-known dependencies and normalized execution configuration;
+it is broader than the local authored fingerprint exposed in test metadata. It does not track
+arbitrary runtime files, environment variables, network data, time, randomness, or side effects
+from earlier tests. Reusing a pass does not replay that test's output or other effects.
+
+Completed test runs return `0` when every selected test passes (including zero selected tests), `1`
+for typed test failures, and `2` for runner or cache-exchange operational failures. Abnormal child
+termination remains distinct.
+
 ## Format
 
 `silk format` formats every exact `.silk` file beneath the project source root. Positional files and
