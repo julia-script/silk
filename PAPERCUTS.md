@@ -142,3 +142,9 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
   packages/compiler/dist`, and rebuild with `turbo run build --force` (a plain build hits the
   cache); and verify the causal chain you are claiming rather than concluding by elimination —
   `option.silk` has no imports, so the chain I asserted could not have existed · compiler
+- 2026-09-23 · Reported a branch as "pushed at HEAD" after a co-agent committed to the same shared
+  checkout; their commit was local only, so the reported head did not contain the fix it was
+  credited with, and a conflicted PR meant no CI existed to expose the gap · In a shared checkout
+  never infer push state from your own last push: check `git rev-list --left-right --count
+  HEAD...@{u}` before reporting a head, and confirm each claimed deliverable against `origin/<branch>`
+  with `git show origin/<branch>:<path>` rather than the working tree · repository
