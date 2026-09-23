@@ -136,13 +136,17 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   let unsigned = Json.field(&document, "id") |> Json.asU64 |> Option.unwrapOr<u64>(0)
   if unsigned != 42 { return 17 }
   let nameText = Json.field(&document, "name") |> Json.asString
+  // JUL-223: direct call; piped section fails MIR InvalidCallableOperation
   let name = Option.unwrapOr<string>(move nameText, "")
   if name != "Silk" { return 2 }
   let musicText = Json.field(&document, "music") |> Json.asString
+  // JUL-223: direct call; piped section fails MIR InvalidCallableOperation
   let music = Option.unwrapOr<string>(move musicText, "")
   if music != "𝄞" { return 3 }
   let missingField = Json.field(&document, "missing")
+  // JUL-223: direct call; piped section fails MIR InvalidCallableOperation
   let missingChild = Json.fieldAt(move missingField, "child")
+  // JUL-223: direct call; piped section fails MIR InvalidCallableOperation
   let missing = Json.asI32(move missingChild)
   if Option.unwrapOr<i32>(move missing, -1) != -1 { return 4 }
   let checked = run roundTrip(source) |> Effect.provideMut<Allocator>(&mut allocator)
