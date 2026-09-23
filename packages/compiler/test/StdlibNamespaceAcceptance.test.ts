@@ -39,7 +39,7 @@ effect fn next<'scratch>(
 }
 pub fn main() -> i32 { return 0 }`
 
-const jsonSerdeProgram = `import silk.json_serde { Decode, Deserialize, Serialize }
+const jsonCodecProgram = `import silk.json_codec { Decode, Deserialize, Serialize }
 import silk.json_value { Json }
 import silk.json_array { JsonArray }
 import silk.json_object { JsonObject }
@@ -182,8 +182,8 @@ it.effect('rejects positional aggregates and visible fields without Serialize', 
 it.effect('resolves JSON conversion contracts with exact allocation boundaries', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
-      'stdlib-namespace/json-serde',
-      ascii(jsonSerdeProgram),
+      'stdlib-namespace/json-codec',
+      ascii(jsonCodecProgram),
     )
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => ({

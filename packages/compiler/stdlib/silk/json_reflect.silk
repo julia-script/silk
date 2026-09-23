@@ -15,7 +15,7 @@
 
 import silk.json_output { JsonOptions, JsonOutput }
 import silk.json_scanner { JsonError }
-import silk.json_serde { JsonSerde }
+import silk.json_codec { JsonCodec }
 import silk.reflect { Reflect, namedKind, anonymousNamedKind, labeledFieldKind }
 import silk.static_sequence { StaticSequence }
 import silk.writer { Writer, WriterError }
@@ -57,7 +57,7 @@ impl JsonReflect {
             run JsonOutput.writeString(label)
             run JsonOutput.colon(&child)
             let member = Reflect.borrowField(value, field)
-            run JsonSerde.writeOne(member, &child)
+            run JsonCodec.writeOne(member, &child)
             first = false
           }
         }

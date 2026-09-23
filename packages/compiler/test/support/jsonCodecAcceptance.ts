@@ -1,12 +1,12 @@
 /** One native program checks typed JSON conversion and fluent builder lowering. */
-export const jsonSerdeAcceptanceSource = `import silk.allocator { Allocator, OutOfMemoryError }
+export const jsonCodecAcceptanceSource = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.bytes { Bytes }
 import silk.effect { Effect }
 import silk.json_array { JsonArray }
 import silk.json_object { JsonObject }
 import silk.json_output { JsonOptions }
 import silk.json_scanner { JsonError, JsonReason, JsonScanner, JsonSpan, JsonToken }
-import silk.json_serde { Deserialize, JsonSerde, Serialize }
+import silk.json_codec { Deserialize, JsonCodec, Serialize }
 import silk.json_text { JsonText }
 import silk.json_value { Json, Value }
 import silk.option { Option }
@@ -131,13 +131,13 @@ impl Deserialize for Point {
           Option<i32>.Some { value: _ } => { fail JsonError.at(JsonReason.DuplicateKey, member.offset) }
           Option<i32>.None => {}
         }
-        x = Option.some<i32>(run JsonSerde.deserializeOne<i32>(&mut scanner.*))
+        x = Option.some<i32>(run JsonCodec.deserializeOne<i32>(&mut scanner.*))
       } else if String.view(&member.text) == "y" {
         match &y {
           Option<i32>.Some { value: _ } => { fail JsonError.at(JsonReason.DuplicateKey, member.offset) }
           Option<i32>.None => {}
         }
-        y = Option.some<i32>(run JsonSerde.deserializeOne<i32>(&mut scanner.*))
+        y = Option.some<i32>(run JsonCodec.deserializeOne<i32>(&mut scanner.*))
       } else {
         fail JsonError.at(JsonReason.UnknownField, member.offset)
       }
@@ -202,13 +202,13 @@ impl Deserialize for Segment {
           Option<Point>.Some { value: _ } => { fail JsonError.at(JsonReason.DuplicateKey, member.offset) }
           Option<Point>.None => {}
         }
-        start = Option.some<Point>(run JsonSerde.deserializeOne<Point>(&mut scanner.*))
+        start = Option.some<Point>(run JsonCodec.deserializeOne<Point>(&mut scanner.*))
       } else if String.view(&member.text) == "end" {
         match &end {
           Option<Point>.Some { value: _ } => { fail JsonError.at(JsonReason.DuplicateKey, member.offset) }
           Option<Point>.None => {}
         }
-        end = Option.some<Point>(run JsonSerde.deserializeOne<Point>(&mut scanner.*))
+        end = Option.some<Point>(run JsonCodec.deserializeOne<Point>(&mut scanner.*))
       } else {
         fail JsonError.at(JsonReason.UnknownField, member.offset)
       }

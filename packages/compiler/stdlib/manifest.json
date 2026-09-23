@@ -558,6 +558,12 @@
     "namespace": "JsonArray"
   },
   {
+    "module": "silk/json_codec",
+    "path": "silk/json_codec.silk",
+    "namespace": "JsonCodec",
+    "aliases": ["Serialize", "Decode", "Deserialize"]
+  },
+  {
     "module": "silk/json_object",
     "path": "silk/json_object.silk",
     "namespace": "JsonObject"
@@ -592,12 +598,6 @@
       "JsonSpan",
       "JsonToken"
     ]
-  },
-  {
-    "module": "silk/json_serde",
-    "path": "silk/json_serde.silk",
-    "namespace": "Serialize",
-    "aliases": ["Decode", "Deserialize"]
   },
   {
     "module": "silk/json_text",
