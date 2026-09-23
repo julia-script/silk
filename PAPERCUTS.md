@@ -114,3 +114,6 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
   starts, so an unsupported slug looks like a successful delegation · Update the ChatGPT desktop app
   (`npm install -g @openai/codex@latest` upgrades a binary Intent never invokes), and pass effort as
   the separate `reasoningEffort` argument (`sol-high` is not a model name) · repository
+- 2026-09-23 · `pnpm --filter ... exec vitest` tried to reinstall and purge the existing dependency
+  tree in a non-TTY session, aborting before a focused test could run · Invoke the already-installed
+  `node_modules/.bin/vitest` directly for focused compiler checks · compiler
