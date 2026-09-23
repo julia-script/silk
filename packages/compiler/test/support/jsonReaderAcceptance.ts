@@ -236,6 +236,40 @@ fn isArrayBegin(token: &JsonToken) -> bool {
   }
 }
 
+effect fn syntax() -> bool
+! OutOfMemoryError | BufferError
+? &mut Allocator {
+  let bytes: [u8; 4] = [91, 49, 44, 93]
+  let mut source = run transport(&bytes)
+  let mut clock = FixedClock {}
+  let mut input = run BufferedInput.make(usize.ONE)
+  let mut reader = JsonReader.make()
+  let mut scratch: [u8; 1] = [0]
+  while true {
+    let stepped = run Effect.result(JsonReader.next(
+      &mut reader, &mut input, &mut scratch, Option.none<Instant>(),
+    )
+      |> Effect.provideMut<ByteDuplex>(&mut source)
+      |> Effect.provideMut<MonotonicClock>(&mut clock))
+    match move stepped {
+      Result.Success { value } => {
+        let end = isEnd(&value.token)
+        drop value
+        if end { return false }
+      }
+      Result.Failure { error } => return match move error {
+        JsonError { reason, offset, required, available } => {
+          drop required
+          drop available
+          return reason == JsonReason.UnexpectedByte && offsetIs(move offset, 3)
+        }
+        _ => false
+      }
+    }
+  }
+  return false
+}
+
 effect fn program() -> i32
 ! OutOfMemoryError | BufferError | JsonError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -244,6 +278,8 @@ effect fn program() -> i32
   if !same { return 1 }
   let failed = run capacity() |> Effect.provideMut<Allocator>(&mut allocator)
   if !failed { return 2 }
+  let rejected = run syntax() |> Effect.provideMut<Allocator>(&mut allocator)
+  if !rejected { return 4 }
   return 0
 }
 
