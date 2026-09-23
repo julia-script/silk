@@ -2357,17 +2357,23 @@ export const cacheEntry = <A>(self: Evaluation<A>, key: string): CacheEntry<A> |
   return state === undefined || state._tag === 'Pending' ? undefined : { key, state }
 }
 
-/** Canonical target-and-application identity used only inside static-evaluation coordination. */
-export const applicationKey = (environment: TargetEnvironment, application: Application): string =>
-  Canonical.record('StaticApplication', [
-    environment.compilation.identity,
-    environment.sourceIdentity,
+/** Source-independent semantic identity of one exact specialization. */
+export const semanticApplicationKey = (application: Application): string =>
+  Canonical.record('SemanticApplication.v1', [
     application.declaration.module,
     application.declaration.name,
     Canonical.array(application.typeArguments),
     Canonical.array(application.evidence),
     Canonical.array(application.contractRow),
     Canonical.array(application.staticArguments.map(StaticValue.key)),
+  ])
+
+/** Canonical target-and-application identity used only inside static-evaluation coordination. */
+export const applicationKey = (environment: TargetEnvironment, application: Application): string =>
+  Canonical.record('StaticApplication', [
+    environment.compilation.identity,
+    environment.sourceIdentity,
+    semanticApplicationKey(application),
   ])
 
 const applicationFrame = (

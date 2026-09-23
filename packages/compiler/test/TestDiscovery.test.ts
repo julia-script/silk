@@ -150,6 +150,39 @@ const runnerExecutionIdentity = Effect.fnUntraced(function* (text: string) {
   )
 })
 
+const bundledExecutionSnapshot = Effect.fnUntraced(function* (text: string) {
+  const analysis = yield* Analysis.makeRealized({
+    root: 'silk/test_runner',
+    target: 'x86_64-unknown-linux-gnu',
+    discovery: { root: 'Cases' },
+  }).pipe(
+    Effect.provide(
+      SourceResolver.overlay([source('Cases', text)]).pipe(
+        Layer.provideMerge(SourceResolver.empty),
+      ),
+    ),
+  )
+  assert.deepEqual(Analysis.diagnostics(analysis), [])
+  const catalog = analysis.testCatalog
+  if (catalog === undefined) return unreachable('expected test catalog')
+  const runner = yield* TestExecution.runnerIdentity(
+    Analysis.instancesOf(analysis),
+    analysis.results,
+    catalog,
+  )
+  const manifest = yield* TestExecution.make({
+    catalog,
+    discovery: Analysis.instancesOf(analysis),
+    results: analysis.results,
+    environment: {
+      ...defaultEnvironment,
+      runnerIdentity: runner.identity,
+      complete: runner.complete,
+    },
+  })
+  return { analysis, runner, manifest }
+})
+
 it.effect('builds a deterministic project-owned catalog from only the discovery-root closure', () =>
   Effect.gen(function* () {
     const analysis = yield* snapshot('let value = 1 drop value', 'let value = 2 drop value')
@@ -689,6 +722,51 @@ it.effect('keeps the bundled runner environment complete for ordinary tests', ()
       manifest.entries.map((entry) => entry.eligibility._tag),
       ['Eligible'],
     )
+  }),
+)
+
+it.effect('keeps bundled runner identity independent from exclusive test helper revisions', () =>
+  Effect.gen(function* () {
+    const program = (
+      shared: number,
+      alphaOffset: number,
+    ) => `fn sharedHelper() -> i32 { return ${shared} }
+fn alphaHelper() -> i32 { return sharedHelper() + ${alphaOffset} }
+fn betaHelper() -> i32 { return sharedHelper() + 2 }
+test fn alpha() -> () { let observed = alphaHelper() drop observed }
+test fn beta() -> () { let observed = betaHelper() drop observed }
+test fn independent() -> () {}`
+    const before = yield* bundledExecutionSnapshot(program(40, 1))
+    const alphaChanged = yield* bundledExecutionSnapshot(program(40, 7))
+    const sharedChanged = yield* bundledExecutionSnapshot(program(41, 1))
+    const beforeIdentities = eligibleIdentities(before.manifest)
+    const alphaIdentities = eligibleIdentities(alphaChanged.manifest)
+    const sharedIdentities = eligibleIdentities(sharedChanged.manifest)
+
+    for (const snapshot of [before, alphaChanged, sharedChanged]) {
+      assert.isTrue(snapshot.runner.complete)
+      assert.deepEqual(
+        snapshot.manifest.entries.map((entry) => entry.eligibility._tag),
+        ['Eligible', 'Eligible', 'Eligible'],
+      )
+    }
+    assert.strictEqual(alphaChanged.runner.identity, before.runner.identity)
+    assert.strictEqual(
+      alphaChanged.manifest.environmentIdentity,
+      before.manifest.environmentIdentity,
+    )
+    assert.notStrictEqual(alphaIdentities.get('alpha'), beforeIdentities.get('alpha'))
+    assert.strictEqual(alphaIdentities.get('beta'), beforeIdentities.get('beta'))
+    assert.strictEqual(alphaIdentities.get('independent'), beforeIdentities.get('independent'))
+
+    assert.strictEqual(sharedChanged.runner.identity, before.runner.identity)
+    assert.strictEqual(
+      sharedChanged.manifest.environmentIdentity,
+      before.manifest.environmentIdentity,
+    )
+    assert.notStrictEqual(sharedIdentities.get('alpha'), beforeIdentities.get('alpha'))
+    assert.notStrictEqual(sharedIdentities.get('beta'), beforeIdentities.get('beta'))
+    assert.strictEqual(sharedIdentities.get('independent'), beforeIdentities.get('independent'))
   }),
 )
 

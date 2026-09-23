@@ -124,7 +124,12 @@ interface State {
   readonly dependencies: Map<string, string>
   readonly dependencyApplications: Map<
     string,
-    { readonly specialization: string; readonly typeArguments: ReadonlyArray<Type.GenericArgument> }
+    {
+      readonly specialization: string
+      readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+      readonly declaration: DeclarationFacts.CanonicalId
+      readonly kind: Dependency['kind']
+    }
   >
   readonly applicationProvenance: Map<
     string,
@@ -350,25 +355,6 @@ const record = (
   }
 }
 
-const canonicalFields = (value: string): ReadonlyArray<string> | undefined => {
-  const fields: string[] = []
-  let offset = 0
-  while (offset < value.length) {
-    const separator = value.indexOf(':', offset)
-    if (separator < 0) return undefined
-    const lengthText = value.slice(offset, separator)
-    if (!/^\d+$/.test(lengthText)) return undefined
-    const length = Number(lengthText)
-    if (!Number.isSafeInteger(length)) return undefined
-    const start = separator + 1
-    const end = start + length
-    if (end > value.length) return undefined
-    fields.push(value.slice(start, end))
-    offset = end
-  }
-  return fields
-}
-
 const descriptorParts = (address: string): ReadonlyArray<string> | undefined => {
   const value: unknown = JSON.parse(address)
   return Array.isArray(value) && value.every((part): part is string => typeof part === 'string')
@@ -377,21 +363,10 @@ const descriptorParts = (address: string): ReadonlyArray<string> | undefined => 
 }
 
 const dependencyOf = (self: EvaluationCoordinator, application: string): Dependency | undefined => {
-  const fields = canonicalFields(application)
-  if (fields?.at(0) !== 'StaticApplication') return undefined
-  const module = fields.at(3)
-  const encodedName = fields.at(4)
-  if (module === undefined || encodedName === undefined) return undefined
-  const predicate = encodedName.endsWith('#validation')
-  const name = predicate ? encodedName.slice(0, -'#validation'.length) : encodedName
-  const declaration = lookupDeclaration(self, {
-    _tag: 'CanonicalDeclarationId',
-    module,
-    name,
-  })
-  if (declaration === undefined || declaration.canonical._tag !== 'Canonical') return undefined
   const exact = self[stateSymbol].dependencyApplications.get(application)
   if (exact === undefined) return undefined
+  const declaration = lookupDeclaration(self, exact.declaration)
+  if (declaration === undefined || declaration.canonical._tag !== 'Canonical') return undefined
   if (declaration._tag === 'FunctionDeclaration') {
     const canonical = declaration.bodyTemplate?.canonical
     const provenance = self[stateSymbol].applicationProvenance.get(application)
@@ -421,7 +396,7 @@ const dependencyOf = (self: EvaluationCoordinator, application: string): Depende
   )
     return undefined
   let canonical: string | undefined
-  if (predicate) {
+  if (exact.kind === 'Predicate') {
     canonical =
       declaration._tag === 'PackageParameterDeclaration'
         ? declaration.predicateTemplate?.canonical
@@ -430,7 +405,7 @@ const dependencyOf = (self: EvaluationCoordinator, application: string): Depende
   return canonical === undefined
     ? undefined
     : {
-        kind: predicate ? 'Predicate' : 'Default',
+        kind: exact.kind,
         application,
         specialization: exact.specialization,
         typeArguments: exact.typeArguments,
@@ -850,15 +825,10 @@ const evaluateStaticFunction = (
   }
   const originScope = Evaluation.applicationKey(self[stateSymbol].environment, application)
   self[stateSymbol].dependencyApplications.set(originScope, {
-    specialization: Canonical.record('StaticDependency.v1', [
-      declaration.canonical.id.module,
-      declaration.canonical.id.name,
-      Canonical.array(application.typeArguments),
-      Canonical.array(application.evidence),
-      Canonical.array(application.contractRow),
-      Canonical.array(application.staticArguments.map(StaticValue.key)),
-    ]),
+    specialization: Evaluation.semanticApplicationKey(application),
     typeArguments: identity.typeArguments,
+    declaration: declaration.canonical.id,
+    kind: 'Helper',
   })
   const result = Semantic.evaluateFrom(
     self[stateSymbol].semantic,
@@ -1095,15 +1065,10 @@ function evaluateConstantValue(
   }
   const applicationIdentity = Evaluation.applicationKey(self[stateSymbol].environment, application)
   self[stateSymbol].dependencyApplications.set(applicationIdentity, {
-    specialization: Canonical.record('StaticDependency.v1', [
-      application.declaration.module,
-      application.declaration.name,
-      Canonical.array(application.typeArguments),
-      Canonical.array(application.evidence),
-      Canonical.array(application.contractRow),
-      Canonical.array(application.staticArguments.map(StaticValue.key)),
-    ]),
+    specialization: Evaluation.semanticApplicationKey(application),
     typeArguments: [],
+    declaration: declaration.canonical.id,
+    kind: predicate === undefined ? 'Default' : 'Predicate',
   })
   const result = Semantic.evaluateFrom(
     self[stateSymbol].semantic,
@@ -1520,10 +1485,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       const semantic = SemanticContext.make(input.result.authored)
       const request: Tir.ArtifactId['request'] = {
         _tag: 'Specialize',
-        application: Evaluation.applicationKey(
-          self[stateSymbol].environment,
-          evaluation.application,
-        ),
+        application: Evaluation.semanticApplicationKey(evaluation.application),
       }
       const builder = BodyBuilder.make({ owner: declaration.owner, request })
       const analyzed = analyzeFunctionBody(

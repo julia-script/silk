@@ -132,6 +132,37 @@ it.effect('keys and caches complete static applications by target and canonical 
     })
 
     const evaluation = Evaluation.make<string>(profilex8664UnknownLinuxGnu)
+    const unrelatedRevision = Evaluation.make<string>(
+      profilex8664UnknownLinuxGnu,
+      Evaluation.defaultLimits,
+      'unrelated-source-revision',
+    )
+    const request = application('render')
+    assert.notStrictEqual(
+      Evaluation.applicationKey(evaluation.environment, request),
+      Evaluation.applicationKey(unrelatedRevision.environment, request),
+    )
+    const semanticIdentity = Evaluation.semanticApplicationKey(request)
+    const semanticVariants: ReadonlyArray<Evaluation.Application> = [
+      { ...request, declaration: { ...request.declaration, name: 'other' } },
+      { ...request, typeArguments: ['i64'] },
+      { ...request, evidence: ['Clone<i32>'] },
+      { ...request, contractRow: ['result:i64'] },
+      {
+        ...request,
+        staticArguments: [
+          admitted(
+            StaticValue.admit(
+              { _tag: 'IntegerValue', type: 'i32', value: 43n },
+              { pointerBits: 64 },
+            ),
+          ),
+        ],
+      },
+    ]
+    assert.strictEqual(Evaluation.semanticApplicationKey({ ...request }), semanticIdentity)
+    for (const variant of semanticVariants)
+      assert.notStrictEqual(Evaluation.semanticApplicationKey(variant), semanticIdentity)
     let calls = 0
     const callback: Evaluation.EvaluationCallback<string> = (context) => {
       calls += 1
@@ -139,8 +170,8 @@ it.effect('keys and caches complete static applications by target and canonical 
       assert.strictEqual(context.retain(staticArgument), undefined)
       return Evaluation.complete('residual body')
     }
-    const first = Evaluation.evaluate(evaluation, application('render'), callback)
-    const second = Evaluation.evaluate(evaluation, application('render'), callback)
+    const first = Evaluation.evaluate(evaluation, request, callback)
+    const second = Evaluation.evaluate(evaluation, request, callback)
 
     assert.strictEqual(first._tag, 'Complete')
     assert.strictEqual(first.cached, false)
@@ -1420,6 +1451,21 @@ pub fn main() -> i32 { return choose(true, 42) }`),
     const second = Residualization.residualize(coordinator, application)
     assert.strictEqual(first._tag, 'ResidualBody')
     assert.strictEqual(second, first)
+    if (first._tag === 'ResidualBody') {
+      assert.strictEqual(first.artifact.request._tag, 'Specialize')
+      if (first.artifact.request._tag === 'Specialize')
+        assert.strictEqual(
+          first.artifact.request.application,
+          Evaluation.semanticApplicationKey({
+            declaration: application.declaration,
+            typeArguments: application.typeArguments.map(Type.genericArgumentKey),
+            evidence: application.evidence,
+            contractRow: application.contractRow,
+            staticArguments: application.staticArguments,
+            span: staticSpan,
+          }),
+        )
+    }
     assert.deepEqual(Residualization.counters(coordinator), {
       _tag: 'ResidualizationCounters',
       requests: 2,
