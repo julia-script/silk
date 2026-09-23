@@ -181,3 +181,10 @@ HEAD...@{u}` before reporting a head, and confirm each claimed deliverable again
   disappeared, because `.git` is a pointer file there · Resolve the Git directory with
   `git rev-parse --git-dir`, or check the state directly with `git rev-parse --verify MERGE_HEAD`
   · repository
+- 2026-09-23 · `pnpm --filter @silklang/compiler exec vitest` tried to purge `node_modules`
+  during a dependency-status check and aborted without a TTY before the focused test began · Run
+  `../../node_modules/.bin/vitest` from `packages/compiler` when dependencies are already present
+  · compiler
+- 2026-09-23 · Compiler test shards 3 and 4 each carried 57 files, yet ran 10m21s and 20m46s;
+  shard 4 timed out eight tests · File count is a poor cost proxy: keep per-test timing artifacts
+  and rebalance the shards using measured work · compiler

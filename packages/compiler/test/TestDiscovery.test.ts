@@ -227,6 +227,8 @@ fn helper() -> () { let value = 2 drop value }`)
       assert.notStrictEqual(before.testCatalog?.identity, bodyAndHelperEdit.testCatalog?.identity)
       assert.notStrictEqual(before.testCatalog?.identity, movedAndTriviaEdit.testCatalog?.identity)
     }),
+  // Four snapshots took 48.8s locally on 2026-09-23 and exceeded 60s in CI shard 4.
+  180_000,
 )
 
 it.effect('attributes observable layouts only to their users', () =>
@@ -438,9 +440,11 @@ pub fn main() -> () {
   }),
 )
 
-it.effect('retains folded constant provenance in custom runner work', () =>
-  Effect.gen(function* () {
-    const program = (initializer: string) => `const ANSWER: i32 = ${initializer}
+it.effect(
+  'retains folded constant provenance in custom runner work',
+  () =>
+    Effect.gen(function* () {
+      const program = (initializer: string) => `const ANSWER: i32 = ${initializer}
 static fn leaf() -> i32 { return ANSWER }
 test fn alpha() -> () {}
 test fn beta() -> () {}
@@ -452,42 +456,44 @@ pub fn main() -> () {
     body()
   }
 }`
-    const before = yield* executionSnapshot(program('1'))
-    const changed = yield* executionSnapshot(program('2'))
-    const sameResultEdit = yield* executionSnapshot(program('1 + 0'))
-    const runnerOf = Effect.fnUntraced(function* (snapshot: typeof before) {
-      const catalog = snapshot.analysis.testCatalog
-      if (catalog === undefined) return unreachable('expected test catalog')
-      return yield* TestExecution.runnerIdentity(
-        Analysis.instancesOf(snapshot.analysis),
-        snapshot.analysis.results,
-        catalog,
+      const before = yield* executionSnapshot(program('1'))
+      const changed = yield* executionSnapshot(program('2'))
+      const sameResultEdit = yield* executionSnapshot(program('1 + 0'))
+      const runnerOf = Effect.fnUntraced(function* (snapshot: typeof before) {
+        const catalog = snapshot.analysis.testCatalog
+        if (catalog === undefined) return unreachable('expected test catalog')
+        return yield* TestExecution.runnerIdentity(
+          Analysis.instancesOf(snapshot.analysis),
+          snapshot.analysis.results,
+          catalog,
+        )
+      })
+      const beforeRunner = yield* runnerOf(before)
+      const changedRunner = yield* runnerOf(changed)
+      const sameResultRunner = yield* runnerOf(sameResultEdit)
+      assert.isTrue(beforeRunner.complete)
+      assert.isTrue(changedRunner.complete)
+      assert.isTrue(sameResultRunner.complete)
+      assert.notStrictEqual(changedRunner.identity, beforeRunner.identity)
+      assert.notStrictEqual(sameResultRunner.identity, beforeRunner.identity)
+      assert.deepEqual(eligibleIdentities(changed.manifest), eligibleIdentities(before.manifest))
+      assert.deepEqual(
+        eligibleIdentities(sameResultEdit.manifest),
+        eligibleIdentities(before.manifest),
       )
-    })
-    const beforeRunner = yield* runnerOf(before)
-    const changedRunner = yield* runnerOf(changed)
-    const sameResultRunner = yield* runnerOf(sameResultEdit)
-    assert.isTrue(beforeRunner.complete)
-    assert.isTrue(changedRunner.complete)
-    assert.isTrue(sameResultRunner.complete)
-    assert.notStrictEqual(changedRunner.identity, beforeRunner.identity)
-    assert.notStrictEqual(sameResultRunner.identity, beforeRunner.identity)
-    assert.deepEqual(eligibleIdentities(changed.manifest), eligibleIdentities(before.manifest))
-    assert.deepEqual(
-      eligibleIdentities(sameResultEdit.manifest),
-      eligibleIdentities(before.manifest),
-    )
 
-    const runnerDependency = Analysis.instancesOf(before.analysis)
-      .residualBodies.find(
-        (body) => body.declaration.module === 'Cases' && body.declaration.name === 'main',
-      )
-      ?.dependencies.find((dependency) => dependency.declaration.name === 'leaf')
-    assert.isDefined(runnerDependency)
-    assert.deepEqual(runnerDependency?.resolvedConstants, [
-      { _tag: 'CanonicalDeclarationId', module: 'Cases', name: 'ANSWER' },
-    ])
-  }),
+      const runnerDependency = Analysis.instancesOf(before.analysis)
+        .residualBodies.find(
+          (body) => body.declaration.module === 'Cases' && body.declaration.name === 'main',
+        )
+        ?.dependencies.find((dependency) => dependency.declaration.name === 'leaf')
+      assert.isDefined(runnerDependency)
+      assert.deepEqual(runnerDependency?.resolvedConstants, [
+        { _tag: 'CanonicalDeclarationId', module: 'Cases', name: 'ANSWER' },
+      ])
+    }),
+  // Shared runner provenance took 44.7s locally on 2026-09-23 and exceeded 60s in CI shard 4.
+  180_000,
 )
 
 it.effect('propagates custom runner resolved types into effective test identities', () =>
@@ -568,9 +574,11 @@ pub fn main() -> () {
   }),
 )
 
-it.effect('keeps runner policy independent from tests while tracking custom runner work', () =>
-  Effect.gen(function* () {
-    const program = (alpha: number, runnerHelper: number, runnerBody: string) => `
+it.effect(
+  'keeps runner policy independent from tests while tracking custom runner work',
+  () =>
+    Effect.gen(function* () {
+      const program = (alpha: number, runnerHelper: number, runnerBody: string) => `
 test fn alpha() -> () { let value = ${alpha} drop value }
 test fn beta() -> () {}
 fn runnerHelper() -> i32 { return ${runnerHelper} }
@@ -582,15 +590,17 @@ pub fn main() -> () {
     body()
   }
 }`
-    const before = yield* runnerExecutionIdentity(program(1, 2, ''))
-    const alphaChanged = yield* runnerExecutionIdentity(program(3, 2, ''))
-    const helperChanged = yield* runnerExecutionIdentity(program(1, 4, ''))
-    const runnerChanged = yield* runnerExecutionIdentity(program(1, 2, '+ 1'))
-    assert.isTrue(before.complete)
-    assert.strictEqual(alphaChanged.identity, before.identity)
-    assert.notStrictEqual(helperChanged.identity, before.identity)
-    assert.notStrictEqual(runnerChanged.identity, before.identity)
-  }),
+      const before = yield* runnerExecutionIdentity(program(1, 2, ''))
+      const alphaChanged = yield* runnerExecutionIdentity(program(3, 2, ''))
+      const helperChanged = yield* runnerExecutionIdentity(program(1, 4, ''))
+      const runnerChanged = yield* runnerExecutionIdentity(program(1, 2, '+ 1'))
+      assert.isTrue(before.complete)
+      assert.strictEqual(alphaChanged.identity, before.identity)
+      assert.notStrictEqual(helperChanged.identity, before.identity)
+      assert.notStrictEqual(runnerChanged.identity, before.identity)
+    }),
+  // Four runner snapshots took 46.1s locally on 2026-09-23 and exceeded 60s in CI shard 4.
+  180_000,
 )
 
 it.effect('keeps the bundled runner environment complete for ordinary tests', () =>
@@ -640,10 +650,12 @@ it.effect('keeps the bundled runner environment complete for ordinary tests', ()
   }),
 )
 
-it.effect('isolates exclusive helper edits and invalidates shared transitive dependents', () =>
-  Effect.gen(function* () {
-    const program = (shared: number, alphaOffset: number) =>
-      `fn sharedHelper() -> i32 { return ${shared} }
+it.effect(
+  'isolates exclusive helper edits and invalidates shared transitive dependents',
+  () =>
+    Effect.gen(function* () {
+      const program = (shared: number, alphaOffset: number) =>
+        `fn sharedHelper() -> i32 { return ${shared} }
 fn alphaHelper() -> i32 { return sharedHelper() + ${alphaOffset} }
 fn betaHelper() -> i32 { return sharedHelper() + 2 }
 test fn alpha() -> () { let observed = alphaHelper() drop observed }
@@ -655,31 +667,33 @@ pub fn main() -> () {
     body()
   }
 }`
-    const before = yield* executionManifest(program(40, 1))
-    const alphaChanged = yield* executionManifest(program(40, 7))
-    const sharedChanged = yield* executionManifest(program(41, 1))
+      const before = yield* executionManifest(program(40, 1))
+      const alphaChanged = yield* executionManifest(program(40, 7))
+      const sharedChanged = yield* executionManifest(program(41, 1))
 
-    for (const manifest of [before, alphaChanged, sharedChanged]) {
-      assert.deepEqual(
-        manifest.entries.map((entry) => entry.test.name),
-        ['alpha', 'beta', 'independent'],
-      )
-      assert.deepEqual(
-        manifest.entries.map((entry) => entry.eligibility._tag),
-        ['Eligible', 'Eligible', 'Eligible'],
-      )
-    }
-    const beforeIdentities = eligibleIdentities(before)
-    const alphaIdentities = eligibleIdentities(alphaChanged)
-    const sharedIdentities = eligibleIdentities(sharedChanged)
+      for (const manifest of [before, alphaChanged, sharedChanged]) {
+        assert.deepEqual(
+          manifest.entries.map((entry) => entry.test.name),
+          ['alpha', 'beta', 'independent'],
+        )
+        assert.deepEqual(
+          manifest.entries.map((entry) => entry.eligibility._tag),
+          ['Eligible', 'Eligible', 'Eligible'],
+        )
+      }
+      const beforeIdentities = eligibleIdentities(before)
+      const alphaIdentities = eligibleIdentities(alphaChanged)
+      const sharedIdentities = eligibleIdentities(sharedChanged)
 
-    assert.notStrictEqual(alphaIdentities.get('alpha'), beforeIdentities.get('alpha'))
-    assert.strictEqual(alphaIdentities.get('beta'), beforeIdentities.get('beta'))
-    assert.strictEqual(alphaIdentities.get('independent'), beforeIdentities.get('independent'))
-    assert.notStrictEqual(sharedIdentities.get('alpha'), beforeIdentities.get('alpha'))
-    assert.notStrictEqual(sharedIdentities.get('beta'), beforeIdentities.get('beta'))
-    assert.strictEqual(sharedIdentities.get('independent'), beforeIdentities.get('independent'))
-  }),
+      assert.notStrictEqual(alphaIdentities.get('alpha'), beforeIdentities.get('alpha'))
+      assert.strictEqual(alphaIdentities.get('beta'), beforeIdentities.get('beta'))
+      assert.strictEqual(alphaIdentities.get('independent'), beforeIdentities.get('independent'))
+      assert.notStrictEqual(sharedIdentities.get('alpha'), beforeIdentities.get('alpha'))
+      assert.notStrictEqual(sharedIdentities.get('beta'), beforeIdentities.get('beta'))
+      assert.strictEqual(sharedIdentities.get('independent'), beforeIdentities.get('independent'))
+    }),
+  // Three provenance snapshots took 19.4s locally on 2026-09-23 and exceeded 60s in CI shard 4.
+  120_000,
 )
 
 it.effect('includes normalized execution configuration in every eligible identity', () =>

@@ -181,7 +181,8 @@ pub effect fn main() -> () ! LogError {
       const unconstrained = yield* snapshot(wrapper(''))
       assert.isAbove(Analysis.diagnostics(unconstrained).length, 0)
     }),
-  { timeout: 30_000 },
+  // Both snapshots took 22.4s locally on 2026-09-23 and exceeded 30s in CI shard 4.
+  { timeout: 120_000 },
 )
 
 it.effect('rejects a callable relay whose leading binding has observable work', () =>
@@ -267,5 +268,6 @@ ${body}`)
         assert.strictEqual(frontend.mir._tag, 'Unavailable')
       }
     }),
-  { timeout: 60_000 },
+  // Four snapshots took 36.6s locally on 2026-09-23 and exceeded 60s in CI shard 4.
+  { timeout: 180_000 },
 )

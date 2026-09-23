@@ -321,6 +321,8 @@ it.effect(
         assert.deepEqual(diagnostics(fresh), diagnostics(first))
       }
     }),
+  // Three cache paths took 19.8s locally on 2026-09-23 and exceeded 60s in CI shard 4.
+  120_000,
 )
 
 it.effect('measures Effect phases with the fiber clock', () =>
@@ -691,8 +693,9 @@ it.effect(
       assert.strictEqual(reads.filter((key) => key.startsWith('native-')).length, nativeReads)
       assert.strictEqual(writes.filter((key) => key.startsWith('native-')).length, 1)
     }),
-  // Cold emission, cache reuse and a rejected supply each run the complete source runtime pipeline.
-  120_000,
+  // Cold emission, cache reuse and a rejected supply took 39.9s locally on 2026-09-23;
+  // the three complete source runtime pipelines exceeded 120s in CI shard 4.
+  240_000,
 )
 
 it.effect('reports a missing request-supplied object as linker input even when cached', () =>
