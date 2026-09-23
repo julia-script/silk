@@ -240,7 +240,7 @@ function checkInvariants(dump, file) {
   }
   // Reachability: one traversal from the declaration range must reach every node exactly once,
   // which is what makes the arena a forest of the declarations rather than a bag with orphans.
-  const parents = new Array(nodes.length).fill(undefined)
+  const parents = Array.from({ length: nodes.length })
   // Iterative, because a long expression chain lowers to an equally long reference chain and the
   // standard library holds modules deep enough to exhaust the JavaScript stack.
   const pending = declarations.map((declaration) => [declaration, 'the module'])
