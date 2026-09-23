@@ -60,6 +60,11 @@ export const assignTests = (files, timings, shardCount = 4) => {
   return { shards, fallbackCost, unmeasured: files.filter((file) => !(file in timings)) }
 }
 
+export const exclusionFlags = (files, shards, shardIndex) => {
+  const selected = new Set(shards[shardIndex].files)
+  return files.filter((file) => !selected.has(file)).map((file) => `--exclude=${file}`)
+}
+
 export const readArtifactTimings = (directory) => {
   const artifacts = []
   const visit = (path) => {
@@ -129,10 +134,12 @@ const main = (args) => {
     if (unmeasured.length) process.stdout.write(`New files: ${unmeasured.join(', ')}\n`)
     return
   }
-  const match = /^--shard=([1-4])\/4$/.exec(args[0] ?? '')
+  const match = /^--exclude-for-shard=([1-4])\/4$/.exec(args[0] ?? '')
   if (!match || args.length !== 1)
-    throw new Error('Usage: --shard=N/4 | --audit | --refresh DIR RUN_ID HEAD_SHA')
-  for (const file of shards[Number(match[1]) - 1].files) process.stdout.write(String(file) + '\n')
+    throw new Error('Usage: --exclude-for-shard=N/4 | --audit | --refresh DIR RUN_ID HEAD_SHA')
+  for (const flag of exclusionFlags(files, shards, Number(match[1]) - 1)) {
+    process.stdout.write(flag + '\n')
+  }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

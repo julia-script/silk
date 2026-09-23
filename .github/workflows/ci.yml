@@ -219,11 +219,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node scripts/turbo.mjs run build
       # Select each file once by reviewed CI timings; the selector assigns new files a median cost.
-      # Invoke vitest directly because `pnpm --filter … run script -- args` drops the args.
+      # Vitest treats positional file filters as substrings, so exclude every unassigned path
+      # exactly. Invoke vitest directly because `pnpm --filter … run script -- args` drops the args.
       - run: |
-          compiler_tests=$(node scripts/compiler-shards.mjs --shard=${{ matrix.shard }}/4)
-          readarray -t compiler_tests <<< "$compiler_tests"
-          pnpm --filter @silklang/compiler exec vitest run "${compiler_tests[@]}" \
+          compiler_excludes=$(node scripts/compiler-shards.mjs --exclude-for-shard=${{ matrix.shard }}/4)
+          readarray -t compiler_excludes <<< "$compiler_excludes"
+          pnpm --filter @silklang/compiler exec vitest run "${compiler_excludes[@]}" \
             --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts \
             --exclude test/DriverTlsClientWasmAcceptance.test.ts \
             --exclude test/DriverTlsConnectionWasmAcceptance.test.ts \
