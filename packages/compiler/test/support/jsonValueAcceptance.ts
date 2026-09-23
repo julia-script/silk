@@ -135,11 +135,15 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   if signed != 42 { return 16 }
   let unsigned = Json.field(&document, "id") |> Json.asU64 |> Option.unwrapOr<u64>(0)
   if unsigned != 42 { return 17 }
-  let name = Json.field(&document, "name") |> Json.asString |> Option.unwrapOr<string>("")
+  let nameText = Json.field(&document, "name") |> Json.asString
+  let name = Option.unwrapOr<string>(move nameText, "")
   if name != "Silk" { return 2 }
-  let music = Json.field(&document, "music") |> Json.asString |> Option.unwrapOr<string>("")
+  let musicText = Json.field(&document, "music") |> Json.asString
+  let music = Option.unwrapOr<string>(move musicText, "")
   if music != "𝄞" { return 3 }
-  let missing = Json.field(&document, "missing") |> Json.fieldAt("child") |> Json.asI32
+  let missingField = Json.field(&document, "missing")
+  let missingChild = Json.fieldAt(move missingField, "child")
+  let missing = Json.asI32(move missingChild)
   if Option.unwrapOr<i32>(move missing, -1) != -1 { return 4 }
   let checked = run roundTrip(source) |> Effect.provideMut<Allocator>(&mut allocator)
   if !checked { return 5 }

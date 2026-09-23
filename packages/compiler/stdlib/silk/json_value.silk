@@ -98,7 +98,8 @@ impl Json {
   pub effect fn parse(bytes: &[u8]) -> Value ! JsonError | OutOfMemoryError ? &mut Allocator {
     let mut scanner = JsonScanner.make(bytes)
     let first = run nextToken(&mut scanner)
-    let document = run parseToken(&mut scanner, move first, bytes.length)
+    let parsed = run parseToken(&mut scanner, move first, bytes.length)
+    let document = run expectValue(move parsed, bytes.length)
     let tail = run nextToken(&mut scanner)
     match move tail {
       JsonToken.EndOfInput => { return move document }
@@ -123,20 +124,7 @@ impl Json {
     return match &self.* {
       Value.Object { entries } => {
         let boxed = Box.get<Vector<JsonChild>>(&entries)
-        let values = Vector.asSlice<JsonChild>(&boxed[0])
-        let mut index = usize.ZERO
-        while index < values.length {
-          match &values[index] {
-            JsonChild.Member { entry } => {
-              if String.view(&entry.key) == key {
-                return Option.some<&'a Value>(&entry.value)
-              }
-            }
-            _ => {}
-          }
-          index = index + usize.ONE
-        }
-        return Option.none<&'a Value>()
+        return findMember(&boxed[0], key)
       }
       _ => Option.none<&'a Value>()
     }
@@ -204,6 +192,21 @@ impl Json {
   }
 }
 
+fn findMember<'a>(entries: &'a Vector<JsonChild>, key: string) -> Option<&'a Value> {
+  let values = Vector.asSlice<JsonChild>(entries)
+  let mut index = usize.ZERO
+  while index < values.length {
+    match &values[index] {
+      JsonChild.Member { entry } => {
+        if String.view(&entry.key) == key { return Option.some<&'a Value>(&entry.value) }
+      }
+      _ => {}
+    }
+    index = index + usize.ONE
+  }
+  return Option.none<&'a Value>()
+}
+
 effect fn nextToken(scanner: &mut JsonScanner) -> JsonToken ! JsonError {
   return match move JsonScanner.next(&mut scanner.*) {
     Result<JsonToken, JsonError>.Success { value } => move value
@@ -212,41 +215,55 @@ effect fn nextToken(scanner: &mut JsonScanner) -> JsonToken ! JsonError {
 }
 
 effect fn parseToken(scanner: &mut JsonScanner, token: JsonToken, end: usize)
-  -> Value ! JsonError | OutOfMemoryError ? &mut Allocator {
+  -> Option<Value> ! JsonError | OutOfMemoryError ? &mut Allocator {
   return match move token {
-    JsonToken.Null => Value.Null
-    JsonToken.True => Value.Bool { value: true }
-    JsonToken.False => Value.Bool { value: false }
+    JsonToken.Null => Option.some<Value>(Value.Null)
+    JsonToken.True => Option.some<Value>(Value.Bool { value: true })
+    JsonToken.False => Option.some<Value>(Value.Bool { value: false })
     JsonToken.Number { span } => {
       let offset = span.offset
       let raw = JsonScanner.slice(&scanner.*, move span)
       let text = run copyValidated(raw, offset)
-      return Value.Number { text: move text }
+      return Option.some<Value>(Value.Number { text: move text })
     }
     JsonToken.String { span, escaped } => {
       let offset = span.offset
       let text = run decodeString(JsonScanner.slice(&scanner.*, move span), offset, escaped)
-      return Value.String { text: move text }
+      return Option.some<Value>(Value.String { text: move text })
     }
-    JsonToken.ArrayBegin => run parseArray(&mut scanner.*, end)
-    JsonToken.ObjectBegin => run parseObject(&mut scanner.*, end)
+    JsonToken.ArrayBegin => Option.some<Value>(run parseArray(&mut scanner.*, end))
+    JsonToken.ObjectBegin => Option.some<Value>(run parseObject(&mut scanner.*, end))
+    JsonToken.ArrayEnd => Option.none<Value>()
+    JsonToken.ObjectEnd => Option.none<Value>()
     _ => { fail inputError(JsonReason.UnexpectedByte, end) }
+  }
+}
+
+effect fn expectValue(parsed: Option<Value>, end: usize) -> Value ! JsonError {
+  return match move parsed {
+    Option<Value>.Some { value } => move value
+    Option<Value>.None => { fail inputError(JsonReason.UnexpectedByte, end) }
   }
 }
 
 effect fn parseArray(scanner: &mut JsonScanner, end: usize)
   -> Value ! JsonError | OutOfMemoryError ? &mut Allocator {
   let mut values = Vector.make<JsonChild>()
-  let mut token = run nextToken(&mut scanner.*)
-  match &token {
-    JsonToken.ArrayEnd => {
-      let boxed = run Box.make<Vector<JsonChild>>(move values)
-      return Value.Array { values: move boxed }
-    }
-    _ => {}
-  }
+  let mut first = true
   while true {
-    let value = run parseToken(&mut scanner.*, move token, end)
+    let token = run nextToken(&mut scanner.*)
+    let parsed = run parseToken(&mut scanner.*, move token, end)
+    let value = match move parsed {
+      Option<Value>.Some { value } => move value
+      Option<Value>.None => {
+        if first {
+          let boxed = run Box.make<Vector<JsonChild>>(move values)
+          return Value.Array { values: move boxed }
+        }
+        fail inputError(JsonReason.UnexpectedByte, end)
+      }
+    }
+    first = false
     run Vector.append<JsonChild>(&mut values, JsonChild.Item { value: move value })
     let separator = run nextToken(&mut scanner.*)
     match move separator {
@@ -254,7 +271,7 @@ effect fn parseArray(scanner: &mut JsonScanner, end: usize)
         let boxed = run Box.make<Vector<JsonChild>>(move values)
         return Value.Array { values: move boxed }
       }
-      JsonToken.ValueSeparator => { token = run nextToken(&mut scanner.*) }
+      JsonToken.ValueSeparator => {}
       _ => { fail inputError(JsonReason.UnexpectedByte, end) }
     }
   }
@@ -264,34 +281,26 @@ effect fn parseArray(scanner: &mut JsonScanner, end: usize)
 effect fn parseObject(scanner: &mut JsonScanner, end: usize)
   -> Value ! JsonError | OutOfMemoryError ? &mut Allocator {
   let mut entries = Vector.make<JsonChild>()
-  let mut token = run nextToken(&mut scanner.*)
-  match &token {
-    JsonToken.ObjectEnd => {
-      let boxed = run Box.make<Vector<JsonChild>>(move entries)
-      return Value.Object { entries: move boxed }
-    }
-    _ => {}
-  }
+  let mut first = true
   while true {
+    let token = run nextToken(&mut scanner.*)
     let keySpan = match move token {
       JsonToken.String { span, escaped: _ } => span
+      JsonToken.ObjectEnd => {
+        if first {
+          let boxed = run Box.make<Vector<JsonChild>>(move entries)
+          return Value.Object { entries: move boxed }
+        }
+        fail inputError(JsonReason.UnexpectedByte, end)
+      }
       _ => { fail inputError(JsonReason.UnexpectedByte, end) }
     }
+    first = false
     let offset = keySpan.offset
     let raw = JsonScanner.slice(&scanner.*, move keySpan)
     let key = run decodeString(raw, offset, true)
-    let old = Vector.asSlice<JsonChild>(&entries)
-    let mut index = usize.ZERO
-    while index < old.length {
-      match &old[index] {
-        JsonChild.Member { entry } => {
-          if String.view(&entry.key) == String.view(&key) {
-            fail inputError(JsonReason.DuplicateKey, offset)
-          }
-        }
-        _ => {}
-      }
-      index = index + usize.ONE
+    if containsKey(&entries, String.view(&key)) {
+      fail inputError(JsonReason.DuplicateKey, offset)
     }
     let colon = run nextToken(&mut scanner.*)
     match move colon {
@@ -299,7 +308,8 @@ effect fn parseObject(scanner: &mut JsonScanner, end: usize)
       _ => { fail inputError(JsonReason.UnexpectedByte, end) }
     }
     let valueToken = run nextToken(&mut scanner.*)
-    let value = run parseToken(&mut scanner.*, move valueToken, end)
+    let parsed = run parseToken(&mut scanner.*, move valueToken, end)
+    let value = run expectValue(move parsed, end)
     run Vector.append<JsonChild>(&mut entries, JsonChild.Member {
       entry: JsonEntry { key: move key, value: move value }
     })
@@ -309,11 +319,26 @@ effect fn parseObject(scanner: &mut JsonScanner, end: usize)
         let boxed = run Box.make<Vector<JsonChild>>(move entries)
         return Value.Object { entries: move boxed }
       }
-      JsonToken.ValueSeparator => { token = run nextToken(&mut scanner.*) }
+      JsonToken.ValueSeparator => {}
       _ => { fail inputError(JsonReason.UnexpectedByte, end) }
     }
   }
   fail inputError(JsonReason.UnexpectedEnd, end)
+}
+
+fn containsKey(entries: &Vector<JsonChild>, key: string) -> bool {
+  let old = Vector.asSlice<JsonChild>(entries)
+  let mut index = usize.ZERO
+  while index < old.length {
+    match &old[index] {
+      JsonChild.Member { entry } => {
+        if String.view(&entry.key) == key { return true }
+      }
+      _ => {}
+    }
+    index = index + usize.ONE
+  }
+  return false
 }
 
 effect fn copyValidated(raw: &[u8], offset: usize)
