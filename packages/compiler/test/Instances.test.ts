@@ -219,6 +219,66 @@ pub fn main() -> i32 { return left(1) + right(2) }`)
   }),
 )
 
+it.effect('discovers and lowers concrete witness delegation through nested fields', () =>
+  Effect.gen(function* () {
+    const analyzed = yield* snapshot(`interface Decode { fn decode() -> Self }
+impl Decode for i32 { fn decode() -> Self { return 42 } }
+struct Child { value: i32 }
+struct Outer { child: Child }
+fn decodeOne<T: Decode>() -> T { return Decode.decode() }
+impl Child {
+  fn decodeChild() -> Child { return Child { value: decodeOne<i32>() } }
+}
+impl Decode for Child { decode: Child.decodeChild }
+impl Decode for Outer {
+  fn decode() -> Self { return Outer { child: decodeOne<Child>() } }
+}
+pub fn main() -> i32 { return decodeOne<Outer>().child.value }`)
+    assert.deepEqual(
+      analyzed.instances.violations.map((violation) => ({
+        caller: violation.caller.declaration.name,
+        callerArguments: violation.caller.typeArguments.map(Type.encodeGenericArgument),
+        target: violation.target.declaration.name,
+        targetArguments: violation.target.typeArguments.map(Type.encodeGenericArgument),
+      })),
+      [],
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(analyzed).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    assert.deepEqual(
+      analyzed.instances.instances
+        .filter((instance) => instance.key.declaration.name === 'decodeOne')
+        .map((instance) => instance.key.typeArguments.map(Type.encodeGenericArgument)),
+      [['golden/program.Outer'], ['golden/program.Child'], ['i32']],
+    )
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(analyzed)), [])
+  }),
+)
+
+it.effect('requires provider evidence for a direct zero-operand witness call', () =>
+  Effect.gen(function* () {
+    const source = `interface Decode { fn decode() -> Self }
+impl Decode for i32 { fn decode() -> Self { return 42 } }
+struct Outer { value: i32 }
+impl Decode for Outer {
+  fn decode() -> Self { return Outer { value: Decode.decode() } }
+}
+pub fn main() -> i32 { return 0 }`
+    const analyzed = yield* snapshot(source)
+    const operation = source.indexOf('Decode.decode()') + 'Decode.'.length
+    assert.deepEqual(
+      Analysis.diagnostics(analyzed).map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start,
+        diagnostic.span.end,
+      ]),
+      [['SEM0010', operation, operation + 'decode'.length]],
+    )
+  }),
+)
+
 it.effect('retains generic ancestors across shared monomorphic helpers', () =>
   Effect.gen(function* () {
     const analyzed = yield* snapshot(`fn generic<T>() -> i32 { return helper() }

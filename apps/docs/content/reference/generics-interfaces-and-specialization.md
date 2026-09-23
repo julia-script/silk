@@ -320,8 +320,9 @@ semantic analysis could not close.
 
 **Status:** Confirmed
 
-A recursively reachable call to the same generic declaration must preserve its current concrete
-generic arguments. This permits ordinary recursion while keeping specialization finite.
+A recursively reachable call normally reuses its current concrete generic arguments. A concrete
+interface witness may delegate through a bounded helper to another concrete specialization when
+each argument's structural shape does not grow. Both routes keep specialization finite.
 
 ```silk,ignore
 fn walk<T>(value: T, remaining: i32) -> T {
@@ -332,10 +333,12 @@ fn walk<T>(value: T, remaining: i32) -> T {
 }
 ```
 
-The recursive call reuses the same `walk<T>` specialization.
+The recursive call reuses the same `walk<T>` specialization. A concrete witness can also call a
+bounded helper at a smaller or equally sized concrete type, such as `decodeOne<Outer>()` delegating
+to `decodeOne<i32>()`; the reachable type shapes remain finite.
 
-**Boundary:** Polymorphic recursion that calls the same declaration with a structurally different
-argument is outside the stable model:
+**Boundary:** Ordinary polymorphic recursion that changes a type argument is outside the stable
+model. Witness delegation that grows a type argument along a recursive call cycle is also invalid:
 
 ```silk,ignore
 fn grow<T>(value: T) -> i32 {
@@ -346,9 +349,9 @@ fn grow<T>(value: T) -> i32 {
 Each step would require another specialization and no finite static family follows from the source.
 Mutual recursion is subject to the same rule across the complete cycle.
 
-**Diagnostics:** A recursive call that changes the current generic arguments reports a
-polymorphic-recursion diagnostic at that call and shows the current and requested applications. It
-must be rejected before instance discovery recursively expands the family.
+**Diagnostics:** A disallowed recursive call reports a polymorphic-recursion diagnostic at that
+call and shows the current and requested applications. It must be rejected before instance
+discovery recursively expands the family.
 
 **Evidence:** [runtime specialization requirement](../../../../openspec/specs/bootstrap-type-generics/spec.md),
 [generic instance discovery](../../../../packages/compiler/src/Instances.ts).
@@ -1039,6 +1042,23 @@ pub const UserSchema =
 
 The explicit argument to `Schema.of<User>()` fixes `T = User`. The bound inside `Schema.of` then
 fixes `Self = User` and the `SchemaOf` application without runtime evidence.
+
+The same route lets one concrete witness invoke another type's witness:
+
+```silk,ignore
+interface Decode { fn decode() -> Self }
+impl Decode for i32 { fn decode() -> Self { return 42 } }
+
+struct Outer { value: i32 }
+fn decodeOne<T: Decode>() -> T { return Decode.decode() }
+impl Decode for Outer {
+  fn decode() -> Self { return Outer { value: decodeOne<i32>() } }
+}
+```
+
+The explicit `i32` argument selects the child witness. Writing `Decode.decode()` directly in the
+`Outer` body supplies no provider evidence for `i32`; the field's expected result does not select
+`Self`, so that call reports `SEM0010`.
 
 For an applied call, the compiler infers implicit `Self` from agreeing supplied operands first. A
 zero-operand operation may instead use one enclosing bound whose complete interface application
