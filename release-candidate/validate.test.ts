@@ -1162,6 +1162,8 @@ test('the CLI release candidate installs with its project-first command surface'
       'Report',
       'RunCommand',
       'TestCommand',
+      'TestExchange',
+      'TestResult',
       'Workflow',
     ])
   } finally {

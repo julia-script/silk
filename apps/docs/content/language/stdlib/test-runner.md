@@ -10,7 +10,7 @@ Builtin sequential test runner assembled from public static test primitives.
 
 This module is an ordinary Silk application selected by `silk test`. It discovers tests from
 the compilation request, applies runtime-only filters, invokes matching tests sequentially, and
-returns process status 0, 1, or 2. Equal fingerprints never skip execution.
+returns process status 0, 1, or 2. Its host plan is validated before any test body runs.
 
 Import as `TestRunner` with `import silk.test_runner as TestRunner`.
 
