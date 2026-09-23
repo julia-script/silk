@@ -68,7 +68,7 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
   nodes, so the failure surfaced as a wrong count far from the cause rather than as a syntax error ·
   Dump a new fixture with `silk-compiler <file>` before asserting against it, and check fixture
   identifiers against the `TokenKind` keyword list · compiler
-- 2026-09-23 · `pnpm exec silk` in a worktree ran the *main checkout's* CLI: the globally installed
+- 2026-09-23 · `pnpm exec silk` in a worktree ran the _main checkout's_ CLI: the globally installed
   `silk` shim execs a hard-coded `/Users/.../Documents/dev.nosync/silk/packages/cli/dist/bin.js`, so
   a compiler fix committed only in the worktree was invisible and `silk test` reproduced a bootstrap
   blowup the worktree had already fixed; every self-hosted figure taken this way is a measurement of

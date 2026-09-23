@@ -170,7 +170,7 @@ lowers both constraint forms inside one function rather than delegating to a per
 that shape was never re-measured against the fixed compiler. Two things obscured this. The wave-3
 `# Gotchas` block that explained the single-function shape was removed when the compiler fix landed,
 and every self-hosted gate up to `b3298425` was run through `pnpm exec silk`, which is a globally
-installed shim onto the *main checkout's* older CLI rather than this worktree's build — so the
+installed shim onto the _main checkout's_ older CLI rather than this worktree's build — so the
 "no longer trips" evidence was produced by a compiler that does not contain the fix.
 
 Making both `LowerType.callableContract` and `LowerType.constraints` reachable from the test entry
