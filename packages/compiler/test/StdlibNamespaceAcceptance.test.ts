@@ -93,6 +93,92 @@ pub effect fn main() -> i32 ! JsonError | WriterError {
   return 0
 }`
 
+const jsonReflectProgram = `import silk.effect { Effect }
+import silk.json_output { JsonOptions }
+import silk.json_reflect { JsonReflect }
+import silk.json_scanner { JsonError }
+import silk.writer { Writer, WriterError }
+
+struct Hidden {}
+struct Record { pub alpha: i32 hidden: Hidden pub beta: bool }
+
+struct Sink {}
+effect fn writeAll(self: &mut Sink, values: &[u8]) -> () ! WriterError { return () }
+effect fn flush(self: &mut Sink) -> () ! WriterError { return () }
+impl Writer for Sink { writeAll: Sink.writeAll flush: Sink.flush }
+
+pub effect fn main() -> i32 ! JsonError | WriterError {
+  let value = Record { alpha: 7, hidden: Hidden {}, beta: true }
+  let options = JsonOptions.compact()
+  let mut sink = Sink {}
+  run JsonReflect.write<Record>(&value, &options) |> Effect.provideMut<Writer>(&mut sink)
+  return 0
+}`
+
+it.effect('reflects only visible serializable fields across the stdlib boundary', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/json-reflect',
+      ascii(jsonReflectProgram),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        source: diagnostic.span.sourceId,
+        start: diagnostic.span.start,
+      })),
+      [],
+    )
+  }),
+)
+
+const jsonReflectFailuresProgram = `import silk.effect { Effect }
+import silk.json_output { JsonOptions }
+import silk.json_reflect { JsonReflect }
+import silk.json_scanner { JsonError }
+import silk.writer { Writer, WriterError }
+
+struct Hidden {}
+struct Missing { pub value: Hidden }
+tuple Pair(i32, i32)
+
+struct Sink {}
+effect fn writeAll(self: &mut Sink, values: &[u8]) -> () ! WriterError { return () }
+effect fn flush(self: &mut Sink) -> () ! WriterError { return () }
+impl Writer for Sink { writeAll: Sink.writeAll flush: Sink.flush }
+
+pub effect fn main() -> i32 ! JsonError | WriterError {
+  let missing = Missing { value: Hidden {} }
+  let pair = Pair(1, 2)
+  let options = JsonOptions.compact()
+  let mut sink = Sink {}
+  run JsonReflect.write<Missing>(&missing, &options)
+    |> Effect.provideMut<Writer>(&mut sink)
+  run JsonReflect.write<Pair>(&pair, &options)
+    |> Effect.provideMut<Writer>(&mut sink)
+  return 0
+}`
+
+it.effect('rejects positional aggregates and visible fields without Serialize', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/json-reflect-invalid',
+      ascii(jsonReflectFailuresProgram),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        source: diagnostic.span.sourceId,
+        start: diagnostic.span.start,
+      })),
+      [
+        { code: 'SEM0177', source: 'silk/json_reflect', start: 2234 },
+        { code: 'SEM0083', source: 'silk/json_reflect', start: 2818 },
+      ],
+    )
+  }),
+)
+
 it.effect('resolves JSON conversion contracts with exact allocation boundaries', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(

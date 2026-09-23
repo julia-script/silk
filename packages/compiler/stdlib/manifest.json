@@ -575,6 +575,11 @@
     "aliases": ["JsonReadToken"]
   },
   {
+    "module": "silk/json_reflect",
+    "path": "silk/json_reflect.silk",
+    "namespace": "JsonReflect"
+  },
+  {
     "module": "silk/json_scanner",
     "path": "silk/json_scanner.silk",
     "namespace": "JsonScanner",

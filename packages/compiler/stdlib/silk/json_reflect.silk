@@ -1,0 +1,71 @@
+//! Explicit JSON serialization of visible named aggregate fields.
+//!
+//! # When to use
+//! Use [`JsonReflect.write`] directly for a struct whose visible fields each implement
+//! `Serialize`. No `Serialize` implementation for the struct is needed.
+//!
+//! # Details
+//! Fields are written in declaration order. Reflection uses this module's visibility, so private
+//! fields of a type declared elsewhere are omitted. The result is that type's visible projection,
+//! not necessarily its complete state. Writing requires no JSON-owned allocation.
+//!
+//! # Gotchas
+//! The current compiler reports `SEM0053` if a concrete `Serialize` implementation delegates to
+//! this helper (JUL-226). Call the helper directly. Generic reflected deserialization is unavailable:
+//! public reflection can borrow fields but cannot construct an arbitrary aggregate from decoded
+//! owned fields.
+
+import silk.json_output { JsonOptions, JsonOutput }
+import silk.json_scanner { JsonError }
+import silk.json_serde { JsonSerde }
+import silk.reflect { Reflect, namedKind, anonymousNamedKind, labeledFieldKind }
+import silk.static_sequence { StaticSequence }
+import silk.writer { Writer, WriterError }
+
+static fn visibleLabels<T>() -> Intrinsic.StaticSequence<string<'static>> {
+  let mut labels = StaticSequence.empty<string<'static>>()
+  static for field in Reflect.fields<T>() {
+    static if Reflect.fieldKind(field) == labeledFieldKind {
+      labels = StaticSequence.append<string<'static>>(
+        move labels, Reflect.fieldLabel(field))
+    }
+  }
+  return move labels
+}
+
+/// Operations for writing the visible projection of a named aggregate.
+pub struct JsonReflect {}
+
+impl JsonReflect {
+  /// Writes one JSON object from visible labeled fields in declaration order.
+  ///
+  /// # Details
+  /// Every visible field must implement `Serialize`. Unsupported aggregate kinds and missing
+  /// field witnesses fail during specialization. A Writer failure can leave a partial object.
+  pub effect fn write<T>(value: &T, options: &JsonOptions)
+    -> () ! JsonError | WriterError ? &mut Writer {
+    static if Reflect.typeKind(Reflect.typeOf<T>()) != namedKind &&
+      Reflect.typeKind(Reflect.typeOf<T>()) != anonymousNamedKind {
+      compileError("JsonReflect.write requires a named aggregate")
+    }
+    let child = run JsonOptions.child(options)
+    run Writer.writeAll(b"{")
+    let mut first = true
+    static for label in visibleLabels<T>() {
+      static for field in Reflect.fields<T>() {
+        static if Reflect.fieldKind(field) == labeledFieldKind {
+          static if Reflect.fieldLabel(field) == label {
+            run JsonOutput.separator(&child, first)
+            run JsonOutput.writeString(label)
+            run JsonOutput.colon(&child)
+            let member = Reflect.borrowField(value, field)
+            run JsonSerde.writeOne(member, &child)
+            first = false
+          }
+        }
+      }
+    }
+    if !first { run JsonOutput.line(options) }
+    return run Writer.writeAll(b"}")
+  }
+}
