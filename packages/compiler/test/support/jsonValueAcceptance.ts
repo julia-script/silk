@@ -6,9 +6,9 @@ export const jsonValueAcceptanceSource = `import silk.allocator { Allocator, Out
 import silk.effect { Effect }
 import silk.f32
 import silk.f64
-import silk.format { Format }
 import silk.json_output { JsonOptions }
 import silk.json_scanner { JsonError, JsonReason }
+import silk.json_serde { JsonSerde }
 import silk.json_value { Json, Value }
 import silk.layout { Layout }
 import silk.option { Option }
@@ -63,10 +63,12 @@ effect fn roundTrip(input: &[u8]) -> bool
 effect fn roundTripF64(value: f64) -> bool
 ! JsonError | OutOfMemoryError | WriterError ? &mut Allocator {
   let mut output = capture()
-  let rendered = run Effect.result(Format.display(&value) |> Effect.provideMut<Writer>(&mut output))
+  let options = JsonOptions.compact()
+  let rendered = run Effect.result(JsonSerde.writeOne<f64>(&value, &options)
+    |> Effect.provideMut<Writer>(&mut output))
   match move rendered {
-    Result<(), WriterError>.Success { value: _ } => {}
-    Result<(), WriterError>.Failure { error: _ } => { return false }
+    Result<(), JsonError | WriterError>.Success { value: _ } => {}
+    Result<(), JsonError | WriterError>.Failure { error: _ } => { return false }
   }
   let serialized = Slice.view<u8>(&output.bytes, usize.ZERO, output.count)
   let document = run Json.parse(serialized)
@@ -79,16 +81,58 @@ effect fn roundTripF64(value: f64) -> bool
 effect fn roundTripF32(value: f32) -> bool
 ! JsonError | OutOfMemoryError | WriterError ? &mut Allocator {
   let mut output = capture()
-  let rendered = run Effect.result(Format.display(&value) |> Effect.provideMut<Writer>(&mut output))
+  let options = JsonOptions.compact()
+  let rendered = run Effect.result(JsonSerde.writeOne<f32>(&value, &options)
+    |> Effect.provideMut<Writer>(&mut output))
   match move rendered {
-    Result<(), WriterError>.Success { value: _ } => {}
-    Result<(), WriterError>.Failure { error: _ } => { return false }
+    Result<(), JsonError | WriterError>.Success { value: _ } => {}
+    Result<(), JsonError | WriterError>.Failure { error: _ } => { return false }
   }
   let serialized = Slice.view<u8>(&output.bytes, usize.ZERO, output.count)
   let document = run Json.parse(serialized)
   return match move Json.asF32(Option.some<&Value>(&document)) {
     Option<f32>.None => false
     Option<f32>.Some { value: parsed } => f32.toBits(parsed) == f32.toBits(value)
+  }
+}
+
+effect fn rejectsNonFiniteF64(value: f64) -> bool {
+  let mut output = capture()
+  let options = JsonOptions.compact()
+  let result = run Effect.result(JsonSerde.writeOne<f64>(&value, &options)
+    |> Effect.provideMut<Writer>(&mut output))
+  return match move result {
+    Result<(), JsonError | WriterError>.Success { value: _ } => false
+    Result<(), JsonError | WriterError>.Failure { error } => match move error {
+      JsonError problem => {
+        let noOffset = match move problem.offset {
+          Option<usize>.None => true
+          Option<usize>.Some { value: _ } => false
+        }
+        return problem.reason == JsonReason.InvalidNumber && noOffset && output.count == 0
+      }
+      WriterError problem => false
+    }
+  }
+}
+
+effect fn rejectsNonFiniteF32(value: f32) -> bool {
+  let mut output = capture()
+  let options = JsonOptions.compact()
+  let result = run Effect.result(JsonSerde.writeOne<f32>(&value, &options)
+    |> Effect.provideMut<Writer>(&mut output))
+  return match move result {
+    Result<(), JsonError | WriterError>.Success { value: _ } => false
+    Result<(), JsonError | WriterError>.Failure { error } => match move error {
+      JsonError problem => {
+        let noOffset = match move problem.offset {
+          Option<usize>.None => true
+          Option<usize>.Some { value: _ } => false
+        }
+        return problem.reason == JsonReason.InvalidNumber && noOffset && output.count == 0
+      }
+      WriterError problem => false
+    }
   }
 }
 
@@ -203,6 +247,10 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   if !(run roundTripF64(1.2345678901234567) |> Effect.provideMut<Allocator>(&mut allocator)) { return 26 }
   if !(run roundTripF32(f32.fromBits(1)) |> Effect.provideMut<Allocator>(&mut allocator)) { return 27 }
   if !(run roundTripF32(1.234567) |> Effect.provideMut<Allocator>(&mut allocator)) { return 28 }
+  if !(run rejectsNonFiniteF64(f64.fromBits(9218868437227405312))) { return 34 }
+  if !(run rejectsNonFiniteF64(f64.fromBits(9221120237041090560))) { return 35 }
+  if !(run rejectsNonFiniteF32(f32.fromBits(2139095040))) { return 36 }
+  if !(run rejectsNonFiniteF32(f32.fromBits(2143289344))) { return 37 }
   let overflow = run Json.parse(b"1e999") |> Effect.provideMut<Allocator>(&mut allocator)
   match move Json.asF64(Option.some<&Value>(&overflow)) {
     Option<f64>.Some { value: _ } => { return 29 }
