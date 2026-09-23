@@ -268,6 +268,9 @@ test fn alpha() -> () {
   let answer = leaf()
   if answer == 2 { let crash = 1 / 0 drop crash }
 }
+test fn direct() -> () {
+  if ANSWER == 2 { let crash = 1 / 0 drop crash }
+}
 test fn shared() -> () { let answer = leaf() drop answer }
 test fn beta() -> () {}
 pub fn main() -> () {
@@ -286,11 +289,11 @@ pub fn main() -> () {
     for (const snapshot of [before, changed, sameResultEdit]) {
       assert.deepEqual(
         snapshot.manifest.entries.map((entry) => entry.test.name),
-        ['alpha', 'beta', 'shared'],
+        ['alpha', 'beta', 'direct', 'shared'],
       )
       assert.deepEqual(
         snapshot.manifest.entries.map((entry) => entry.eligibility._tag),
-        ['Eligible', 'Eligible', 'Eligible'],
+        ['Eligible', 'Eligible', 'Eligible', 'Eligible'],
       )
       const dependencies = new Map(
         Analysis.instancesOf(snapshot.analysis).residualBodies.flatMap((body) =>
@@ -316,7 +319,7 @@ pub fn main() -> () {
       }
     }
 
-    for (const name of ['alpha', 'shared']) {
+    for (const name of ['alpha', 'direct', 'shared']) {
       assert.notStrictEqual(changedIdentities.get(name), beforeIdentities.get(name))
       assert.notStrictEqual(sameResultIdentities.get(name), beforeIdentities.get(name))
     }
@@ -332,9 +335,11 @@ static fn leaf() -> bool {
   let value: Number = 16777216.0
   return value + 1.0 == value
 }
+fn runtimeValue() -> Number { return 1.0 }
 test fn alpha() -> () {
   if leaf() { let crash = 1 / 0 drop crash }
 }
+test fn runtime() -> () { let value = runtimeValue() drop value }
 test fn shared() -> () { let rounded = leaf() drop rounded }
 test fn beta() -> () {}
 pub fn main() -> () {
@@ -354,11 +359,11 @@ pub fn main() -> () {
     ] as const) {
       assert.deepEqual(
         snapshot_.manifest.entries.map((entry) => entry.test.name),
-        ['alpha', 'beta', 'shared'],
+        ['alpha', 'beta', 'runtime', 'shared'],
       )
       assert.deepEqual(
         snapshot_.manifest.entries.map((entry) => entry.eligibility._tag),
-        ['Eligible', 'Eligible', 'Eligible'],
+        ['Eligible', 'Eligible', 'Eligible', 'Eligible'],
       )
       const dependencies = new Map(
         Analysis.instancesOf(snapshot_.analysis).residualBodies.flatMap((body) =>
@@ -382,7 +387,7 @@ pub fn main() -> () {
       }
     }
 
-    for (const name of ['alpha', 'shared'])
+    for (const name of ['alpha', 'runtime', 'shared'])
       assert.notStrictEqual(changedIdentities.get(name), beforeIdentities.get(name))
     assert.strictEqual(changedIdentities.get('beta'), beforeIdentities.get('beta'))
   }),
