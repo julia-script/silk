@@ -106,10 +106,10 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
   compiler
 - 2026-09-23 · A fresh silk worktree has no `node_modules`, and after `pnpm install` the compiler
   test files still fail to import: first `Cannot find module './ToolchainIntegrity.generated.js'`,
-  then `Cannot find package '@silklang/llvm/ByteString'` · Run `CI=true pnpm install
-  --frozen-lockfile`, then from `packages/compiler` run `node scripts/generate-unicode-tables.mjs
-  && node scripts/generate-stdlib.mjs && node scripts/generate-toolchain-integrity.mjs`, then
-  `CI=true node_modules/.bin/turbo run build --filter @silklang/llvm` · compiler
+  then `Cannot find package '@silklang/llvm/ByteString'` · Run `CI=true pnpm install` with
+  `--frozen-lockfile`, then run all three generator scripts from `packages/compiler`
+  (`generate-unicode-tables.mjs`, `generate-stdlib.mjs`, `generate-toolchain-integrity.mjs`), then
+  build the LLVM package with `turbo run build --filter @silklang/llvm` · compiler
 - 2026-09-23 · `MirVerification` emits the same `InvalidCallableOperation` rule tag for both the
   `MakeCallable` and the `ApplyCallable` blocks, so a violation report alone does not say which
   operation failed and sends debugging to the wrong code · Read the violation's `detail` string,
