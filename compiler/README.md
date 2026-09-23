@@ -73,6 +73,16 @@ the bootstrap `AuthoredLowering` helpers of the same names; the literal decoders
 `internal/Escape`. A magnitude that no `u64` can hold lowers to an invalid expression with an
 overflow cause rather than widening the vocabulary.
 
+`hir/LowerType.silk` lowers every type operand, generic binder list, row, `where` constraint, and
+callable contract. `LowerType.lowerType` is the one type entry point: it unwraps grouping
+parentheses in place, so a parenthesized type leaves no node, and retains a lifetime, a bare
+requirement, or a damaged region in a type position as an invalid type. `LowerType.rowOperand`
+selects between a type and a written requirement wherever a row admits both.
+`LowerType.callableContract` reads the contract pieces directly off a callable header, because the
+grammar attaches them there rather than to a node of their own. Property clauses are not lowered
+yet; their values are expressions, so `ForeignFunctionType` carries an empty `properties` range
+until the expression lowering lands.
+
 CST construction remains postponed. The token vector retains source information, but there is no
 second concrete-syntax tree to maintain.
 
@@ -102,6 +112,7 @@ available stack in the bootstrap-generated debug executable before recovery coul
 | `hir/Intern.silk`                              | Deduplicated byte-string storage: `Symbol` identities and the `StringTable` that produces them                                              |
 | `hir/Hir.silk`                                 | The flat HIR vocabulary, the `Module` arena, its debug dump writer, and its arena verifier                                                  |
 | `hir/Draft.silk`                               | The in-progress module a lowering builds: arena appends, interning, binder frames, syntax accessors, and the name, path, and literal lowerings |
+| `hir/LowerType.silk`                           | Types, generic parameters, rows, `where` constraints, and callable contracts                                                                |
 
 Grammar rules are ordinary Silk functions. They consume `State` and return it with either an
 unfinished element list or a completed node ID. Replacement values are evaluated before assigning

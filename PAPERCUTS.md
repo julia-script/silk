@@ -63,3 +63,8 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
   variant because one field was named after the contextual keyword `role`; keyword fields such as
   `type` and `unsafe` reported clearly, but `role` did not · Check a new field name against the
   `TokenKind` keyword list before debugging the enclosing declaration · compiler
+- 2026-09-22 · A lowering test asserted zero generic parameters because its fixture source named the
+  function `run`, a keyword; the parser recovered the whole signature into a flat run of `Error`
+  nodes, so the failure surfaced as a wrong count far from the cause rather than as a syntax error ·
+  Dump a new fixture with `silk-compiler <file>` before asserting against it, and check fixture
+  identifiers against the `TokenKind` keyword list · compiler

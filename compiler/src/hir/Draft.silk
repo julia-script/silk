@@ -1047,8 +1047,16 @@ pub fn magnitudeOf(digits: &[u8]) -> Magnitude {
 /// This is the bootstrap `integerFromToken` under decision 6 of the port: the bootstrap kept a
 /// `bigint`, so it never rejected a magnitude. Here a literal beyond `u64` becomes an
 /// [`Node.InvalidExpression`](hir.Hir.Node) carrying [`CauseCode.IntegerOverflow`].
-pub effect fn integerFromToken(draft: &mut Draft, tree: &SyntaxTree, span: Span, digits: Span)
--> HirId
+///
+/// `negative` is the bootstrap's own parameter: the sign is written by the enclosing expression,
+/// not by the digit token, so a position whose grammar admits no sign passes `false`.
+pub effect fn integerFromToken(
+  draft: &mut Draft,
+  tree: &SyntaxTree,
+  span: Span,
+  digits: Span,
+  negative: bool,
+) -> HirId
 ! OutOfMemoryError
 ? &mut Allocator {
   let source = Bytes.asSlice(&tree.source)
@@ -1058,9 +1066,14 @@ pub effect fn integerFromToken(draft: &mut Draft, tree: &SyntaxTree, span: Span,
   if !magnitude.fits {
     return run undecodableLiteral(&mut draft.*, span, CauseCode.IntegerOverflow)
   }
+  let mut sign = Sign.Positive
+  if negative {
+    sign = Sign.Negative
+  }
   return run appendHealthy(
     &mut draft.*,
     Node.IntegerLiteral {
+      sign: sign,
       magnitude: magnitude.value,
       radix: base.radix,
       suffix: SymbolRef.absent(),
@@ -1070,6 +1083,12 @@ pub effect fn integerFromToken(draft: &mut Draft, tree: &SyntaxTree, span: Span,
 }
 
 /// Lowers an `IntegerLiteralExpression` node, including its bare-token and pattern positions.
+///
+/// # Details
+///
+/// The grammar spells the node `[Minus?, DecimalInteger]`, so the sign is a direct token of the
+/// literal rather than a prefix expression wrapping it. Reading it here is what keeps `-1` and `1`
+/// distinct in the arena.
 pub effect fn integerLiteral(draft: &mut Draft, tree: &SyntaxTree, parent: NodeId) -> HirId
 ! OutOfMemoryError
 ? &mut Allocator {
@@ -1078,7 +1097,8 @@ pub effect fn integerLiteral(draft: &mut Draft, tree: &SyntaxTree, parent: NodeI
   if !digits.present {
     return run missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
   }
-  return run integerFromToken(&mut draft.*, tree, span, tokenSpan(digits.token))
+  let negative = hasToken(tree, parent, TokenKind.Minus)
+  return run integerFromToken(&mut draft.*, tree, span, tokenSpan(digits.token), negative)
 }
 
 /// Lowers a `FloatingLiteralExpression` node into sign, coefficient, and decimal exponent.

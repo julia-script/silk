@@ -47,8 +47,9 @@
 //!   than anchors, because a span is what a diagnostic needs to underline a keyword.
 //! - Field names that are Silk keywords are renamed, never dropped: `type` is `annotation`,
 //!   `public` is `isPublic`, `role` is `rolePath` or `roleName` by its child kind, and `effect`,
-//!   `test`, `unsafe`, `static`, and `move` take an `is` prefix. `IntegerLiteral.value` is
-//!   `magnitude`, because the field holds an unsigned magnitude rather than a signed value.
+//!   `test`, `unsafe`, `static`, and `move` take an `is` prefix. The bootstrap's signed
+//!   `IntegerLiteral.value` becomes an unsigned `magnitude` paired with a `sign`, for the same
+//!   reason `FloatingLiteral` splits its exponent: a `u64` cannot carry the sign.
 //! - `Requirement.access` and `NamedType.mode` are non-optional enums paired with a `hasAccess` or
 //!   `hasMode` flag, because an enum cannot carry an absence marker and a reserved variant would
 //!   make one written mode unrepresentable.
@@ -768,6 +769,8 @@ pub union Node {
 
   /// An integer literal whose magnitude fits `u64`.
   IntegerLiteral {
+    /// The written sign of the literal.
+    pub sign: Sign,
     /// The decoded magnitude.
     pub magnitude: u64,
     /// The written base.
@@ -1970,7 +1973,7 @@ fn nodeKindName(node: Node) -> string<'static> {
     Node.CallableContract {generics: ignored1, parameters: ignored2, variadic: ignored3, result: ignored4, failures: ignored5, requirements: ignored6, constraints: ignored7, isEffect: ignored8, isTest: ignored9, environment: ignored10, isUnsafe: ignored11, isStatic: ignored12, effectAnchor: ignored13, testAnchor: ignored14, unsafeAnchor: ignored15, staticAnchor: ignored16, genericsAnchor: ignored17, failuresAnchor: ignored18, constraintsAnchor: ignored19} => "CallableContract"
     Node.Property {name: ignored1, value: ignored2} => "Property"
     Node.PropertyClause {namespace: ignored1, operation: ignored2, properties: ignored3} => "PropertyClause"
-    Node.IntegerLiteral {magnitude: ignored1, radix: ignored2, suffix: ignored3} => "IntegerLiteral"
+    Node.IntegerLiteral {sign: ignored1, magnitude: ignored2, radix: ignored3, suffix: ignored4} => "IntegerLiteral"
     Node.TextLiteral {value: ignored1} => "TextLiteral"
     Node.FloatingLiteral {sign: ignored1, coefficient: ignored2, exponent: ignored3, exponentSign: ignored4, suffix: ignored5} => "FloatingLiteral"
     Node.DurationComponent {magnitude: ignored1, unit: ignored2} => "DurationComponent"
@@ -2229,7 +2232,8 @@ effect fn writeNodeFields(module: &Module, node: Node) -> () ! WriterError ? &mu
       run writeIdField("operation", operation)
       run writeRangeField(module, "properties", properties)
     }
-    Node.IntegerLiteral {magnitude, radix, suffix} => {
+    Node.IntegerLiteral {sign, magnitude, radix, suffix} => {
+      run writeSignField("sign", sign)
       run writeMagnitudeField("magnitude", magnitude)
       run writeRadixField("radix", radix)
       run writeSymbolRefField(module, "suffix", suffix)
@@ -3086,7 +3090,7 @@ effect fn verifyNode(module: &Module, parent: usize, found: &mut Vector<Defect>)
       run recordId(module, parent, operation, &mut found.*)
       run recordRange(module, parent, properties, &mut found.*)
     }
-    Node.IntegerLiteral {magnitude: ignored1, radix: ignored2, suffix} => {
+    Node.IntegerLiteral {sign: ignored1, magnitude: ignored2, radix: ignored3, suffix} => {
       run recordSymbolRef(module, parent, suffix, &mut found.*)
     }
     Node.TextLiteral {value} => {

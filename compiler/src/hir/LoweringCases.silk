@@ -397,15 +397,15 @@ effect fn lowerExpression(source: string<'static>, kind: NodeKind) -> Module
   return move module
 }
 
-/// Reports whether the module's last node is an integer literal with this magnitude and radix.
-fn expectInteger(module: &Module, magnitude: u64, radix: Radix) -> bool {
+/// Reports whether the module's last node is an integer literal with this sign, magnitude, radix.
+fn expectInteger(module: &Module, sign: Sign, magnitude: u64, radix: Radix) -> bool {
   let last = Module.length(module)
   if last == usize.ZERO {
     return false
   }
-  if let Node.IntegerLiteral {magnitude: found, radix: foundRadix, suffix: ignoredSuffix}
+  if let Node.IntegerLiteral {sign: foundSign, magnitude: found, radix: foundRadix, ..}
     = Module.node(module, HirId {index: last - usize.ONE}) {
-    return found == magnitude && foundRadix == radix
+    return foundSign == sign && found == magnitude && foundRadix == radix
   }
   return false
 }
@@ -448,26 +448,26 @@ effect fn checkIntegerForms() -> () ! OutOfMemoryError | AssertionError<'static>
     "fn main() -> i32 { return 0xFF }",
     NodeKind.IntegerLiteralExpression,
   )
-  run Testing.expect(expectInteger(&hex, 255, Radix.Hexadecimal), "0xFF reads as hexadecimal 255")
+  run Testing.expect(expectInteger(&hex, Sign.Positive, 255, Radix.Hexadecimal), "0xFF reads as hexadecimal 255")
   drop hex
   let binary = run lowerExpression(
     "fn main() -> i32 { return 0b1010 }",
     NodeKind.IntegerLiteralExpression,
   )
-  run Testing.expect(expectInteger(&binary, 10, Radix.Binary), "0b1010 reads as binary 10")
+  run Testing.expect(expectInteger(&binary, Sign.Positive, 10, Radix.Binary), "0b1010 reads as binary 10")
   drop binary
   let octal = run lowerExpression(
     "fn main() -> i32 { return 0o17 }",
     NodeKind.IntegerLiteralExpression,
   )
-  run Testing.expect(expectInteger(&octal, 15, Radix.Octal), "0o17 reads as octal 15")
+  run Testing.expect(expectInteger(&octal, Sign.Positive, 15, Radix.Octal), "0o17 reads as octal 15")
   drop octal
   let separated = run lowerExpression(
     "fn main() -> i32 { return 1_000_000 }",
     NodeKind.IntegerLiteralExpression,
   )
   run Testing.expect(
-    expectInteger(&separated, 1000000, Radix.Decimal),
+    expectInteger(&separated, Sign.Positive, 1000000, Radix.Decimal),
     "a separator groups digits without carrying value",
   )
   drop separated
@@ -488,7 +488,7 @@ effect fn checkIntegerOverflow() -> ()
     NodeKind.IntegerLiteralExpression,
   )
   run Testing.expect(
-    !expectInteger(&module, 0, Radix.Decimal),
+    !expectInteger(&module, Sign.Positive, 0, Radix.Decimal),
     "a magnitude beyond u64 is not an integer literal",
   )
   run Testing.expect(
@@ -1000,7 +1000,7 @@ effect fn checkFullContract() -> ()
 ! OutOfMemoryError | AssertionError<'static>
 ? &mut Allocator {
   let module = run lowerContractOf(
-    "pub test effect fn run<T>(mut value: T, ...) -> i32 !Error ?&Clock where T in Copy { return 0 }",
+    "pub test effect fn apply<T>(mut value: T, ...) -> i32 !Error ?&Clock where T in Copy { return 0 }",
   )
   let mut generics = Range.empty()
   let mut parameters = Range.empty()
@@ -1114,4 +1114,56 @@ test effect fn missingResultTypeRecordsACause() -> ()
 ! OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   return run checkMissingResultType() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkSignedInteger() -> ()
+! OutOfMemoryError | WriterError | AssertionError<'static>
+? &mut Allocator {
+  let negative = run lowerExpression(
+    "fn main() -> i32 { return -1 }",
+    NodeKind.IntegerLiteralExpression,
+  )
+  run Testing.expect(
+    expectInteger(&negative, Sign.Negative, 1, Radix.Decimal),
+    "a written `-` makes the literal negative",
+  )
+  let rendered = run Hir.render(&negative)
+  let expected = String.utf8Bytes(
+    """documentation none
+declarations [#0]
+
+nodes 1
+#0 IntegerLiteral 26..28
+  sign: Negative
+  magnitude: 1
+  radix: Decimal
+  suffix: none
+
+causes 0
+
+diagnostics 0
+""",
+  )
+  run Testing.expect(
+    bytesEqual(Vector.asSlice<u8>(&rendered), expected),
+    "the dump names the written sign",
+  )
+  drop rendered
+  drop negative
+  let positive = run lowerExpression(
+    "fn main() -> i32 { return 1 }",
+    NodeKind.IntegerLiteralExpression,
+  )
+  run Testing.expect(
+    expectInteger(&positive, Sign.Positive, 1, Radix.Decimal),
+    "an unsigned literal stays positive, so `-1` and `1` never collide",
+  )
+  drop positive
+  return ()
+}
+
+test effect fn integerLiteralKeepsItsSign() -> ()
+! OutOfMemoryError | WriterError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkSignedInteger() |> Effect.provideMut<Allocator>(&mut allocator)
 }

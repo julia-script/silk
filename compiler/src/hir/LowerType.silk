@@ -594,12 +594,8 @@ pub effect fn bindersIn(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeI
 ///
 /// This is the bootstrap `constraints`. A membership constraint's two operands are row positions,
 /// so a written requirement is admitted there; a provider's first operand is an ordinary type.
-///
-/// # Gotchas
-///
-/// The whole clause is lowered by this one function rather than by a per-constraint helper. The
-/// bootstrap compiler's realizer cannot size the ancestry of the extra call-graph level; see
-/// `compiler/BUGS.md`.
+/// Both constraint forms are lowered here, because the two share every operand rule but the one
+/// leading type a provider adds.
 pub effect fn constraints(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> Range
 ! OutOfMemoryError
 ? &mut Allocator {
@@ -991,7 +987,7 @@ effect fn fixedArrayType(draft: &mut DraftState, tree: &SyntaxTree, syntax: Node
   let mut length = HirId {index: usize.ZERO}
   if digits.present {
     let digitSpan = tokenSpan(digits.token)
-    length = run Draft.integerFromToken(&mut draft.*, tree, digitSpan, digitSpan)
+    length = run Draft.integerFromToken(&mut draft.*, tree, digitSpan, digitSpan, false)
   } else {
     length = run Draft.missingExpression(
       &mut draft.*,
@@ -1078,7 +1074,7 @@ effect fn pointerQualifier(draft: &mut DraftState, tree: &SyntaxTree, syntax: No
   let mut value = HirId {index: usize.ZERO}
   if digits.present {
     let digitSpan = tokenSpan(digits.token)
-    value = run Draft.integerFromToken(&mut draft.*, tree, digitSpan, digitSpan)
+    value = run Draft.integerFromToken(&mut draft.*, tree, digitSpan, digitSpan, false)
   } else {
     value = run Draft.missingExpression(&mut draft.*, tree, span, CauseCode.MissingToken)
   }
