@@ -94,7 +94,7 @@ pub fn main() -> i32 {
         { code: 'SEM0177', span: ['logging/main', 146, 147] },
         { code: 'SEM0177', span: ['logging/main', 175, 179] },
         { code: 'SEM0177', span: ['logging/main', 207, 216] },
-        { code: 'SEM0083', span: ['silk/format', 14496, 14517] },
+        { code: 'SEM0083', span: ['silk/format', 15490, 15511] },
       ],
     )
   }),
