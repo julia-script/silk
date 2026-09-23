@@ -80,3 +80,6 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 - 2026-09-23 · Starting an authorized merge in a linked worktree failed because the sandbox could
   not create the shared Git worktree's `ORIG_HEAD.lock` · Retry the exact scoped merge with approved
   Git metadata access instead of changing branches or bypassing the worktree · repository
+- 2026-09-23 · A focused formatter/linter command used repository-root paths after changing its cwd
+  to `packages/compiler`, so formatting matched no files and the package-local binary path was
+  wrong · Keep the repository root as cwd for root-relative file lists and tool binaries · compiler

@@ -116,6 +116,25 @@ const expectedPhases = [
   'link',
 ]
 
+it.effect('consumes a shorthand target when synthesizing the complete profile', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource(
+      'shorthand-target.ll',
+      'pub fn main() -> i32 { return 42 }',
+      {
+        compilation: {
+          root: 'memory/shorthand-target',
+          target: 'wasm32-unknown-unknown',
+        },
+        artifactKind: 'WebAssemblyModule',
+        stage: 'llvm-ir',
+      },
+    )
+
+    assert.strictEqual(outcome._tag, 'Compiled')
+  }),
+)
+
 it.effect('publishes execution identities for a successful discovered-test executable', () =>
   Effect.gen(function* () {
     const root = 'memory/driver-tests'

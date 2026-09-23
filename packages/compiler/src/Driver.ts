@@ -378,7 +378,10 @@ export const compile = Effect.fn('Driver.compile')(
       request.compilation.configuration !== undefined || targetId === undefined
         ? request.compilation
         : {
-            ...request.compilation,
+            root: request.compilation.root,
+            ...(request.compilation.discovery === undefined
+              ? {}
+              : { discovery: request.compilation.discovery }),
             configuration: {
               package: `${request.packageName}@0.0.0`,
               profile: {
