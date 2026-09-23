@@ -128,3 +128,14 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
   stdlib pages because `generate-documentation.mjs` read the built compiler's older manifest · Run
   `node_modules/.bin/tsc -p packages/compiler/tsconfig.json` after changing the manifest, then
   regenerate documentation and check that the new pages exist · compiler
+- 2026-09-23 · A fresh silk worktree has no `node_modules`, and after `pnpm install` the compiler
+  test files still fail to import: first `Cannot find module './ToolchainIntegrity.generated.js'`,
+  then `Cannot find package '@silklang/llvm/ByteString'` · Run `CI=true pnpm install` with
+  `--frozen-lockfile`, then run all three generator scripts from `packages/compiler`
+  (`generate-unicode-tables.mjs`, `generate-stdlib.mjs`, `generate-toolchain-integrity.mjs`), then
+  build the LLVM package with `turbo run build --filter @silklang/llvm` · compiler
+- 2026-09-23 · `MirVerification` emits the same `InvalidCallableOperation` rule tag for both the
+  `MakeCallable` and the `ApplyCallable` blocks, so a violation report alone does not say which
+  operation failed and sends debugging to the wrong code · Read the violation's `detail` string,
+  not the `rule`: "callable construction disagrees ..." is `MakeCallable`, "callable application
+  disagrees ..." is `ApplyCallable` · compiler
