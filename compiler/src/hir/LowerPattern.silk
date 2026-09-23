@@ -1,0 +1,410 @@
+//! Lowering of match, conditional, and destructuring patterns.
+//!
+//! # When to use
+//!
+//! Call [`lowerPattern`] wherever the grammar admits a pattern operand and [`patternIn`] when the
+//! pattern is one child of an enclosing construct that may have lost it. Both bind every name a
+//! [`Node.BindingPattern`](hir.Hir.Node) introduces into the innermost open frame, so the caller
+//! opens the frame that the bindings belong to before it lowers the pattern.
+//!
+//! # Details
+//!
+//! This is the port of the `pattern`, `patternFields`, and `missingPattern` section of the
+//! bootstrap `AuthoredLowering` (`packages/compiler/src/AuthoredLowering.ts`). Children are
+//! appended before their parent, so the arena stays postorder.
+//!
+//! # Gotchas
+//!
+//! A record field written in shorthand (`Point {x}`) still lowers to a
+//! [`Node.PatternField`](hir.Hir.Node) over a synthesized binding pattern of the same name, exactly
+//! as the bootstrap does, so a consumer never distinguishes the two spellings.
+
+import hir.Draft
+import hir.Draft {Draft as DraftState, TokenRef}
+import hir.Hir {CauseCode, HirId, HirRef, Module, Node, Range, RangeRef}
+import hir.LowerType
+import hir.LowerType {NodeRef}
+import lexer.Span {Span}
+import lexer.Token {Token, TokenKind, kind as tokenKind, span as tokenSpan}
+import parser.Element {Element}
+import parser.Node {NodeKind}
+import parser.NodeId {NodeId}
+import parser.SyntaxTree {SyntaxTree}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.usize
+import silk.vector {Vector}
+
+/// Reports whether `kind` may occupy one pattern-operand position.
+///
+/// # Details
+///
+/// This is the bootstrap `patternKinds`. `ErrorPattern` belongs to it because a damaged pattern is
+/// still retained in place rather than deleted.
+pub fn isPatternKind(kind: NodeKind) -> bool {
+  return match kind {
+    NodeKind.ErrorPattern => true
+    NodeKind.EnumMemberPattern => true
+    NodeKind.IntegerPattern => true
+    NodeKind.NominalPattern => true
+    NodeKind.BindingPattern => true
+    NodeKind.UniversalPattern => true
+    NodeKind.UnionVariantPattern => true
+    _ => false
+  }
+}
+
+/// Returns the first direct child of `parent` that may be a pattern.
+pub fn patternChildOf(tree: &SyntaxTree, parent: NodeId) -> NodeRef {
+  let count = Draft.childCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parent, index)
+    if isPatternKind(Draft.kindOf(tree, child)) {
+      return NodeRef.of(child)
+    }
+    index = index + usize.ONE
+  }
+  return NodeRef.absent()
+}
+
+/// Lowers a required but absent pattern.
+pub effect fn missingPattern(draft: &mut DraftState, tree: &SyntaxTree, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let causes = run Draft.recoveryCauses(&mut draft.*, tree, span, CauseCode.MissingToken)
+  return run Draft.append(&mut draft.*, Node.MissingPattern, span, causes)
+}
+
+/// Lowers the pattern child of `parent`, or a missing pattern over `span` when it wrote none.
+pub effect fn patternIn(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let found = patternChildOf(tree, parent)
+  if !found.present {
+    return run missingPattern(&mut draft.*, tree, span)
+  }
+  return run lowerPattern(&mut draft.*, tree, found.id)
+}
+
+/// Returns the identifier token of `parent` at `offset` among its direct identifier tokens.
+fn identifierAt(tree: &SyntaxTree, parent: NodeId, offset: usize) -> TokenRef {
+  let count = Draft.elementCount(tree, parent)
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    if let Element.Token {id} = Draft.elementAt(tree, parent, index) {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      if tokenKind(token) == TokenKind.Identifier {
+        if seen == offset {
+          return TokenRef.of(token)
+        }
+        seen = seen + usize.ONE
+      }
+    }
+    index = index + usize.ONE
+  }
+  return TokenRef.absent()
+}
+
+/// Lowers one `Subject.member` selector, or a fully missing one over `span`.
+///
+/// # Details
+///
+/// This is the bootstrap `memberSelector` together with the fallback its two callers share: an
+/// applied member expression and a union variant pattern both keep their shape when the parser
+/// recovered without a selector, so the selector is synthesized from a missing type and a missing
+/// name rather than being dropped.
+pub effect fn memberSelector(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let found = LowerType.firstChildOf(tree, parent, NodeKind.AppliedMemberSelector)
+  if !found.present {
+    let subject = run LowerType.missingType(&mut draft.*, tree, span)
+    let member = run Draft.missingName(&mut draft.*, tree, span, CauseCode.MissingToken)
+    return run Draft.appendHealthy(
+      &mut draft.*,
+      Node.MemberSelector {subject: subject, member: member},
+      span,
+    )
+  }
+  let syntax = found.id
+  let selectorSpan = Draft.nodeSpan(tree, syntax)
+  let subjectSyntax = LowerType.typeChildAt(tree, syntax, usize.ZERO, false)
+  let subject = run LowerType.typeOrMissing(&mut draft.*, tree, subjectSyntax, selectorSpan)
+  let member = run selectedName(&mut draft.*, tree, syntax, selectorSpan)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.MemberSelector {subject: subject, member: member},
+    selectorSpan,
+    causes,
+  )
+}
+
+/// Lowers the last identifier token of a selector, which is the member it selects.
+effect fn selectedName(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let mut last = TokenRef.absent()
+  let count = Draft.elementCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    if let Element.Token {id} = Draft.elementAt(tree, syntax, index) {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      if tokenKind(token) == TokenKind.Identifier {
+        last = TokenRef.of(token)
+      }
+    }
+    index = index + usize.ONE
+  }
+  if last.present {
+    return run Draft.nameFromToken(&mut draft.*, tree, last.token)
+  }
+  let missing = Draft.missingToken(tree, syntax, TokenKind.Identifier)
+  let mut where = span
+  if missing.present {
+    where = missing.span
+  }
+  return run Draft.missingName(&mut draft.*, tree, where, CauseCode.MissingToken)
+}
+
+/// Lowers the field and rest patterns of a nominal or variant pattern, answering their range.
+///
+/// # Details
+///
+/// This is the bootstrap `patternFields`. A field written `name: pattern` lowers its written
+/// pattern; a field written `name` or `name: binder` lowers to a binding pattern that the
+/// enclosing frame records, so a shorthand binds exactly like a spelled-out one.
+pub effect fn patternFields(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId) -> Range
+! OutOfMemoryError
+? &mut Allocator {
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    let field = Draft.childAt(tree, parent, index)
+    let kind = Draft.kindOf(tree, field)
+    if kind == NodeKind.RestPattern {
+      let rest = run Draft.appendHealthy(
+        &mut draft.*,
+        Node.RestPattern,
+        Draft.nodeSpan(tree, field),
+      )
+      run Draft.pushChild(&mut draft.*, rest)
+    } else if kind == NodeKind.PatternField {
+      let lowered = run patternField(&mut draft.*, tree, field)
+      run Draft.pushChild(&mut draft.*, lowered)
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.finishChildren(&mut draft.*, mark)
+}
+
+effect fn patternField(draft: &mut DraftState, tree: &SyntaxTree, field: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, field)
+  let nameToken = identifierAt(tree, field, usize.ZERO)
+  let mut name = HirId {index: usize.ZERO}
+  if nameToken.present {
+    name = run Draft.nameFromToken(&mut draft.*, tree, nameToken.token)
+  } else {
+    name = run Draft.missingName(&mut draft.*, tree, span, CauseCode.MissingToken)
+  }
+  let nested = patternChildOf(tree, field)
+  let mut lowered = HirId {index: usize.ZERO}
+  if nested.present {
+    lowered = run lowerPattern(&mut draft.*, tree, nested.id)
+  } else {
+    lowered = run shorthandBinding(&mut draft.*, tree, field, span, nameToken)
+  }
+  let causes = run Draft.damage(&mut draft.*, tree, field)
+  return run Draft.append(
+    &mut draft.*,
+    Node.PatternField {name: name, pattern: lowered},
+    span,
+    causes,
+  )
+}
+
+/// Lowers the binding a record field introduces when it writes no nested pattern.
+///
+/// # Details
+///
+/// `name: binder` binds `binder`; a bare `name` binds `name` itself. The bootstrap distinguishes
+/// the two through an `Origin` tag, which this port drops: every node in a module is authored, and
+/// the span already says whether the binder was written.
+effect fn shorthandBinding(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  field: NodeId,
+  span: Span,
+  nameToken: TokenRef,
+) -> HirId ! OutOfMemoryError ? &mut Allocator {
+  let bindingToken = identifierAt(tree, field, usize.ONE)
+  let mut bindingName = HirId {index: usize.ZERO}
+  let mut bindingSpan = span
+  if bindingToken.present {
+    bindingSpan = tokenSpan(bindingToken.token)
+    bindingName = run Draft.nameFromToken(&mut draft.*, tree, bindingToken.token)
+  } else if nameToken.present {
+    bindingName = run Draft.nameFromToken(&mut draft.*, tree, nameToken.token)
+  } else {
+    bindingName = run Draft.missingName(&mut draft.*, tree, span, CauseCode.MissingToken)
+  }
+  let binding = run Draft.appendHealthy(
+    &mut draft.*,
+    Node.BindingPattern {annotation: HirRef.absent(), name: bindingName},
+    bindingSpan,
+  )
+  run bindName(&mut draft.*, bindingName, binding)
+  return binding
+}
+
+/// Records `name` as a binder for `id` when the name was actually written.
+effect fn bindName(draft: &mut DraftState, name: HirId, id: HirId) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if let Node.Name {text} = Module.node(&draft.module, name) {
+    run Draft.bind(&mut draft.*, text, id)
+  }
+  return ()
+}
+
+/// Lowers one pattern node in one operand position.
+///
+/// # Details
+///
+/// This is the bootstrap `pattern`. A damaged pattern region keeps its place as
+/// [`Node.InvalidPattern`](hir.Hir.Node), or as [`Node.MissingPattern`](hir.Hir.Node) when the
+/// parser recovered by inserting a name rather than by consuming source.
+pub effect fn lowerPattern(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let kind = Draft.kindOf(tree, syntax)
+  let span = Draft.nodeSpan(tree, syntax)
+  if kind == NodeKind.EnumMemberPattern {
+    let path = run Draft.pathOf(&mut draft.*, tree, syntax, true)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.EnumPattern {path: path}, span, causes)
+  }
+  if kind == NodeKind.IntegerPattern {
+    let digits = Draft.directToken(tree, syntax, TokenKind.DecimalInteger)
+    if !digits.present {
+      return run missingPattern(&mut draft.*, tree, span)
+    }
+    let value = run Draft.integerFromToken(
+      &mut draft.*,
+      tree,
+      span,
+      tokenSpan(digits.token),
+      Draft.hasToken(tree, syntax, TokenKind.Minus),
+    )
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.IntegerPattern {value: value}, span, causes)
+  }
+  if kind == NodeKind.NominalPattern {
+    let target = LowerType.typeChildAt(tree, syntax, usize.ZERO, false)
+    let annotation = run LowerType.typeOrMissing(&mut draft.*, tree, target, span)
+    let fields = run patternFields(&mut draft.*, tree, syntax)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.NominalPattern {annotation: annotation, fields: fields},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.BindingPattern {
+    let target = LowerType.typeChildAt(tree, syntax, usize.ZERO, false)
+    let mut annotation = HirRef.absent()
+    if target.present {
+      annotation = HirRef.of(run LowerType.lowerType(&mut draft.*, tree, target.id))
+    }
+    let name = run bindingPatternName(&mut draft.*, tree, syntax)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    let binding = run Draft.append(
+      &mut draft.*,
+      Node.BindingPattern {annotation: annotation, name: name},
+      span,
+      causes,
+    )
+    run bindName(&mut draft.*, name, binding)
+    return binding
+  }
+  if kind == NodeKind.UniversalPattern {
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.UniversalPattern {name: HirRef.absent()},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.UnionVariantPattern {
+    let selector = run memberSelector(&mut draft.*, tree, syntax, span)
+    let mut fields = RangeRef.absent()
+    if Draft.hasToken(tree, syntax, TokenKind.LeftBrace) {
+      fields = RangeRef.of(run patternFields(&mut draft.*, tree, syntax))
+    }
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.VariantPattern {selector: selector, fields: fields},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.ErrorPattern && !hasErrorRegion(tree, syntax) {
+    return run missingPattern(&mut draft.*, tree, span)
+  }
+  let causes = run Draft.recoveryCauses(&mut draft.*, tree, span, CauseCode.UnexpectedToken)
+  return run Draft.append(&mut draft.*, Node.InvalidPattern {retained: Range.empty()}, span, causes)
+}
+
+/// Lowers the name a binding pattern introduces, which the grammar writes after its type.
+///
+/// # Details
+///
+/// The parser spells `mut value: T` as a type operand followed by an identifier, so the binder is
+/// the last identifier token of the node rather than its first, which is what
+/// [`Draft.nameIn`](hir.Draft.nameIn) would answer.
+effect fn bindingPatternName(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let mut last = TokenRef.absent()
+  let count = Draft.elementCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    if let Element.Token {id} = Draft.elementAt(tree, syntax, index) {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      if tokenKind(token) == TokenKind.Identifier {
+        last = TokenRef.of(token)
+      }
+    }
+    index = index + usize.ONE
+  }
+  if last.present {
+    return run Draft.nameFromToken(&mut draft.*, tree, last.token)
+  }
+  let missing = Draft.missingToken(tree, syntax, TokenKind.Identifier)
+  let mut where = Draft.nodeSpan(tree, syntax)
+  if missing.present {
+    where = missing.span
+  }
+  return run Draft.missingName(&mut draft.*, tree, where, CauseCode.MissingToken)
+}
+
+/// Reports whether `parent` directly holds a damaged region, which the bootstrap calls
+/// `errorRegions`.
+pub fn hasErrorRegion(tree: &SyntaxTree, parent: NodeId) -> bool {
+  let count = Draft.childCount(tree, parent)
+  let mut index = usize.ZERO
+  while index < count {
+    if Draft.kindOf(tree, Draft.childAt(tree, parent, index)) == NodeKind.Error {
+      return true
+    }
+    index = index + usize.ONE
+  }
+  return false
+}

@@ -2,6 +2,7 @@
 
 import hir.Draft
 import hir.Draft {Draft as DraftState}
+import hir.Fingerprint
 import hir.Hir
 import hir.Hir {
   Cause,
@@ -9,6 +10,7 @@ import hir.Hir {
   CauseCode,
   Defect,
   DurationUnit,
+  GroupBranch,
   HirId,
   HirRef,
   Module,
@@ -19,10 +21,14 @@ import hir.Hir {
   OwnerKind,
   Radix,
   Range,
+  RangeRef,
   Sign,
   Violation,
 }
 import hir.Intern {StringTable, Symbol, SymbolRef}
+import hir.Lower
+import hir.LowerExpression
+import hir.LowerStatement
 import hir.LowerType
 import lexer.Lexer {Lexer}
 import lexer.Span {Span}
@@ -234,6 +240,7 @@ effect fn buildModule() -> Module ! OutOfMemoryError ? &mut Allocator {
     &mut module,
     Node.Declaration {
       owner: OwnerKey {kind: OwnerKind.Role, name: SymbolRef.of(clock), occurrence: usize.ZERO},
+      documentation: SymbolRef.absent(),
       header: header,
       body: body,
     },
@@ -270,6 +277,7 @@ nodes 4
 #2 NoBody 14..14
 #3 Declaration 0..14
   owner: Role "Clock" #0
+  documentation: none
   header: #1
   body: #2
 
@@ -996,11 +1004,19 @@ test effect fn callableTypeKeepsBinders() -> () ! OutOfMemoryError | AssertionEr
   return run checkCallableBinders() |> Effect.provideMut<Allocator>(&mut allocator)
 }
 
+/// Returns the written mode of the parameter at `offset` within `parameters`.
+fn parameterModeAt(module: &Module, parameters: Range, offset: usize) -> ParameterMode {
+  if let Node.Parameter {mode, ..} = Module.node(module, Module.child(module, parameters, offset)) {
+    return mode
+  }
+  return ParameterMode.Value
+}
+
 effect fn checkFullContract() -> ()
 ! OutOfMemoryError | AssertionError<'static>
 ? &mut Allocator {
   let module = run lowerContractOf(
-    "pub test effect fn apply<T>(mut value: T, ...) -> i32 !Error ?&Clock where T in Copy { return 0 }",
+    "pub test static unsafe effect<> fn apply<T>(value: T, mut second: i32, static third: i32, ...) -> i32 !Error ?&Clock where T in Copy { return 0 }",
   )
   let mut generics = Range.empty()
   let mut parameters = Range.empty()
@@ -1008,13 +1024,18 @@ effect fn checkFullContract() -> ()
   let mut variadic = false
   let mut isEffect = false
   let mut isTest = false
+  let mut isUnsafe = false
+  let mut isStatic = false
   let mut hasResult = false
   let mut hasFailures = false
   let mut hasRequirements = false
   let mut effectAnchored = false
   let mut testAnchored = false
+  let mut unsafeAnchored = false
+  let mut staticAnchored = false
   let mut genericsAnchored = false
   let mut constraintsAnchored = false
+  let mut environment = RangeRef.absent()
   if let Node.CallableContract {
     generics: foundGenerics,
     parameters: foundParameters,
@@ -1025,8 +1046,13 @@ effect fn checkFullContract() -> ()
     constraints: foundConstraints,
     isEffect: foundEffect,
     isTest: foundTest,
+    isUnsafe: foundUnsafe,
+    isStatic: foundStatic,
+    environment: foundEnvironment,
     effectAnchor,
     testAnchor,
+    unsafeAnchor,
+    staticAnchor,
     genericsAnchor,
     constraintsAnchor,
     ..
@@ -1037,34 +1063,60 @@ effect fn checkFullContract() -> ()
     variadic = foundVariadic
     isEffect = foundEffect
     isTest = foundTest
+    isUnsafe = foundUnsafe
+    isStatic = foundStatic
+    environment = foundEnvironment
     hasResult = result.present
     hasFailures = failures.present
     hasRequirements = requirements.present
     effectAnchored = effectAnchor.present
     testAnchored = testAnchor.present
+    unsafeAnchored = unsafeAnchor.present
+    staticAnchored = staticAnchor.present
     genericsAnchored = genericsAnchor.present
     constraintsAnchored = constraintsAnchor.present
   }
   run Testing.expect(generics.length == usize.ONE, "the written generic parameter is retained")
-  run Testing.expect(parameters.length == usize.ONE, "the written parameter is retained")
+  run Testing.expect(
+    parameters.length == usize.add(usize.ONE, 2),
+    "every written parameter is retained",
+  )
   run Testing.expect(variadic, "a trailing `...` marks the list variadic")
   run Testing.expect(isEffect && effectAnchored, "`effect` is recorded with the keyword it was written as")
   run Testing.expect(isTest && testAnchored, "a contextual `test` before `fn` is a test marker")
+  run Testing.expect(
+    isUnsafe && unsafeAnchored,
+    "`unsafe` is recorded with the keyword it was written as",
+  )
+  run Testing.expect(
+    isStatic && staticAnchored,
+    "`static` is recorded with the keyword it was written as",
+  )
   run Testing.expect(hasResult && hasFailures && hasRequirements, "result and both rows are written")
   run Testing.expect(constraints.length == usize.ONE, "the `where` clause keeps its one constraint")
   run Testing.expect(genericsAnchored && constraintsAnchored, "a written list keeps its own anchor")
+  run Testing.expect(
+    environment.present && environment.range.length == usize.ZERO,
+    "a written but empty `effect<>` environment is present and empty, not absent",
+  )
   let mut isMembership = false
   if let Node.MembershipConstraint {..}
     = Module.node(&module, Module.child(&module, constraints, usize.ZERO)) {
     isMembership = true
   }
   run Testing.expect(isMembership, "`T in Copy` lowers to a membership constraint")
-  let mut mode = ParameterMode.Value
-  if let Node.Parameter {mode: found, ..}
-    = Module.node(&module, Module.child(&module, parameters, usize.ZERO)) {
-    mode = found
-  }
-  run Testing.expect(mode == ParameterMode.Mutable, "a `mut` parameter receives its argument mutably")
+  run Testing.expect(
+    parameterModeAt(&module, parameters, usize.ZERO) == ParameterMode.Value,
+    "an unmarked parameter receives its argument by value",
+  )
+  run Testing.expect(
+    parameterModeAt(&module, parameters, usize.ONE) == ParameterMode.Mutable,
+    "a `mut` parameter receives its argument mutably",
+  )
+  run Testing.expect(
+    parameterModeAt(&module, parameters, usize.add(usize.ONE, usize.ONE)) == ParameterMode.Static,
+    "a `static` parameter receives its argument statically",
+  )
   let defects = run Hir.verify(&module)
   run Testing.expect(
     Vector.length<Defect>(&defects) == usize.ZERO,
@@ -1166,4 +1218,1218 @@ test effect fn integerLiteralKeepsItsSign() -> ()
 ! OutOfMemoryError | WriterError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   return run checkSignedInteger() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// ---------------------------------------------------------------------------
+// Expressions, patterns, statements, and blocks
+// ---------------------------------------------------------------------------
+
+/// Lowers the body block of the first function declaration of `source`.
+///
+/// # Details
+///
+/// The contract is lowered first with binding enabled, exactly as a declaration lowering will, so
+/// a parameter is in scope for every identifier in the body.
+effect fn lowerBodyOf(source: string<'static>) -> Module
+! OutOfMemoryError
+? &mut Allocator {
+  let tree = run parseWithAllocator(source)
+  let declaration = firstNode(&tree, NodeKind.FunctionDeclaration)
+  let mut draft = DraftState.make()
+  run Draft.pushFrame(&mut draft)
+  let contract = run LowerType.callableContract(&mut draft, &tree, declaration, true)
+  let body = run LowerStatement.blockIn(
+    &mut draft,
+    &tree,
+    declaration,
+    Draft.nodeSpan(&tree, declaration),
+  )
+  Draft.popFrame(&mut draft)
+  let mut module = DraftState.finish(move draft)
+  let start = Vector.length<HirId>(&module.children)
+  run Vector.append<HirId>(&mut module.children, contract)
+  run Vector.append<HirId>(&mut module.children, body)
+  module.declarations = Range {start: start, length: usize.add(usize.ONE, usize.ONE)}
+  drop tree
+  return move module
+}
+
+/// Returns the last node of `kind` in `tree`, which is the outermost one of a nested family.
+fn lastSyntaxNode(tree: &SyntaxTree, kind: NodeKind) -> NodeId {
+  let nodes = Vector.asSlice<SyntaxNode>(&tree.nodes)
+  let mut found = tree.root
+  let mut index = usize.ZERO
+  while index < nodes.length {
+    if nodes[index].kind == kind {
+      found = NodeId {index: index}
+    }
+    index = index + usize.ONE
+  }
+  return found
+}
+
+/// Lowers the outermost expression node of `kind` in `source` with no enclosing frame.
+effect fn lowerExpressionOf(source: string<'static>, kind: NodeKind) -> Module
+! OutOfMemoryError
+? &mut Allocator {
+  let tree = run parseWithAllocator(source)
+  let target = lastSyntaxNode(&tree, kind)
+  let mut draft = DraftState.make()
+  let lowered = run LowerExpression.lowerExpression(&mut draft, &tree, target)
+  let mut module = DraftState.finish(move draft)
+  let start = Vector.length<HirId>(&module.children)
+  run Vector.append<HirId>(&mut module.children, lowered)
+  module.declarations = Range {start: start, length: usize.ONE}
+  drop tree
+  return move module
+}
+
+/// What one of the searches below is looking for in the arena.
+enum Sought {
+  InvalidExpression,
+  InvalidStatement,
+  IntegerLiteral,
+  DurationLiteral,
+  Conditional,
+}
+
+fn matches(node: Node, sought: Sought) -> bool {
+  return match sought {
+    Sought.InvalidExpression => match node {
+      Node.InvalidExpression {retained: ignored1} => true
+      _ => false
+    }
+    Sought.InvalidStatement => match node {
+      Node.InvalidStatement {retained: ignored1} => true
+      _ => false
+    }
+    Sought.IntegerLiteral => match node {
+      Node.IntegerLiteral {sign: ignored1, magnitude: ignored2, radix: ignored3, suffix: ignored4} =>
+        true
+      _ => false
+    }
+    Sought.DurationLiteral => match node {
+      Node.DurationLiteral {components: ignored1} => true
+      _ => false
+    }
+    Sought.Conditional => match node {
+      Node.ConditionalStatement {condition: ignored1, thenBranch: ignored2, elseBranch: ignored3} =>
+        true
+      _ => false
+    }
+  }
+}
+
+/// Returns the first node of the module that `sought` names, or the module's length.
+fn findKind(module: &Module, sought: Sought) -> usize {
+  let mut index = usize.ZERO
+  while index < Module.length(module) {
+    if matches(Module.node(module, HirId {index: index}), sought) {
+      return index
+    }
+    index = index + usize.ONE
+  }
+  return Module.length(module)
+}
+
+/// Returns the last node of the module that `sought` names, or the module's length.
+fn findLastKind(module: &Module, sought: Sought) -> usize {
+  let mut found = Module.length(module)
+  let mut index = usize.ZERO
+  while index < Module.length(module) {
+    if matches(Module.node(module, HirId {index: index}), sought) {
+      found = index
+    }
+    index = index + usize.ONE
+  }
+  return found
+}
+
+/// Returns the binder an identifier expression resolved to, or an absent reference.
+fn bindingOf(module: &Module, id: usize) -> HirRef {
+  if let Node.IdentifierExpression {binding, ..} = Module.node(module, HirId {index: id}) {
+    return binding
+  }
+  return HirRef.absent()
+}
+
+/// Reports whether the interned text of the name node `id` equals `expected`.
+fn nameIs(module: &Module, id: HirId, expected: string<'static>) -> bool {
+  if let Node.Name {text} = Module.node(module, id) {
+    return bytesEqual(Module.text(module, text), String.utf8Bytes(expected))
+  }
+  return false
+}
+
+/// Returns the identifier expression at `offset` among the module's identifier expressions.
+fn identifierAt(module: &Module, offset: usize) -> usize {
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < Module.length(module) {
+    if let Node.IdentifierExpression {name: ignoredName, binding: ignoredBinding}
+      = Module.node(module, HirId {index: index}) {
+      if seen == offset {
+        return index
+      }
+      seen = seen + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  return Module.length(module)
+}
+
+effect fn checkParameterBinding() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerBodyOf("fn main(value: i32) -> i32 { return value }")
+  let identifier = identifierAt(&module, usize.ZERO)
+  run Testing.expect(identifier < Module.length(&module), "the body holds one identifier")
+  let binding = bindingOf(&module, identifier)
+  run Testing.expect(binding.present, "an identifier naming a parameter resolves to it")
+  match Module.node(&module, binding.id) {
+    Node.Parameter {name, annotation: ignoredAnnotation, mode: ignoredMode} => {
+      run Testing.expect(nameIs(&module, name, "value"), "it resolves to the parameter of that name")
+    }
+    _ => { run Testing.expect(false, "the binder is the parameter node") }
+  }
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "the lowered module satisfies every flat invariant",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+effect fn checkPatternConditionalSubjectScope() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerBodyOf(
+    "fn main(value: Option) -> i32 { if let Option.Some {value} = value { return 1 } return 0 }",
+  )
+  let subject = identifierAt(&module, usize.ZERO)
+  run Testing.expect(subject < Module.length(&module), "the statement holds one identifier")
+  let binding = bindingOf(&module, subject)
+  run Testing.expect(binding.present, "the subject resolves to a binder")
+  match Module.node(&module, binding.id) {
+    Node.Parameter {name, annotation: ignoredAnnotation, mode: ignoredMode} => {
+      run Testing.expect(
+        nameIs(&module, name, "value"),
+        "the subject reads the enclosing parameter, not the binding its own pattern introduces",
+      )
+    }
+    _ => { run Testing.expect(false, "the subject binder is the enclosing parameter") }
+  }
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "the lowered module satisfies every flat invariant",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn patternConditionalSubjectsReadTheOuterScope() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkPatternConditionalSubjectScope()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+test effect fn identifiersResolveToTheirParameter() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkParameterBinding() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkLetBindingAndShadowing() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerBodyOf(
+    "fn main() -> i32 { let outer = 1 if true { let outer = 2 drop outer } outer }",
+  )
+  // Identifier 0 is the inner reference, identifier 1 the outer one: the inner block closes first.
+  let inner = bindingOf(&module, identifierAt(&module, usize.ZERO))
+  let outer = bindingOf(&module, identifierAt(&module, usize.ONE))
+  run Testing.expect(inner.present && outer.present, "both references resolve to a `let`")
+  run Testing.expect(
+    inner.id.index != outer.id.index,
+    "an inner block shadows an outer binding of the same name",
+  )
+  run Testing.expect(
+    inner.id.index > outer.id.index,
+    "the inner binder is the one appended later",
+  )
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "the lowered module satisfies every flat invariant",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn nestedBlocksShadowOuterBindings() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkLetBindingAndShadowing() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkUnresolvedIdentifier() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerBodyOf("fn main() -> i32 { return elsewhere }")
+  let identifier = identifierAt(&module, usize.ZERO)
+  run Testing.expect(
+    !bindingOf(&module, identifier).present,
+    "an identifier with no binder in scope stays unresolved for a later phase",
+  )
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "the lowered module satisfies every flat invariant",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn unresolvedIdentifiersStayAbsent() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkUnresolvedIdentifier() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkMatchArmBinding() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerBodyOf(
+    "fn main(subject: Shape) -> i32 { match subject { Circle {radius} => radius } }",
+  )
+  // Identifier 0 is the match subject; identifier 1 is the arm result.
+  let result = bindingOf(&module, identifierAt(&module, usize.ONE))
+  run Testing.expect(result.present, "an arm result resolves to the pattern's binder")
+  match Module.node(&module, result.id) {
+    Node.BindingPattern {annotation: ignoredAnnotation, name} => {
+      run Testing.expect(nameIs(&module, name, "radius"), "the binder is the shorthand binding")
+    }
+    _ => { run Testing.expect(false, "the binder is a binding pattern") }
+  }
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "the lowered module satisfies every flat invariant",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn matchArmPatternsBindTheirNames() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkMatchArmBinding() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkCapturedBinding() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerBodyOf(
+    "fn main(captured: i32) -> i32 { let inner = fn () -> i32 { return captured } 0 }",
+  )
+  let identifier = identifierAt(&module, usize.ZERO)
+  let binding = bindingOf(&module, identifier)
+  run Testing.expect(binding.present, "an anonymous callable body sees the enclosing frame")
+  match Module.node(&module, binding.id) {
+    Node.Parameter {name, annotation: ignoredAnnotation, mode: ignoredMode} => {
+      run Testing.expect(
+        nameIs(&module, name, "captured"),
+        "the capture resolves to the enclosing parameter",
+      )
+    }
+    _ => { run Testing.expect(false, "the binder is the enclosing parameter") }
+  }
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "the lowered module satisfies every flat invariant",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn callableBodiesCaptureEnclosingBinders() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkCapturedBinding() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkElseIfChain() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let module = run lowerBodyOf(
+    "fn main(a: bool, b: bool) -> i32 { if a { } else if b { } else { } }",
+  )
+  // The outer conditional is appended last, so the chained one precedes it in the arena.
+  let outerIndex = findLastKind(&module, Sought.Conditional)
+  run Testing.expect(outerIndex < Module.length(&module), "the body holds a conditional")
+  if let Node.ConditionalStatement {
+    condition: ignoredCondition,
+    thenBranch: ignoredThen,
+    elseBranch,
+  } = Module.node(&module, HirId {index: outerIndex}) {
+    run Testing.expect(elseBranch.present, "a written `else` keeps its branch")
+    match Module.node(&module, elseBranch.id) {
+      Node.ConditionalStatement {
+        condition: ignoredInnerCondition,
+        thenBranch: ignoredInnerThen,
+        elseBranch: innerElse,
+      } => {
+        run Testing.expect(
+          innerElse.present,
+          "an `else if` chain nests: the chained conditional is the else branch",
+        )
+        match Module.node(&module, innerElse.id) {
+          Node.Block {statements: ignoredStatements} => {}
+          _ => { run Testing.expect(false, "the final `else` is a block") }
+        }
+      }
+      _ => { run Testing.expect(false, "the else branch of an `else if` is a conditional") }
+    }
+  } else {
+    run Testing.expect(false, "the outermost statement is a conditional")
+  }
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "the lowered module satisfies every flat invariant",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn elseIfChainsNestTheirConditionals() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkElseIfChain() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkInvalidStatement() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerBodyOf("fn main() -> i32 { ] 7 }")
+  let invalid = findKind(&module, Sought.InvalidStatement)
+  run Testing.expect(invalid < Module.length(&module), "a damaged statement keeps its place")
+  let range = Module.causeRange(&module, HirId {index: invalid})
+  run Testing.expect(range.length > usize.ZERO, "it records why it is damaged")
+  let healthy = findKind(&module, Sought.IntegerLiteral)
+  run Testing.expect(
+    healthy < Module.length(&module),
+    "the healthy statement after it survives the damage",
+  )
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "the lowered module satisfies every flat invariant",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn invalidStatementsRetainHealthySiblings() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkInvalidStatement() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkSubordinateDuration() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  // The lexer applies the subordinate-range rule, so the lowering sees an invalid literal token.
+  let rejected = run lowerExpression(
+    "fn main() -> i32 { return 1h90m }",
+    NodeKind.DurationLiteralExpression,
+  )
+  run Testing.expect(
+    findKind(&rejected, Sought.InvalidExpression) < Module.length(&rejected),
+    "a subordinate component beyond its range does not lower to a duration",
+  )
+  run Testing.expect(
+    hasCause(&rejected, CauseCode.InvalidLiteralEncoding),
+    "the rejected literal records why it is not a duration",
+  )
+  drop rejected
+  let leading = run lowerExpression(
+    "fn main() -> i32 { return 90m }",
+    NodeKind.DurationLiteralExpression,
+  )
+  run Testing.expect(
+    findKind(&leading, Sought.DurationLiteral) < Module.length(&leading),
+    "a leading component names a whole amount, so `90m` stays a duration",
+  )
+  let defects = run Hir.verify(&leading)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "the lowered module satisfies every flat invariant",
+  )
+  drop defects
+  drop leading
+  return ()
+}
+
+test effect fn durationsRejectOutOfRangeSubordinates() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkSubordinateDuration() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkPrecedenceShape() -> ()
+! OutOfMemoryError | WriterError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerExpressionOf(
+    "fn main(a: i32) -> i32 { return -a.b * 2 + 1 }",
+    NodeKind.InfixExpression,
+  )
+  let rendered = run Hir.render(&module)
+  let expected = String.utf8Bytes(
+    """documentation none
+declarations [#8]
+
+nodes 9
+#0 Name 33..34
+  text: "a"
+#1 IdentifierExpression 33..34
+  name: #0
+  binding: none
+#2 Name 35..36
+  text: "b"
+#3 FieldExpression 33..36
+  subject: #1
+  field: #2
+#4 PrefixExpression 32..36
+  operator: Negate
+  operatorAnchor: 32..33
+  operand: #3
+#5 IntegerLiteral 39..40
+  sign: Positive
+  magnitude: 2
+  radix: Decimal
+  suffix: none
+#6 InfixExpression 32..40
+  operator: Multiply
+  operatorAnchor: 37..38
+  left: #4
+  right: #5
+#7 IntegerLiteral 43..44
+  sign: Positive
+  magnitude: 1
+  radix: Decimal
+  suffix: none
+#8 InfixExpression 32..44
+  operator: Add
+  operatorAnchor: 41..42
+  left: #6
+  right: #7
+
+causes 0
+
+diagnostics 0
+""",
+  )
+  run Testing.expect(
+    bytesEqual(Vector.asSlice<u8>(&rendered), expected),
+    "`-a.b * 2 + 1` groups as `((-(a.b)) * 2) + 1`, postorder in the arena",
+  )
+  drop rendered
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "the lowered module satisfies every flat invariant",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn precedenceSurvivesLowering() -> ()
+! OutOfMemoryError | WriterError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkPrecedenceShape() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// ---------------------------------------------------------------------------
+// Declarations and module assembly
+// ---------------------------------------------------------------------------
+
+/// Lowers a whole source file into a module, as the executable's `hir` dump would.
+effect fn lowerSource(source: string<'static>) -> Module ! OutOfMemoryError ? &mut Allocator {
+  let tree = run parseWithAllocator(source)
+  let module = run Lower.lower(&tree)
+  drop tree
+  return move module
+}
+
+/// Returns the identity of the module's declaration at `offset` among its top-level declarations.
+fn declarationAt(module: &Module, offset: usize) -> HirId {
+  return Module.child(module, module.declarations, offset)
+}
+
+/// Returns the owner key of the declaration node `id`, or a damaged key when `id` is not one.
+fn ownerOf(module: &Module, id: HirId) -> OwnerKey {
+  if let Node.Declaration {owner, ..} = Module.node(module, id) {
+    return owner
+  }
+  return OwnerKey {kind: OwnerKind.Damaged, name: SymbolRef.absent(), occurrence: usize.ZERO}
+}
+
+/// Reports whether `name` is present and interns exactly `expected`.
+fn symbolIs(module: &Module, name: SymbolRef, expected: string<'static>) -> bool {
+  if !name.present {
+    return false
+  }
+  return bytesEqual(Module.text(module, name.symbol), String.utf8Bytes(expected))
+}
+
+/// Returns the members of `id`'s body, or the empty range when its body holds none.
+fn membersOf(module: &Module, id: HirId) -> Range {
+  if let Node.Declaration {body, ..} = Module.node(module, id) {
+    if let Node.MembersBody {members} = Module.node(module, body) {
+      return members
+    }
+  }
+  return Range.empty()
+}
+
+effect fn checkOwnerKeys() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let module = run lowerSource(
+    "fn same() -> () { return () }\nfn same() -> () { return () }\nstruct same {}\n",
+  )
+  run Testing.expect(
+    module.declarations.length == usize.add(0, 3),
+    "three top-level declarations lower into three declaration nodes",
+  )
+  let first = ownerOf(&module, declarationAt(&module, usize.ZERO))
+  let second = ownerOf(&module, declarationAt(&module, usize.ONE))
+  let third = ownerOf(&module, declarationAt(&module, usize.add(0, 2)))
+  run Testing.expect(
+    first.kind == OwnerKind.Function && symbolIs(&module, first.name, "same") && first.occurrence == usize.ZERO,
+    "the first function takes occurrence zero",
+  )
+  run Testing.expect(
+    second.kind == OwnerKind.Function && second.occurrence == usize.ONE,
+    "a same-named sibling takes the next occurrence",
+  )
+  run Testing.expect(
+    third.kind == OwnerKind.Struct && third.occurrence == usize.ZERO,
+    "a different kind with the same name restarts at occurrence zero",
+  )
+  run Testing.expect(
+    first.name.symbol.index == second.name.symbol.index,
+    "same-named siblings share one interned name symbol",
+  )
+  drop module
+  return ()
+}
+
+test effect fn sameNameSiblingsTakeDistinctOccurrences() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkOwnerKeys() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkImplementationKey() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerSource(
+    "impl Eq for Point {\n  fn eq(self: &Self) -> bool { return true }\n}\nimpl Point {\n  fn size(self: &Self) -> usize { return 0 }\n}\n",
+  )
+  let paired = ownerOf(&module, declarationAt(&module, usize.ZERO))
+  let inherent = ownerOf(&module, declarationAt(&module, usize.ONE))
+  run Testing.expect(
+    paired.kind == OwnerKind.Implementation && symbolIs(&module, paired.name, "Eq for Point"),
+    "an interface implementation names itself `subject for target`",
+  )
+  run Testing.expect(
+    inherent.kind == OwnerKind.Implementation && symbolIs(&module, inherent.name, "Point"),
+    "an inherent implementation names itself by its subject alone",
+  )
+  let members = membersOf(&module, declarationAt(&module, usize.ZERO))
+  run Testing.expect(members.length == usize.ONE, "the implementation body holds its one function")
+  let member = ownerOf(&module, Module.child(&module, members, usize.ZERO))
+  run Testing.expect(
+    member.kind == OwnerKind.Function && symbolIs(&module, member.name, "eq") && member.occurrence == usize.ZERO,
+    "a member key is scoped to its implementation, so it restarts at occurrence zero",
+  )
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "a module of two implementations satisfies every flat invariant",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn implementationsNameTheirSubjectAndTarget() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkImplementationKey() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkConditionalArms() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerSource(
+    "static if DEBUG {\n  fn on() -> () { return () }\n} else {\n  fn off() -> () { return () }\n}\n",
+  )
+  run Testing.expect(
+    module.declarations.length == usize.ONE,
+    "a static conditional is one top-level declaration",
+  )
+  let conditional = declarationAt(&module, usize.ZERO)
+  let key = ownerOf(&module, conditional)
+  run Testing.expect(
+    key.kind == OwnerKind.Conditional && !key.name.present,
+    "a static conditional names nothing",
+  )
+  let mut thenBranch = HirId {index: usize.ZERO}
+  let mut elseBranch = HirRef.absent()
+  if let Node.Declaration {body, ..} = Module.node(&module, conditional) {
+    if let Node.ConditionalBody {thenBranch: found, elseBranch: other}
+      = Module.node(&module, body) {
+      thenBranch = found
+      elseBranch = other
+    }
+  }
+  run Testing.expect(elseBranch.present, "a written `else` arm is retained beside the `then` arm")
+  let thenMembers = membersOf(&module, thenBranch)
+  let elseMembers = membersOf(&module, elseBranch.id)
+  run Testing.expect(
+    thenMembers.length == usize.ONE && elseMembers.length == usize.ONE,
+    "both arms lower their members, including the one the condition will not select",
+  )
+  let taken = ownerOf(&module, Module.child(&module, thenMembers, usize.ZERO))
+  let skipped = ownerOf(&module, Module.child(&module, elseMembers, usize.ZERO))
+  run Testing.expect(
+    symbolIs(&module, taken.name, "on") && symbolIs(&module, skipped.name, "off"),
+    "each arm keeps the declaration it actually wrote",
+  )
+  let mut thenIsThen = false
+  if let Node.Declaration {header, ..} = Module.node(&module, thenBranch) {
+    if let Node.GroupHeader {branch} = Module.node(&module, header) {
+      thenIsThen = branch == GroupBranch.Then
+    }
+  }
+  run Testing.expect(thenIsThen, "the first arm records the `Then` branch")
+  drop module
+  return ()
+}
+
+test effect fn staticConditionalsLowerBothArms() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkConditionalArms() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkVariantBraces() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let module = run lowerSource("union Shape {\n  Dot,\n  Empty {},\n  Circle {r: f64},\n}\n")
+  let mut variants = Range.empty()
+  if let Node.Declaration {header, ..} = Module.node(&module, declarationAt(&module, usize.ZERO)) {
+    if let Node.UnionHeader {name: ignoredName, isPublic: ignoredPublic, generics: ignoredGenerics, variants: found}
+      = Module.node(&module, header) {
+      variants = found
+    }
+  }
+  run Testing.expect(variants.length == usize.add(0, 3), "three variants lower into three nodes")
+  let mut unitHasBraces = true
+  let mut emptyHasBraces = false
+  let mut emptyFields = usize.ONE
+  let mut payloadFields = usize.ZERO
+  if let Node.Variant {name: ignoredUnitName, fields: ignoredUnitFields, braces}
+    = Module.node(&module, Module.child(&module, variants, usize.ZERO)) {
+    unitHasBraces = braces
+  }
+  if let Node.Variant {name: ignoredEmptyName, fields, braces: emptyBraces}
+    = Module.node(&module, Module.child(&module, variants, usize.ONE)) {
+    emptyHasBraces = emptyBraces
+    emptyFields = fields.length
+  }
+  if let Node.Variant {name: ignoredCircleName, fields: circleFields, braces: ignoredCircleBraces}
+    = Module.node(&module, Module.child(&module, variants, usize.add(0, 2))) {
+    payloadFields = circleFields.length
+  }
+  run Testing.expect(!unitHasBraces, "a unit variant writes no field block")
+  run Testing.expect(
+    emptyHasBraces && emptyFields == usize.ZERO,
+    "an empty field block stays distinct from a unit variant",
+  )
+  run Testing.expect(payloadFields == usize.ONE, "a payload variant keeps its declared field")
+  drop module
+  return ()
+}
+
+test effect fn unionVariantsRecordTheirFieldBlock() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkVariantBraces() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+/// Returns the `///` block interned on declaration `id`.
+fn documentationOf(module: &Module, id: HirId) -> SymbolRef {
+  if let Node.Declaration {documentation, ..} = Module.node(module, id) {
+    return documentation
+  }
+  return SymbolRef.absent()
+}
+
+effect fn checkDocumentation() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let documented = run lowerSource(
+    "//! The module.\n//! Second line.\n\n/// The function.\n/// Second line.\nfn work() -> () { return () }\n",
+  )
+  run Testing.expect(
+    documented.documentation.present,
+    "a leading `//!` block becomes the module's documentation",
+  )
+  run Testing.expect(
+    symbolIs(&documented, documented.documentation, "//! The module.\n//! Second line."),
+    "the module block interns every comment it spans, joined as written",
+  )
+  let attached = documentationOf(&documented, declarationAt(&documented, usize.ZERO))
+  run Testing.expect(
+    symbolIs(&documented, attached, "/// The function.\n/// Second line."),
+    "a `///` block attaches to the declaration that follows it",
+  )
+  drop documented
+  let undocumented = run lowerSource(
+    "\n/// Detached by a blank line.\n\nfn work() -> () { return () }\n",
+  )
+  run Testing.expect(
+    !undocumented.documentation.present,
+    "a file with no `//!` block documents nothing",
+  )
+  run Testing.expect(
+    !documentationOf(&undocumented, declarationAt(&undocumented, usize.ZERO)).present,
+    "a blank line detaches a `///` block from the declaration after it",
+  )
+  drop undocumented
+  let detached = run lowerSource("//! The module.\n\nfn work() -> () { return () }\n")
+  run Testing.expect(
+    detached.documentation.present,
+    "a blank line after the module block does not detach it from the module",
+  )
+  drop detached
+  return ()
+}
+
+test effect fn moduleDocumentationIsInterned() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkDocumentation() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkDiagnosticsCopied() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerSource("fn work( -> () { return () }\n")
+  run Testing.expect(
+    Vector.length<Hir.Diagnostic>(&module.diagnostics) > usize.ZERO,
+    "a parser diagnostic is copied into the module",
+  )
+  let first = Vector.get<Hir.Diagnostic>(&module.diagnostics, usize.ZERO)
+  run Testing.expect(
+    first.span.end >= first.span.start,
+    "a copied diagnostic keeps a well-ordered span in module coordinates",
+  )
+  let enclosing = Module.span(&module, declarationAt(&module, usize.ZERO))
+  run Testing.expect(
+    enclosing.start <= first.span.start && first.span.end <= enclosing.end,
+    "the diagnostic falls inside the declaration that encloses it, so its owner is derivable",
+  )
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "a damaged source still lowers into a consistent arena",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn parserDiagnosticsReachTheModule() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkDiagnosticsCopied() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkBroadModule() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let module = run lowerSource(
+    """import a.b {C as D}
+pub struct Point<T> {
+  pub x: i32
+  y: T
+}
+pub union Shape {
+  Circle {r: f64},
+  Dot,
+}
+pub enum(u8) Color {
+  Red = 1,
+  Blue,
+}
+tuple Pair<T>(i32, T)
+pub type Alias<T> = Vector<T>
+role Reader
+pub const LIMIT: usize = 10
+param DEBUG: bool = false where DEBUG
+export "C" static counter: i32 = 0
+module with module.property(name: "v")
+pub service Clock {
+  effect fn now() -> u64
+}
+interface Eq {
+  fn eq(self: &Self) -> bool
+  operator == fn same(self: &Self) -> bool
+}
+impl Eq for Point {
+  eq: Point.eq
+  fn eq(self: &Self) -> bool { return true }
+}
+extern "C" fn puts(text: *const u8) -> i32
+pub effect fn main() -> () { return () }
+""",
+  )
+  run Testing.expect(
+    Vector.length<Hir.Diagnostic>(&module.diagnostics) == usize.ZERO,
+    "a syntactically clean file records no frontend diagnostic",
+  )
+  run Testing.expect(
+    Vector.length<Cause>(&module.causes) == usize.ZERO,
+    "a syntactically clean file lowers with no recovery cause",
+  )
+  run Testing.expect(
+    module.declarations.length == usize.add(0, 16),
+    "every top-level declaration of the file lowers into its own declaration node",
+  )
+  run Testing.expect(
+    Vector.length<Span>(&module.spans) == Module.length(&module),
+    "every node carries exactly one span",
+  )
+  run Testing.expect(
+    Vector.length<Range>(&module.nodeCauses) == Module.length(&module),
+    "every node carries exactly one cause run",
+  )
+  let defects = run Hir.verify(&module)
+  run Testing.expect(
+    Vector.length<Defect>(&defects) == usize.ZERO,
+    "children precede parents and every reference is in range across a broad module",
+  )
+  drop defects
+  drop module
+  return ()
+}
+
+test effect fn aBroadModuleSatisfiesEveryFlatInvariant() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkBroadModule() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// ---------------------------------------------------------------------------
+// Canonical encoding and fingerprints
+// ---------------------------------------------------------------------------
+
+/// Returns the canonical header bytes of the top-level declaration at `offset`.
+effect fn headerOf(source: string<'static>, offset: usize) -> Vector<u8>
+! OutOfMemoryError
+? &mut Allocator {
+  let module = run lowerSource(source)
+  let bytes = run Fingerprint.header(&module, declarationAt(&module, offset))
+  drop module
+  return move bytes
+}
+
+/// Returns the canonical body bytes of the top-level declaration at `offset`.
+effect fn bodyOf(source: string<'static>, offset: usize) -> Vector<u8>
+! OutOfMemoryError
+? &mut Allocator {
+  let module = run lowerSource(source)
+  let bytes = run Fingerprint.body(&module, declarationAt(&module, offset))
+  drop module
+  return move bytes
+}
+
+/// Reports whether the declaration at `left` of one source encodes as the one at `right` of another.
+effect fn sameHeader(
+  first: string<'static>,
+  left: usize,
+  second: string<'static>,
+  right: usize,
+) -> bool
+! OutOfMemoryError
+? &mut Allocator {
+  let a = run headerOf(first, left)
+  let b = run headerOf(second, right)
+  let answer = bytesEqual(Vector.asSlice<u8>(&a), Vector.asSlice<u8>(&b))
+  drop a
+  drop b
+  return answer
+}
+
+/// Reports whether two declarations' body encodings agree.
+effect fn sameBody(
+  first: string<'static>,
+  left: usize,
+  second: string<'static>,
+  right: usize,
+) -> bool
+! OutOfMemoryError
+? &mut Allocator {
+  let a = run bodyOf(first, left)
+  let b = run bodyOf(second, right)
+  let answer = bytesEqual(Vector.asSlice<u8>(&a), Vector.asSlice<u8>(&b))
+  drop a
+  drop b
+  return answer
+}
+
+effect fn checkReorderingKeepsBytes() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let straight = "fn alpha() -> i32 { return 1 }\nfn beta() -> i32 { return 2 }\n"
+  let swapped = "fn beta() -> i32 { return 2 }\nfn alpha() -> i32 { return 1 }\n"
+  run Testing.expect(
+    run sameHeader(straight, usize.ZERO, swapped, usize.ONE),
+    "reordering two uniquely named declarations leaves `alpha`'s header bytes alone",
+  )
+  run Testing.expect(
+    run sameBody(straight, usize.ZERO, swapped, usize.ONE),
+    "reordering two uniquely named declarations leaves `alpha`'s body bytes alone",
+  )
+  run Testing.expect(
+    run sameHeader(straight, usize.ONE, swapped, usize.ZERO),
+    "reordering leaves `beta`'s header bytes alone too, so neither one paid for the move",
+  )
+  run Testing.expect(
+    run sameBody(straight, usize.ONE, swapped, usize.ZERO),
+    "reordering leaves `beta`'s body bytes alone too",
+  )
+  return ()
+}
+
+test effect fn reorderingDeclarationsKeepsTheirBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkReorderingKeepsBytes() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkTriviaIsInvisible() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let plain = "fn work(value: i32) -> i32 { return value }\n"
+  let padded = "\n// a leading comment\nfn work(  value : i32 )  ->  i32  {\n  // inside\n  return value\n}\n\n"
+  run Testing.expect(
+    run sameHeader(plain, usize.ZERO, padded, usize.ZERO),
+    "comments and spacing never reach the header bytes",
+  )
+  run Testing.expect(
+    run sameBody(plain, usize.ZERO, padded, usize.ZERO),
+    "comments and spacing never reach the body bytes",
+  )
+  return ()
+}
+
+test effect fn triviaNeverReachesTheBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkTriviaIsInvisible() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkStringTableLayoutIsInvisible() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let source = "fn work(value: i32) -> i32 { return value }\n"
+  let crowded =
+    "fn unrelated(first: i64, second: u8) -> u8 { return second }\nfn work(value: i32) -> i32 { return value }\n"
+  run Testing.expect(
+    run sameHeader(source, usize.ZERO, crowded, usize.ONE),
+    "interning other declarations' strings first does not move `work`'s header bytes",
+  )
+  run Testing.expect(
+    run sameBody(source, usize.ZERO, crowded, usize.ONE),
+    "a symbol frames its interned text, so its index never reaches the body bytes",
+  )
+  return ()
+}
+
+test effect fn theStringTableLayoutNeverReachesTheBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkStringTableLayoutIsInvisible() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkBodyEditsSpareTheHeader() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let before = "fn work(value: i32) -> i32 { return value }\n"
+  let after = "fn work(value: i32) -> i32 { return 0 }\n"
+  run Testing.expect(
+    run sameHeader(before, usize.ZERO, after, usize.ZERO),
+    "editing only the return expression leaves the header bytes identical",
+  )
+  run Testing.expect(
+    !(run sameBody(before, usize.ZERO, after, usize.ZERO)),
+    "editing the return expression changes the body bytes",
+  )
+  return ()
+}
+
+test effect fn aBodyEditSparesTheHeaderBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkBodyEditsSpareTheHeader() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkParameterTypeEditsSpareTheBody() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let before = "fn work(value: i32) -> i32 { return value }\n"
+  let after = "fn work(value: i64) -> i32 { return value }\n"
+  run Testing.expect(
+    !(run sameHeader(before, usize.ZERO, after, usize.ZERO)),
+    "changing a parameter type changes the header bytes",
+  )
+  run Testing.expect(
+    run sameBody(before, usize.ZERO, after, usize.ZERO),
+    "the body reaches its parameter by ordinal, so retyping it leaves the body bytes alone",
+  )
+  return ()
+}
+
+test effect fn aParameterTypeEditSparesTheBodyBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkParameterTypeEditsSpareTheBody() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkDamagedBodiesAreStable() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let damaged = "fn work() -> i32 { return }\n"
+  run Testing.expect(
+    run sameBody(damaged, usize.ZERO, damaged, usize.ZERO),
+    "two lowerings of the same damaged source encode the same body bytes",
+  )
+  run Testing.expect(
+    run sameHeader(damaged, usize.ZERO, damaged, usize.ZERO),
+    "two lowerings of the same damaged source encode the same header bytes",
+  )
+  let healthy = "fn work() -> i32 { return 0 }\n"
+  run Testing.expect(
+    !(run sameBody(damaged, usize.ZERO, healthy, usize.ZERO)),
+    "a recovery cause is content, so a damaged body never matches the repaired one",
+  )
+  return ()
+}
+
+test effect fn aDamagedBodyEncodesStableBytes() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkDamagedBodiesAreStable() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkBindersUseOrdinals() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let first = "fn work(a: i32, b: i32) -> i32 { return a }\n"
+  let second = "fn work(a: i32, b: i32) -> i32 { return b }\n"
+  run Testing.expect(
+    !(run sameBody(first, usize.ZERO, second, usize.ZERO)),
+    "a body that reads its second parameter is not the body that reads its first",
+  )
+  let renamed = "fn work(a: i32, b: i32) -> i32 { return a }\n"
+  run Testing.expect(
+    run sameBody(first, usize.ZERO, renamed, usize.ZERO),
+    "an unchanged body encodes the same bytes across two lowerings",
+  )
+  return ()
+}
+
+test effect fn bindersEncodeAsPreorderOrdinals() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkBindersUseOrdinals() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkModuleDigestSeesOrder() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let straight = run lowerSource("fn alpha() -> i32 { return 1 }\nfn beta() -> i32 { return 2 }\n")
+  let swapped = run lowerSource("fn beta() -> i32 { return 2 }\nfn alpha() -> i32 { return 1 }\n")
+  let again = run lowerSource("fn alpha() -> i32 { return 1 }\nfn beta() -> i32 { return 2 }\n")
+  let first = run Fingerprint.moduleDigest(&straight)
+  let second = run Fingerprint.moduleDigest(&swapped)
+  let third = run Fingerprint.moduleDigest(&again)
+  run Testing.expect(
+    !bytesEqual(&first, &second),
+    "the module digest sees the declaration order that the per-declaration digests ignore",
+  )
+  run Testing.expect(
+    bytesEqual(&first, &third),
+    "the same module content digests the same twice",
+  )
+  drop straight
+  drop swapped
+  drop again
+  return ()
+}
+
+test effect fn theModuleDigestSeesDeclarationOrder() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkModuleDigestSeesOrder() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn checkDigestsAgreeWithBytes() -> ()
+! OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let module = run lowerSource("fn work(value: i32) -> i32 { return value }\n")
+  let id = declarationAt(&module, usize.ZERO)
+  let headerBytes = run Fingerprint.header(&module, id)
+  let bodyBytes = run Fingerprint.body(&module, id)
+  run Testing.expect(
+    Vector.length<u8>(&headerBytes) > usize.ZERO
+      && Vector.length<u8>(&bodyBytes) > usize.ZERO,
+    "both halves encode to a non-empty frame sequence",
+  )
+  run Testing.expect(
+    !bytesEqual(Vector.asSlice<u8>(&headerBytes), Vector.asSlice<u8>(&bodyBytes)),
+    "the domain frame keeps a header from ever colliding with a body",
+  )
+  let headerHash = run Fingerprint.headerDigest(&module, id)
+  let bodyHash = run Fingerprint.bodyDigest(&module, id)
+  run Testing.expect(
+    !bytesEqual(&headerHash, &bodyHash),
+    "the two digests answer for the two halves they were asked about",
+  )
+  let mut hex = Vector.make<u8>()
+  run Fingerprint.appendHex(&mut hex, &headerHash)
+  run Testing.expect(
+    Vector.length<u8>(&hex) == usize.add(0, 64),
+    "a 32-byte SHA-256 digest spells as 64 hexadecimal digits",
+  )
+  drop hex
+  drop headerBytes
+  drop bodyBytes
+  drop module
+  return ()
+}
+
+test effect fn digestsSummariseTheirOwnHalf() -> ()
+! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run checkDigestsAgreeWithBytes() |> Effect.provideMut<Allocator>(&mut allocator)
 }

@@ -280,6 +280,97 @@ pub fn main() -> i32 { return ${entries.map((_, index) => `z0(1, e${index})`).jo
   }),
 )
 
+it.effect('bounds ancestry for one mutually recursive lowering cycle across modules', () =>
+  Effect.gen(function* () {
+    // The shape of the self-hosted HIR lowering: mutually recursive `effect fn` walkers threading
+    // one `&mut State` and requiring `&mut Allocator`, spread over several modules so the whole
+    // set is one strongly connected component, with a second cycle reachable from the first.
+    // Every walker is monomorphic, so no ancestor of one can ever differ from a target of it and
+    // the guard below it decides nothing; correlating them was what grew the exact histories past
+    // what a process can hold once the component reached a few hundred declarations.
+    const walkers = (module: string, count: number, next: string): string =>
+      Array.from(
+        { length: count },
+        (_, index) => `pub effect fn w${module}${index}(state: &mut State, depth: i32) -> i32
+? &mut Allocator {
+  if depth == 0 { return run ${next}(&mut state.*, depth) }
+  let left = run w${module}${(index + 1) % count}(&mut state.*, depth - 1)
+  let right = run ${index + 1 === count ? next : `w${module}${index + 1}`}(&mut state.*, depth - 1)
+  return left + right
+}`,
+      ).join('\n')
+    const modules = new Map([
+      [
+        'lower/state',
+        ascii(`pub struct State { count: i32 }
+pub fn newState() -> State { return State { count: 0 } }
+pub service Allocator { effect fn reserve(size: i32) -> i32 ? &mut Allocator }`),
+      ],
+      [
+        'lower/second',
+        ascii(`import lower.state { State, Allocator }
+pub effect fn tail(state: &mut State, depth: i32) -> i32 ? &mut Allocator {
+  if depth == 0 { return run Allocator.reserve(1) }
+  return run tailAgain(&mut state.*, depth - 1)
+}
+pub effect fn tailAgain(state: &mut State, depth: i32) -> i32 ? &mut Allocator {
+  if depth == 0 { return run Allocator.reserve(2) }
+  return run tail(&mut state.*, depth - 1)
+}`),
+      ],
+      [
+        'lower/type',
+        ascii(`import lower.state { State, Allocator }
+import lower.expression { wexpression0 }
+import lower.second { tail }
+${walkers('type', 8, 'wexpression0')}`),
+      ],
+      [
+        'lower/expression',
+        ascii(`import lower.state { State, Allocator }
+import lower.pattern { wpattern0 }
+${walkers('expression', 8, 'wpattern0')}`),
+      ],
+      [
+        'lower/pattern',
+        ascii(`import lower.state { State, Allocator }
+import lower.type { wtype0 }
+import lower.second { tail }
+${walkers('pattern', 8, 'tail')}`),
+      ],
+    ])
+    const root = `import lower.state { State, Allocator, newState }
+import lower.type { wtype0 }
+pub effect fn main() -> i32 ? &mut Allocator {
+  let mut state = newState()
+  return run wtype0(&mut state, 3)
+}`
+    const selected = AnalysisFixture.configuration('lower/root', 'aarch64-apple-darwin')
+    const analyzed = yield* Analysis.make({ root: 'lower/root', configuration: selected }).pipe(
+      Effect.flatMap((frontend) => Analysis.realize(frontend, selected)),
+      Effect.provide(
+        SourceResolver.overlay([SourceFile.make('lower/root', ascii(root))]).pipe(
+          Layer.provideMerge(SourceResolver.memory(modules)),
+          Layer.provideMerge(SourceResolver.empty),
+        ),
+      ),
+    )
+    assert.deepEqual(Analysis.diagnostics(analyzed), [])
+    const discovery = Analysis.instancesOf(analyzed)
+    assert.deepEqual(discovery.violations, [])
+    // Every walker is reached, so the bound is not the absence of discovery.
+    assert.strictEqual(
+      discovery.instances.filter((instance) => instance.key.declaration.name.startsWith('w'))
+        .length,
+      24,
+    )
+    // Structural, not a timing: before the bound this component interned a decision node for every
+    // correlated subset of its walkers. A declaration realized at one instance key decides nothing,
+    // so none of them enters the ancestry at all.
+    assert.strictEqual(discovery.counters.ancestryNodes, 0)
+  }),
+)
+
 it.effect('roots native libraries at C exports without selecting main', () =>
   Effect.gen(function* () {
     const frontend = yield* Analysis.ofSource(

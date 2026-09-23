@@ -1,0 +1,387 @@
+//! Lowering of statements, conditional chains, and brace-delimited blocks.
+//!
+//! # When to use
+//!
+//! Call [`lowerBlock`] for a written block and [`blockIn`] when the block is one child of an
+//! enclosing construct that may have lost it. [`lowerStatement`] lowers one statement of an already
+//! open block.
+//!
+//! # Details
+//!
+//! This is the port of the `block`, `conditional`, and `statement` section of the bootstrap
+//! `AuthoredLowering` (`packages/compiler/src/AuthoredLowering.ts`). Children are appended before
+//! their parent, so the arena stays postorder.
+//!
+//! A block opens its own binding frame, so a name bound inside it is invisible after its closing
+//! brace. A binding statement binds after its initializer is lowered, so `let x = x` resolves its
+//! right-hand side to the outer `x`.
+//!
+//! # Gotchas
+//!
+//! An `else if` chain is not a list. The chained conditional is the `elseBranch` of the one before
+//! it, exactly as the bootstrap nests them, so a consumer walks the chain rather than iterating it.
+
+import hir.Draft
+import hir.Draft {Draft as DraftState}
+import hir.Hir {CauseCode, HirId, HirRef, Module, Node, Range}
+import hir.LowerExpression
+import hir.LowerPattern
+import hir.LowerType
+import lexer.Span {Span}
+import lexer.Token {Token, TokenKind, kind as tokenKind, span as tokenSpan}
+import parser.Element {Element}
+import parser.Node {NodeKind}
+import parser.NodeId {NodeId}
+import parser.SyntaxTree {SyntaxTree}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.usize
+import silk.vector {Vector}
+
+// ---------------------------------------------------------------------------
+// Blocks
+// ---------------------------------------------------------------------------
+
+/// Lowers one written block, opening the binding frame its statements share.
+pub effect fn lowerBlock(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  run Draft.pushFrame(&mut draft.*)
+  let mark = Draft.beginChildren(&draft.*)
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    let lowered = run lowerStatement(&mut draft.*, tree, child)
+    run Draft.pushChild(&mut draft.*, lowered)
+    index = index + usize.ONE
+  }
+  let statements = run Draft.finishChildren(&mut draft.*, mark)
+  Draft.popFrame(&mut draft.*)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(&mut draft.*, Node.Block {statements: statements}, span, causes)
+}
+
+/// Lowers the block child of `parent`, or an empty block over `span` when it wrote none.
+pub effect fn blockIn(draft: &mut DraftState, tree: &SyntaxTree, parent: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let found = LowerType.firstChildOf(tree, parent, NodeKind.Block)
+  if !found.present {
+    return run Draft.appendHealthy(&mut draft.*, Node.Block {statements: Range.empty()}, span)
+  }
+  return run lowerBlock(&mut draft.*, tree, found.id)
+}
+
+/// Lowers the block of `parent` at `offset` among its block children, or an empty one over `span`.
+effect fn blockAt(
+  draft: &mut DraftState,
+  tree: &SyntaxTree,
+  parent: NodeId,
+  offset: usize,
+  span: Span,
+) -> HirId ! OutOfMemoryError ? &mut Allocator {
+  let count = Draft.childCount(tree, parent)
+  let mut seen = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, parent, index)
+    if Draft.kindOf(tree, child) == NodeKind.Block {
+      if seen == offset {
+        return run lowerBlock(&mut draft.*, tree, child)
+      }
+      seen = seen + usize.ONE
+    }
+    index = index + usize.ONE
+  }
+  return run Draft.appendHealthy(&mut draft.*, Node.Block {statements: Range.empty()}, span)
+}
+
+// ---------------------------------------------------------------------------
+// Conditionals
+// ---------------------------------------------------------------------------
+
+fn isConditionalKind(kind: NodeKind) -> bool {
+  return kind == NodeKind.ConditionalStatement || kind == NodeKind.PatternConditionalStatement || kind == NodeKind.StaticConditionalStatement
+}
+
+/// Lowers one conditional statement and, through its `elseBranch`, the whole `else if` chain.
+///
+/// # Details
+///
+/// This is the bootstrap `conditional`. The `else` branch is a chained conditional when one was
+/// written and the second block otherwise; without an `else` keyword it stays absent, so an
+/// `if` with no alternative is distinguishable from one whose alternative is empty.
+///
+/// A pattern conditional opens a frame for its pattern's binders, which the `then` branch sees and
+/// the `else` branch does not.
+pub effect fn conditional(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let span = Draft.nodeSpan(tree, syntax)
+  let kind = Draft.kindOf(tree, syntax)
+  if kind == NodeKind.PatternConditionalStatement {
+    // The subject is lowered in the enclosing scope, before the pattern's frame opens, so
+    // `if let Option.Some {value} = value` reads the outer `value` rather than binding to itself.
+    let subject = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    run Draft.pushFrame(&mut draft.*)
+    let pattern = run LowerPattern.patternIn(&mut draft.*, tree, syntax, span)
+    let thenBranch = run blockAt(&mut draft.*, tree, syntax, usize.ZERO, span)
+    Draft.popFrame(&mut draft.*)
+    let elseBranch = run elseBranchOf(&mut draft.*, tree, syntax, span)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.PatternConditionalStatement {
+        pattern: pattern,
+        subject: subject,
+        thenBranch: thenBranch,
+        elseBranch: elseBranch,
+      },
+      span,
+      causes,
+    )
+  }
+  let condition = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+  let thenBranch = run blockAt(&mut draft.*, tree, syntax, usize.ZERO, span)
+  let elseBranch = run elseBranchOf(&mut draft.*, tree, syntax, span)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  if kind == NodeKind.StaticConditionalStatement {
+    return run Draft.append(
+      &mut draft.*,
+      Node.StaticConditionalStatement {
+        condition: condition,
+        thenBranch: thenBranch,
+        elseBranch: elseBranch,
+      },
+      span,
+      causes,
+    )
+  }
+  return run Draft.append(
+    &mut draft.*,
+    Node.ConditionalStatement {condition: condition, thenBranch: thenBranch, elseBranch: elseBranch},
+    span,
+    causes,
+  )
+}
+
+effect fn elseBranchOf(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, span: Span) -> HirRef
+! OutOfMemoryError
+? &mut Allocator {
+  if !Draft.hasToken(tree, syntax, TokenKind.ElseKeyword) {
+    return HirRef.absent()
+  }
+  let count = Draft.childCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    let child = Draft.childAt(tree, syntax, index)
+    if isConditionalKind(Draft.kindOf(tree, child)) {
+      return HirRef.of(run conditional(&mut draft.*, tree, child))
+    }
+    index = index + usize.ONE
+  }
+  return HirRef.of(run blockAt(&mut draft.*, tree, syntax, usize.ONE, span))
+}
+
+// ---------------------------------------------------------------------------
+// Statements
+// ---------------------------------------------------------------------------
+
+/// Lowers one statement of an open block.
+///
+/// # Details
+///
+/// This is the bootstrap `statement`. A damaged statement region keeps its place as
+/// [`Node.InvalidStatement`](hir.Hir.Node), or as [`Node.MissingStatement`](hir.Hir.Node) when the
+/// parser recovered without consuming source.
+pub effect fn lowerStatement(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let kind = Draft.kindOf(tree, syntax)
+  let span = Draft.nodeSpan(tree, syntax)
+  if kind == NodeKind.ExpressionStatement {
+    let expression = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.ExpressionStatement {expression: expression},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.BindingStatement {
+    return run bindingStatement(&mut draft.*, tree, syntax, span)
+  }
+  if kind == NodeKind.PatternBindingStatement {
+    // The initializer is lowered first, so its own names resolve to the enclosing scope.
+    let initializer = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let pattern = run LowerPattern.patternIn(&mut draft.*, tree, syntax, span)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.PatternBindingStatement {pattern: pattern, initializer: initializer},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.AssignmentStatement {
+    let target = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let value = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ONE)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.AssignmentStatement {target: target, value: value},
+      span,
+      causes,
+    )
+  }
+  if isConditionalKind(kind) {
+    return run conditional(&mut draft.*, tree, syntax)
+  }
+  if kind == NodeKind.StaticForStatement {
+    return run staticForStatement(&mut draft.*, tree, syntax, span)
+  }
+  if kind == NodeKind.WhileStatement {
+    let condition = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let body = run blockIn(&mut draft.*, tree, syntax, span)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.WhileStatement {condition: condition, body: body},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.BreakStatement {
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.BreakStatement, span, causes)
+  }
+  if kind == NodeKind.ContinueStatement {
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.ContinueStatement, span, causes)
+  }
+  if kind == NodeKind.ReturnStatement {
+    let operand = LowerExpression.expressionChildAt(tree, syntax, usize.ZERO)
+    let mut value = HirRef.absent()
+    if operand.present {
+      value = HirRef.of(run LowerExpression.lowerExpression(&mut draft.*, tree, operand.id))
+    }
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.ReturnStatement {value: value}, span, causes)
+  }
+  if kind == NodeKind.FailStatement {
+    let value = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(
+      &mut draft.*,
+      Node.FailStatement {isMove: Draft.hasToken(tree, syntax, TokenKind.MoveKeyword), value: value},
+      span,
+      causes,
+    )
+  }
+  if kind == NodeKind.DropStatement {
+    let value = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.DropStatement {value: value}, span, causes)
+  }
+  if kind == NodeKind.UnsafeStatement {
+    let body = run blockIn(&mut draft.*, tree, syntax, span)
+    let causes = run Draft.damage(&mut draft.*, tree, syntax)
+    return run Draft.append(&mut draft.*, Node.UnsafeStatement {body: body}, span, causes)
+  }
+  if kind == NodeKind.ErrorStatement && !LowerPattern.hasErrorRegion(tree, syntax) {
+    let causes = run Draft.recoveryCauses(&mut draft.*, tree, span, CauseCode.MissingToken)
+    return run Draft.append(&mut draft.*, Node.MissingStatement, span, causes)
+  }
+  // The parser wraps exactly one `Error` region per `ErrorStatement` and nothing else, so a damaged
+  // statement has no healthy child to keep; a healthy neighbour is its own statement of the block.
+  let causes = run Draft.recoveryCauses(&mut draft.*, tree, span, CauseCode.UnexpectedToken)
+  return run Draft.append(
+    &mut draft.*,
+    Node.InvalidStatement {retained: Range.empty()},
+    span,
+    causes,
+  )
+}
+
+effect fn bindingStatement(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  // The initializer is lowered first, so `let x = x` resolves its right-hand side to the outer `x`.
+  let initializer = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+  let annotationSyntax = LowerType.typeChildAt(tree, syntax, usize.ZERO, false)
+  let mut annotation = HirRef.absent()
+  if annotationSyntax.present {
+    annotation = HirRef.of(run LowerType.lowerType(&mut draft.*, tree, annotationSyntax.id))
+  }
+  let name = run Draft.nameIn(&mut draft.*, tree, syntax, true)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  let binding = run Draft.append(
+    &mut draft.*,
+    Node.BindingStatement {
+      name: name,
+      mutable: Draft.hasToken(tree, syntax, TokenKind.MutKeyword),
+      isStatic: Draft.hasToken(tree, syntax, TokenKind.StaticKeyword),
+      annotation: annotation,
+      initializer: initializer,
+    },
+    span,
+    causes,
+  )
+  if let Node.Name {text} = Module.node(&draft.module, name) {
+    run Draft.bind(&mut draft.*, text, binding)
+  }
+  return binding
+}
+
+/// Lowers one `static for` statement, binding its iteration name inside its body.
+///
+/// # Details
+///
+/// The binder is the loop's name node rather than the statement node. A postorder arena appends the
+/// statement only after its body, and the body must already see the binding, so the name is the one
+/// identity that exists in time. The bootstrap reaches its statement anchor before the body because
+/// its anchors are allocated separately from its records.
+effect fn staticForStatement(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let binding = run iterationName(&mut draft.*, tree, syntax, span)
+  let iterable = run LowerExpression.operandAt(&mut draft.*, tree, syntax, usize.ZERO)
+  run Draft.pushFrame(&mut draft.*)
+  if let Node.Name {text} = Module.node(&draft.module, binding) {
+    run Draft.bind(&mut draft.*, text, binding)
+  }
+  let body = run blockIn(&mut draft.*, tree, syntax, span)
+  Draft.popFrame(&mut draft.*)
+  let causes = run Draft.damage(&mut draft.*, tree, syntax)
+  return run Draft.append(
+    &mut draft.*,
+    Node.StaticForStatement {binding: binding, iterable: iterable, body: body},
+    span,
+    causes,
+  )
+}
+
+/// Lowers the name a `static for` binds, which is the identifier that is not the `in` keyword.
+effect fn iterationName(draft: &mut DraftState, tree: &SyntaxTree, syntax: NodeId, span: Span) -> HirId
+! OutOfMemoryError
+? &mut Allocator {
+  let count = Draft.elementCount(tree, syntax)
+  let mut index = usize.ZERO
+  while index < count {
+    if let Element.Token {id} = Draft.elementAt(tree, syntax, index) {
+      let token = Vector.get<Token>(&tree.tokens, id.index)
+      if tokenKind(token) == TokenKind.Identifier && !Draft.spelled(tree, tokenSpan(token), "in") {
+        return run Draft.nameFromToken(&mut draft.*, tree, token)
+      }
+    }
+    index = index + usize.ONE
+  }
+  let missing = Draft.missingToken(tree, syntax, TokenKind.Identifier)
+  let mut where = span
+  if missing.present {
+    where = missing.span
+  }
+  return run Draft.missingName(&mut draft.*, tree, where, CauseCode.MissingToken)
+}

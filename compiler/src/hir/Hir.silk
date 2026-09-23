@@ -854,6 +854,19 @@ pub union Node {
     /// The referenced name.
     pub name: HirId,
     /// The lexical binder this identifier resolves to, absent when no binder is in scope.
+    ///
+    /// # Details
+    ///
+    /// A binder is exactly one of four node kinds:
+    /// [`Parameter`](Node.Parameter) for a callable parameter,
+    /// [`BindingStatement`](Node.BindingStatement) for a `let` or `const`,
+    /// [`BindingPattern`](Node.BindingPattern) for a name a pattern introduces, and
+    /// [`Name`](Node.Name) for a `static for` iteration name. The loop is the odd one out
+    /// because a postorder arena appends its statement only after its body, so the name node is
+    /// the only identity that exists while the body is being lowered.
+    ///
+    /// Absence means unresolved, not unbound: an import, a member, and a type name all stay
+    /// absent here, because lowering resolves lexical scope only.
     pub binding: HirRef,
   },
   /// A `move` expression.
@@ -1464,6 +1477,8 @@ pub union Node {
   Declaration {
     /// The declaration's source-independent logical name.
     pub owner: OwnerKey,
+    /// The interned `///` block the source attached to it, if any.
+    pub documentation: SymbolRef,
     /// The declaration header.
     pub header: HirId,
     /// The declaration body.
@@ -1565,14 +1580,16 @@ impl Module {
 // Debug text form
 // ---------------------------------------------------------------------------
 
-fn accessName(access: Access) -> string<'static> {
+/// Returns the stable spelling of `access`, shared by the debug dump and the canonical encoding.
+pub fn accessName(access: Access) -> string<'static> {
   return match access {
     Access.Shared => "Shared"
     Access.Mutable => "Mutable"
   }
 }
 
-fn callableModeName(mode: CallableMode) -> string<'static> {
+/// Returns the stable spelling of `mode`, shared by the debug dump and the canonical encoding.
+pub fn callableModeName(mode: CallableMode) -> string<'static> {
   return match mode {
     CallableMode.Shared => "Shared"
     CallableMode.Mutable => "Mutable"
@@ -1580,7 +1597,8 @@ fn callableModeName(mode: CallableMode) -> string<'static> {
   }
 }
 
-fn parameterModeName(mode: ParameterMode) -> string<'static> {
+/// Returns the stable spelling of `mode`, shared by the debug dump and the canonical encoding.
+pub fn parameterModeName(mode: ParameterMode) -> string<'static> {
   return match mode {
     ParameterMode.Value => "Value"
     ParameterMode.Mutable => "Mutable"
@@ -1588,7 +1606,8 @@ fn parameterModeName(mode: ParameterMode) -> string<'static> {
   }
 }
 
-fn radixName(radix: Radix) -> string<'static> {
+/// Returns the stable spelling of `radix`, shared by the debug dump and the canonical encoding.
+pub fn radixName(radix: Radix) -> string<'static> {
   return match radix {
     Radix.Binary => "Binary"
     Radix.Octal => "Octal"
@@ -1597,14 +1616,16 @@ fn radixName(radix: Radix) -> string<'static> {
   }
 }
 
-fn signName(sign: Sign) -> string<'static> {
+/// Returns the stable spelling of `sign`, shared by the debug dump and the canonical encoding.
+pub fn signName(sign: Sign) -> string<'static> {
   return match sign {
     Sign.Positive => "Positive"
     Sign.Negative => "Negative"
   }
 }
 
-fn durationUnitName(unit: DurationUnit) -> string<'static> {
+/// Returns the stable spelling of `unit`, shared by the debug dump and the canonical encoding.
+pub fn durationUnitName(unit: DurationUnit) -> string<'static> {
   return match unit {
     DurationUnit.Weeks => "Weeks"
     DurationUnit.Days => "Days"
@@ -1617,14 +1638,16 @@ fn durationUnitName(unit: DurationUnit) -> string<'static> {
   }
 }
 
-fn multiplicityName(multiplicity: Multiplicity) -> string<'static> {
+/// Returns the stable spelling of `multiplicity`, shared by the debug dump and the canonical encoding.
+pub fn multiplicityName(multiplicity: Multiplicity) -> string<'static> {
   return match multiplicity {
     Multiplicity.Single => "Single"
     Multiplicity.Many => "Many"
   }
 }
 
-fn matchAccessName(access: MatchAccess) -> string<'static> {
+/// Returns the stable spelling of `access`, shared by the debug dump and the canonical encoding.
+pub fn matchAccessName(access: MatchAccess) -> string<'static> {
   return match access {
     MatchAccess.Default => "Default"
     MatchAccess.Place => "Place"
@@ -1634,7 +1657,8 @@ fn matchAccessName(access: MatchAccess) -> string<'static> {
   }
 }
 
-fn prefixOperatorName(operator: PrefixOperator) -> string<'static> {
+/// Returns the stable spelling of `operator`, shared by the debug dump and the canonical encoding.
+pub fn prefixOperatorName(operator: PrefixOperator) -> string<'static> {
   return match operator {
     PrefixOperator.Negate => "Negate"
     PrefixOperator.Not => "Not"
@@ -1642,7 +1666,8 @@ fn prefixOperatorName(operator: PrefixOperator) -> string<'static> {
   }
 }
 
-fn infixOperatorName(operator: InfixOperator) -> string<'static> {
+/// Returns the stable spelling of `operator`, shared by the debug dump and the canonical encoding.
+pub fn infixOperatorName(operator: InfixOperator) -> string<'static> {
   return match operator {
     InfixOperator.Add => "Add"
     InfixOperator.Subtract => "Subtract"
@@ -1663,14 +1688,16 @@ fn infixOperatorName(operator: InfixOperator) -> string<'static> {
   }
 }
 
-fn linkageDirectionName(direction: LinkageDirection) -> string<'static> {
+/// Returns the stable spelling of `direction`, shared by the debug dump and the canonical encoding.
+pub fn linkageDirectionName(direction: LinkageDirection) -> string<'static> {
   return match direction {
     LinkageDirection.Import => "Import"
     LinkageDirection.Export => "Export"
   }
 }
 
-fn groupBranchName(branch: GroupBranch) -> string<'static> {
+/// Returns the stable spelling of `branch`, shared by the debug dump and the canonical encoding.
+pub fn groupBranchName(branch: GroupBranch) -> string<'static> {
   return match branch {
     GroupBranch.Then => "Then"
     GroupBranch.Else => "Else"
@@ -1937,7 +1964,14 @@ effect fn writeOwnerField(module: &Module, name: string<'static>, owner: OwnerKe
   return run Writer.writeString("\n")
 }
 
-fn nodeKindName(node: Node) -> string<'static> {
+/// Returns the grammar category of `node` as a stable name.
+///
+/// # Details
+///
+/// The name identifies the variant and nothing else: it never depends on a field value, an arena
+/// index, or a span. [`Fingerprint`](hir.Fingerprint) frames it as a node's canonical tag, so
+/// adding or reordering a variant cannot silently collide two kinds the way a numeric tag would.
+pub fn nodeKindName(node: Node) -> string<'static> {
   return match node {
     Node.Name {text: ignored1} => "Name"
     Node.MissingName => "MissingName"
@@ -2070,7 +2104,7 @@ fn nodeKindName(node: Node) -> string<'static> {
     Node.MembersBody {members: ignored1} => "MembersBody"
     Node.ConditionalBody {thenBranch: ignored1, elseBranch: ignored2} => "ConditionalBody"
     Node.InvalidDeclarationBody {retained: ignored1} => "InvalidDeclarationBody"
-    Node.Declaration {owner: ignored1, header: ignored2, body: ignored3} => "Declaration"
+    Node.Declaration {owner: ignored1, documentation: ignored2, header: ignored3, body: ignored4} => "Declaration"
   }
 }
 
@@ -2612,8 +2646,9 @@ effect fn writeNodeFields(module: &Module, node: Node) -> () ! WriterError ? &mu
     Node.InvalidDeclarationBody {retained} => {
       run writeRangeField(module, "retained", retained)
     }
-    Node.Declaration {owner, header, body} => {
+    Node.Declaration {owner, documentation, header, body} => {
       run writeOwnerField(module, "owner", owner)
+      run writeSymbolRefField(module, "documentation", documentation)
       run writeIdField("header", header)
       run writeIdField("body", body)
     }
@@ -3425,8 +3460,9 @@ effect fn verifyNode(module: &Module, parent: usize, found: &mut Vector<Defect>)
     Node.InvalidDeclarationBody {retained} => {
       run recordRange(module, parent, retained, &mut found.*)
     }
-    Node.Declaration {owner, header, body} => {
+    Node.Declaration {owner, documentation, header, body} => {
       run recordOwner(module, parent, owner, &mut found.*)
+      run recordSymbolRef(module, parent, documentation, &mut found.*)
       run recordId(module, parent, header, &mut found.*)
       run recordId(module, parent, body, &mut found.*)
     }
