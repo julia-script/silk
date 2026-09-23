@@ -84,9 +84,10 @@ import silk.isize
 import silk.option { Option }
 import silk.reflect { Reflect, namedKind, positionalKind, anonymousNamedKind, anonymousPositionalKind, labeledFieldKind, positionalFieldKind }
 import silk.result { Result }
+import silk.slice { Slice }
 import silk.static_sequence { StaticSequence }
 import silk.static_text { StaticText }
-import silk.string { String }
+import silk.string { String, InvalidUtf8 }
 import silk.u16
 import silk.u32
 import silk.u64
@@ -1643,6 +1644,271 @@ impl Display for i64 {
 impl Display for isize {
   effect fn display(self: &Self, formatter: &mut Formatter) -> () ! WriterError ? &mut Writer {
     return run signedDisplay(&mut formatter, isize.toI64(self.*))
+  }
+}
+
+// Start with the exact terminating decimal expansion of the binary value. At each digit
+// count, test the two adjacent decimals against the correctly rounded parser. The first
+// count that returns the original bits is the shortest round-tripping significand.
+struct FloatCandidate {
+  bytes: [u8; 32]
+  length: usize
+}
+
+fn emptyFloatCandidate() -> FloatCandidate {
+  return FloatCandidate {
+    bytes: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    length: usize.ZERO,
+  }
+}
+
+fn appendFloatByte(value: &mut FloatCandidate, byte: u8) -> () {
+  value.bytes[value.length] = byte
+  value.length = value.length + usize.ONE
+}
+
+fn floatExponentDigits(value: i64) -> usize {
+  let mut magnitude = value
+  if magnitude < 0 { magnitude = -magnitude }
+  let mut digits = usize.ONE
+  while magnitude >= 10 {
+    magnitude = magnitude / 10
+    digits = digits + usize.ONE
+  }
+  return digits
+}
+
+fn appendFloatExponent(value: &mut FloatCandidate, exponent: i64) -> () {
+  if exponent == 0 { return () }
+  appendFloatByte(&mut value, 101)
+  let mut magnitude = exponent
+  if magnitude < 0 {
+    appendFloatByte(&mut value, 45)
+    magnitude = -magnitude
+  }
+  let mut divisor: i64 = 1
+  while divisor <= magnitude / 10 { divisor = divisor * 10 }
+  while divisor > 0 {
+    appendFloatByte(&mut value, i64.toU8(magnitude / divisor) + 48)
+    magnitude = magnitude % divisor
+    divisor = divisor / 10
+  }
+}
+
+fn floatCandidate(exact: &BoundaryDecimal, count: usize, roundUp: bool) -> FloatCandidate {
+  let exactCount = boundaryDigits(exact)
+  let mut order = usize.toI64(exactCount) - exact.scale - 1
+  let mut digits: [u8; 17] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let mut index = usize.ZERO
+  while index < count {
+    if index < exactCount { digits[index] = boundaryDigit(exact, index) }
+    index = index + usize.ONE
+  }
+  if roundUp {
+    let mut position = count
+    while position > usize.ZERO {
+      position = position - usize.ONE
+      if digits[position] < 9 {
+        digits[position] = digits[position] + 1
+        break
+      }
+      digits[position] = 0
+    }
+    if position == usize.ZERO && digits[usize.ZERO] == 0 {
+      digits[usize.ZERO] = 1
+      order = order + 1
+    }
+  }
+  let mut scientificLength = count
+  if count > usize.ONE { scientificLength = scientificLength + usize.ONE }
+  if order != 0 {
+    scientificLength = scientificLength + 1 + floatExponentDigits(order)
+    if order < 0 { scientificLength = scientificLength + usize.ONE }
+  }
+  let mut fixedLength: usize = 1000
+  if order >= usize.toI64(count) - 1 {
+    if order < 32 { fixedLength = i64.toUsize(order) + 1 }
+  }
+  else if order >= 0 { fixedLength = count + 1 }
+  else if order > -30 { fixedLength = 2 + i64.toUsize(-order - 1) + count }
+  let fixed = fixedLength <= scientificLength && fixedLength <= 32
+  let mut result = emptyFloatCandidate()
+  if fixed {
+    if order >= usize.toI64(count) - 1 {
+      index = usize.ZERO
+      while index < count {
+        appendFloatByte(&mut result, digits[index] + 48)
+        index = index + usize.ONE
+      }
+      while result.length < fixedLength { appendFloatByte(&mut result, 48) }
+    } else if order >= 0 {
+      index = usize.ZERO
+      while index < count {
+        if index == i64.toUsize(order) + 1 { appendFloatByte(&mut result, 46) }
+        appendFloatByte(&mut result, digits[index] + 48)
+        index = index + usize.ONE
+      }
+    } else {
+      appendFloatByte(&mut result, 48)
+      appendFloatByte(&mut result, 46)
+      let mut zeros = -order - 1
+      while zeros > 0 {
+        appendFloatByte(&mut result, 48)
+        zeros = zeros - 1
+      }
+      index = usize.ZERO
+      while index < count {
+        appendFloatByte(&mut result, digits[index] + 48)
+        index = index + usize.ONE
+      }
+    }
+  } else {
+    appendFloatByte(&mut result, digits[usize.ZERO] + 48)
+    if count > usize.ONE {
+      appendFloatByte(&mut result, 46)
+      index = usize.ONE
+      while index < count {
+        appendFloatByte(&mut result, digits[index] + 48)
+        index = index + usize.ONE
+      }
+    }
+    appendFloatExponent(&mut result, order)
+  }
+  return move result
+}
+
+fn floatCandidateMatches(candidate: &FloatCandidate, bits: u64, binary32: bool) -> bool {
+  let bytes = Slice.view<u8>(&candidate.bytes, usize.ZERO, candidate.length)
+  return match move String.fromUtf8(bytes) {
+    Result<string, InvalidUtf8>.Failure { error: _ } => false
+    Result<string, InvalidUtf8>.Success { value: text } => {
+      if binary32 {
+        return match move Format.f32Value(text) {
+          Result<f32, ParseError>.Success { value } => u32.toU64(f32.toBits(value)) == bits
+          Result<f32, ParseError>.Failure { error: _ } => false
+        }
+      }
+      return match move Format.f64Value(text) {
+        Result<f64, ParseError>.Success { value } => f64.toBits(value) == bits
+        Result<f64, ParseError>.Failure { error: _ } => false
+      }
+    }
+  }
+}
+
+fn exactFloat(bits: u64, binary32: bool) -> BoundaryDecimal {
+  let mut fractionBits: u64 = 52
+  let mut bias: i64 = 1023
+  if binary32 {
+    fractionBits = 23
+    bias = 127
+  }
+  let fractionMask = u64.shiftLeft(1, fractionBits) - 1
+  let exponentField = u64.shiftRight(bits, fractionBits)
+  let fraction = u64.bitAnd(bits, fractionMask)
+  let mut coefficient = fraction
+  let mut exponent2 = 1 - bias - u64.toI64(fractionBits)
+  if exponentField != 0 {
+    coefficient = fraction + fractionMask + 1
+    exponent2 = u64.toI64(exponentField) - bias - u64.toI64(fractionBits)
+  }
+  return boundaryDecimal(coefficient, exponent2)
+}
+
+fn shortestFloat(exact: &BoundaryDecimal, bits: u64, binary32: bool) -> Option<FloatCandidate> {
+  let mut limit: usize = 17
+  if binary32 { limit = 9 }
+  let exactCount = boundaryDigits(exact)
+  let mut count = usize.ONE
+  while count <= limit {
+    let lower = floatCandidate(exact, count, false)
+    let lowerMatches = floatCandidateMatches(&lower, bits, binary32)
+    let mut hasTail = false
+    let mut tail = count
+    while tail < exactCount {
+      if boundaryDigit(exact, tail) != 0 { hasTail = true break }
+      tail = tail + usize.ONE
+    }
+    if !hasTail {
+      if lowerMatches { return Option.some<FloatCandidate>(move lower) }
+    } else {
+      let upper = floatCandidate(exact, count, true)
+      let upperMatches = floatCandidateMatches(&upper, bits, binary32)
+      if lowerMatches && upperMatches {
+        if boundaryDigit(exact, count) < 5 { return Option.some<FloatCandidate>(move lower) }
+        return Option.some<FloatCandidate>(move upper)
+      }
+      if lowerMatches { return Option.some<FloatCandidate>(move lower) }
+      if upperMatches { return Option.some<FloatCandidate>(move upper) }
+    }
+    count = count + usize.ONE
+  }
+  return Option.none<FloatCandidate>()
+}
+
+effect fn writeExactFloat(formatter: &mut Formatter, exact: &BoundaryDecimal, negative: bool)
+  -> () ! WriterError ? &mut Writer {
+  let count = boundaryDigits(exact)
+  let exponent = usize.toI64(count) - exact.scale - 1
+  let mut suffix = emptyFloatCandidate()
+  appendFloatExponent(&mut suffix, exponent)
+  let mut width = count + suffix.length + signWidth(&formatter, negative)
+  if count > usize.ONE { width = width + usize.ONE }
+  run Format.writeLeadingPadding(&mut formatter, width)
+  run writeSign(&mut formatter, negative)
+  let mut index = usize.ZERO
+  while index < count {
+    if index == usize.ONE { run Format.write(&mut formatter, b".") }
+    let byte = [boundaryDigit(exact, index) + 48]
+    run Format.write(&mut formatter, &byte)
+    index = index + usize.ONE
+  }
+  run Format.write(&mut formatter, Slice.view<u8>(&suffix.bytes, usize.ZERO, suffix.length))
+  return run Format.writeTrailingPadding(&mut formatter, width)
+}
+
+effect fn floatDisplay(formatter: &mut Formatter, magnitude: u64, negative: bool, binary32: bool)
+  -> () ! WriterError ? &mut Writer {
+  let mut candidate = emptyFloatCandidate()
+  if magnitude == 0 { appendFloatByte(&mut candidate, 48) }
+  else {
+    let exact = exactFloat(magnitude, binary32)
+    match move shortestFloat(&exact, magnitude, binary32) {
+      Option<FloatCandidate>.Some { value } => { candidate = move value }
+      Option<FloatCandidate>.None => { return run writeExactFloat(&mut formatter, &exact, negative) }
+    }
+  }
+  let width = candidate.length + signWidth(&formatter, negative)
+  run Format.writeLeadingPadding(&mut formatter, width)
+  run writeSign(&mut formatter, negative)
+  run Format.write(&mut formatter, Slice.view<u8>(&candidate.bytes, usize.ZERO, candidate.length))
+  return run Format.writeTrailingPadding(&mut formatter, width)
+}
+
+impl Display for f64 {
+  effect fn display(self: &Self, formatter: &mut Formatter) -> () ! WriterError ? &mut Writer {
+    if f64.isNaN(self.*) { return run Format.writeText(&mut formatter, "NaN") }
+    if f64.isInfinite(self.*) {
+      run writeSign(&mut formatter, f64.isSignNegative(self.*))
+      return run Format.writeText(&mut formatter, "Infinity")
+    }
+    return run floatDisplay(&mut formatter,
+      u64.bitAnd(f64.toBits(self.*), 9223372036854775807),
+      f64.isSignNegative(self.*), false)
+  }
+}
+
+impl Display for f32 {
+  effect fn display(self: &Self, formatter: &mut Formatter) -> () ! WriterError ? &mut Writer {
+    if f32.isNaN(self.*) { return run Format.writeText(&mut formatter, "NaN") }
+    if f32.isInfinite(self.*) {
+      run writeSign(&mut formatter, f32.isSignNegative(self.*))
+      return run Format.writeText(&mut formatter, "Infinity")
+    }
+    return run floatDisplay(&mut formatter,
+      u32.toU64(u32.bitAnd(f32.toBits(self.*), 2147483647)),
+      f32.isSignNegative(self.*), true)
   }
 }
 

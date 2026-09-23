@@ -201,6 +201,34 @@ impl Json {
     }
   }
 
+  /// Decodes a number into `f64`, returning `None` for absence or invalid text.
+  pub fn asF64(self: Option<&Value>) -> Option<f64> {
+    return match move self {
+      Option<&Value>.None => Option.none<f64>()
+      Option<&Value>.Some { value } => match &value.* {
+        Value.Number { text } => match move Format.f64Value(String.view(&text)) {
+          Result<f64, ParseError>.Success { value: parsed } => Option.some<f64>(parsed)
+          Result<f64, ParseError>.Failure { error: _ } => Option.none<f64>()
+        }
+        _ => Option.none<f64>()
+      }
+    }
+  }
+
+  /// Decodes a number into `f32`, returning `None` for absence or invalid text.
+  pub fn asF32(self: Option<&Value>) -> Option<f32> {
+    return match move self {
+      Option<&Value>.None => Option.none<f32>()
+      Option<&Value>.Some { value } => match &value.* {
+        Value.Number { text } => match move Format.f32Value(String.view(&text)) {
+          Result<f32, ParseError>.Success { value: parsed } => Option.some<f32>(parsed)
+          Result<f32, ParseError>.Failure { error: _ } => Option.none<f32>()
+        }
+        _ => Option.none<f32>()
+      }
+    }
+  }
+
   /// Borrows decoded string text while its owning tree remains alive.
   pub fn asString<'a>(self: Option<&'a Value>) -> Option<string<'a>> {
     return match move self {
