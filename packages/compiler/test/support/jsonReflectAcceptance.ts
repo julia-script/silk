@@ -42,6 +42,6 @@ pub effect fn main() -> i32 ! JsonError | WriterError {
   run JsonReflect.write<Record>(&value, &options)
     |> Effect.provideMut<Writer>(&mut capture)
   let actual = Slice.view<u8>(&capture.bytes, usize.ZERO, capture.count)
-  if !equal(actual, b"{\\\"alpha\\\":7,\\\"beta\\\":true}") { return 1 }
+  if !equal(actual, b"{\\"alpha\\":7,\\"beta\\":true}") { return 1 }
   return 0
 }`
