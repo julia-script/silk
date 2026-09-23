@@ -166,9 +166,12 @@ impl Format {
   /// Reports whether alternate presentation is requested.
   pub fn alternate(self: &Formatter) -> bool { return self.options.alternate }
 
-  /// Reports whether width-driven integer zero padding is requested. A supplied precision disables
-  /// that padding when presenting an integer. Float presentations pad with the fill scalar and
-  /// never with zeroes.
+  /// Reports whether integer width padding with zeroes is requested.
+  ///
+  /// # Details
+  ///
+  /// A supplied precision disables this padding for integers. Float presentations use the fill
+  /// scalar for width padding and never use zeroes.
   pub fn zeroPad(self: &Formatter) -> bool { return self.options.zeroPad }
 
   /// Reports whether a numeric precision was supplied.
@@ -888,10 +891,14 @@ pub struct FormatOptions {
   /// Whether integer width padding uses zeroes after the sign. A supplied precision disables this
   /// width-driven zero padding.
   pub zeroPad: bool
-  /// Optional digit count for numeric presentations. For integers this is a minimum digit count,
-  /// and supplying it disables width-driven zero padding. For floats it is the exact number of
-  /// fractional digits, rounded ties-to-even, which replaces the shortest round-tripping default
-  /// and so may not parse back to the original bits. Nonfinite floats ignore it.
+  /// Optional digit count for numeric presentations.
+  ///
+  /// # Details
+  ///
+  /// For integers, this is a minimum digit count and disables width-driven zero padding. For floats,
+  /// it is the exact number of fractional digits, rounded ties-to-even. This replaces the shortest
+  /// round-tripping default, so the output may not parse back to the original bits. Nonfinite floats
+  /// ignore it.
   pub precision: Option<usize>
   /// Permission, not a requirement, to emit balanced ANSI styling.
   pub color: bool

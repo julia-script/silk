@@ -346,7 +346,8 @@ checked-conversion code can select the same source and destination type.
 pub fn toF32(value: isize) -> f32
 ```
 
-Converts `value` to the nearest `f32` value, with ties to even.
+Converts `value` to the nearest `f32` value, with ties to even. Only magnitudes below `2^24` are
+exactly representable, so a larger `isize` rounds.
 
 <a id="declaration-73696c6b2f6973697a653a3a746f463634"></a>
 
@@ -356,7 +357,8 @@ Converts `value` to the nearest `f32` value, with ties to even.
 pub fn toF64(value: isize) -> f64
 ```
 
-Converts `value` to the nearest `f64` value, with ties to even.
+Converts `value` to the nearest `f64` value, with ties to even. Only magnitudes below `2^53` are
+exactly representable, so a larger `isize` rounds. Every `isize` is exact on a 32-bit target.
 
 <a id="declaration-73696c6b2f6973697a653a3a616464"></a>
 
