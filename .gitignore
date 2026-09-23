@@ -2,6 +2,7 @@
 **/dist/
 /packages/compiler/src/ToolchainIntegrity.generated.ts
 /coverage/
+/.pnpm-store/
 **/.turbo/
 **/.vitest-attachments/
 /.release-candidate/
