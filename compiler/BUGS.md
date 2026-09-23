@@ -203,39 +203,45 @@ which does contain the fix. `LowerType.constraints` was split into the per-form 
 `membershipConstraint` and `providerConstraint` that the shape naturally wants, with
 `callableContract`, `constraints`, and the whole expression, pattern, and statement lowering all
 reachable from the test entry point — a strictly larger reachable graph than the one that
-originally blew up. Discovery completes; the self-hosted code now carries no residue of the
-workaround, so no `# Gotchas` block explaining the inlined shape is needed.
+originally blew up. The self-hosted code now carries no residue of the workaround, so no
+`# Gotchas` block explaining the inlined shape is needed.
 
-## Ancestor-history interning exhausts the V8 heap for the HIR declaration lowering
+**Correction, 2026-09-23.** The sentence "discovery completes" that stood here was wrong.
+Discovery does **not** complete from the test entry point at `ea3fbb1a`. Measured by checking out
+`ea3fbb1a` into a detached worktree and running `silk test` against it with this worktree's own
+build — so none of the later declaration lowering is present — the run aborts after roughly 175
+seconds and 4 GB with `FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed -
+JavaScript heap out of memory`. `silk check` passes at that commit, which is what the original
+re-measurement had actually confirmed. See the entry below.
 
-**Status:** open and blocking. `silk check` succeeds; `silk test` cannot complete.
+## Ancestor-history interning exhausts the V8 heap for the whole `hir` lowering
 
-Wiring `Lower.lower` into `main.program` — the existing `silk-compiler <file>` path, which already
-reaches the lexer, the parser, and `SyntaxTree.write` — aborts instance discovery with
-`RangeError: Map maximum size exceeded`, thrown from `AncestorHistory.intern` through
-`Realization.discoverInstances`. This is the same failure mode as the wave-3 entry above, one
-scale further out, and it survives the `2d4e1c6d` SCC-projection repair: that fix removes dead
-ancestor correlation, but the surviving correlation still interns past what a JavaScript `Map` can
-hold once the whole lowering (types, expressions, patterns, statements, declarations) is reachable
-from the same root as the parser and the writer.
+**Status:** open, and already present at `ea3fbb1a` before the declaration lowering. `silk check`
+succeeds at every commit of this branch; `silk test` does not complete at `ea3fbb1a` or after.
 
-The blowup is about _which root_ reaches the lowering, not about the lowering itself. With
-`Lower.lower` reachable only from the test entry point, `silk check` succeeds and the full suite
-runs; the identical code reached from `main.program` does not survive discovery. Raising
-`--max-old-space-size` to 12 GB does not help, because the limit is the `Map` entry cap rather
-than the heap.
+`silk test` aborts in instance discovery, in `AncestorHistory` interning reached through
+`Realization.discoverInstances`. It is the same failure mode as the wave-3 entry above, further
+out, and it survives the `2d4e1c6d` SCC-projection repair: that fix removes dead ancestor
+correlation, but the surviving correlation still grows past what the process can hold once the
+whole lowering is reachable from one root. Two surfaces of the same wall have been observed:
 
-The wall is not confined to the executable. After the declaration lowering landed, `silk test` also
-fails, with the same interning growth reaching the heap limit rather than the `Map` entry cap:
-`Builtins_MapPrototypeSet` to `Runtime_MapGrow` to `FATAL ERROR: CALL_AND_RETRY_LAST Allocation
-failed - JavaScript heap out of memory`, after roughly 125 seconds and 3.7 GB. So the test entry
-point, which carried waves 1-4, no longer survives discovery either. `silk check` still passes,
-which is why the failure is invisible until a native build is attempted.
+- **`Lower.lower` reachable from `main.program`** — the existing `silk-compiler <file>` path, which
+  also reaches the lexer, the parser, and `SyntaxTree.write` — aborts with `RangeError: Map maximum
+size exceeded` from `AncestorHistory.intern`. Raising `--max-old-space-size` to 12 GB does not
+  help, because that surface is the `Map` entry cap rather than the heap.
+- **`Lower.lower` reachable from the test entry point** — aborts with `FATAL ERROR: CALL_AND_RETRY_
+LAST Allocation failed - JavaScript heap out of memory` through `Builtins_MapPrototypeSet` and
+  `Runtime_MapGrow`, after roughly 125 seconds and 3.7 GB.
+
+**The declaration lowering did not introduce this.** Checking `ea3fbb1a` out into a detached
+worktree and running `silk test` against it with this worktree's own build reproduces the heap
+exhaustion with none of the declaration lowering present: roughly 175 seconds, 4 GB, `Ineffective
+mark-compacts near heap limit`. The wave-4 entry above has been corrected accordingly.
 
 The practical consequence is that `compiler/src/hir` has outgrown what the bootstrap's instance
-discovery can realize in one program. The next step is a bootstrap-side repair in
-`packages/compiler` (the `2d4e1c6d` SCC projection removed dead correlation but not enough of it),
-not a further reshaping of the self-hosted source: the wave-3 experience already showed that
-moving declarations around only shifts the threshold.
+discovery can realize in one program, and that `silk check` is currently the only self-hosted gate
+that runs to completion. The next step is a bootstrap-side repair in `packages/compiler`, not a
+further reshaping of the self-hosted source: the wave-3 experience already showed that moving
+declarations around only shifts the threshold.
 
 Encountered on 2026-09-23 while porting the declaration lowering and assembling the module.

@@ -854,6 +854,19 @@ pub union Node {
     /// The referenced name.
     pub name: HirId,
     /// The lexical binder this identifier resolves to, absent when no binder is in scope.
+    ///
+    /// # Details
+    ///
+    /// A binder is exactly one of four node kinds:
+    /// [`Parameter`](Node.Parameter) for a callable parameter,
+    /// [`BindingStatement`](Node.BindingStatement) for a `let` or `const`,
+    /// [`BindingPattern`](Node.BindingPattern) for a name a pattern introduces, and
+    /// [`Name`](Node.Name) for a `static for` iteration name. The loop is the odd one out
+    /// because a postorder arena appends its statement only after its body, so the name node is
+    /// the only identity that exists while the body is being lowered.
+    ///
+    /// Absence means unresolved, not unbound: an import, a member, and a type name all stay
+    /// absent here, because lowering resolves lexical scope only.
     pub binding: HirRef,
   },
   /// A `move` expression.
