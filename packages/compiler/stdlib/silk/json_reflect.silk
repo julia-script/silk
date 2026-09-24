@@ -10,10 +10,10 @@
 //! not necessarily its complete state. Writing requires no JSON-owned allocation.
 //!
 //! # Gotchas
-//! The current compiler reports `SEM0053` if a concrete `Serialize` implementation delegates to
-//! this helper (JUL-226). Call the helper directly. Generic reflected deserialization is unavailable:
-//! public reflection can borrow fields but cannot construct an arbitrary aggregate from decoded
-//! owned fields.
+//! Calling `Serialize.serialize` directly on a reflected field inside a `static for` reports
+//! `SEM0010` (JUL-226); use `JsonSerde.writeOne` to select its witness. Generic reflected
+//! deserialization is unavailable: public reflection can borrow fields but cannot construct an
+//! arbitrary aggregate from decoded owned fields.
 
 import silk.json_output { JsonOptions, JsonOutput }
 import silk.json_scanner { JsonError }

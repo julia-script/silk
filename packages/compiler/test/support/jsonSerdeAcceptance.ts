@@ -7,7 +7,7 @@ import silk.json_array { JsonArray }
 import silk.json_object { JsonObject }
 import silk.json_output { JsonOptions }
 import silk.json_scanner { JsonError, JsonReason, JsonScanner, JsonSpan, JsonToken }
-import silk.json_serde { Deserialize, Serialize }
+import silk.json_serde { Deserialize, JsonSerde, Serialize }
 import silk.json_text { JsonText }
 import silk.json_value { Json, Value }
 import silk.option { Option }
@@ -45,6 +45,7 @@ fn equals(sink: &Sink, expected: &[u8]) -> bool {
 }
 
 struct Point { x: i32 y: i32 }
+struct Outer { inner: Point }
 
 struct Key { text: String offset: usize }
 
@@ -173,6 +174,36 @@ impl Deserialize for Point {
   }
 }
 
+impl Serialize for Outer {
+  effect fn serialize(self: &Self, options: &JsonOptions)
+    -> () ! JsonError | WriterError ? &mut Writer {
+    return run JsonObject.begin(options)
+      |> JsonObject.field("inner", &self.inner)
+      |> JsonObject.end
+  }
+}
+
+impl Deserialize for Outer {
+  effect fn deserialize(scanner: &mut JsonScanner)
+    -> Self ! JsonError | OutOfMemoryError ? &mut Allocator {
+    let opening = run token(&mut scanner.*)
+    match move opening {
+      JsonToken.ObjectBegin => {}
+      _ => { fail JsonError.at(JsonReason.TypeMismatch, JsonScanner.offset(&scanner.*)) }
+    }
+    let member = run key(&mut scanner.*)
+    if String.view(&member.text) != "inner" {
+      fail JsonError.at(JsonReason.UnknownField, member.offset)
+    }
+    let inner = run JsonSerde.deserializeOne<Point>(&mut scanner.*)
+    let closing = run token(&mut scanner.*)
+    match move closing {
+      JsonToken.ObjectEnd => { return Outer { inner: move inner } }
+      _ => { fail JsonError.at(JsonReason.UnexpectedByte, JsonScanner.offset(&scanner.*)) }
+    }
+  }
+}
+
 effect fn rejectsPoint(bytes: &[u8], expected: JsonReason, offset: usize)
   -> bool ! OutOfMemoryError ? &mut Allocator {
   let attempted = run Effect.result(Json.deserialize<Point>(bytes))
@@ -227,6 +258,19 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   let mut sink = Sink { output: move storage, count: usize.ZERO }
   run Json.serialize<Point>(&point, &options) |> Effect.provideMut<Writer>(&mut sink)
   if !equals(&sink, b"{\\"x\\":3,\\"y\\":4}") { return 6 }
+  sink.count = usize.ZERO
+  let outer = Outer { inner: Point { x: 3, y: 4 } }
+  run Json.serialize<Outer>(&outer, &options) |> Effect.provideMut<Writer>(&mut sink)
+  if !equals(&sink, b"{\\"inner\\":{\\"x\\":3,\\"y\\":4}}") { return 19 }
+  let outerStored = Bytes.asSlice(&sink.output)
+  let outerEncoded = Slice.view<u8>(outerStored, usize.ZERO, sink.count)
+  let outerRestored = run Json.deserialize<Outer>(outerEncoded)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if !(outerRestored.inner.x == outer.inner.x && outerRestored.inner.y == outer.inner.y) { return 20 }
+  drop outerEncoded
+  drop outerStored
+  sink.count = usize.ZERO
+  run Json.serialize<Point>(&point, &options) |> Effect.provideMut<Writer>(&mut sink)
   let stored = Bytes.asSlice(&sink.output)
   let encoded = Slice.view<u8>(stored, usize.ZERO, sink.count)
   let roundTrip = run Json.deserialize<Point>(encoded)

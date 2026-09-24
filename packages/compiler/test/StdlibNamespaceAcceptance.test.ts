@@ -172,8 +172,8 @@ it.effect('rejects positional aggregates and visible fields without Serialize', 
         start: diagnostic.span.start,
       })),
       [
-        { code: 'SEM0177', source: 'silk/json_reflect', start: 2234 },
-        { code: 'SEM0083', source: 'silk/json_reflect', start: 2818 },
+        { code: 'SEM0177', source: 'silk/json_reflect', start: 2251 },
+        { code: 'SEM0083', source: 'silk/json_reflect', start: 2835 },
       ],
     )
   }),
