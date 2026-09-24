@@ -47,7 +47,7 @@ const defaultClang = (): string => {
 }
 
 const clang = Effect.runSync(
-  Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
+  Config.String('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
 )
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',

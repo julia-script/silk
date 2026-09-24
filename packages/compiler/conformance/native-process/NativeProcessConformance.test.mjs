@@ -48,7 +48,7 @@ const fixtures = {
 
 /** @param {string} name @param {string} fallback */
 const configured = (name, fallback) =>
-  Effect.runSync(Config.string(name).pipe(Config.withDefault(fallback)))
+  Effect.runSync(Config.String(name).pipe(Config.withDefault(fallback)))
 
 const requestedMode = configured('SILK_PROCESS_MODE', 'normal')
 const requestedOptimization = configured('SILK_PROCESS_OPTIMIZATION', 'all')
@@ -75,20 +75,20 @@ const runLane = Effect.fnUntraced(
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const target = yield* Config.string('SILK_SUPPLY_TARGET')
+    const target = yield* Config.String('SILK_SUPPLY_TARGET')
     if (mode === 'child-fault' && !target.includes('linux'))
       return yield* new ConformanceError({
         message: 'Child fault admission requires a GNU target',
       })
-    const clang = yield* Config.string('SILK_SUPPLY_CLANG')
-    const llvmAr = yield* Config.string('SILK_SUPPLY_AR')
-    const linker = yield* Config.string('SILK_SUPPLY_LINKER')
-    const inspect = yield* Config.string('SILK_SUPPLY_READOBJ')
-    const root = yield* Config.string('SILK_SUPPLY_ROOT')
-    const gcc = yield* Config.string('SILK_SUPPLY_GCC').pipe(Config.withDefault(''))
-    const image = yield* Config.string('SILK_SUPPLY_IMAGE').pipe(Config.withDefault(''))
+    const clang = yield* Config.String('SILK_SUPPLY_CLANG')
+    const llvmAr = yield* Config.String('SILK_SUPPLY_AR')
+    const linker = yield* Config.String('SILK_SUPPLY_LINKER')
+    const inspect = yield* Config.String('SILK_SUPPLY_READOBJ')
+    const root = yield* Config.String('SILK_SUPPLY_ROOT')
+    const gcc = yield* Config.String('SILK_SUPPLY_GCC').pipe(Config.withDefault(''))
+    const image = yield* Config.String('SILK_SUPPLY_IMAGE').pipe(Config.withDefault(''))
     const output = path.resolve(
-      yield* Config.string('SILK_SUPPLY_OUTPUT').pipe(
+      yield* Config.String('SILK_SUPPLY_OUTPUT').pipe(
         Config.withDefault('.scratch/native-process'),
       ),
     )

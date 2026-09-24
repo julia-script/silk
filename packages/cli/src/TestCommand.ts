@@ -7,22 +7,22 @@ import * as CommandExit from './CommandExit.js'
 import * as ProjectOptions from './ProjectOptions.js'
 import * as Workflow from './Workflow.js'
 
-const root = Flag.string('root').pipe(
+const root = Flag.String('root').pipe(
   Flag.withDescription('Manifest-relative .silk root whose active import graph supplies tests.'),
   Flag.optional,
 )
 
-const file = Flag.string('file').pipe(
+const file = Flag.String('file').pipe(
   Flag.withDescription('Exact project-relative logical source path to select at runtime.'),
   Flag.optional,
 )
 
-const filter = Flag.string('filter').pipe(
+const filter = Flag.String('filter').pipe(
   Flag.withDescription('Literal ASCII case-insensitive test-name substring to select at runtime.'),
   Flag.optional,
 )
 
-const noCache = Flag.boolean('no-cache').pipe(
+const noCache = Flag.Boolean('no-cache').pipe(
   Flag.withDescription('Execute selected tests without reading or writing persistent results.'),
   Flag.withDefault(false),
 )

@@ -15,7 +15,7 @@ const defaultClang = (): string => {
   return 'clang'
 }
 const clang = Effect.runSync(
-  Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
+  Config.String('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
 )
 const root = mkdtempSync(join(tmpdir(), 'silk-build-exe-test-'))
 

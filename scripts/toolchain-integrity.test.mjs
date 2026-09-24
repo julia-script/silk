@@ -56,7 +56,7 @@ void test('development watcher refreshes identity and terminates with its compil
   )
   await chmod(executable, 0o755)
   const child = spawn(process.execPath, [join(root, 'scripts/watch-toolchain.mjs')], {
-    env: { PATH: `${join(root, 'bin')}:${Effect.runSync(Config.string('PATH'))}` },
+    env: { PATH: `${join(root, 'bin')}:${Effect.runSync(Config.String('PATH'))}` },
     stdio: ['ignore', 'pipe', 'inherit'],
   })
   t.after(() => child.kill('SIGKILL'))

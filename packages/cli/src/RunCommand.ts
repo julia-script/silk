@@ -7,7 +7,7 @@ import * as CommandExit from './CommandExit.js'
 import * as ProjectOptions from './ProjectOptions.js'
 import * as Workflow from './Workflow.js'
 
-const arguments_ = Argument.string('arguments').pipe(
+const arguments_ = Argument.String('arguments').pipe(
   Argument.withDescription('Arguments passed literally to the compiled program after `--`.'),
   Argument.variadic(),
 )

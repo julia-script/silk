@@ -12,7 +12,7 @@ const fixtureRoot = resolve(packageRoot, 'fixtures/foundation')
 const oracle = resolve(packageRoot, 'scripts/foundation-oracle.zig')
 const command = process.argv[2] ?? 'verify'
 const executable = (name, variable) =>
-  Effect.runSync(Config.string(variable).pipe(Config.withDefault(name)))
+  Effect.runSync(Config.String(variable).pipe(Config.withDefault(name)))
 
 const decodeHex = (path) => Buffer.from(readFileSync(path, 'utf8').trim(), 'hex')
 

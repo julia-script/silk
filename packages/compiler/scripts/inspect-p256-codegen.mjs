@@ -41,7 +41,7 @@ const inspect = Effect.fnUntraced(function* () {
     return yield* new InspectionFailure({ message: 'Provide an inspection output directory' })
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const llvm = yield* Config.string('LLVM_BIN').pipe(
+  const llvm = yield* Config.String('LLVM_BIN').pipe(
     Config.withDefault('/opt/homebrew/opt/llvm/bin'),
   )
   const toolchain = {

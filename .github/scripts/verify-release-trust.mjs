@@ -3,10 +3,10 @@ import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 
 const registry = Effect.runSync(
-  Config.string('NPM_REGISTRY').pipe(Config.withDefault('https://registry.npmjs.org')),
+  Config.String('NPM_REGISTRY').pipe(Config.withDefault('https://registry.npmjs.org')),
 )
 const publishedPackages = Effect.runSync(
-  Config.string('PUBLISHED_PACKAGES').pipe(Config.withDefault('')),
+  Config.String('PUBLISHED_PACKAGES').pipe(Config.withDefault('')),
 )
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))
 

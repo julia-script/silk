@@ -6,11 +6,11 @@ import { configDefaults } from 'vitest/config'
 import { defineSilkConfig, wholeMachineWorkers } from '../../vitest.shared.js'
 
 const nativeCacheDirectory = Effect.runSync(
-  Config.string('SILK_NATIVE_CACHE_DIR').pipe(
+  Config.String('SILK_NATIVE_CACHE_DIR').pipe(
     Config.withDefault(join(homedir(), '.cache', 'silk-effect', 'native')),
   ),
 )
-const ci = Effect.runSync(Config.boolean('CI').pipe(Config.withDefault(false)))
+const ci = Effect.runSync(Config.Boolean('CI').pipe(Config.withDefault(false)))
 
 export default defineSilkConfig({
   test: {

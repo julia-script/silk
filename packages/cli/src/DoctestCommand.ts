@@ -21,25 +21,25 @@ import * as CommandExit from './CommandExit.js'
  * modules with no project rooting them.
  */
 
-const input = Flag.string('input').pipe(
+const input = Flag.String('input').pipe(
   Flag.withAlias('i'),
   Flag.withDescription('Documentation JSON written by `silk doc`.'),
   Flag.optional,
 )
 
-const sourceRoot = Flag.string('source-root').pipe(
+const sourceRoot = Flag.String('source-root').pipe(
   Flag.withDescription(
     'Directory holding the documented modules, used to turn a byte offset into a line.',
   ),
   Flag.optional,
 )
 
-const stdlib = Flag.boolean('stdlib').pipe(
+const stdlib = Flag.Boolean('stdlib').pipe(
   Flag.withDescription('Doctest the compiler-shipped standard library instead of a JSON file.'),
   Flag.withDefault(false),
 )
 
-const target = Flag.string('target').pipe(
+const target = Flag.String('target').pipe(
   Flag.withDescription(`Target examples compile against. Defaults to ${Doctest.defaultTarget}.`),
   Flag.optional,
 )

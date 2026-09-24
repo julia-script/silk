@@ -61,17 +61,17 @@ const program = Effect.gen(function* () {
     throw new Error(
       'Supply distinct native target ids. LTO is unsupported; this lane accepts debug and optimized native objects only.',
     )
-  const clang = yield* Config.string('SILK_BOUNDARY_CLANG').pipe(
+  const clang = yield* Config.String('SILK_BOUNDARY_CLANG').pipe(
     Config.withDefault('/opt/homebrew/opt/llvm/bin/clang'),
   )
-  const darwinLinker = yield* Config.string('SILK_BOUNDARY_LD64').pipe(
+  const darwinLinker = yield* Config.String('SILK_BOUNDARY_LD64').pipe(
     Config.withDefault('/opt/homebrew/bin/ld64.lld'),
   )
-  const sdk = yield* Config.string('SILK_BOUNDARY_SDK').pipe(
+  const sdk = yield* Config.String('SILK_BOUNDARY_SDK').pipe(
     Config.withDefault('/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk'),
   )
   const output = resolve(
-    yield* Config.string('SILK_BOUNDARY_OUTPUT').pipe(
+    yield* Config.String('SILK_BOUNDARY_OUTPUT').pipe(
       Config.withDefault(join(directory, '../../../../.scratch/native-boundary')),
     ),
   )

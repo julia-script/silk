@@ -21,52 +21,52 @@ import * as Workflow from './Workflow.js'
 const targetIds = Target.all.map((candidate) => candidate.id)
 const profiles = ['debug', 'release', 'release-with-debug'] as const
 
-const source = Argument.file('source', { mustExist: true }).pipe(
+const source = Argument.File('source', { mustExist: true }).pipe(
   Argument.withDescription('The root source file to compile.'),
 )
 
-const sourceRoot = Flag.string('source-root').pipe(
+const sourceRoot = Flag.String('source-root').pipe(
   Flag.withDescription('Source root used for canonical module resolution.'),
   Flag.optional,
 )
 
-const output = Flag.string('output').pipe(
+const output = Flag.String('output').pipe(
   Flag.withAlias('o'),
   Flag.withDescription('Destination path for the linked executable.'),
   Flag.withDefault('a.out'),
 )
 
-const target = Flag.choice('target', targetIds).pipe(
+const target = Flag.Literals('target', targetIds).pipe(
   Flag.withDescription('Compilation target. Defaults to the host target.'),
   Flag.optional,
 )
 
-const optimization = Flag.choice('optimization', profiles).pipe(
+const optimization = Flag.Literals('optimization', profiles).pipe(
   Flag.withDescription('Optimization mode.'),
   Flag.optional,
 )
 
-const profileInput = Flag.string('profile-input').pipe(
+const profileInput = Flag.String('profile-input').pipe(
   Flag.withDescription('Complete logical profile as JSON.'),
   Flag.optional,
 )
 
-const platformSupply = Flag.string('platform-supply').pipe(
+const platformSupply = Flag.String('platform-supply').pipe(
   Flag.withDescription('Physical platform supply request as JSON.'),
   Flag.optional,
 )
 
-const clang = Flag.string('clang').pipe(
+const clang = Flag.String('clang').pipe(
   Flag.withDescription('Path to the Clang executable used for object emission and linking.'),
   Flag.withDefault('clang'),
 )
 
-const saveTemps = Flag.boolean('save-temps').pipe(
+const saveTemps = Flag.Boolean('save-temps').pipe(
   Flag.withDescription('Keep the build scope intermediates for inspection.'),
   Flag.withDefault(false),
 )
 
-const timings = Flag.boolean('timings').pipe(
+const timings = Flag.Boolean('timings').pipe(
   Flag.withDescription('Print the per-phase timing and memory report.'),
   Flag.withDefault(false),
 )

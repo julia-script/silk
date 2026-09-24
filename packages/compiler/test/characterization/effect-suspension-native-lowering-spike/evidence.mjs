@@ -9,7 +9,7 @@ import * as Effect from 'effect/Effect'
 
 const log = (...values) => Effect.runSync(Console.log(...values))
 const configured = (name, fallback) =>
-  Effect.runSync(Config.string(name).pipe(Config.withDefault(fallback)))
+  Effect.runSync(Config.String(name).pipe(Config.withDefault(fallback)))
 
 const root = dirname(fileURLToPath(import.meta.url))
 const evidenceRoot = join(root, 'evidence')

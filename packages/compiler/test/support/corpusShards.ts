@@ -23,7 +23,7 @@ import { corpus } from './corpus.js'
 const encoder = new TextEncoder()
 const ascii = (value: string): Uint8Array => encoder.encode(value)
 const verificationLimit = Number.parseInt(
-  Effect.runSync(Config.string('SILK_VERIFY_CORPUS_LIMIT').pipe(Config.withDefault('0'))),
+  Effect.runSync(Config.String('SILK_VERIFY_CORPUS_LIMIT').pipe(Config.withDefault('0'))),
   10,
 )
 

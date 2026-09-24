@@ -10,12 +10,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0-rc.117",
     "@silklang/llvm": "workspace:*",
-    "effect": "4.0.0-rc.112"
+    "effect": "4.0.0-rc.117"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.117",
     "@types/node": "^22.13.0",
     "typescript": "7.0.2",
     "vitest": "4.1.10"

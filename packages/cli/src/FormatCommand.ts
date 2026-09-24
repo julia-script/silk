@@ -9,12 +9,12 @@ import * as CommandExit from './CommandExit.js'
 import * as FormatWorkflow from './FormatWorkflow.js'
 import * as ProjectOptions from './ProjectOptions.js'
 
-const paths = Argument.string('path').pipe(
+const paths = Argument.String('path').pipe(
   Argument.withDescription('A source-root .silk file or directory to format.'),
   Argument.variadic(),
 )
 
-const check = Flag.boolean('check').pipe(
+const check = Flag.Boolean('check').pipe(
   Flag.withDescription('Verify canonical formatting without writing files.'),
   Flag.withDefault(false),
 )

@@ -1,3 +1,4 @@
+import * as ByteSize from 'effect/ByteSize'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
@@ -116,7 +117,7 @@ const adapt = <A>(
 ): Effect.Effect<A, PlatformError.PlatformError> =>
   effect.pipe(Effect.mapError((error) => platformError(method, path, error)))
 
-const emptyInfo = (type: FileSystem.File.Type, size: FileSystem.Size): FileSystem.File.Info => ({
+const emptyInfo = (type: FileSystem.File.Type, size: ByteSize.ByteSize): FileSystem.File.Info => ({
   type,
   size,
   mode: 0,
@@ -153,10 +154,10 @@ const isEncoding = (encoding: string): encoding is WebContainer.BufferEncoding =
 const sizeNumber = (
   method: string,
   path: string,
-  input: FileSystem.SizeInput,
+  input: ByteSize.Input,
 ): Effect.Effect<number, PlatformError.PlatformError> => {
-  const value = BigInt(input)
-  if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+  const value = Option.getOrUndefined(ByteSize.fromInput(input))
+  if (value === undefined || value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) {
     return Effect.fail(
       invalidData(method, path, `${method} requires a nonnegative safe-integer byte size`),
     )
@@ -297,7 +298,7 @@ const makeService = Effect.fnUntraced(function* () {
     const normalized = path.normalize(target)
     if (normalized === '.' || normalized === '/' || normalized === runtime.workdir) {
       yield* adapt('stat', target, primitive.readDirectory(target))
-      return emptyInfo('Directory', FileSystem.Size(0))
+      return emptyInfo('Directory', ByteSize.zero)
     }
     const parent = path.dirname(normalized)
     const name = path.basename(normalized)
@@ -309,7 +310,7 @@ const makeService = Effect.fnUntraced(function* () {
     // File sizes are a documented zero approximation: upstream exposes no stat, and measuring
     // them by reading contents would make every tree walk O(total bytes). Use
     // `readFile(...).byteLength` when an accurate size is required.
-    return emptyInfo(entry.type, FileSystem.Size(0))
+    return emptyInfo(entry.type, ByteSize.zero)
   })
 
   const access = Effect.fnUntraced(function* (target: string) {
@@ -464,7 +465,7 @@ const makeService = Effect.fnUntraced(function* () {
     return resolved
   })
 
-  const truncate = Effect.fnUntraced(function* (target: string, length: FileSystem.SizeInput = 0) {
+  const truncate = Effect.fnUntraced(function* (target: string, length: number = 0) {
     const requested = yield* sizeNumber('truncate', target, length)
     const current = yield* readFile(target)
     if (requested <= current.byteLength) {
@@ -478,20 +479,17 @@ const makeService = Effect.fnUntraced(function* () {
   const fileStream: FileSystem.FileSystem['stream'] = (
     target: string,
     options?: {
-      readonly bytesToRead?: FileSystem.SizeInput | undefined
-      readonly chunkSize?: FileSystem.SizeInput | undefined
-      readonly offset?: FileSystem.SizeInput | undefined
+      readonly bytesToRead?: ByteSize.Input | undefined
+      readonly chunkSize?: number | undefined
+      readonly offset?: ByteSize.Input | undefined
     },
   ): Stream.Stream<Uint8Array, PlatformError.PlatformError> =>
     Stream.unwrap(
       Effect.gen(function* () {
         const bytes = yield* readFile(target)
-        const offset = yield* sizeNumber('stream', target, options?.offset ?? 0)
-        const chunkSize = yield* sizeNumber(
-          'stream',
-          target,
-          options?.chunkSize ?? FileSystem.KiB(64),
-        )
+        const offset =
+          options?.offset === undefined ? 0 : yield* sizeNumber('stream', target, options.offset)
+        const chunkSize = yield* sizeNumber('stream', target, options?.chunkSize ?? 64 * 1024)
         if (chunkSize === 0) {
           return yield* invalidData('stream', target, 'chunkSize must be greater than zero')
         }

@@ -7,41 +7,41 @@ import { Flag } from 'effect/unstable/cli'
 export const profiles = ['debug', 'release', 'release-with-debug'] as const
 const targetIds = ['host', ...Target.all.map((candidate) => candidate.id)]
 
-export const manifestPath = Flag.string('manifest-path').pipe(
+export const manifestPath = Flag.String('manifest-path').pipe(
   Flag.withDescription('Path to a Silk project manifest. Disables upward discovery.'),
   Flag.optional,
 )
 
-export const targets = Flag.choice('target', targetIds).pipe(
+export const targets = Flag.Literals('target', targetIds).pipe(
   Flag.withDescription('Compilation target selector. Repeat to build more than one target.'),
   Flag.atLeast(0),
 )
 
-export const profile = Flag.string('profile').pipe(
+export const profile = Flag.String('profile').pipe(
   Flag.withDescription('Named project compilation profile.'),
   Flag.optional,
 )
-export const profileInput = Flag.string('profile-input').pipe(
+export const profileInput = Flag.String('profile-input').pipe(
   Flag.withDescription('Complete logical profile as a JSON object.'),
   Flag.optional,
 )
 
-export const optimization = Flag.choice('optimization', profiles).pipe(
+export const optimization = Flag.Literals('optimization', profiles).pipe(
   Flag.withDescription('Compilation optimization.'),
   Flag.optional,
 )
 
-export const release = Flag.boolean('release').pipe(
+export const release = Flag.Boolean('release').pipe(
   Flag.withDescription('Build with the release optimization.'),
   Flag.withDefault(false),
 )
 
-export const verifyMir = Flag.boolean('verify-mir').pipe(
+export const verifyMir = Flag.Boolean('verify-mir').pipe(
   Flag.withDescription('Audit lowered MIR invariants before emission (compiler development).'),
   Flag.withDefault(false),
 )
 
-export const watch = Flag.boolean('watch').pipe(
+export const watch = Flag.Boolean('watch').pipe(
   Flag.withDescription('Run again after every change to a project source file.'),
   Flag.withDefault(false),
 )

@@ -50,16 +50,16 @@ const defaultClang = (): string => {
   return '/usr/bin/clang'
 }
 
-const testPath = Effect.runSync(Config.string('PATH').pipe(Config.withDefault('')))
+const testPath = Effect.runSync(Config.String('PATH').pipe(Config.withDefault('')))
 const clang = Effect.runSync(
-  Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
+  Config.String('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
 )
 const defaultLlvmAr = join(dirname(clang), 'llvm-ar')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,
   llvmAr: Effect.runSync(
-    Config.string('SILK_TEST_LLVM_AR').pipe(
+    Config.String('SILK_TEST_LLVM_AR').pipe(
       Config.withDefault(existsSync(defaultLlvmAr) ? defaultLlvmAr : '/usr/bin/llvm-ar'),
     ),
   ),
