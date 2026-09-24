@@ -120,3 +120,7 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
   Node test promises and direct process environment reads · Await Node test registrations, pass
   the GitHub summary path as an argument, and verify against full-root lint when dependencies are
   complete · compiler CI
+- 2026-09-23 · After the interrupted install was cleaned up, worktree Oxlint could not resolve its
+  preset, while main-checkout Oxlint treated the worktree config as a nested root config · Confirm
+  both lockfiles and Oxlint configs match, then lint the changed absolute paths from the prepared
+  checkout with `--disable-nested-config` · compiler CI

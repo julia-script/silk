@@ -18,9 +18,9 @@ const comparePaths = (left, right) => {
   return 0
 }
 
-// Refresh from a completed four-shard CI run at the matching checkout:
-//   gh run download RUN_ID --pattern 'compiler-shard-*-timings-a1' --dir /tmp/compiler-timings
-//   node scripts/compiler-shards.mjs --refresh /tmp/compiler-timings RUN_ID HEAD_SHA
+// Refresh from at least two completed four-shard CI runs with two workers and the same file set:
+//   gh run download RUN_ID --pattern 'compiler-shard-*-timings-a1' --dir /tmp/compiler-timings-RUN_ID
+//   node scripts/compiler-shards.mjs --refresh DIR_1 RUN_ID_1 HEAD_SHA_1 DIR_2 RUN_ID_2 HEAD_SHA_2 [...]
 // Review the resulting baseline diff and `--audit` totals before committing it.
 export const discoverTests = (directory = compilerDirectory) => {
   const files = []
@@ -96,24 +96,53 @@ export const readArtifactTimings = (directory) => {
   return Object.fromEntries(Object.entries(timings).sort(([a], [b]) => comparePaths(a, b)))
 }
 
+export const medianTimings = (samples) => {
+  if (samples.length === 0) throw new Error('At least one successful timing sample is required')
+  return Object.fromEntries(
+    Object.keys(samples[0])
+      .sort(comparePaths)
+      .map((file) => {
+        const values = samples.map((sample) => sample[file]).sort((a, b) => a - b)
+        const lower = values[Math.floor((values.length - 1) / 2)]
+        const upper = values[Math.floor(values.length / 2)]
+        return [file, Math.round((lower + upper) / 2)]
+      }),
+  )
+}
+
 const main = (args) => {
   if (args[0] === '--refresh') {
-    const [, artifactDirectory, runId, headSha] = args
-    if (!artifactDirectory || !/^\d+$/.test(runId ?? '') || !/^[0-9a-f]{40}$/.test(headSha ?? '')) {
-      throw new Error('Usage: --refresh ARTIFACT_DIRECTORY RUN_ID HEAD_SHA')
+    if (args.length < 7 || (args.length - 1) % 3 !== 0) {
+      throw new Error('Usage: --refresh DIR_1 RUN_ID_1 HEAD_SHA_1 DIR_2 RUN_ID_2 HEAD_SHA_2 [...]')
     }
-    const timings = readArtifactTimings(artifactDirectory)
     const files = discoverTests()
-    const missing = files.filter((file) => !(file in timings))
-    const extra = Object.keys(timings).filter((file) => !files.includes(file))
-    if (missing.length || extra.length) {
-      throw new Error(
-        `Artifact coverage mismatch: missing ${missing.join(', ') || 'none'}; extra ${extra.join(', ') || 'none'}`,
-      )
+    const samples = []
+    for (let index = 1; index < args.length; index += 3) {
+      const [artifactDirectory, runId, headSha] = args.slice(index, index + 3)
+      if (!/^\d+$/.test(runId) || !/^[0-9a-f]{40}$/.test(headSha)) {
+        throw new Error(
+          'Usage: --refresh DIR_1 RUN_ID_1 HEAD_SHA_1 DIR_2 RUN_ID_2 HEAD_SHA_2 [...]',
+        )
+      }
+      const timings = readArtifactTimings(artifactDirectory)
+      const missing = files.filter((file) => !(file in timings))
+      const extra = Object.keys(timings).filter((file) => !files.includes(file))
+      if (missing.length || extra.length) {
+        throw new Error(
+          `Run ${runId} coverage mismatch: missing ${missing.join(', ') || 'none'}; extra ${extra.join(', ') || 'none'}`,
+        )
+      }
+      samples.push({ runId: Number(runId), headSha, timings })
     }
+    samples.sort((a, b) => a.runId - b.runId)
+    if (new Set(samples.map((sample) => sample.runId)).size !== samples.length) {
+      throw new Error('Timing runs must be distinct')
+    }
+    const timings = medianTimings(samples.map((sample) => sample.timings))
+    const runs = samples.map(({ runId, headSha }) => ({ runId, headSha }))
     writeFileSync(
       baselinePath,
-      `${JSON.stringify({ source: { runId: Number(runId), headSha }, timings }, null, 2)}\n`,
+      `${JSON.stringify({ source: { workerCount: 2, estimator: 'median', runs }, timings }, null, 2)}\n`,
     )
     return
   }
@@ -122,7 +151,9 @@ const main = (args) => {
   const files = discoverTests()
   const { shards, fallbackCost, unmeasured } = assignTests(files, timings)
   if (args[0] === '--audit') {
-    process.stdout.write(`Baseline: GitHub Actions run ${source.runId}, head ${source.headSha}\n`)
+    process.stdout.write(
+      `Baseline: median of GitHub Actions runs ${source.runs.map((run) => run.runId).join(', ')}; ${source.workerCount} CI workers\n`,
+    )
     process.stdout.write(
       `Eligible: ${files.length}; measured: ${files.length - unmeasured.length}; new: ${unmeasured.length}; new-file cost: ${fallbackCost} ms\n`,
     )
@@ -136,7 +167,9 @@ const main = (args) => {
   }
   const match = /^--exclude-for-shard=([1-4])\/4$/.exec(args[0] ?? '')
   if (!match || args.length !== 1)
-    throw new Error('Usage: --exclude-for-shard=N/4 | --audit | --refresh DIR RUN_ID HEAD_SHA')
+    throw new Error(
+      'Usage: --exclude-for-shard=N/4 | --audit | --refresh DIR RUN_ID HEAD_SHA [...]',
+    )
   for (const flag of exclusionFlags(files, shards, Number(match[1]) - 1)) {
     process.stdout.write(flag + '\n')
   }

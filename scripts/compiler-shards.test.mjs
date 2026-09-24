@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { assignTests, discoverTests, exclusionFlags } from './compiler-shards.mjs'
+import { assignTests, discoverTests, exclusionFlags, medianTimings } from './compiler-shards.mjs'
 
 const baseline = JSON.parse(
   readFileSync(new URL('./compiler-shard-timings.json', import.meta.url), 'utf8'),
@@ -26,6 +26,9 @@ await test('the CI assignment covers every eligible compiler file once, includin
 })
 
 await test('measured-cost assignment is stable and balances the reviewed baseline', () => {
+  assert.equal(baseline.source.workerCount, 2)
+  assert.equal(baseline.source.estimator, 'median')
+  assert.ok(baseline.source.runs.length >= 2)
   const files = discoverTests()
   const first = assignTests(files, baseline.timings)
   const reversed = assignTests([...files].reverse(), baseline.timings)
@@ -33,6 +36,18 @@ await test('measured-cost assignment is stable and balances the reviewed baselin
   assert.deepEqual(first.unmeasured, [])
   const totals = first.shards.map((shard) => shard.totalMs)
   assert.ok(Math.max(...totals) - Math.min(...totals) < 1_000)
+})
+
+await test('baseline refresh uses the median across two-worker runs', () => {
+  assert.deepEqual(
+    medianTimings([
+      { 'test/Variable.test.ts': 10 },
+      { 'test/Variable.test.ts': 20 },
+      { 'test/Variable.test.ts': 30 },
+      { 'test/Variable.test.ts': 1000 },
+    ]),
+    { 'test/Variable.test.ts': 25 },
+  )
 })
 
 await test('Vitest selects same-stem test files on only their assigned shards', (context) => {
@@ -55,7 +70,9 @@ await test('Vitest selects same-stem test files on only their assigned shards', 
     'test/Other.test.ts': 80,
     'test/Fourth.test.ts': 70,
   })
-  const vitest = fileURLToPath(new URL('../node_modules/.bin/vitest', import.meta.url))
+  const vitest =
+    process.env.SILK_COMPILER_SHARD_VITEST_BIN ??
+    fileURLToPath(new URL('../node_modules/.bin/vitest', import.meta.url))
   const selected = []
   for (const [index, shard] of shards.entries()) {
     const result = spawnSync(
