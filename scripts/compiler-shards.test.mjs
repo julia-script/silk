@@ -70,9 +70,7 @@ await test('Vitest selects same-stem test files on only their assigned shards', 
     'test/Other.test.ts': 80,
     'test/Fourth.test.ts': 70,
   })
-  const vitest =
-    process.env.SILK_COMPILER_SHARD_VITEST_BIN ??
-    fileURLToPath(new URL('../node_modules/.bin/vitest', import.meta.url))
+  const vitest = fileURLToPath(new URL('../node_modules/.bin/vitest', import.meta.url))
   const selected = []
   for (const [index, shard] of shards.entries()) {
     const result = spawnSync(
