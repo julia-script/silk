@@ -2,6 +2,11 @@
 
 Format: date · symptom · fix · project. Check here first when tooling is slow or fails mysteriously.
 
+- 2026-09-23 · A delegated worktree had only a partial `node_modules`; `pnpm exec` automatically
+  attempted a full install and stalled on unavailable npm registry DNS · Stop the retry, use the
+  prepared main checkout's dependency links and binaries for focused checks, and pass Vitest
+  `--configLoader runner` to avoid writes through a read-only dependency link · compiler
+
 - 2026-09-19 · Ran the whole `packages/compiler` vitest suite (about 230 files, 25–40 min locally;
   each `ModuleVerification` shard alone is about 10 min) after every change and as the harness for
   a temporary probe, which cost hours · Typecheck, then run only the test files that exercise the
