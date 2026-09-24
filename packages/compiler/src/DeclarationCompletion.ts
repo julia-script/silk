@@ -108,12 +108,11 @@ const sourceConformanceOwners = (
   provider: Type.Type,
   contract: InterfaceFact | ServiceFact,
 ): ReadonlyArray<string> => {
-  if (Type.isNominal(provider))
-    return contract._tag === 'InterfaceDeclaration'
-      ? provider.module === capability.module
-        ? [provider.module]
-        : [provider.module, capability.module]
-      : [provider.module]
+  if (Type.isNominal(provider)) {
+    if (contract._tag === 'InterfaceDeclaration' && provider.module !== capability.module)
+      return [provider.module, capability.module]
+    return [provider.module]
+  }
   if (Type.isBuiltin(provider) || Type.isString(provider)) return [capability.module]
   return []
 }
@@ -1416,12 +1415,12 @@ export const complete = (
         continue
       }
       if (sourceContract !== undefined && !conformanceOwners.includes(conformance.module)) {
-        const ownership =
-          sourceContract._tag === 'InterfaceDeclaration' && Type.isNominal(provider)
-            ? "the interface's or provider's module"
-            : Type.isNominal(provider)
-              ? "the provider's module"
-              : "the contract's module for scalar and string providers"
+        let ownership: string
+        if (!Type.isNominal(provider))
+          ownership = "the contract's module for scalar and string providers"
+        else if (sourceContract._tag === 'InterfaceDeclaration')
+          ownership = "the interface's or provider's module"
+        else ownership = "the provider's module"
         diagnostics.push(
           invalidDiagnostic(
             `implementation for ${Type.encode(provider)} must be declared in ${conformanceOwners.join(' or ')}, ${ownership}`,
