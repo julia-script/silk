@@ -1074,6 +1074,12 @@
     ]
   },
   {
+    "module": "silk/toml_scanner",
+    "path": "silk/toml_scanner.silk",
+    "namespace": "TomlScanner",
+    "aliases": ["TomlError", "TomlReason", "TomlScalarKind", "TomlSpan", "TomlToken"]
+  },
+  {
     "module": "silk/trust_anchor",
     "path": "silk/trust_anchor.silk",
     "namespace": "TrustAnchor"
