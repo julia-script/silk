@@ -414,7 +414,7 @@ effect fn insertAt(root: Value, current: &[KeyPart], at: usize,
       })
     }
     Value.Array { values, tables } => {
-      if !tables { fail problem(TomlReason.TableConflict, current[at].offset) }
+      if tables {} else { fail problem(TomlReason.TableConflict, current[at].offset) }
       let mut boxed = Box.getMut<Vector<TomlChild>>(&mut values)
       let index = Vector.length<TomlChild>(&boxed[0]) - usize.ONE
       let removed = Vector.remove<TomlChild>(&mut boxed[0], index)
@@ -477,6 +477,18 @@ effect fn insertKey(root: Value, parts: &[KeyPart], at: usize, value: Value, inl
         entry: TomlEntry { key: move entry.key, value: move updated }
       })
     }
+    Value.Array { values, tables } => {
+      if tables {} else { fail problem(TomlReason.TableConflict, parts[at].offset) }
+      let mut boxed = Box.getMut<Vector<TomlChild>>(&mut values)
+      let index = Vector.length<TomlChild>(&boxed[0]) - usize.ONE
+      let removed = Vector.remove<TomlChild>(&mut boxed[0], index)
+      let child = match move removed {
+        TomlChild.Item { value: item } => move item
+        _ => { fail problem(TomlReason.TableConflict, parts[at].offset) }
+      }
+      let updated = run insertKey(move child, parts, at, move value, inline)
+      run Vector.insert<TomlChild>(&mut boxed[0], index, TomlChild.Item { value: move updated })
+    }
     _ => { fail problem(TomlReason.TableConflict, parts[at].offset) }
   }
   return move owned
@@ -529,7 +541,8 @@ effect fn defineHeader(root: Value, parts: &[KeyPart], at: usize, array: bool)
                 }
               }
               Value.Array { values, tables } => {
-                if !array || !tables { fail problem(TomlReason.TableConflict, parts[at].offset) }
+                if !array { fail problem(TomlReason.TableConflict, parts[at].offset) }
+                if tables {} else { fail problem(TomlReason.TableConflict, parts[at].offset) }
                 let mut boxedArray = Box.getMut<Vector<TomlChild>>(&mut values)
                 let tableValue = run table(TableKind.Explicit)
                 run Vector.append<TomlChild>(&mut boxedArray[0], TomlChild.Item { value: move tableValue })
@@ -572,7 +585,7 @@ effect fn defineHeader(root: Value, parts: &[KeyPart], at: usize, array: bool)
       })
     }
     Value.Array { values, tables } => {
-      if !tables { fail problem(TomlReason.TableConflict, parts[at].offset) }
+      if tables {} else { fail problem(TomlReason.TableConflict, parts[at].offset) }
       let mut boxed = Box.getMut<Vector<TomlChild>>(&mut values)
       let index = Vector.length<TomlChild>(&boxed[0]) - usize.ONE
       let removed = Vector.remove<TomlChild>(&mut boxed[0], index)
