@@ -8,7 +8,7 @@ import silk.f32
 import silk.f64
 import silk.json_output { JsonOptions }
 import silk.json_scanner { JsonError, JsonReason }
-import silk.json_serde { JsonSerde }
+import silk.json_codec { JsonCodec }
 import silk.json_value { Json, Value }
 import silk.layout { Layout }
 import silk.option { Option }
@@ -64,7 +64,7 @@ effect fn roundTripF64(value: f64) -> bool
 ! JsonError | OutOfMemoryError | WriterError ? &mut Allocator {
   let mut output = capture()
   let options = JsonOptions.compact()
-  let rendered = run Effect.result(JsonSerde.writeOne<f64>(&value, &options)
+  let rendered = run Effect.result(JsonCodec.writeOne<f64>(&value, &options)
     |> Effect.provideMut<Writer>(&mut output))
   match move rendered {
     Result<(), JsonError | WriterError>.Success { value: _ } => {}
@@ -82,7 +82,7 @@ effect fn roundTripF32(value: f32) -> bool
 ! JsonError | OutOfMemoryError | WriterError ? &mut Allocator {
   let mut output = capture()
   let options = JsonOptions.compact()
-  let rendered = run Effect.result(JsonSerde.writeOne<f32>(&value, &options)
+  let rendered = run Effect.result(JsonCodec.writeOne<f32>(&value, &options)
     |> Effect.provideMut<Writer>(&mut output))
   match move rendered {
     Result<(), JsonError | WriterError>.Success { value: _ } => {}
@@ -99,7 +99,7 @@ effect fn roundTripF32(value: f32) -> bool
 effect fn rejectsNonFiniteF64(value: f64) -> bool {
   let mut output = capture()
   let options = JsonOptions.compact()
-  let result = run Effect.result(JsonSerde.writeOne<f64>(&value, &options)
+  let result = run Effect.result(JsonCodec.writeOne<f64>(&value, &options)
     |> Effect.provideMut<Writer>(&mut output))
   return match move result {
     Result<(), JsonError | WriterError>.Success { value: _ } => false
@@ -119,7 +119,7 @@ effect fn rejectsNonFiniteF64(value: f64) -> bool {
 effect fn rejectsNonFiniteF32(value: f32) -> bool {
   let mut output = capture()
   let options = JsonOptions.compact()
-  let result = run Effect.result(JsonSerde.writeOne<f32>(&value, &options)
+  let result = run Effect.result(JsonCodec.writeOne<f32>(&value, &options)
     |> Effect.provideMut<Writer>(&mut output))
   return match move result {
     Result<(), JsonError | WriterError>.Success { value: _ } => false

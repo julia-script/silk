@@ -8,7 +8,7 @@ Effectful JSON array construction through the ambient Writer.
 
 ## When to use
 
-Use [`JsonArray`](#declaration-73696c6b2f6a736f6e5f61727261793a3a4a736f6e4172726179) to write a slice of values with a [`Serialize`](./json-serde.md#declaration-73696c6b2f6a736f6e5f73657264653a3a53657269616c697a65) implementation.
+Use [`JsonArray`](#declaration-73696c6b2f6a736f6e5f61727261793a3a4a736f6e4172726179) to write a slice of values with a [`Serialize`](./json-codec.md#declaration-73696c6b2f6a736f6e5f636f6465633a3a53657269616c697a65) implementation.
 
 ## Details
 

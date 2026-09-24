@@ -8,7 +8,7 @@ Effectful JSON object construction through the ambient Writer.
 
 ## When to use
 
-Use [`JsonObject`](#declaration-73696c6b2f6a736f6e5f6f626a6563743a3a4a736f6e4f626a656374) to write named values with a [`Serialize`](./json-serde.md#declaration-73696c6b2f6a736f6e5f73657264653a3a53657269616c697a65) implementation.
+Use [`JsonObject`](#declaration-73696c6b2f6a736f6e5f6f626a6563743a3a4a736f6e4f626a656374) to write named values with a [`Serialize`](./json-codec.md#declaration-73696c6b2f6a736f6e5f636f6465633a3a53657269616c697a65) implementation.
 Each operation keeps the object state in an Effect for the next operation.
 
 ## Details

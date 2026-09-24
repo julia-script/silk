@@ -407,35 +407,3 @@ If growth fails, the vector keeps its prior contents, length, and capacity.
 ```silk
 impl Drop for silk/vector.Vector<T>
 ```
-
-<a id="declaration-73696c6b2f766563746f723a3a696d706c656d656e746174696f6e3a32"></a>
-
-## Implementation `Serialize for silk/vector.Vector<T>`
-
-```silk
-impl Serialize for silk/vector.Vector<T>
-```
-
-<a id="declaration-73696c6b2f766563746f723a3a696d706c656d656e746174696f6e3a323a3a6f7065726174696f6e3a30"></a>
-
-### Operation `serialize`
-
-```silk
-serialize = Vector.impl@2.serialize
-```
-
-<a id="declaration-73696c6b2f766563746f723a3a696d706c656d656e746174696f6e3a33"></a>
-
-## Implementation `Deserialize for silk/vector.Vector<T>`
-
-```silk
-impl Deserialize for silk/vector.Vector<T>
-```
-
-<a id="declaration-73696c6b2f766563746f723a3a696d706c656d656e746174696f6e3a333a3a6f7065726174696f6e3a30"></a>
-
-### Operation `deserialize`
-
-```silk
-deserialize = Vector.impl@3.deserialize
-```

@@ -10,7 +10,7 @@
 import silk.effect { Effect }
 import silk.json_output { JsonOptions, JsonOutput }
 import silk.json_scanner { JsonError }
-import silk.json_serde { Serialize }
+import silk.json_codec { Serialize }
 import silk.usize
 import silk.writer { Writer, WriterError }
 
