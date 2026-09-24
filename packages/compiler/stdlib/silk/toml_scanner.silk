@@ -55,6 +55,10 @@ pub enum TomlReason {
   InvalidNumber,
   /// A date or time spelling has an invalid field or structure.
   InvalidDateTime,
+  /// A typed conversion expected another TOML value kind.
+  TypeMismatch,
+  /// A valid TOML number does not fit the requested numeric type.
+  NumberOutOfRange,
   /// A key is defined more than once in one table.
   DuplicateKey,
   /// A table definition conflicts with an earlier value or table.

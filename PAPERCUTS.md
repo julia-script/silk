@@ -221,3 +221,4 @@ HEAD...@{u}` before reporting a head, and confirm each claimed deliverable again
 - 2026-09-24 · `rtk vitest --version` produced no output and stalled during a focused merge check ·
   Stop that probe and invoke the prepared `node_modules/.bin/vitest` directly · compiler
 - 2026-09-24 · Focused TOML tests appeared to ignore recent Silk source edits because the compiler reads generated embedded stdlib text · Run `node packages/compiler/scripts/generate-stdlib.mjs` after each stdlib edit before testing · compiler
+- 2026-09-24 · `pnpm exec vitest` in the TOML task worktree retried unreachable registry downloads and left only a partial `node_modules` · Stop the repair, link the prepared main checkout dependencies, and invoke its Vitest binary directly · compiler
