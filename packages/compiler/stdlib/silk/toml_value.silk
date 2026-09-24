@@ -3,6 +3,51 @@
 //! # When to use
 //! Use [`Toml.parse`] to validate and own a complete TOML document, then borrow fields from
 //! its root table. Every allocation uses the ambient Allocator and partial trees drop on failure.
+//!
+//! # Details
+//! Tables keep key order. Numeric and date/time values keep their validated source text.
+//! String values contain decoded UTF-8 text.
+//!
+//! # Gotchas
+//! A borrowed field cannot outlive its document. Use `silk.toml_output` to write the owned tree.
+//!
+//! # Examples
+//! ## Read a nested string
+//! ```silk
+//! import silk.allocator as Allocators {Allocator, OutOfMemoryError}
+//! import silk.effect as Effects {Effect}
+//! import silk.option as Options {Option}
+//! import silk.toml_scanner as Scanners {TomlError}
+//! import silk.toml_value as Values {Toml}
+//!
+//! effect fn read() -> i32 ! TomlError | OutOfMemoryError {
+//!   let mut allocator = Allocator.systemAllocatorProvider()
+//!   let document = run Toml.parse(b"[owner]\nname = \"Ada\"\n")
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   let owner = Toml.field(&document, "owner")
+//!   let name = Toml.fieldAt(move owner, "name")
+//!     |> Toml.asString
+//!   return match move name {
+//!     Option<string>.Some {value} => {
+//!       if value == "Ada" {
+//!         return 0
+//!       }
+//!       return 1
+//!     }
+//!     Option<string>.None => {
+//!       return 2
+//!     }
+//!   }
+//! }
+//!
+//! effect fn recover(error: TomlError | OutOfMemoryError) -> i32 {
+//!   return 3
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(read(), recover)
+//! }
+//! ```
 
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.box { Box }
@@ -18,32 +63,95 @@ import silk.usize
 import silk.vector { Vector }
 
 /// How a table was first defined. An inline table is closed to later document definitions.
-pub enum TableKind { Implicit, Dotted, Explicit, Inline }
+pub enum TableKind {
+  /// A table created by a later header path.
+  Implicit,
+  /// A table created by a dotted key.
+  Dotted,
+  /// A table defined by a header.
+  Explicit,
+  /// A table defined inside braces and closed to later definitions.
+  Inline,
+}
 
 /// One ordered table member.
 pub struct TomlEntry {
+  /// The decoded member key.
   pub key: String
+  /// The owned member value.
   pub value: Value
 }
 
 /// Recursive storage shared by tables and arrays.
 pub union TomlChild {
-  Item { pub value: Value },
-  Member { pub entry: TomlEntry },
+  /// An array element without a key.
+  Item {
+    /// The owned element value.
+    pub value: Value
+  },
+  /// A table member with its key.
+  Member {
+    /// The owned key and value.
+    pub entry: TomlEntry
+  },
 }
 
 /// An owned TOML value. Numeric and temporal spellings retain their validated source precision.
 pub union Value {
-  Integer { pub text: String },
-  Float { pub text: String },
-  Boolean { pub value: bool },
-  OffsetDateTime { pub text: String },
-  LocalDateTime { pub text: String },
-  LocalDate { pub text: String },
-  LocalTime { pub text: String },
-  String { pub text: String },
-  Array { pub values: Box<Vector<TomlChild>>, pub tables: bool },
-  Table { pub entries: Box<Vector<TomlChild>>, pub kind: TableKind },
+  /// A validated integer in its source spelling.
+  Integer {
+    /// The validated integer text.
+    pub text: String
+  },
+  /// A validated float in its source spelling.
+  Float {
+    /// The validated float text.
+    pub text: String
+  },
+  /// A TOML boolean.
+  Boolean {
+    /// The boolean value.
+    pub value: bool
+  },
+  /// A date and time with an explicit offset and retained precision.
+  OffsetDateTime {
+    /// The validated source text.
+    pub text: String
+  },
+  /// A date and time without an offset and with retained precision.
+  LocalDateTime {
+    /// The validated source text.
+    pub text: String
+  },
+  /// A calendar date without a time.
+  LocalDate {
+    /// The validated source text.
+    pub text: String
+  },
+  /// A clock time without a date and with retained precision.
+  LocalTime {
+    /// The validated source text.
+    pub text: String
+  },
+  /// Decoded UTF-8 text.
+  String {
+    /// The decoded text.
+    pub text: String
+  },
+  /// Ordered values or an array of tables.
+  Array {
+    /// The owned elements in source order.
+    pub values: Box<Vector<TomlChild>>,
+    /// Whether the array came from `[[table]]` headers.
+    pub tables: bool
+  },
+  /// Ordered key/value members.
+  Table {
+    /// The owned members in source order.
+    pub entries: Box<Vector<TomlChild>>,
+    /// How the table was defined.
+    pub kind: TableKind
+  },
 }
 
 struct KeyPart {
@@ -55,7 +163,11 @@ struct KeyPart {
 pub struct Toml {}
 
 impl Toml {
-  /// Parses one complete document into a root table.
+  /// Parses one complete UTF-8 document into an owned root table.
+  ///
+  /// # Details
+  /// All allocations use the ambient allocator. Syntax errors include a reason and byte offset.
+  /// If parsing fails, the partial tree is released.
   pub effect fn parse(bytes: &[u8]) -> Value ! TomlError | OutOfMemoryError ? &mut Allocator {
     let mut scanner = TomlScanner.make(bytes)
     let valid = TomlScanner.validate(&mut scanner)
@@ -114,7 +226,7 @@ impl Toml {
     fail problem(TomlReason.UnexpectedEnd, bytes.length)
   }
 
-  /// Borrows a table member by decoded key.
+  /// Borrows a table member by decoded key, or returns `None` for absence or another value kind.
   pub fn field<'a>(self: &'a Value, name: string) -> Option<&'a Value> {
     return match &self.* {
       Value.Table { entries, kind: _ } => {
@@ -125,7 +237,7 @@ impl Toml {
     }
   }
 
-  /// Chains a table lookup through an optional borrowed value.
+  /// Borrows a nested table member through an optional value, or returns `None`.
   pub fn fieldAt<'a>(self: Option<&'a Value>, name: string) -> Option<&'a Value> {
     return match move self {
       Option<&'a Value>.None => Option.none<&'a Value>()
@@ -149,7 +261,7 @@ impl Toml {
     }
   }
 
-  /// Borrows decoded UTF-8 string text.
+  /// Borrows decoded UTF-8 string text, or returns `None` for another value kind.
   pub fn asString<'a>(self: Option<&'a Value>) -> Option<string<'a>> {
     return match move self {
       Option<&'a Value>.None => Option.none<string<'a>>()

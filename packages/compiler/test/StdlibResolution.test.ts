@@ -902,6 +902,42 @@ it.effect(
     }),
 )
 
+it.effect('resolves all TOML modules in every supported target profile', () =>
+  Effect.gen(function* () {
+    const modules = ['toml_scanner', 'toml_text', 'toml_value', 'toml_output', 'toml_codec']
+    const source = SourceFile.make(
+      'project/toml-imports',
+      ascii(modules.map((name, index) => `import silk.${name} as Toml${index}`).join('\n')),
+    )
+    for (const target of Target.all) {
+      for (const libc of target.operatingSystem === 'linux'
+        ? [undefined, 'none' as const]
+        : [undefined]) {
+        const selection = yield* SourceCatalog.analyze({
+          roots: [source.id],
+          configuration: {
+            profile: libc === undefined ? { target: target.id } : { target: target.id, libc },
+          },
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([source]).pipe(Layer.provideMerge(SourceResolver.empty)),
+          ),
+        )
+        const profile = `${target.id}${libc === undefined ? '' : '-no-libc'}`
+        assert.deepEqual(selection.closure.resolutionFailures, [], profile)
+        assert.deepEqual(selection.closure.diagnostics, [], profile)
+        for (const name of modules) {
+          assert.isAbove(
+            selection.catalog?.modules.get(`silk/${name}`)?.publicDeclarations.length ?? 0,
+            0,
+            `${profile}: ${name}`,
+          )
+        }
+      }
+    }
+  }),
+)
+
 it.effect(
   'selects native file trust on exactly three libc profiles and rejects other reachability',
   () =>

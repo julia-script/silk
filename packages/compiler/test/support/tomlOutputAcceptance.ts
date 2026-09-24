@@ -38,6 +38,61 @@ fn equal(left: &[u8], right: &[u8]) -> bool {
   return true
 }
 
+fn textIs(value: Option<&Value>, kind: i32, expected: string) -> bool {
+  return match move value {
+    Option<&Value>.None => false
+    Option<&Value>.Some { value: item } => match &item.* {
+      Value.String { text } => kind == 1 && String.view(&text) == expected
+      Value.Integer { text } => kind == 2 && String.view(&text) == expected
+      Value.Float { text } => kind == 3 && String.view(&text) == expected
+      Value.LocalTime { text } => kind == 4 && String.view(&text) == expected
+      Value.OffsetDateTime { text } => kind == 5 && String.view(&text) == expected
+      _ => false
+    }
+  }
+}
+
+fn matchesTree(document: &Value) -> bool {
+  if !textIs(Toml.field(document, "quoted.key"), 1, "value") { return false }
+  if !textIs(Toml.field(document, "number"), 2, "1_024") { return false }
+  if !textIs(Toml.field(document, "float"), 3, "2_5.0") { return false }
+  if !textIs(Toml.field(document, "time"), 4, "07:32") { return false }
+  if !textIs(Toml.field(document, "offset"), 5, "1979-05-27T07:32Z") { return false }
+  if !textIs(Toml.fieldAt(Toml.field(document, "owner"), "name"), 1, "Ada") { return false }
+  if !textIs(Toml.fieldAt(Toml.field(document, "inline"), "leaf"), 1, "yes") { return false }
+  let items = Toml.field(document, "items")
+  return match move items {
+    Option<&Value>.None => false
+    Option<&Value>.Some { value: array } => {
+      let first = Toml.item(array, usize.ZERO)
+      let second = Toml.item(array, usize.ONE)
+      return match move first {
+        Option<&Value>.None => false
+        Option<&Value>.Some { value: one } => match move second {
+          Option<&Value>.None => false
+          Option<&Value>.Some { value: two } => {
+            return textIs(Toml.field(one, "label"), 1, "first") &&
+              textIs(Toml.field(two, "label"), 1, "second")
+          }
+        }
+      }
+    }
+  }
+}
+
+effect fn preservesTree(input: &[u8]) -> bool ! TomlError | OutOfMemoryError | WriterError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let first = run Toml.parse(input) |> Effect.provideMut<Allocator>(&mut allocator)
+  if !matchesTree(&first) { return false }
+  let mut output = capture()
+  run TomlOutput.write(&first)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+    |> Effect.provideMut<Writer>(&mut output)
+  let bytes = Slice.view<u8>(&output.bytes, usize.ZERO, output.count)
+  let second = run Toml.parse(bytes) |> Effect.provideMut<Allocator>(&mut allocator)
+  return matchesTree(&second)
+}
+
 effect fn roundTrip(input: &[u8]) -> bool ! TomlError | OutOfMemoryError | WriterError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let first = run Toml.parse(input) |> Effect.provideMut<Allocator>(&mut allocator)
@@ -55,6 +110,7 @@ effect fn roundTrip(input: &[u8]) -> bool ! TomlError | OutOfMemoryError | Write
 }
 
 effect fn check() -> i32 ! TomlError | OutOfMemoryError | WriterError {
+  if !run preservesTree(b"\\"quoted.key\\" = \\"value\\"\\nnumber = 1_024\\nfloat = 2_5.0\\ntime = 07:32\\noffset = 1979-05-27T07:32Z\\ninline = {\\n leaf = \\"yes\\",\\n}\\n[owner]\\nname = \\"Ada\\"\\n[[items]]\\nlabel = \\"first\\"\\n[[items]]\\nlabel = \\"second\\"\\n") { return 23 }
   if !run roundTrip(b"[[servers]]\\nname = \\"one\\"\\n[servers.meta]\\nflag = true\\n[[servers]]\\nname = \\"two\\"\\n") { return 20 }
   if !run roundTrip(b"title = \\"quote \\\\\\" and \\\\\\\\\\\\\\"\\"\\n") { return 1 }
   if !run roundTrip(b"when = 1979-05-27T07:32Z\\nnumber = 1_000\\nvalues = [1, 2.5, true, { x = \\"y\\" }]\\n") { return 2 }

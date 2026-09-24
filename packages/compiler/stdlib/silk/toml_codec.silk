@@ -23,16 +23,19 @@ import silk.writer { Writer, WriterError }
 
 /// A type that writes one TOML value through the ambient Writer.
 pub interface Serialize {
+  /// Writes one value in TOML syntax through the ambient Writer.
   effect fn serialize(self: &Self) -> () ! TomlError | WriterError ? &mut Writer
 }
 
 /// A type decoded from an owned TOML value without allocation.
 pub interface Decode {
+  /// Converts one owned TOML value without allocation or returns a typed failure.
   fn decode(value: &Value) -> Result<Self, TomlError>
 }
 
 /// A type decoded from an owned TOML value with allocation.
 pub interface Deserialize {
+  /// Converts one owned TOML value with the ambient allocator.
   effect fn deserialize(value: &Value) -> Self ! TomlError | OutOfMemoryError ? &mut Allocator
 }
 
@@ -64,17 +67,20 @@ fn floatText() -> FloatText {
 }
 
 impl TomlCodec {
-  /// Writes a typed value in value position.
+  /// Writes a typed value in value position through the ambient Writer.
+  ///
+  /// # Gotchas
+  /// Write the key and ` = ` before this call when writing a document.
   pub effect fn writeOne<T: Serialize>(value: &T) -> () ! TomlError | WriterError ? &mut Writer {
     return run Serialize.serialize(value)
   }
 
-  /// Decodes an allocation-free type from one owned value.
+  /// Decodes an allocation-free type from one owned value, or returns a typed failure.
   pub fn decodeOne<T: Decode>(value: &Value) -> Result<T, TomlError> {
     return Decode.decode(value)
   }
 
-  /// Deserializes an allocating type from one owned value.
+  /// Deserializes an allocating type from one owned value with the ambient allocator.
   pub effect fn deserializeOne<T: Deserialize>(value: &Value)
     -> T ! TomlError | OutOfMemoryError ? &mut Allocator {
     return run Deserialize.deserialize(value)

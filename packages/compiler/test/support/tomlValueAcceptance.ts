@@ -104,6 +104,7 @@ effect fn check() -> i32 ! TomlError | OutOfMemoryError {
   if !run rejected(b"a.b = 1\\na.b = 2\\n", 10, 1) { return 8 }
   if !run rejected(b"a.b = 1\\n[a]\\n", 9, 2) { return 9 }
   if !run rejected(b"a = { b = 1 }\\na.c = 2\\n", 16, 2) { return 10 }
+  if !run rejected(b"inline = {\\n leaf = 1,\\n leaf = 2,\\n}\\n", 23, 1) { return 19 }
   let promoted = run Toml.parse(b"[a.b]\\nx = 1\\n[a]\\ny = 2\\n")
     |> Effect.provideMut<Allocator>(&mut allocator)
   drop promoted

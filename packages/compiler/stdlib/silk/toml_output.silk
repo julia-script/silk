@@ -3,6 +3,57 @@
 //! # When to use
 //! Use [`TomlOutput.write`] for an owned TOML document. Unsupported scalar spellings and
 //! container shapes fail before the first write. Writer failures may leave an accepted prefix.
+//!
+//! # Examples
+//! ## Write a parsed document
+//! ```silk
+//! import silk.allocator as Allocators {Allocator, OutOfMemoryError}
+//! import silk.effect as Effects {Effect}
+//! import silk.toml_output as Outputs {TomlOutput}
+//! import silk.toml_scanner as Scanners {TomlError}
+//! import silk.toml_value as Values {Toml}
+//! import silk.usize as Sizes
+//! import silk.writer as Writers {Writer, WriterError}
+//!
+//! struct Count {
+//!   bytes: usize
+//! }
+//!
+//! effect fn writeAll(self: &mut Count, data: &[u8]) -> () ! WriterError {
+//!   self.bytes = self.bytes + data.length
+//! }
+//!
+//! effect fn flush(self: &mut Count) -> () ! WriterError {
+//!   return ()
+//! }
+//!
+//! impl Writer for Count {
+//!   writeAll: Count.writeAll
+//!   flush: Count.flush
+//! }
+//!
+//! effect fn write() -> i32 ! TomlError | OutOfMemoryError | WriterError {
+//!   let mut allocator = Allocator.systemAllocatorProvider()
+//!   let document = run Toml.parse(b"name = \"Ada\"\n")
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   let mut output = Count {bytes: Sizes.ZERO}
+//!   run TomlOutput.write(&document)
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!     |> Effect.provideMut<Writer>(&mut output)
+//!   if output.bytes > Sizes.ZERO {
+//!     return 0
+//!   }
+//!   return 1
+//! }
+//!
+//! effect fn recover(error: TomlError | OutOfMemoryError | WriterError) -> i32 {
+//!   return 2
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(write(), recover)
+//! }
+//! ```
 
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.box { Box }
@@ -21,6 +72,10 @@ pub struct TomlOutput {}
 
 impl TomlOutput {
   /// Writes a complete document, preserving table and array-of-tables structure.
+  ///
+  /// # Details
+  /// Invalid scalar text or container structure fails before the first write.
+  /// Writer failure can leave an accepted prefix. This operation does not flush the Writer.
   pub effect fn write(document: &Value)
     -> () ! TomlError | OutOfMemoryError | WriterError ? &mut Allocator | &mut Writer {
     run check(document, usize.ZERO, true)
