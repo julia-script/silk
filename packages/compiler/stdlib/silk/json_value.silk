@@ -41,7 +41,7 @@ import silk.f64
 import silk.format { Format, ParseError }
 import silk.json_output { JsonOptions, JsonOutput }
 import silk.json_scanner { JsonError, JsonReason, JsonScanner, JsonSpan, JsonToken }
-import silk.json_serde { Decode, Deserialize, JsonSerde, Serialize }
+import silk.json_codec { Decode, Deserialize, JsonCodec, Serialize }
 import silk.json_text { JsonText }
 import silk.option { Option }
 import silk.result { Result }
@@ -131,7 +131,7 @@ impl Json {
   /// Decodes one complete JSON document without an allocator requirement.
   pub fn decode<T: Decode>(bytes: &[u8]) -> Result<T, JsonError> {
     let mut scanner = JsonScanner.make(bytes)
-    let parsed = JsonSerde.decodeOne<T>(&mut scanner)
+    let parsed = JsonCodec.decodeOne<T>(&mut scanner)
     return match move parsed {
       Result<T, JsonError>.Failure { error } => Result.failResult<T, JsonError>(move error)
       Result<T, JsonError>.Success { value } => match move JsonScanner.next(&mut scanner) {
@@ -149,7 +149,7 @@ impl Json {
   pub effect fn deserialize<T: Deserialize>(bytes: &[u8])
     -> T ! JsonError | OutOfMemoryError ? &mut Allocator {
     let mut scanner = JsonScanner.make(bytes)
-    let value = run JsonSerde.deserializeOne<T>(&mut scanner)
+    let value = run JsonCodec.deserializeOne<T>(&mut scanner)
     let tail = run nextToken(&mut scanner)
     match move tail {
       JsonToken.EndOfInput => { return move value }
@@ -160,7 +160,7 @@ impl Json {
   /// Serializes one value through its static witness and the ambient Writer.
   pub effect fn serialize<T: Serialize>(value: &T, options: &JsonOptions)
     -> () ! JsonError | WriterError ? &mut Writer {
-    return run JsonSerde.writeOne<T>(value, options)
+    return run JsonCodec.writeOne<T>(value, options)
   }
 
   /// Writes a tree compactly through the ambient Writer.

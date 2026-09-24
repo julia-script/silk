@@ -84,16 +84,11 @@ import silk.bool
 import silk.bytes { Bytes }
 import silk.char
 import silk.allocator { Allocator, OutOfMemoryError }
-import silk.json_output { JsonOptions, JsonOutput }
-import silk.json_scanner { JsonError, JsonReason, JsonScanner, JsonToken }
-import silk.json_serde { Deserialize, Serialize }
-import silk.json_text { JsonText }
 import silk.option { Option }
 import silk.result { Result }
 import silk.u32
 import silk.u8
 import silk.usize
-import silk.writer { Writer, WriterError }
 
 /// An owned sequence of valid UTF-8 bytes that releases its storage on drop.
 pub struct String {
@@ -432,30 +427,4 @@ fn firstInvalidUtf8(values: &[u8]) -> Option<usize> {
 
 fn scalar32(value: u8) -> u32 {
   return u8.toU32(value)
-}
-
-impl Serialize for String {
-  effect fn serialize(self: &Self, options: &JsonOptions)
-    -> () ! JsonError | WriterError ? &mut Writer {
-    return run JsonOutput.writeString(String.view(self))
-  }
-}
-
-impl Deserialize for String {
-  effect fn deserialize(scanner: &mut JsonScanner)
-    -> Self ! JsonError | OutOfMemoryError ? &mut Allocator {
-    let token = JsonScanner.next(&mut scanner.*)
-    return match move token {
-      Result<JsonToken, JsonError>.Failure { error } => { fail move error }
-      Result<JsonToken, JsonError>.Success { value } => match move value {
-        JsonToken.String { span, escaped } => {
-          let offset = span.offset
-          let raw = JsonScanner.slice(&scanner.*, move span)
-          let decoded = run JsonText.decode(raw, offset, escaped)
-          return unsafe String.fromBytesUnchecked(move decoded)
-        }
-        _ => { fail JsonError.at(JsonReason.TypeMismatch, JsonScanner.offset(&scanner.*)) }
-      }
-    }
-  }
 }

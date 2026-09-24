@@ -8,8 +8,8 @@ Explicit JSON serialization of visible named aggregate fields.
 
 ## When to use
 
-Use [`JsonReflect.write`](#declaration-73696c6b2f6a736f6e5f7265666c6563743a3a4a736f6e5265666c6563742e7772697465) directly for a struct whose visible fields each implement
-`Serialize`. No `Serialize` implementation for the struct is needed.
+Use [`JsonReflect.write`](#declaration-73696c6b2f6a736f6e5f7265666c6563743a3a4a736f6e5265666c6563742e7772697465) for a struct whose visible fields each implement `Serialize`.
+Call it directly or from the struct's hand-written `Serialize` witness.
 
 ## Details
 
@@ -19,10 +19,8 @@ not necessarily its complete state. Writing requires no JSON-owned allocation.
 
 ## Gotchas
 
-The current compiler reports `SEM0053` if a concrete `Serialize` implementation delegates to
-this helper (JUL-226). Call the helper directly. Generic reflected deserialization is unavailable:
-public reflection can borrow fields but cannot construct an arbitrary aggregate from decoded
-owned fields.
+Generic reflected deserialization is unavailable: public reflection can borrow fields but
+cannot construct an arbitrary aggregate from decoded owned fields.
 
 Import as `JsonReflect` with `import silk.json_reflect { JsonReflect }`.
 

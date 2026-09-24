@@ -127,7 +127,29 @@ pub fn main() -> i32 { return 0 }`)
   }),
 )
 
-it.effect('rejects a conformance outside the provider module', () =>
+it.effect('admits an interface-owned implementation for an imported nominal provider', () =>
+  Effect.gen(function* () {
+    const model = encoder.encode('pub struct Rectangle {}')
+    const root = SourceFile.make(
+      'contracts',
+      encoder.encode(`import model { Rectangle }
+pub interface Shape { fn area(value: &Self) -> i32 }
+impl Shape for Rectangle {
+  fn area(value: &Self) -> i32 { return 42 }
+}`),
+    )
+    const self = yield* Analysis.make({ root: root.id }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(SourceResolver.memory(new Map([['model', model]]))),
+        ),
+      ),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
+it.effect('rejects a conformance outside both the interface and provider modules', () =>
   Effect.gen(function* () {
     const model = encoder.encode(`pub interface Shape { fn area(value: &Self) -> i32 }
 pub struct Rectangle {}`)
@@ -146,10 +168,35 @@ pub fn main() -> i32 { return 0 }`),
         ),
       ),
     )
-    assert.include(
-      messages(self),
-      "Invalid conformance: implementation for model.Rectangle must be declared in model, the provider's module",
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: diagnostic.span.sourceId,
+      })),
+      [{ code: 'SEM0083', span: 'consumer' }],
     )
+  }),
+)
+
+it.effect('keeps provider-owned implementations valid', () =>
+  Effect.gen(function* () {
+    const contracts = encoder.encode('pub interface Shape { fn area(value: &Self) -> i32 }')
+    const root = SourceFile.make(
+      'model',
+      encoder.encode(`import contracts { Shape }
+pub struct Rectangle {}
+impl Shape for Rectangle {
+  fn area(value: &Self) -> i32 { return 42 }
+}`),
+    )
+    const self = yield* Analysis.make({ root: root.id }).pipe(
+      Effect.provide(
+        SourceResolver.overlay([root]).pipe(
+          Layer.provideMerge(SourceResolver.memory(new Map([['contracts', contracts]]))),
+        ),
+      ),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
   }),
 )
 
@@ -190,6 +237,23 @@ impl<'text> Present for string<'text> {
 }
 fn present<T: Present>(value: &T) -> i32 { return Present.present(value) }
 pub fn main() -> i32 { let text = "Silk" return present(&text) }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
+it.effect('admits borrowed string and imported owned String in one interface module', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.string { String }
+interface Present {
+  fn present(value: &Self) -> i32
+}
+impl<'text> Present for string<'text> {
+  fn present(value: &Self) -> i32 { return 1 }
+}
+impl Present for String {
+  fn present(value: &Self) -> i32 { return 2 }
+}
+pub fn main() -> i32 { return 0 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
   }),
 )

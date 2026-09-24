@@ -1,13 +1,12 @@
 /** One native program checks typed JSON conversion and fluent builder lowering. */
-export const jsonSerdeAcceptanceSource = `import silk.allocator { Allocator, OutOfMemoryError }
+export const jsonCodecAcceptanceSource = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.bytes { Bytes }
 import silk.effect { Effect }
-import silk.format { Format, ParseError, NotANumber, OutOfRange }
 import silk.json_array { JsonArray }
 import silk.json_object { JsonObject }
 import silk.json_output { JsonOptions }
 import silk.json_scanner { JsonError, JsonReason, JsonScanner, JsonSpan, JsonToken }
-import silk.json_serde { Deserialize, JsonSerde, Serialize }
+import silk.json_codec { Deserialize, JsonCodec, Serialize }
 import silk.json_text { JsonText }
 import silk.json_value { Json, Value }
 import silk.option { Option }
@@ -45,7 +44,7 @@ fn equals(sink: &Sink, expected: &[u8]) -> bool {
 }
 
 struct Point { x: i32 y: i32 }
-struct Outer { inner: Point }
+struct Segment { start: Point end: Point }
 
 struct Key { text: String offset: usize }
 
@@ -82,25 +81,6 @@ effect fn key(scanner: &mut JsonScanner)
   match move colon {
     JsonToken.KeySeparator => { return move member }
     _ => { fail JsonError.at(JsonReason.UnexpectedByte, JsonScanner.offset(&scanner.*)) }
-  }
-}
-
-effect fn number(scanner: &mut JsonScanner) -> i32 ! JsonError {
-  let next = run token(&mut scanner.*)
-  return match move next {
-    JsonToken.Number { span } => {
-      let offset = span.offset
-      let raw = JsonScanner.slice(&scanner.*, move span)
-      let text = unsafe Intrinsic.stringFromUtf8Unchecked(raw)
-      return match move Format.i32Value(text) {
-        Result<i32, ParseError>.Success { value } => value
-        Result<i32, ParseError>.Failure { error } => match move error.reason {
-          NotANumber { offset: _ } => { fail JsonError.at(JsonReason.TypeMismatch, offset) }
-          OutOfRange {} => { fail JsonError.at(JsonReason.NumberOutOfRange, offset) }
-        }
-      }
-    }
-    _ => { fail JsonError.at(JsonReason.TypeMismatch, JsonScanner.offset(&scanner.*)) }
   }
 }
 
@@ -151,13 +131,13 @@ impl Deserialize for Point {
           Option<i32>.Some { value: _ } => { fail JsonError.at(JsonReason.DuplicateKey, member.offset) }
           Option<i32>.None => {}
         }
-        x = Option.some<i32>(run number(&mut scanner.*))
+        x = Option.some<i32>(run JsonCodec.deserializeOne<i32>(&mut scanner.*))
       } else if String.view(&member.text) == "y" {
         match &y {
           Option<i32>.Some { value: _ } => { fail JsonError.at(JsonReason.DuplicateKey, member.offset) }
           Option<i32>.None => {}
         }
-        y = Option.some<i32>(run number(&mut scanner.*))
+        y = Option.some<i32>(run JsonCodec.deserializeOne<i32>(&mut scanner.*))
       } else {
         fail JsonError.at(JsonReason.UnknownField, member.offset)
       }
@@ -174,16 +154,30 @@ impl Deserialize for Point {
   }
 }
 
-impl Serialize for Outer {
+effect fn finishSegment(start: Option<Point>, end: Option<Point>, offset: usize)
+  -> Segment ! JsonError {
+  let first = match move start {
+    Option<Point>.Some { value } => move value
+    Option<Point>.None => { fail JsonError.at(JsonReason.MissingField, offset) }
+  }
+  let last = match move end {
+    Option<Point>.Some { value } => move value
+    Option<Point>.None => { fail JsonError.at(JsonReason.MissingField, offset) }
+  }
+  return Segment { start: move first, end: move last }
+}
+
+impl Serialize for Segment {
   effect fn serialize(self: &Self, options: &JsonOptions)
     -> () ! JsonError | WriterError ? &mut Writer {
     return run JsonObject.begin(options)
-      |> JsonObject.field("inner", &self.inner)
+      |> JsonObject.field("start", &self.start)
+      |> JsonObject.field("end", &self.end)
       |> JsonObject.end
   }
 }
 
-impl Deserialize for Outer {
+impl Deserialize for Segment {
   effect fn deserialize(scanner: &mut JsonScanner)
     -> Self ! JsonError | OutOfMemoryError ? &mut Allocator {
     let opening = run token(&mut scanner.*)
@@ -191,16 +185,43 @@ impl Deserialize for Outer {
       JsonToken.ObjectBegin => {}
       _ => { fail JsonError.at(JsonReason.TypeMismatch, JsonScanner.offset(&scanner.*)) }
     }
-    let member = run key(&mut scanner.*)
-    if String.view(&member.text) != "inner" {
-      fail JsonError.at(JsonReason.UnknownField, member.offset)
+    let mut start = Option.none<Point>()
+    let mut end = Option.none<Point>()
+    let first = run peek(&mut scanner.*)
+    match move first {
+      JsonToken.ObjectEnd => {
+        let closing = run token(&mut scanner.*)
+        return run finishSegment(move start, move end, JsonScanner.offset(&scanner.*))
+      }
+      _ => {}
     }
-    let inner = run JsonSerde.deserializeOne<Point>(&mut scanner.*)
-    let closing = run token(&mut scanner.*)
-    match move closing {
-      JsonToken.ObjectEnd => { return Outer { inner: move inner } }
-      _ => { fail JsonError.at(JsonReason.UnexpectedByte, JsonScanner.offset(&scanner.*)) }
+    while true {
+      let member = run key(&mut scanner.*)
+      if String.view(&member.text) == "start" {
+        match &start {
+          Option<Point>.Some { value: _ } => { fail JsonError.at(JsonReason.DuplicateKey, member.offset) }
+          Option<Point>.None => {}
+        }
+        start = Option.some<Point>(run JsonCodec.deserializeOne<Point>(&mut scanner.*))
+      } else if String.view(&member.text) == "end" {
+        match &end {
+          Option<Point>.Some { value: _ } => { fail JsonError.at(JsonReason.DuplicateKey, member.offset) }
+          Option<Point>.None => {}
+        }
+        end = Option.some<Point>(run JsonCodec.deserializeOne<Point>(&mut scanner.*))
+      } else {
+        fail JsonError.at(JsonReason.UnknownField, member.offset)
+      }
+      let separator = run token(&mut scanner.*)
+      match move separator {
+        JsonToken.ObjectEnd => {
+          return run finishSegment(move start, move end, JsonScanner.offset(&scanner.*))
+        }
+        JsonToken.ValueSeparator => {}
+        _ => { fail JsonError.at(JsonReason.UnexpectedByte, JsonScanner.offset(&scanner.*)) }
+      }
     }
+    fail JsonError.at(JsonReason.UnexpectedEnd, JsonScanner.offset(&scanner.*))
   }
 }
 
@@ -258,19 +279,6 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   let mut sink = Sink { output: move storage, count: usize.ZERO }
   run Json.serialize<Point>(&point, &options) |> Effect.provideMut<Writer>(&mut sink)
   if !equals(&sink, b"{\\"x\\":3,\\"y\\":4}") { return 6 }
-  sink.count = usize.ZERO
-  let outer = Outer { inner: Point { x: 3, y: 4 } }
-  run Json.serialize<Outer>(&outer, &options) |> Effect.provideMut<Writer>(&mut sink)
-  if !equals(&sink, b"{\\"inner\\":{\\"x\\":3,\\"y\\":4}}") { return 19 }
-  let outerStored = Bytes.asSlice(&sink.output)
-  let outerEncoded = Slice.view<u8>(outerStored, usize.ZERO, sink.count)
-  let outerRestored = run Json.deserialize<Outer>(outerEncoded)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  if !(outerRestored.inner.x == outer.inner.x && outerRestored.inner.y == outer.inner.y) { return 20 }
-  drop outerEncoded
-  drop outerStored
-  sink.count = usize.ZERO
-  run Json.serialize<Point>(&point, &options) |> Effect.provideMut<Writer>(&mut sink)
   let stored = Bytes.asSlice(&sink.output)
   let encoded = Slice.view<u8>(stored, usize.ZERO, sink.count)
   let roundTrip = run Json.deserialize<Point>(encoded)
@@ -278,6 +286,21 @@ effect fn check() -> i32 ! JsonError | OutOfMemoryError | WriterError {
   if !(roundTrip.x == point.x && roundTrip.y == point.y) { return 10 }
   drop encoded
   drop stored
+  sink.count = usize.ZERO
+  let segment = Segment {
+    start: Point { x: -2, y: 7 },
+    end: Point { x: 11, y: 19 }
+  }
+  run Json.serialize<Segment>(&segment, &options) |> Effect.provideMut<Writer>(&mut sink)
+  if !equals(&sink, b"{\\"start\\":{\\"x\\":-2,\\"y\\":7},\\"end\\":{\\"x\\":11,\\"y\\":19}}") { return 19 }
+  let segmentBytes = Bytes.asSlice(&sink.output)
+  let serializedSegment = Slice.view<u8>(segmentBytes, usize.ZERO, sink.count)
+  let decodedSegment = run Json.deserialize<Segment>(serializedSegment)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if !(decodedSegment.start.x == segment.start.x && decodedSegment.start.y == segment.start.y &&
+    decodedSegment.end.x == segment.end.x && decodedSegment.end.y == segment.end.y) { return 20 }
+  drop serializedSegment
+  drop segmentBytes
   sink.count = usize.ZERO
   let value: i32 = 1
   let values = [value]

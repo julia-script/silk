@@ -1540,6 +1540,67 @@ pub fn main() -> i32 { return 0 }`,
   }),
 )
 
+it.effect('admits conditional interface-owned nominal heads and checks their overlap', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('contracts', [
+      ['model', 'pub struct Wrapper<T> { value: T }'],
+      [
+        'contracts',
+        `import model { Wrapper }
+interface Present { fn present(value: &Self) -> i32 }
+impl<T: Copy> Present for Wrapper<T> {
+  fn present(value: &Self) -> i32 { return 1 }
+}
+impl<U: Copy> Present for Wrapper<U> {
+  fn present(value: &Self) -> i32 { return 2 }
+}`,
+      ],
+    ])
+    assert.deepEqual(
+      index.published.map((diagnostic) => diagnostic.code),
+      ['SEM0119'],
+    )
+    assert.deepEqual(
+      index.modules
+        .find((module) => module.module === 'contracts')
+        ?.conformances.map((conformance) => [
+          conformance.validity._tag,
+          conformance.coherence._tag,
+          conformance.termination._tag,
+        ]),
+      [
+        ['ValidConformance', 'Coherent', 'Terminating'],
+        ['InvalidConformance', 'Overlapping', 'Terminating'],
+      ],
+    )
+    assert.isTrue(
+      ConformanceProof.conforms(
+        index,
+        Type.nominal('model', 'Wrapper', ['i32']),
+        Type.nominal('contracts', 'Present'),
+      ),
+    )
+  }),
+)
+
+it.effect('does not grant service modules ownership of foreign nominal providers', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('contracts', [
+      ['model', 'pub struct Remote {}'],
+      [
+        'contracts',
+        `import model { Remote }
+service Gate { effect fn read() -> i32 ? &Gate }
+impl Gate for Remote {}`,
+      ],
+    ])
+    assert.deepEqual(
+      index.published.map((diagnostic) => diagnostic.code),
+      ['SEM0083'],
+    )
+  }),
+)
+
 it.effect('validates service mappings and rejects duplicate or foreign witnesses', () =>
   Effect.gen(function* () {
     const valid = yield* collect('allocator-valid', [

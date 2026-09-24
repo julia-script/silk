@@ -1,8 +1,8 @@
 //! Explicit JSON serialization of visible named aggregate fields.
 //!
 //! # When to use
-//! Use [`JsonReflect.write`] directly for a struct whose visible fields each implement
-//! `Serialize`. No `Serialize` implementation for the struct is needed.
+//! Use [`JsonReflect.write`] for a struct whose visible fields each implement `Serialize`.
+//! Call it directly or from the struct's hand-written `Serialize` witness.
 //!
 //! # Details
 //! Fields are written in declaration order. Reflection uses this module's visibility, so private
@@ -10,14 +10,12 @@
 //! not necessarily its complete state. Writing requires no JSON-owned allocation.
 //!
 //! # Gotchas
-//! Calling `Serialize.serialize` directly on a reflected field inside a `static for` reports
-//! `SEM0010` (JUL-226); use `JsonSerde.writeOne` to select its witness. Generic reflected
-//! deserialization is unavailable: public reflection can borrow fields but cannot construct an
-//! arbitrary aggregate from decoded owned fields.
+//! Generic reflected deserialization is unavailable: public reflection can borrow fields but
+//! cannot construct an arbitrary aggregate from decoded owned fields.
 
 import silk.json_output { JsonOptions, JsonOutput }
 import silk.json_scanner { JsonError }
-import silk.json_serde { JsonSerde }
+import silk.json_codec { JsonCodec }
 import silk.reflect { Reflect, namedKind, anonymousNamedKind, labeledFieldKind }
 import silk.static_sequence { StaticSequence }
 import silk.writer { Writer, WriterError }
@@ -59,7 +57,7 @@ impl JsonReflect {
             run JsonOutput.writeString(label)
             run JsonOutput.colon(&child)
             let member = Reflect.borrowField(value, field)
-            run JsonSerde.writeOne(member, &child)
+            run JsonCodec.writeOne(member, &child)
             first = false
           }
         }
