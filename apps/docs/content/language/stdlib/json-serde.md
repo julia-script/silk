@@ -16,13 +16,8 @@ values that need no allocation. Use `Deserialize` when a value can allocate.
 Each decode consumes one JSON value from a slice scanner. The caller checks for end of input.
 Integer, Boolean, and finite floating-point values support all three contracts. Nonfinite
 floating-point values fail with `JsonError` before any bytes are written.
-
-## Gotchas
-
-The current compiler rejects a hand-written witness that specializes another concrete JSON
-witness from its body with `SEM0053` (JUL-226). A nested user-struct witness cannot yet delegate to its
-child through `JsonObject.field` or `JsonSerde.deserializeOne`. Keep the contracts unchanged;
-a flat struct can still decode directly from `JsonScanner` and serialize with the builders.
+A hand-written aggregate witness can delegate to field witnesses through `JsonSerde` and the
+JSON object builders. Use the bounded `JsonSerde.deserializeOne<T>` helper when decoding a field.
 
 Import as `Serialize` with `import silk.json_serde { Serialize }`.
 
