@@ -58,6 +58,7 @@ import { websocketUpgradeAcceptanceSource } from './websocketUpgradeAcceptance.j
 import { base64AcceptanceSource } from './base64Acceptance.js'
 import { jsonScannerAcceptanceSource } from './jsonScannerAcceptance.js'
 import { tomlScannerAcceptanceSource } from './tomlScannerAcceptance.js'
+import { tomlValueAcceptanceSource } from './tomlValueAcceptance.js'
 import { utf8DecoderAcceptanceSource } from './utf8DecoderAcceptance.js'
 import { jsonReaderAcceptanceSource } from './jsonReaderAcceptance.js'
 import { jsonReflectAcceptanceSource } from './jsonReflectAcceptance.js'
@@ -6772,6 +6773,11 @@ pub fn main() -> i32 { return run Effect.catchAll(verify(), recover) }`,
   {
     name: 'toml-scanner',
     source: tomlScannerAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'toml-value',
+    source: tomlValueAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

@@ -1080,6 +1080,17 @@
     "aliases": ["TomlError", "TomlReason", "TomlScalarKind", "TomlSpan", "TomlToken"]
   },
   {
+    "module": "silk/toml_text",
+    "path": "silk/toml_text.silk",
+    "namespace": "TomlText"
+  },
+  {
+    "module": "silk/toml_value",
+    "path": "silk/toml_value.silk",
+    "namespace": "Toml",
+    "aliases": ["Value", "TomlEntry", "TomlChild", "TableKind"]
+  },
+  {
     "module": "silk/trust_anchor",
     "path": "silk/trust_anchor.silk",
     "namespace": "TrustAnchor"

@@ -55,6 +55,10 @@ pub enum TomlReason {
   InvalidNumber,
   /// A date or time spelling has an invalid field or structure.
   InvalidDateTime,
+  /// A key is defined more than once in one table.
+  DuplicateKey,
+  /// A table definition conflicts with an earlier value or table.
+  TableConflict,
   /// More than [`MAX_DEPTH`] arrays or inline tables are nested.
   DepthExceeded,
 }
@@ -648,7 +652,8 @@ impl ParseState {
       while self.cursor < input.length {
         let current = input[self.cursor]
         if horizontal(current) || current == 10 || current == 13 || current == 35 || current == 61
-          || current == 44 || current == 91 || current == 93 || current == 123 || current == 125 { break }
+          || current == 44 || current == 91 || current == 93 || current == 123 || current == 125
+          || current == 34 || current == 39 { break }
         self.cursor = self.cursor + usize.ONE
       }
       if self.cursor < input.length && input[self.cursor] == 32 && datePart(input, at, self.cursor)
@@ -696,4 +701,6 @@ impl<'input> TomlScanner<'input> {
   pub fn slice(self: &TomlScanner<'input>, span: TomlSpan) -> &'input [u8] {
     return Slice.view<u8>(self.input, span.offset, span.length)
   }
+  /// Returns the byte offset of the next lexical token.
+  pub fn offset(self: &TomlScanner) -> usize { return self.cursor }
 }

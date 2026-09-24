@@ -1,0 +1,100 @@
+//! Decoding scanner-validated TOML string tokens into owned UTF-8 text.
+
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.bytes { Bytes }
+import silk.slice { Slice }
+import silk.u32
+import silk.u8
+import silk.usize
+
+/// Operations on validated TOML string spellings.
+pub struct TomlText {}
+
+impl TomlText {
+  /// Copies validated bytes into owned storage.
+  pub effect fn copy(raw: &[u8]) -> Bytes ! OutOfMemoryError ? &mut Allocator {
+    let mut output = Bytes.make()
+    run Bytes.append(&mut output, raw)
+    return move output
+  }
+
+  /// Decodes a complete quoted token, including multiline trimming and escapes.
+  pub effect fn decode(raw: &[u8], literal: bool, multiline: bool)
+    -> Bytes ! OutOfMemoryError ? &mut Allocator {
+    let mut delimiter: usize = 1
+    if multiline { delimiter = 3 }
+    let mut start = delimiter
+    let end = raw.length - delimiter
+    if multiline {
+      if raw[start] == 13 { start = start + usize.ONE }
+      if raw[start] == 10 { start = start + usize.ONE }
+    }
+    let mut output = Bytes.make()
+    run Bytes.reserveExact(&mut output, end - start)
+    let mut index = start
+    let mut segment = start
+    while index < end {
+      if literal || raw[index] != 92 { index = index + usize.ONE
+        continue }
+      if segment < index {
+        run Bytes.append(&mut output, Slice.view<u8>(raw, segment, index - segment))
+      }
+      index = index + usize.ONE
+      let escaped = raw[index]
+      if multiline && (escaped == 32 || escaped == 9 || escaped == 10 || escaped == 13) {
+        while index < end && (raw[index] == 32 || raw[index] == 9 || raw[index] == 10 || raw[index] == 13) {
+          index = index + usize.ONE
+        }
+      } else if escaped == 120 || escaped == 117 || escaped == 85 {
+        let mut digits: usize = 8
+        if escaped == 120 { digits = 2 }
+        else if escaped == 117 { digits = 4 }
+        let mut scalar: u32 = 0
+        let mut digit = usize.ZERO
+        while digit < digits {
+          let byte = raw[index + usize.ONE + digit]
+          let mut value = u8.toU32(byte - 48)
+          if byte >= 65 && byte <= 70 { value = u8.toU32(byte - 65) + 10 }
+          if byte >= 97 && byte <= 102 { value = u8.toU32(byte - 97) + 10 }
+          scalar = scalar * 16 + value
+          digit = digit + usize.ONE
+        }
+        run appendScalar(&mut output, scalar)
+        index = index + digits + usize.ONE
+      } else {
+        let mut decoded = escaped
+        if escaped == 98 { decoded = 8 }
+        else if escaped == 116 { decoded = 9 }
+        else if escaped == 110 { decoded = 10 }
+        else if escaped == 102 { decoded = 12 }
+        else if escaped == 114 { decoded = 13 }
+        else if escaped == 101 { decoded = 27 }
+        let one = [decoded]
+        run Bytes.append(&mut output, &one)
+        index = index + usize.ONE
+      }
+      segment = index
+    }
+    if segment < end { run Bytes.append(&mut output, Slice.view<u8>(raw, segment, end - segment)) }
+    return move output
+  }
+}
+
+effect fn appendScalar(output: &mut Bytes, scalar: u32) -> () ! OutOfMemoryError ? &mut Allocator {
+  if scalar < 128 {
+    let encoded = [u32.toU8(scalar)]
+    return run Bytes.append(&mut output.*, &encoded)
+  }
+  if scalar < 2048 {
+    let encoded = [u32.toU8(192 + scalar / 64), u32.toU8(128 + scalar % 64)]
+    return run Bytes.append(&mut output.*, &encoded)
+  }
+  if scalar < 65536 {
+    let encoded = [u32.toU8(224 + scalar / 4096), u32.toU8(128 + scalar / 64 % 64),
+      u32.toU8(128 + scalar % 64)]
+    return run Bytes.append(&mut output.*, &encoded)
+  }
+  let encoded = [u32.toU8(240 + scalar / 262144), u32.toU8(128 + scalar / 4096 % 64),
+    u32.toU8(128 + scalar / 64 % 64), u32.toU8(128 + scalar % 64)]
+  return run Bytes.append(&mut output.*, &encoded)
+}
