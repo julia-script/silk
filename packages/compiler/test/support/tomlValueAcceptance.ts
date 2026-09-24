@@ -85,10 +85,11 @@ effect fn rejected(bytes: &[u8], offset: usize, kind: i32) -> bool {
 
 effect fn check() -> i32 ! TomlError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let document = run Toml.parse(b"title = \\"example\\"\\ninteger = 1\\nfloat = 1.5\\nboolean = true\\ndate = 1979-05-27\\ntime = 07:32\\nlocal = 1979-05-27T07:32\\noffset = 1979-05-27T07:32Z\\n[owner]\\nname = \\"Ada\\"\\n[[items]]\\nlabel = \\"first\\"\\n[[items]]\\nlabel = \\"second\\"\\n")
+  let document = run Toml.parse(b"title = \\"example\\"\\ninteger = 1\\nfloat = 1.5\\nboolean = true\\ndate = 1979-05-27\\ntime = 07:32\\nlocal = 1979-05-27T07:32\\noffset = 1979-05-27T07:32Z\\nquoted.\\"segment\\" = \\"yes\\"\\n[owner]\\nname = \\"Ada\\"\\n[[items]]\\nlabel = \\"first\\"\\n[[items]]\\nlabel = \\"second\\"\\n")
     |> Effect.provideMut<Allocator>(&mut allocator)
   if !hasString(Toml.field(&document, "title"), "example") { return 2 }
   if !hasTableString(&document, "owner", "name", "Ada") { return 3 }
+  if !hasTableString(&document, "quoted", "segment", "yes") { return 18 }
   if !hasKind(Toml.field(&document, "integer"), 1) { return 11 }
   if !hasKind(Toml.field(&document, "float"), 2) { return 12 }
   if !hasKind(Toml.field(&document, "boolean"), 3) { return 13 }
