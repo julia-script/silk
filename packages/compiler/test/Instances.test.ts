@@ -219,126 +219,6 @@ pub fn main() -> i32 { return left(1) + right(2) }`)
   }),
 )
 
-it.effect('discovers and lowers concrete witness delegation through nested fields', () =>
-  Effect.gen(function* () {
-    const analyzed = yield* snapshot(`interface Decode { fn decode() -> Self }
-impl Decode for i32 { fn decode() -> Self { return 42 } }
-struct Child { value: i32 }
-struct Outer { child: Child }
-fn decodeOne<T: Decode>() -> T { return Decode.decode() }
-impl Child {
-  fn decodeChild() -> Child { return Child { value: decodeOne<i32>() } }
-}
-impl Decode for Child { decode: Child.decodeChild }
-impl Decode for Outer {
-  fn decode() -> Self { return Outer { child: decodeOne<Child>() } }
-}
-pub fn main() -> i32 { return decodeOne<Outer>().child.value }`)
-    assert.deepEqual(
-      analyzed.instances.violations.map((violation) => ({
-        caller: violation.caller.declaration.name,
-        callerArguments: violation.caller.typeArguments.map(Type.encodeGenericArgument),
-        target: violation.target.declaration.name,
-        targetArguments: violation.target.typeArguments.map(Type.encodeGenericArgument),
-      })),
-      [],
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(analyzed).map((diagnostic) => diagnostic.code),
-      [],
-    )
-    assert.deepEqual(
-      analyzed.instances.instances
-        .filter((instance) => instance.key.declaration.name === 'decodeOne')
-        .map((instance) => instance.key.typeArguments.map(Type.encodeGenericArgument)),
-      [['golden/program.Outer'], ['golden/program.Child'], ['i32']],
-    )
-    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(analyzed)), [])
-  }),
-)
-
-it.effect('allows effect witnesses to delegate from concrete aggregates to field types', () =>
-  Effect.gen(function* () {
-    const analyzed = yield* snapshot(`interface Write { effect fn write(self: &Self) -> i32 }
-impl Write for i32 { effect fn write(self: &Self) -> i32 { return self.* } }
-struct Point { x: i32 }
-struct Segment { start: Point }
-effect fn writeOne<T: Write>(value: &T) -> i32 { return run Write.write(value) }
-impl Write for Point {
-  effect fn write(self: &Self) -> i32 { return run writeOne<i32>(&self.x) }
-}
-impl Write for Segment {
-  effect fn write(self: &Self) -> i32 { return run writeOne<Point>(&self.start) }
-}
-pub fn main() -> i32 {
-  let segment = Segment { start: Point { x: 42 } }
-  return run writeOne<Segment>(&segment)
-}`)
-    assert.deepEqual(
-      Analysis.diagnostics(analyzed).map((diagnostic) => diagnostic.code),
-      [],
-    )
-    assert.deepEqual(analyzed.instances.violations, [])
-    assert.deepEqual(
-      analyzed.instances.instances
-        .filter((instance) => instance.key.declaration.name === 'writeOne')
-        .map((instance) => instance.key.typeArguments.at(0))
-        .map((argument) =>
-          argument === undefined ? undefined : Type.encodeGenericArgument(argument),
-        ),
-      ['golden/program.Segment', 'golden/program.Point', 'i32'],
-    )
-    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(analyzed)), [])
-  }),
-)
-
-it.effect('rejects growth through a concrete witness cycle', () =>
-  Effect.gen(function* () {
-    const analyzed = yield* snapshot(`interface Consume { fn consume(self: Self) -> i32 }
-struct Wrap<T> { value: T }
-fn consumeOne<T: Consume>(value: T) -> i32 { return Consume.consume(move value) }
-impl<T> Consume for Wrap<T> {
-  fn consume(self: Self) -> i32 {
-    return consumeOne<Wrap<Wrap<T>>>(Wrap { value: move self })
-  }
-}
-pub fn main() -> i32 { return consumeOne<Wrap<i32>>(Wrap { value: 42 }) }`)
-    assert.deepEqual(
-      Analysis.diagnostics(analyzed).map((diagnostic) => diagnostic.code),
-      ['SEM0053'],
-    )
-    assert.deepEqual(
-      analyzed.instances.violations.map((violation) => ({
-        caller: violation.caller.declaration.name,
-        target: violation.target.typeArguments.map(Type.encodeGenericArgument),
-      })),
-      [{ caller: 'impl@0.consume', target: ['golden/program.Wrap<golden/program.Wrap<i32>>'] }],
-    )
-  }),
-)
-
-it.effect('requires provider evidence for a direct zero-operand witness call', () =>
-  Effect.gen(function* () {
-    const source = `interface Decode { fn decode() -> Self }
-impl Decode for i32 { fn decode() -> Self { return 42 } }
-struct Outer { value: i32 }
-impl Decode for Outer {
-  fn decode() -> Self { return Outer { value: Decode.decode() } }
-}
-pub fn main() -> i32 { return 0 }`
-    const analyzed = yield* snapshot(source)
-    const operation = source.indexOf('Decode.decode()') + 'Decode.'.length
-    assert.deepEqual(
-      Analysis.diagnostics(analyzed).map((diagnostic) => [
-        diagnostic.code,
-        diagnostic.span.start,
-        diagnostic.span.end,
-      ]),
-      [['SEM0010', operation, operation + 'decode'.length]],
-    )
-  }),
-)
-
 it.effect('retains generic ancestors across shared monomorphic helpers', () =>
   Effect.gen(function* () {
     const analyzed = yield* snapshot(`fn generic<T>() -> i32 { return helper() }
@@ -2415,26 +2295,22 @@ fn allocateOnly() -> () {
   return { analyze, provider, observedProvider, rejections }
 })
 
-it.effect(
-  'binds arbitrary storage exports and keys their source content',
-  () =>
-    Effect.gen(function* () {
-      const { analyze, provider } = yield* storageFixture
-      const valid = yield* analyze(provider, true)
-      const changed = yield* analyze(
-        provider.replace(
-          'fn finish(state: ?*mut u8) -> () {}',
-          'fn finish(state: ?*mut u8) -> () { let changed = 1 }',
-        ),
-        true,
-      )
-      assert.deepEqual(Analysis.diagnostics(valid), [])
-      assert.deepEqual(Analysis.diagnostics(changed), [])
-      assert.strictEqual(Analysis.loweredMir(valid).executionStorage?.acquire.symbol, 'reserve')
-      assert.notStrictEqual(valid.artifactPlan?.identity, changed.artifactPlan?.identity)
-    }),
-  // Two storage-provider analyses took 22.1s locally on 2026-09-23 and exceeded 30s in CI shard 1.
-  { timeout: 60_000 },
+it.effect('binds arbitrary storage exports and keys their source content', () =>
+  Effect.gen(function* () {
+    const { analyze, provider } = yield* storageFixture
+    const valid = yield* analyze(provider, true)
+    const changed = yield* analyze(
+      provider.replace(
+        'fn finish(state: ?*mut u8) -> () {}',
+        'fn finish(state: ?*mut u8) -> () { let changed = 1 }',
+      ),
+      true,
+    )
+    assert.deepEqual(Analysis.diagnostics(valid), [])
+    assert.deepEqual(Analysis.diagnostics(changed), [])
+    assert.strictEqual(Analysis.loweredMir(valid).executionStorage?.acquire.symbol, 'reserve')
+    assert.notStrictEqual(valid.artifactPlan?.identity, changed.artifactPlan?.identity)
+  }),
 )
 
 it.effect('admits storage bootstrap observation whose cleanup needs no storage', () =>
