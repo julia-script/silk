@@ -1612,6 +1612,32 @@ export const discover = (
         Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate)
       )
     })
+  const typeSize = (type: Type.Type): number => {
+    let size = 0
+    Type.visit(type, () => {
+      size += 1
+    })
+    return size
+  }
+  /** A finite set of concrete type shapes cannot grow through a non-increasing call cycle. */
+  const nonGrowingTypeArguments = (ancestor: InstanceKey, target: InstanceKey): boolean => {
+    if (
+      ancestor.typeArguments.length === 0 ||
+      ancestor.typeArguments.length !== target.typeArguments.length
+    )
+      return false
+    return ancestor.typeArguments.every((argument, ordinal) => {
+      const next = target.typeArguments.at(ordinal)
+      return (
+        next !== undefined &&
+        Type.isTypeArgument(argument) &&
+        Type.isTypeArgument(next) &&
+        Type.parameters(argument).length === 0 &&
+        Type.parameters(next).length === 0 &&
+        typeSize(next) <= typeSize(argument)
+      )
+    })
+  }
   const typeArgumentsOf = (key: InstanceKey): ReadonlyArray<Type.Type> =>
     key.typeArguments.filter(Type.isTypeArgument)
   /**
@@ -1631,6 +1657,31 @@ export const discover = (
       if (Type.runtimeKey(type) === candidateKey) found = true
     })
     return found
+  }
+  /** A witness may delegate to a field's concrete type even when nominal types have no arguments. */
+  const isDirectWitnessFieldSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
+    if (!Type.isNominal(whole) || sameRuntimeType(candidate, whole)) return false
+    const declaration = DeclarationFacts.byCanonical(index, {
+      _tag: 'CanonicalDeclarationId',
+      module: whole.module,
+      name: whole.name,
+    })
+    if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
+      return false
+    const substitution =
+      TypeInference.substitution(
+        declaration.typeParameters.map((parameter) => parameter.type),
+        whole.arguments,
+      ) ?? new Map()
+    const fields =
+      declaration._tag === 'StructDeclaration'
+        ? declaration.fields
+        : declaration.variants.flatMap((variant) => variant.fields)
+    return fields.some((field) => {
+      if (field.declaredType._tag !== 'Resolved') return false
+      const type = Type.substitute(field.declaredType.type, substitution)
+      return sameRuntimeType(candidate, type) || isStrictRuntimeStructuralSubterm(candidate, type)
+    })
   }
   const strictlyDescendsSameNominal = (candidate: Type.Nominal, whole: Type.Nominal): boolean => {
     if (candidate.module !== whole.module || candidate.name !== whole.name) return false
@@ -1655,6 +1706,37 @@ export const discover = (
         )
       })
     )
+  }
+  const concreteWitnessFieldDescent = (ancestor: InstanceKey, target: InstanceKey): boolean => {
+    if (ancestor.typeArguments.length !== target.typeArguments.length) return false
+    let descended = false
+    for (const [ordinal, argument] of ancestor.typeArguments.entries()) {
+      const next = target.typeArguments.at(ordinal)
+      if (next === undefined) return false
+      if (Type.isTypeArgument(argument) && Type.isTypeArgument(next)) {
+        if (Type.parameters(argument).length > 0 || Type.parameters(next).length > 0) return false
+        if (sameRuntimeType(argument, next)) continue
+        const sameNominal =
+          Type.isNominal(argument) &&
+          Type.isNominal(next) &&
+          nominalTypeText(argument) === nominalTypeText(next)
+        if (
+          !(sameNominal && strictlyDescendsSameNominal(next, argument)) &&
+          !(
+            !sameNominal &&
+            (isStrictRuntimeStructuralSubterm(next, argument) ||
+              isDirectWitnessFieldSubterm(next, argument))
+          )
+        )
+          return false
+        descended = true
+      } else if (
+        !(Type.isEffectIdentityArgument(argument) && Type.isEffectIdentityArgument(next)) &&
+        Type.runtimeGenericArgumentKey(argument) !== Type.runtimeGenericArgumentKey(next)
+      )
+        return false
+    }
+    return descended
   }
   const isStrictCleanupSubterm = (
     candidate: Type.Type,
@@ -1947,6 +2029,7 @@ export const discover = (
     readonly calls: ReadonlyMap<string, CallTarget>
     readonly identityOfCall: (call: CallTarget) => string
     readonly ordinaryIdentities: ReadonlySet<string>
+    readonly witnessTargets: ReadonlyArray<CallTarget>
     readonly cleanupRoots: ReadonlyMap<string, ReadonlyArray<Type.Type>>
   }
   const analyzedKeys = new Map<string, Analyzed | undefined>()
@@ -1956,6 +2039,33 @@ export const discover = (
     const result = analyzeKey(key)
     analyzedKeys.set(text, result)
     return result
+  }
+  const selectedWitnessOf = (
+    ancestor: InstanceKey,
+    implementation: InstanceKey,
+    fn: Tir.TirFunction,
+  ): boolean => {
+    const analyzed = analyze(ancestor)
+    if (analyzed === undefined) return false
+    return analyzed.witnessTargets.some((call) => {
+      if (
+        call.declaration.module !== implementation.declaration.module ||
+        call.declaration.name !== implementation.declaration.name
+      )
+        return false
+      const targetArguments = call.typeArguments.map((argument) =>
+        Type.substituteGenericArgument(argument, analyzed.substitution),
+      )
+      const selected = keyOf(
+        call.declaration,
+        fn.contract,
+        fn.declaration.typeParameters.map((parameter) => parameter.type),
+        targetArguments,
+        call.staticArguments ?? [],
+        call.evidence ?? [],
+      )
+      return keyText(selected) === keyText(implementation)
+    })
   }
   const analyzeKey = (key: InstanceKey): Analyzed | undefined => {
     const template = functionByKey(results, key)
@@ -2062,10 +2172,11 @@ export const discover = (
           )
         }
         const cleanupTargets = [...slotDropHookTargets(fn, index, substitution), ...cleanupHooks]
+        const witnessTargets = interfaceWitnessTargets(fn, index, substitution)
         const identityOfCall = Specialization.key
         const ordinaryTargets: ReadonlyArray<CallTarget> = [
           ...bodyCallTargets(view, index, substitution),
-          ...interfaceWitnessTargets(fn, index, substitution),
+          ...witnessTargets,
           ...requirementBindingCallTargets(fn, substitution, index),
           ...directCalls.map((call) => ({
             declaration: call.target.declaration,
@@ -2080,11 +2191,11 @@ export const discover = (
           ...callableTargets,
           ...forwardedRequirementTargets(callableTargets, results, index),
         ]
-        return { calls, cleanupTargets, identityOfCall, ordinaryTargets }
+        return { calls, cleanupTargets, identityOfCall, ordinaryTargets, witnessTargets }
       },
       { 'function.module': key.declaration.module, 'function.name': key.declaration.name },
     )
-    const { calls, cleanupTargets, identityOfCall, ordinaryTargets } = collected
+    const { calls, cleanupTargets, identityOfCall, ordinaryTargets, witnessTargets } = collected
     const ordinaryIdentities = new Set(ordinaryTargets.map(identityOfCall))
     const cleanupRoots = new Map<string, Array<Type.Type>>()
     for (const cleanup of cleanupTargets) {
@@ -2135,7 +2246,16 @@ export const discover = (
             : { staticArgumentOrigins: call.staticArgumentOrigins }),
         })
     }
-    return { fn, view, substitution, calls, identityOfCall, ordinaryIdentities, cleanupRoots }
+    return {
+      fn,
+      view,
+      substitution,
+      calls,
+      identityOfCall,
+      ordinaryIdentities,
+      witnessTargets,
+      cleanupRoots,
+    }
   }
   const restartDiscovery = (): void => {
     scheduledContexts.clear()
@@ -2234,6 +2354,11 @@ export const discover = (
               ancestor !== undefined &&
               !sameArguments(ancestor.key, targetKey) &&
               !structurallyDescending &&
+              !(
+                selectedWitnessOf(ancestor.key, key, fn) &&
+                (nonGrowingTypeArguments(ancestor.key, targetKey) ||
+                  concreteWitnessFieldDescent(ancestor.key, targetKey))
+              ) &&
               !cleanupSpecialization &&
               !terminalCallableSpecialization
             ) {

@@ -320,8 +320,11 @@ semantic analysis could not close.
 
 **Status:** Confirmed
 
-A recursively reachable call to the same generic declaration must preserve its current concrete
-generic arguments. This permits ordinary recursion while keeping specialization finite.
+A recursively reachable call normally reuses its current concrete generic arguments. A concrete
+interface witness may delegate through a bounded helper to another concrete specialization when
+its type arguments do not grow, or when a concrete field or type argument strictly descends while
+other type arguments remain fixed or descend. Hidden Effect identities may differ on a strict
+descent. These routes keep specialization finite.
 
 ```silk,ignore
 fn walk<T>(value: T, remaining: i32) -> T {
@@ -332,10 +335,13 @@ fn walk<T>(value: T, remaining: i32) -> T {
 }
 ```
 
-The recursive call reuses the same `walk<T>` specialization.
+The recursive call reuses the same `walk<T>` specialization. A concrete witness can also call a
+bounded helper at a smaller or equally sized concrete type, such as `decodeOne<Outer>()` delegating
+to `decodeOne<i32>()`. An Effect witness can delegate from a concrete aggregate to its field type
+even when its hidden Effect identity changes. The reachable type shapes remain finite.
 
-**Boundary:** Polymorphic recursion that calls the same declaration with a structurally different
-argument is outside the stable model:
+**Boundary:** Ordinary polymorphic recursion that changes a type argument is outside the stable
+model. Witness delegation that grows a type argument along a recursive call cycle is also invalid:
 
 ```silk,ignore
 fn grow<T>(value: T) -> i32 {
@@ -346,9 +352,9 @@ fn grow<T>(value: T) -> i32 {
 Each step would require another specialization and no finite static family follows from the source.
 Mutual recursion is subject to the same rule across the complete cycle.
 
-**Diagnostics:** A recursive call that changes the current generic arguments reports a
-polymorphic-recursion diagnostic at that call and shows the current and requested applications. It
-must be rejected before instance discovery recursively expands the family.
+**Diagnostics:** A disallowed recursive call reports a polymorphic-recursion diagnostic at that
+call and shows the current and requested applications. It must be rejected before instance
+discovery recursively expands the family.
 
 **Evidence:** [runtime specialization requirement](../../../../openspec/specs/bootstrap-type-generics/spec.md),
 [generic instance discovery](../../../../packages/compiler/src/Instances.ts).
@@ -1040,6 +1046,23 @@ pub const UserSchema =
 The explicit argument to `Schema.of<User>()` fixes `T = User`. The bound inside `Schema.of` then
 fixes `Self = User` and the `SchemaOf` application without runtime evidence.
 
+The same route lets one concrete witness invoke another type's witness:
+
+```silk,ignore
+interface Decode { fn decode() -> Self }
+impl Decode for i32 { fn decode() -> Self { return 42 } }
+
+struct Outer { value: i32 }
+fn decodeOne<T: Decode>() -> T { return Decode.decode() }
+impl Decode for Outer {
+  fn decode() -> Self { return Outer { value: decodeOne<i32>() } }
+}
+```
+
+The explicit `i32` argument selects the child witness. Writing `Decode.decode()` directly in the
+`Outer` body supplies no provider evidence for `i32`; the field's expected result does not select
+`Self`, so that call reports `SEM0010`.
+
 For an applied call, the compiler infers implicit `Self` from agreeing supplied operands first. A
 zero-operand operation may instead use one enclosing bound whose complete interface application
 matches the written application. A bare or applied qualified call is invalid when neither source
@@ -1283,12 +1306,13 @@ result, failure, and requirement contracts for both interfaces and services.
 [interface witness tests](../../../../packages/compiler/test/InterfaceWitnessCompatibility.test.ts),
 [nested Effect contract](effects-and-execution.md#eff-004--nested-effects-are-ordinary-values).
 
-### IMPL-004 — Only the provider's defining module may declare its conformances
+### IMPL-004 — An interface or its nominal provider may own a conformance
 
 **Status:** Confirmed
 
-An `impl` must appear in the module that defines the provider's outer nominal type. The interface
-may come from another visible module.
+An interface implementation for a nominal provider may appear either in the interface's defining
+module or in the module that defines the provider's outer nominal type. The two declarations must
+be visible to the implementing module. A service implementation remains provider-owned.
 
 ```silk,ignore
 // model/User.silk
@@ -1301,27 +1325,41 @@ impl Validatable for User {
 }
 ```
 
-For `Wrapper<T>`, the owning module is the module that declares `Wrapper`, independent of `T`.
-This makes every conformance a canonical fact about one nominal provider rather than behavior
-activated by whichever extension module a caller imports.
+For `Wrapper<T>`, the provider's defining module is the module that declares `Wrapper`, independent
+of `T`.
+The module that declares the interface may also implement it for `Wrapper<T>`, including with
+conditional bounds on `T`. Both locations contribute to the same program-wide coherence check,
+which rejects competing implementations.
 
-Third parties may define ordinary actor functions for any public type. To create a new conformance
+```silk,ignore
+// validation/Validatable.silk
+import model.User
+
+pub interface Validatable { /* ... */ }
+impl Validatable for User { /* ... */ }
+```
+
+Scalar and borrowed `string` providers have no nominal declaration module, so only the contract's
+module may implement an interface for them. The same interface module may also implement that
+interface for an imported owned `String` nominal.
+
+Third parties may define ordinary actor functions for any public type. To create a conformance
 between a foreign interface and foreign type, they define an owned nominal adapter and implement the
 interface for that adapter.
 
-**Boundary:** Defining the interface does not grant permission to implement it for a foreign
-provider. Imports never activate a conformance, and an `impl` in a neighboring directory or package
-does not gain provider ownership.
+**Boundary:** A module that owns neither the interface nor the nominal provider cannot declare
+their implementation. Imports never activate a conformance, and an `impl` in a neighboring directory
+or package gains no ownership. Service and compiler-sealed intrinsic rules do not broaden.
 
-This locality rule does not require implementations to live inside the provider declaration. They
-remain top-level `impl` declarations in the same module, preserving data-only nominal types.
+This locality rule does not require implementations to live inside either declaration. They remain
+top-level `impl` declarations, preserving data-only nominal types.
 
-**Diagnostics:** A foreign-provider `impl` reports a conformance-locality diagnostic at the
-provider type and identifies its defining module. Tooling may suggest an owned adapter; it must not
-offer to move the conformance into a module the author cannot modify.
+**Diagnostics:** An unrelated module's `impl` reports `SEM0083` at the conformance and identifies
+the permitted module or modules. Tooling may suggest an owned adapter; it must not offer to move the
+conformance into a module the author cannot modify.
 
-**Current compiler:** Aligned for source-declared contracts. A conformance is admitted only in the
-module defining its provider's outer nominal type; compiler-sealed intrinsic contracts retain their
+**Current compiler:** Aligned for source-declared contracts. Interface-owned and provider-owned
+nominal implementations share one coherence check; compiler-sealed intrinsic contracts retain their
 own explicitly privileged rules.
 
 **Evidence:** [member and conformance style](style-guide.md#style-002--operations-intrinsic-to-one-type-are-inherent-members-with-the-receiver-first).
@@ -1356,7 +1394,7 @@ not an independently private `impl`. Unsupported `pub impl` syntax receives the 
 for a modifier that has no conformance meaning.
 
 **Current artifacts:** The earlier module direction described public and private conformances. That
-dimension is superseded: provider-local coherence and endpoint visibility already determine every
+dimension is superseded: program-wide coherence and endpoint visibility already determine every
 usable goal, and current source syntax needs no general conformance visibility modifier.
 
 **Evidence:** [current impl parser](../../../../packages/compiler/src/Parser.ts),
@@ -1579,15 +1617,15 @@ The later interface rules must preserve decisions already confirmed elsewhere:
 Static conformance selection is one compile-time mechanism shared by several language areas. It
 does not give any one of those areas a second interface model.
 
-| Area                       | Rule                                                                                                                                                                                                                                                                            |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Services                   | A service first passes the declaration-level eligibility check that permits it in a requirement row. Bounds, `impl`, overlap, conditional proof, and operation selection then use the ordinary interface rules. Proving `T: Logger` does not request, provide, or run a logger. |
-| Effects                    | Selecting an effectful operation constructs the one Effect layer declared by its contract. Proof does not execute, flatten, handle failures, satisfy requirements, or change a reusable Effect into a consuming one.                                                            |
-| Ownership                  | A proof is compile-time evidence and does not move, borrow, copy, or drop a value. The selected operation still applies its declared owned, shared, or exclusive operands literally.                                                                                            |
-| Operators                  | Operator syntax may invoke only an operation explicitly marked for that operator. Bounds and conformances select its static implementation; operation names and provider types receive no hidden numeric privilege.                                                             |
-| Modules                    | Only the provider's defining module declares conformances. Imports make declarations nameable but never activate, replace, prioritize, or hide an `impl`; endpoint visibility determines whether a goal can be named.                                                           |
-| Specialization and targets | Every admitted concrete proof selects the same static operation target before LLVM lowering. No target performs interface lookup, receives a witness dictionary, or chooses a different conformance.                                                                            |
-| Static values              | A generic helper such as `Schema.of<User>()` may select `User: SchemaOf` statically, but that fact alone does not execute the call at compile time. Const evaluation and global static composition are not defined by these rules.                                              |
+| Area                       | Rule                                                                                                                                                                                                                                                                                                |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Services                   | A service first passes the declaration-level eligibility check that permits it in a requirement row. Bounds, `impl`, overlap, conditional proof, and operation selection then use the ordinary interface rules. Proving `T: Logger` does not request, provide, or run a logger.                     |
+| Effects                    | Selecting an effectful operation constructs the one Effect layer declared by its contract. Proof does not execute, flatten, handle failures, satisfy requirements, or change a reusable Effect into a consuming one.                                                                                |
+| Ownership                  | A proof is compile-time evidence and does not move, borrow, copy, or drop a value. The selected operation still applies its declared owned, shared, or exclusive operands literally.                                                                                                                |
+| Operators                  | Operator syntax may invoke only an operation explicitly marked for that operator. Bounds and conformances select its static implementation; operation names and provider types receive no hidden numeric privilege.                                                                                 |
+| Modules                    | A nominal interface conformance belongs in the interface's or provider's defining module; service implementations remain provider-owned. Imports make declarations nameable but never activate, replace, prioritize, or hide an `impl`; endpoint visibility determines whether a goal can be named. |
+| Specialization and targets | Every admitted concrete proof selects the same static operation target before LLVM lowering. No target performs interface lookup, receives a witness dictionary, or chooses a different conformance.                                                                                                |
+| Static values              | A generic helper such as `Schema.of<User>()` may select `User: SchemaOf` statically, but that fact alone does not execute the call at compile time. Const evaluation and global static composition are not defined by these rules.                                                                  |
 
 Consequently, an interface or service declaration can be reused in an ordinary generic bound
 without creating an ambient dependency, and a conditional conformance can reuse effectful
@@ -1608,5 +1646,5 @@ selection.
 | Inline implementations  | General `impl` parsing accepts mappings; a narrow hook form accepts one inline function.                     | Implement the already confirmed general inline-or-mapped rule.                                                                               |
 
 IMPL-005 resolves the former conformance-visibility question: conformances have no independently
-written visibility surface. Endpoint visibility and provider-local coherence determine whether a
+written visibility surface. Endpoint visibility and program-wide coherence determine whether a
 goal is usable.

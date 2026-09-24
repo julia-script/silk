@@ -114,6 +114,95 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 cover bool` plus a parse error on each arm: `true` and `false` are not patterns, so the arms read
   as binding identifiers · Use an `if` with a `mut` local; `match` is for unions and enums only ·
   compiler
+- 2026-09-23 · A Codex model that works from the shell fails through Intent delegation with
+  `invalid params: Could not apply Codex model 'gpt-6-sol': JSON-RPC error -32602`, because two
+  different Codex clients are involved: the shell CLI is `codex-cli 0.156.1` at
+  `/opt/homebrew/bin/codex`, while Intent routes through the ChatGPT desktop app's embedded
+  `Codex Framework.framework` (`client_version: 0.153.4` in `~/.codex/models_cache.json`), and the
+  backend serves that older client a model list omitting newly released slugs, so Intent rejects the
+  model before it reaches the API; delegation also returns `ok: true` and fails only after the agent
+  starts, so an unsupported slug looks like a successful delegation · Update the ChatGPT desktop app
+  (`npm install -g @openai/codex@latest` upgrades a binary Intent never invokes), and pass effort as
+  the separate `reasoningEffort` argument (`sol-high` is not a model name) · repository
+- 2026-09-23 · `pnpm --filter ... exec vitest` tried to reinstall and purge the existing dependency
+  tree in a non-TTY session, aborting before a focused test could run · Invoke the already-installed
+  `node_modules/.bin/vitest` directly for focused compiler checks · compiler
+- 2026-09-23 · Native acceptance reached `ArtifactCache.set` but failed with `EPERM` because its
+  default cache writes under `~/.cache`, outside this worktree's writable sandbox · Set
+  `SILK_NATIVE_CACHE_DIR` to a dedicated directory under `/private/tmp` for local tests · compiler
+- 2026-09-23 · A focused native test reported an ownership error at a source offset that did not
+  match the current `format.silk`; the compiler loaded an older embedded copy from
+  `Stdlib.generated.ts` · Run `node scripts/generate-stdlib.mjs` in `packages/compiler` after
+  editing stdlib Silk before interpreting diagnostic offsets or runtime results · compiler
+- 2026-09-23 · Documentation generation passed policy checks but silently omitted newly registered
+  stdlib pages because `generate-documentation.mjs` read the built compiler's older manifest · Run
+  `node_modules/.bin/tsc -p packages/compiler/tsconfig.json` after changing the manifest, then
+  regenerate documentation and check that the new pages exist · compiler
+- 2026-09-23 · A fresh silk worktree has no `node_modules`, and after `pnpm install` the compiler
+  test files still fail to import: first `Cannot find module './ToolchainIntegrity.generated.js'`,
+  then `Cannot find package '@silklang/llvm/ByteString'` · Run `CI=true pnpm install` with
+  `--frozen-lockfile`, then run all three generator scripts from `packages/compiler`
+  (`generate-unicode-tables.mjs`, `generate-stdlib.mjs`, `generate-toolchain-integrity.mjs`), then
+  build the LLVM package with `turbo run build --filter @silklang/llvm` · compiler
+- 2026-09-23 · `MirVerification` emits the same `InvalidCallableOperation` rule tag for both the
+  `MakeCallable` and the `ApplyCallable` blocks, so a violation report alone does not say which
+  operation failed and sends debugging to the wrong code · Read the violation's `detail` string,
+  not the `rule`: "callable construction disagrees ..." is `MakeCallable`, "callable application
+  disagrees ..." is `ApplyCallable` · compiler
+- 2026-09-23 · Focused Vitest matched an untracked `.pnpm-store/v11/projects` duplicate of the
+  compiler suite and failed after the intended JSON case passed · Exclude `.pnpm-store/**` from
+  focused Vitest runs until the store is outside test discovery · compiler
+- 2026-09-23 · `pnpm lint` aborted before reading any source with "The `options.denyWarnings` option
+  is only supported in the root config", failing `validate` CI and the docs preview; the culprit was
+  a generated `.oxlintrc.json` under the git-tracked `.pnpm-store/` cache, not the root config ·
+  Gitignore and untrack `/.pnpm-store/` (`275516ad`); on any oxlint _configuration_ error, search for
+  stray `.oxlintrc.json` under cache or vendored directories first · repository
+- 2026-09-23 · `ws.git.commit` silently restaged an ignored cache file that had just been removed
+  from the index, so the commit still contained it · Use `git rm --cached` plus `git commit --amend`,
+  and verify with `git status` after any commit that removes a path from the index · repository
+- 2026-09-23 · The fresh-snapshot determinism canary timed out at 30s after stdlib growth, with no
+  indication whether cost or output changed · A focused run passed all assertions in 86.4s with a
+  120s limit; its three full snapshots scale with the stdlib's 167 modules · compiler
+- 2026-09-23 · In a shared checkout, a peer's `ws.git.commit({files: [...]})` naming `corpus.ts`
+  staged the WHOLE file, sweeping ~180 lines of my uncommitted work in that same file into their
+  task-scoped commit; separately my `format.silk` was reverted to base in the working tree and had
+  to be recovered · An explicit `files` allowlist stages whole files, never just your own hunks, so
+  two agents with uncommitted edits in one file cannot both commit cleanly. Keep an out-of-tree
+  copy (`cp x /tmp/x.mine`) before running anything that touches shared state, and commit your own
+  scope the moment it passes instead of batching it behind further verification · compiler
+- 2026-09-23 · A fresh `intent` worktree had no `node_modules`, so both the workspace and the
+  primary checkout's `vitest` failed to resolve `effect` · Run `pnpm install --frozen-lockfile` in
+  the worktree once; the symlink trick from the older papercut does not resolve workspace packages
+  · repository
+- 2026-09-23 · Blamed a failing `StdlibResolution` closure assertion on a peer's concurrent edit by
+  reverting only my own file and seeing it still fail; the real cause was a list already stale at
+  the base commit, and reverting one of two concurrent changes never tests a clean base · To
+  attribute a failure in a shared checkout, check out the BASE commit's inputs, `rm -rf
+packages/compiler/dist`, and rebuild with `turbo run build --force` (a plain build hits the
+  cache); and verify the causal chain you are claiming rather than concluding by elimination —
+  `option.silk` has no imports, so the chain I asserted could not have existed · compiler
+- 2026-09-23 · Reported a branch as "pushed at HEAD" after a co-agent committed to the same shared
+  checkout; their commit was local only, so the reported head did not contain the fix it was
+  credited with, and a conflicted PR meant no CI existed to expose the gap · In a shared checkout
+  never infer push state from your own last push: check `git rev-list --left-right --count
+HEAD...@{u}` before reporting a head, and confirm each claimed deliverable against `origin/<branch>`
+  with `git show origin/<branch>:<path>` rather than the working tree · repository
+- 2026-09-23 · Checking `.git/MERGE_HEAD` in a worktree falsely suggested that merge state had
+  disappeared, because `.git` is a pointer file there · Resolve the Git directory with
+  `git rev-parse --git-dir`, or check the state directly with `git rev-parse --verify MERGE_HEAD`
+  · repository
+- 2026-09-23 · `pnpm --filter @silklang/compiler exec vitest` tried to purge `node_modules`
+  during a dependency-status check and aborted without a TTY before the focused test began · Run
+  `../../node_modules/.bin/vitest` from `packages/compiler` when dependencies are already present
+  · compiler
+- 2026-09-23 · Compiler test shards 3 and 4 each carried 57 files, yet ran 10m21s and 20m46s;
+  shard 4 timed out eight tests · File count is a poor cost proxy: keep per-test timing artifacts
+  and rebalance the shards using measured work · compiler
+- 2026-09-23 · The delegated worktree had no `node_modules`; offline pnpm install lacked cached Changesets packages and online install retried unreachable npm DNS · Reuse the prepared main checkout's dependency links for focused local compiler checks · compiler
+- 2026-09-23 · Codebase memory refused to index this Intent worktree because an unverified generation held its coordination lock · Use the existing indexed Silk checkout to locate symbols, then verify source in the active worktree · compiler
+- 2026-09-23 · A Turbo compiler build invoked pnpm's dependency repair, retried unreachable registry URLs, and recreated `node_modules` after a successful install · Restore dependencies with `CI=true pnpm install --frozen-lockfile`, then run the needed generator, focused Vitest files, and direct `tsc` checks · compiler
+- 2026-09-23 · `git restore` could not create this Intent worktree's Git index lock under the read-only linked Git directory · For a generated file changed only by this session, restore its exact committed bytes with `git show HEAD:<path> > <path>` · repository
+- 2026-09-23 · The focused native JSON corpus case failed at `NativeToolchain.ArtifactCache.set` using the default in-memory cache, before program execution · Set `SILK_NATIVE_CACHE_DIR` to a writable `/tmp` directory for that focused run; the same case passed · compiler
 - 2026-09-23 · A filtered `pnpm exec vitest list` probe unexpectedly started recreating root
   `node_modules`, then registry DNS failures left `.bin` missing · Stop the install, move the
   incomplete directory aside, link the prepared main checkout's `node_modules`, and invoke its
@@ -129,3 +218,5 @@ cover bool` plus a parse error on each arm: `true` and `false` are not patterns,
   preset, while main-checkout Oxlint treated the worktree config as a nested root config · Confirm
   both lockfiles and Oxlint configs match, then lint the changed absolute paths from the prepared
   checkout with `--disable-nested-config` · compiler CI
+- 2026-09-24 · `rtk vitest --version` produced no output and stalled during a focused merge check ·
+  Stop that probe and invoke the prepared `node_modules/.bin/vitest` directly · compiler

@@ -19,9 +19,11 @@ it('registers the clock modules, namespaces, and shared Instant alias', () => {
   assert.deepEqual(Stdlib.find('silk/system_clock')?.aliases, ['Instant'])
 })
 
-it.effect('lowers the system clock to libc externs on Darwin and Linux', () =>
-  Effect.gen(function* () {
-    const source = `import silk.effect { Effect }
+it.effect(
+  'lowers the system clock to libc externs on Darwin and Linux',
+  () =>
+    Effect.gen(function* () {
+      const source = `import silk.effect { Effect }
 import silk.os_system_clock { OsSystemClock }
 import silk.system_clock { SystemClock }
 import silk.i64
@@ -32,25 +34,27 @@ pub fn main() -> i32 {
   if resolution > 0 { return i64.toI32(SystemClock.seconds(&instant)) }
   return 0
 }`
-    for (const target of [
-      'aarch64-apple-darwin',
-      'x86_64-unknown-linux-gnu',
-      'aarch64-unknown-linux-gnu',
-    ] as const) {
-      const system = yield* snapshot(source, target)
-      assert.deepEqual(Analysis.diagnostics(system), [])
-      assert.deepEqual(
-        system.instances.foreignCalls.map((call) => call.symbol),
-        ['clock_getres', 'clock_gettime'],
-      )
-      const systemArtifact = yield* Analysis.codegen(system, { mode: 'release' })
-      assert.deepEqual(systemArtifact.nativeRuntimeSymbols, [])
-      assert.deepEqual(
-        systemArtifact.foreignImports.map((entry) => entry.symbol),
-        ['clock_getres', 'clock_gettime'],
-      )
-    }
-  }),
+      for (const target of [
+        'aarch64-apple-darwin',
+        'x86_64-unknown-linux-gnu',
+        'aarch64-unknown-linux-gnu',
+      ] as const) {
+        const system = yield* snapshot(source, target)
+        assert.deepEqual(Analysis.diagnostics(system), [])
+        assert.deepEqual(
+          system.instances.foreignCalls.map((call) => call.symbol),
+          ['clock_getres', 'clock_gettime'],
+        )
+        const systemArtifact = yield* Analysis.codegen(system, { mode: 'release' })
+        assert.deepEqual(systemArtifact.nativeRuntimeSymbols, [])
+        assert.deepEqual(
+          systemArtifact.foreignImports.map((entry) => entry.symbol),
+          ['clock_getres', 'clock_gettime'],
+        )
+      }
+    }),
+  // Three target snapshots took 28.6s locally on 2026-09-23 and exceeded 60s under CI shard load.
+  120_000,
 )
 
 it.effect('lowers monotonic clock reads and waits to ordinary selected source calls', () =>

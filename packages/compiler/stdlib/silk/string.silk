@@ -84,7 +84,6 @@ import silk.bool
 import silk.bytes { Bytes }
 import silk.char
 import silk.allocator { Allocator, OutOfMemoryError }
-import silk.allocator { OutOfMemoryError }
 import silk.option { Option }
 import silk.result { Result }
 import silk.u32
@@ -429,4 +428,3 @@ fn firstInvalidUtf8(values: &[u8]) -> Option<usize> {
 fn scalar32(value: u8) -> u32 {
   return u8.toU32(value)
 }
-

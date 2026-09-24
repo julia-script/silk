@@ -21,6 +21,267 @@ pub fn main() -> i32 {
   return 42
 }`
 
+const jsonReaderProgram = `import silk.buffered_input { BufferedInput, BufferError }
+import silk.byte_duplex { ByteDuplex }
+import silk.json_reader { JsonReader, JsonReadToken }
+import silk.json_scanner { JsonError }
+import silk.monotonic_clock { MonotonicClock }
+import silk.option { Option }
+import silk.system_clock { Instant }
+effect fn next<'scratch>(
+  reader: &mut JsonReader,
+  input: &mut BufferedInput,
+  scratch: &'scratch mut [u8]
+) -> JsonReadToken<'scratch>
+! JsonError | BufferError
+? &mut ByteDuplex | &mut MonotonicClock {
+  return run JsonReader.next(&mut reader.*, &mut input.*, move scratch, Option.none<Instant>())
+}
+pub fn main() -> i32 { return 0 }`
+
+const jsonCodecProgram = `import silk.json_codec { Decode, Deserialize, Serialize }
+import silk.json_value { Json }
+import silk.json_array { JsonArray }
+import silk.json_object { JsonObject }
+import silk.effect { Effect }
+import silk.json_output { JsonOptions }
+import silk.json_scanner { JsonError, JsonScanner }
+import silk.result { Result }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.writer { Writer, WriterError }
+fn read<T: Decode>(scanner: &mut JsonScanner) -> Result<T, JsonError> {
+  return Decode.decode(&mut scanner.*)
+}
+fn decodeDocument(bytes: &[u8]) -> Result<i32, JsonError> {
+  return Json.decode<i32>(bytes)
+}
+effect fn deserializeDocument(bytes: &[u8])
+  -> i32 ! JsonError | OutOfMemoryError ? &mut Allocator {
+  return run Json.deserialize<i32>(bytes)
+}
+effect fn readOwned<T: Deserialize>(scanner: &mut JsonScanner)
+  -> T ! JsonError | OutOfMemoryError ? &mut Allocator {
+  return run Deserialize.deserialize(&mut scanner.*)
+}
+effect fn write<T: Serialize>(value: &T, options: &JsonOptions)
+  -> () ! JsonError | WriterError ? &mut Writer {
+  return run Serialize.serialize(value, options)
+}
+effect fn writeObject(value: &i32, options: &JsonOptions)
+  -> () ! JsonError | WriterError ? &mut Writer {
+  return run JsonObject.begin(options)
+    |> JsonObject.field("x", value)
+    |> JsonObject.end
+}
+effect fn writeArray(values: &[i32], options: &JsonOptions)
+  -> () ! JsonError | WriterError ? &mut Writer {
+  return run JsonArray.begin(options)
+    |> JsonArray.items(values)
+    |> JsonArray.end
+}
+struct Sink {}
+effect fn writeAll(self: &mut Sink, values: &[u8]) -> () ! WriterError { return () }
+effect fn flush(self: &mut Sink) -> () ! WriterError { return () }
+impl Writer for Sink { writeAll: Sink.writeAll flush: Sink.flush }
+pub effect fn main() -> i32 ! JsonError | WriterError {
+  let options = JsonOptions.compact()
+  let value: i32 = 1
+  let values = [value]
+  let mut sink = Sink {}
+  run writeObject(&value, &options) |> Effect.provideMut<Writer>(&mut sink)
+  run writeArray(&values, &options) |> Effect.provideMut<Writer>(&mut sink)
+  return 0
+}`
+
+const jsonReflectProgram = `import silk.effect { Effect }
+import silk.json_output { JsonOptions }
+import silk.json_reflect { JsonReflect }
+import silk.json_scanner { JsonError }
+import silk.writer { Writer, WriterError }
+
+struct Hidden {}
+struct Record { pub alpha: i32 hidden: Hidden pub beta: bool }
+
+struct Sink {}
+effect fn writeAll(self: &mut Sink, values: &[u8]) -> () ! WriterError { return () }
+effect fn flush(self: &mut Sink) -> () ! WriterError { return () }
+impl Writer for Sink { writeAll: Sink.writeAll flush: Sink.flush }
+
+pub effect fn main() -> i32 ! JsonError | WriterError {
+  let value = Record { alpha: 7, hidden: Hidden {}, beta: true }
+  let options = JsonOptions.compact()
+  let mut sink = Sink {}
+  run JsonReflect.write<Record>(&value, &options) |> Effect.provideMut<Writer>(&mut sink)
+  return 0
+}`
+
+it.effect('reflects only visible serializable fields across the stdlib boundary', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/json-reflect',
+      ascii(jsonReflectProgram),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        source: diagnostic.span.sourceId,
+        start: diagnostic.span.start,
+      })),
+      [],
+    )
+  }),
+)
+
+const jsonReflectFailuresProgram = `import silk.effect { Effect }
+import silk.json_output { JsonOptions }
+import silk.json_reflect { JsonReflect }
+import silk.json_scanner { JsonError }
+import silk.writer { Writer, WriterError }
+
+struct Hidden {}
+struct Missing { pub value: Hidden }
+tuple Pair(i32, i32)
+
+struct Sink {}
+effect fn writeAll(self: &mut Sink, values: &[u8]) -> () ! WriterError { return () }
+effect fn flush(self: &mut Sink) -> () ! WriterError { return () }
+impl Writer for Sink { writeAll: Sink.writeAll flush: Sink.flush }
+
+pub effect fn main() -> i32 ! JsonError | WriterError {
+  let missing = Missing { value: Hidden {} }
+  let pair = Pair(1, 2)
+  let options = JsonOptions.compact()
+  let mut sink = Sink {}
+  run JsonReflect.write<Missing>(&missing, &options)
+    |> Effect.provideMut<Writer>(&mut sink)
+  run JsonReflect.write<Pair>(&pair, &options)
+    |> Effect.provideMut<Writer>(&mut sink)
+  return 0
+}`
+
+it.effect('rejects positional aggregates and visible fields without Serialize', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/json-reflect-invalid',
+      ascii(jsonReflectFailuresProgram),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        source: diagnostic.span.sourceId,
+        start: diagnostic.span.start,
+      })),
+      [
+        { code: 'SEM0177', source: 'silk/json_reflect', start: 2091 },
+        { code: 'SEM0083', source: 'silk/json_reflect', start: 2675 },
+      ],
+    )
+  }),
+)
+
+it.effect('resolves JSON conversion contracts with exact allocation boundaries', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/json-codec',
+      ascii(jsonCodecProgram),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        message: diagnostic.message,
+        source: diagnostic.span.sourceId,
+        start: diagnostic.span.start,
+      })),
+      [],
+    )
+    const json = Analysis.declarationIndex(snapshot).modules.find(
+      (candidate) => candidate.module === 'silk/json_value',
+    )
+    const decode = json?.declarations.find(
+      (declaration) => declaration.associatedMember?.name === 'decode',
+    )
+    const deserialize = json?.declarations.find(
+      (declaration) => declaration.associatedMember?.name === 'deserialize',
+    )
+    const serialize = json?.declarations.find(
+      (declaration) => declaration.associatedMember?.name === 'serialize',
+    )
+    assert.isDefined(decode)
+    assert.isDefined(deserialize)
+    assert.isDefined(serialize)
+    if (decode === undefined || deserialize === undefined || serialize === undefined) return
+    const decoded = DeclarationFacts.callableContract(decode).result
+    const deserialized = DeclarationFacts.callableContract(deserialize).result
+    const serialized = DeclarationFacts.callableContract(serialize).result
+    assert.isFalse(Type.isEffect(decoded), 'Json.decode must not require an allocator')
+    assert.isTrue(Type.isEffect(deserialized))
+    assert.isTrue(Type.isEffect(serialized))
+    if (!Type.isEffect(deserialized) || !Type.isEffect(serialized)) return
+    assert.deepEqual(Type.failureMembers(deserialized).map(Type.encode), [
+      'silk/allocator.OutOfMemoryError',
+      'silk/json_scanner.JsonError',
+    ])
+    assert.deepEqual(
+      Type.requirementMembers(deserialized).map((requirement) => ({
+        capability: Type.encode(requirement.capability),
+        access: requirement.access,
+      })),
+      [{ capability: 'silk/allocator.Allocator', access: 'Exclusive' }],
+    )
+    assert.deepEqual(Type.failureMembers(serialized).map(Type.encode), [
+      'silk/json_scanner.JsonError',
+      'silk/writer.WriterError',
+    ])
+    assert.deepEqual(
+      Type.requirementMembers(serialized).map((requirement) => ({
+        capability: Type.encode(requirement.capability),
+        access: requirement.access,
+      })),
+      [{ capability: 'silk/writer.Writer', access: 'Exclusive' }],
+    )
+  }),
+)
+
+it.effect('keeps the JSON reader result tied to scratch with exact effect rows', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/json-reader',
+      ascii(jsonReaderProgram),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).filter(
+        (diagnostic) =>
+          diagnostic.span.sourceId === 'stdlib-namespace/json-reader' ||
+          diagnostic.span.sourceId === 'silk/json_reader',
+      ),
+      [],
+    )
+    const module = Analysis.declarationIndex(snapshot).modules.find(
+      (candidate) => candidate.module === 'silk/json_reader',
+    )
+    const next = module?.declarations.find(
+      (declaration) => declaration.associatedMember?.name === 'next',
+    )
+    const result = next === undefined ? undefined : DeclarationFacts.callableContract(next).result
+    assert.isTrue(result !== undefined && Type.isEffect(result))
+    if (result === undefined || !Type.isEffect(result)) return
+    assert.deepEqual(Type.failureMembers(result).map(Type.encode), [
+      'silk/buffered_input.BufferError',
+      'silk/json_scanner.JsonError',
+    ])
+    assert.deepEqual(
+      Type.requirementMembers(result).map((requirement) => ({
+        capability: Type.encode(requirement.capability),
+        access: requirement.access,
+      })),
+      [
+        { capability: 'silk/byte_duplex.ByteDuplex', access: 'Exclusive' },
+        { capability: 'silk/monotonic_clock.MonotonicClock', access: 'Exclusive' },
+      ],
+    )
+  }),
+)
+
 it.effect('resolves Option, Result, and Vector operations through their namespaces', () =>
   Effect.gen(function* () {
     const module = 'stdlib-namespace/qualified'

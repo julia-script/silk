@@ -53,41 +53,46 @@ const liveSnippets: ReadonlyArray<LiveSnippet> = Array.from(
   ]
 })
 
-it.effect('keeps every live landing-page example diagnostics-correct', () =>
-  Effect.gen(function* () {
-    assert.isAbove(liveSnippets.length, 0, 'the landing page must contain live examples')
-    for (const [index, snippet] of liveSnippets.entries()) {
-      const module = `landing-page/${index + 1}`
-      const bytes = new TextEncoder().encode(snippet.source)
-      const snapshot = yield* Analysis.makeRealized({
-        root: module,
-        configuration: {
-          profile: { target: snippet.target, artifact: 'object', runtime: { kind: 'none' } },
-        },
-      }).pipe(
-        Effect.provide(
-          SourceResolver.overlay([SourceFile.make(module, bytes)]).pipe(
-            Layer.provideMerge(SourceResolver.empty),
+it.effect(
+  'keeps every live landing-page example diagnostics-correct',
+  () =>
+    Effect.gen(function* () {
+      assert.isAbove(liveSnippets.length, 0, 'the landing page must contain live examples')
+      for (const [index, snippet] of liveSnippets.entries()) {
+        const module = `landing-page/${index + 1}`
+        const bytes = new TextEncoder().encode(snippet.source)
+        const snapshot = yield* Analysis.makeRealized({
+          root: module,
+          configuration: {
+            profile: { target: snippet.target, artifact: 'object', runtime: { kind: 'none' } },
+          },
+        }).pipe(
+          Effect.provide(
+            SourceResolver.overlay([SourceFile.make(module, bytes)]).pipe(
+              Layer.provideMerge(SourceResolver.empty),
+            ),
           ),
-        ),
-      )
-      const document = Document.make({
-        uri: module,
-        version: 0,
-        workspace: `snippet:${module}`,
-        module,
-        sourceRoot: '/',
-        bytes,
-      })
-      assert.deepStrictEqual(
-        Document.diagnostics(document, snapshot, () => undefined).map(
-          (diagnostic) => diagnostic.code,
-        ),
-        [...snippet.expectedDiagnosticCodes],
-        snippet.source,
-      )
-    }
-  }),
+        )
+        const document = Document.make({
+          uri: module,
+          version: 0,
+          workspace: `snippet:${module}`,
+          module,
+          sourceRoot: '/',
+          bytes,
+        })
+        assert.deepStrictEqual(
+          Document.diagnostics(document, snapshot, () => undefined).map(
+            (diagnostic) => diagnostic.code,
+          ),
+          [...snippet.expectedDiagnosticCodes],
+          snippet.source,
+        )
+      }
+    }),
+  // The landing-page analysis took 91.8s locally on 2026-09-23 with 167 stdlib modules.
+  // Allow headroom for slower CI runners and further stdlib growth.
+  180_000,
 )
 
 it('keeps landing-page string literals on one source line', () => {

@@ -37,6 +37,7 @@
 //! }
 //! ```
 
+
 /// An owned value that is either [`Some`] or [`None`].
 ///
 /// # Details

@@ -10,12 +10,18 @@ Writer-backed value presentation, statically validated templates, and complete d
 
 Use [`display`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e646973706c6179) for one value. Use [`format`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e666f726d6174) for a static template and a borrowed argument
 pack. Use [`displayWith`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e646973706c617957697468) when presentation needs explicit options. Integer `parse` operations
-are the allocation-free inverse of their default presentation.
+and [`f64Value`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e66363456616c7565)/[`f32Value`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e66333256616c7565) are allocation-free inverses of their default presentation.
 
 ## Details
 
 A [`Formatter`](#declaration-73696c6b2f666f726d61743a3a466f726d6174746572) carries presentation policy while the ambient [`Writer`](./writer.md#declaration-73696c6b2f7772697465723a3a577269746572) owns byte transport.
-Formatter and the shipped integer presentations do not allocate an intermediate `String`.
+Formatter and the shipped numeric presentations do not allocate an intermediate `String`.
+Finite floats use the shortest decimal significand that parses back to identical IEEE bits,
+preserving negative zero as `-0`. Supplying `precision` replaces that default with exactly
+that many fractional digits, rounded ties-to-even against the value's exact decimal
+expansion; a fixed presentation is therefore not required to round-trip.
+Nonfinite floats display as `NaN` or `Infinity`; formats requiring finite values must check
+with `f64.isFinite` or `f32.isFinite` before display.
 Width counts Unicode scalars rather than UTF-8 bytes or terminal cells. A Writer failure
 preserves any prefix that the provider accepted. Formatter does not roll output back.
 Template parsing, field selection, and `Display` selection occur during compilation.
@@ -202,8 +208,12 @@ Reports whether alternate presentation is requested.
 pub fn zeroPad<'life0>(self: &'life0 silk/format.Formatter) -> bool
 ```
 
-Reports whether width-driven integer zero padding is requested. A supplied precision disables
-that padding when presenting an integer.
+Reports whether integer width padding with zeroes is requested.
+
+#### Details
+
+A supplied precision disables this padding for integers. Float presentations use the fill
+scalar for width padding and never use zeroes.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e686173507265636973696f6e"></a>
 
@@ -223,8 +233,12 @@ Reports whether a numeric precision was supplied.
 pub fn precision<'life0>(self: &'life0 silk/format.Formatter) -> usize
 ```
 
-Returns the requested minimum digit count, or zero when no numeric precision was supplied. For
-integers, a supplied precision disables width-driven zero padding.
+Returns the requested digit count, or zero when no numeric precision was supplied.
+
+#### Details
+
+For integers this is a minimum digit count and disables width-driven zero padding. For floats
+it is the exact number of fractional digits.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e636f6c6f72"></a>
 
@@ -376,10 +390,12 @@ Displays one value with explicit options through the ambient mutable Writer.
 
 #### Details
 
-Width counts Unicode scalars. For integers, precision disables width-driven zero padding.
-Alternate form and color do not change integer output. This operation does not require
-Allocator. If Writer fails, an accepted prefix remains written and the original `WriterError`
-is preserved.
+Width counts Unicode scalars. For integers, precision is a minimum digit count and disables
+width-driven zero padding. For floats, precision is the exact number of fractional digits
+rounded ties-to-even, replacing the shortest round-tripping default; float padding always
+uses the fill scalar. Alternate form and color do not change numeric output. This operation
+does not require Allocator. If Writer fails, an accepted prefix remains written and the
+original `WriterError` is preserved.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e666f726d6174"></a>
 
@@ -481,6 +497,38 @@ Reads complete decimal text as a signed value, accepting one leading `-`.
 
 Digits accumulate negatively, so text naming `i64.MIN` reads like any other value. A leading `+`
 is not accepted. A value outside `i64.MIN`–`i64.MAX` is `OutOfRange`.
+
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e66363456616c7565"></a>
+
+### Associated function `Format.f64Value`
+
+```silk
+pub fn f64Value<'life0>(text: string<'life0>) -> silk/result.Result<f64, silk/format.ParseError>
+```
+
+Reads a complete finite decimal spelling, rounding directly to IEEE binary64.
+
+#### Details
+
+An optional sign, decimal point, and `e` exponent are accepted. `NaN` and `Infinity` are
+rejected. Overflow rounds to infinity and underflow rounds to signed zero. The fallback
+compares exact decimal values with binary64 rounding boundaries, including subnormals and
+ties to even; no intermediate floating-point multiplication decides the result.
+
+<a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e66333256616c7565"></a>
+
+### Associated function `Format.f32Value`
+
+```silk
+pub fn f32Value<'life0>(text: string<'life0>) -> silk/result.Result<f32, silk/format.ParseError>
+```
+
+Reads a complete finite decimal spelling, rounding directly to IEEE binary32.
+
+#### Details
+
+The decimal is never rounded through binary64, avoiding double rounding. Overflow produces
+infinity and underflow preserves the sign of zero.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61742e753856616c7565"></a>
 
@@ -688,8 +736,9 @@ Explicit policy for one formatting session.
 
 [`defaultOptions`](#declaration-73696c6b2f666f726d61743a3a466f726d61742e64656661756c744f7074696f6e73) uses no width, default alignment, a space fill, negative-only signs, no
 alternate form, no zero padding, no precision, and no color. Width counts Unicode scalars.
-For integers, precision disables width-driven zero padding. Alternate form and color do not
-change integer output.
+For integers, precision disables width-driven zero padding. For floats, precision selects
+fixed fractional digits instead of the shortest round-tripping form. Alternate form and color
+do not change numeric output.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61744f7074696f6e733a3a6669656c643a30"></a>
 
@@ -761,8 +810,14 @@ width-driven zero padding.
 pub precision: silk/option.Option<usize>
 ```
 
-Optional minimum digit count for numeric presentations. For integers, supplying precision
-disables width-driven zero padding.
+Optional digit count for numeric presentations.
+
+#### Details
+
+For integers, this is a minimum digit count and disables width-driven zero padding. For floats,
+it is the exact number of fractional digits, rounded ties-to-even. This replaces the shortest
+round-tripping default, so the output may not parse back to the original bits. Nonfinite floats
+ignore it.
 
 <a id="declaration-73696c6b2f666f726d61743a3a466f726d61744f7074696f6e733a3a6669656c643a37"></a>
 
@@ -1027,10 +1082,10 @@ display = isize.impl@9.display
 
 <a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a3130"></a>
 
-## Implementation `Display for string<'text>`
+## Implementation `Display for f64`
 
 ```silk
-impl Display for string<'text>
+impl Display for f64
 ```
 
 <a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31303a3a6f7065726174696f6e3a30"></a>
@@ -1038,7 +1093,68 @@ impl Display for string<'text>
 ### Operation `display`
 
 ```silk
-display = string.impl@10.display
+display = f64.impl@10.display
+```
+
+Writes the shortest decimal that parses back to these exact bits, or fixed fractional digits
+when precision is supplied.
+
+#### Details
+
+The default presentation is the shortest significand whose correctly rounded parse returns
+the original bits, so `f64Value` recovers the value exactly. Negative zero displays as `-0`.
+A supplied precision instead emits exactly that many fractional digits, rounded ties-to-even
+against the value's exact decimal expansion, which is not required to round-trip.
+
+#### Gotchas
+
+`NaN` and `Infinity` ignore precision and width-driven zero padding; only the sign policy
+applies, and it applies to `Infinity` alone. Float padding always uses the fill scalar.
+
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a3131"></a>
+
+## Implementation `Display for f32`
+
+```silk
+impl Display for f32
+```
+
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31313a3a6f7065726174696f6e3a30"></a>
+
+### Operation `display`
+
+```silk
+display = f32.impl@11.display
+```
+
+Writes the shortest decimal that parses back to these exact bits, or fixed fractional digits
+when precision is supplied.
+
+#### Details
+
+Rounding reads the binary32 expansion, so the result can differ from the binary64 nearest to
+the same literal. Negative zero displays as `-0`. A supplied precision emits exactly that
+many fractional digits, rounded ties-to-even, which is not required to round-trip.
+
+#### Gotchas
+
+`NaN` and `Infinity` ignore precision and width-driven zero padding; only the sign policy
+applies, and it applies to `Infinity` alone. Float padding always uses the fill scalar.
+
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a3132"></a>
+
+## Implementation `Display for string<'text>`
+
+```silk
+impl Display for string<'text>
+```
+
+<a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31323a3a6f7065726174696f6e3a30"></a>
+
+### Operation `display`
+
+```silk
+display = string.impl@12.display
 ```
 
 Writes the string's UTF-8 bytes through the ambient mutable Writer.

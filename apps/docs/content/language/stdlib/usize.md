@@ -330,7 +330,8 @@ range. Use this function when an out-of-range value is input data.
 pub fn toF32(value: usize) -> f32
 ```
 
-Converts `value` to the nearest `f32` value, with ties to even.
+Converts `value` to the nearest `f32` value, with ties to even. Only magnitudes below `2^24` are
+exactly representable, so a larger `usize` rounds.
 
 <a id="declaration-73696c6b2f7573697a653a3a746f463634"></a>
 
@@ -340,7 +341,8 @@ Converts `value` to the nearest `f32` value, with ties to even.
 pub fn toF64(value: usize) -> f64
 ```
 
-Converts `value` to the nearest `f64` value, with ties to even.
+Converts `value` to the nearest `f64` value, with ties to even. Only magnitudes below `2^53` are
+exactly representable, so a larger `usize` rounds. Every `usize` is exact on a 32-bit target.
 
 <a id="declaration-73696c6b2f7573697a653a3a616464"></a>
 

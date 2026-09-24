@@ -9,6 +9,7 @@ import { x25519AcceptanceSource } from './x25519Acceptance.js'
  */
 import { readFileSync } from 'node:fs'
 import { floatMathPrograms } from './floatMath.js'
+import { checkedConversionPrograms } from './checkedConversions.js'
 import { renameIndependentPolicy } from './independentPolicyRename.js'
 import {
   auditAllocatorSuspension,
@@ -55,6 +56,12 @@ import { httpContentAcceptanceSource } from './httpContentAcceptance.js'
 import { httpServerAcceptanceSource } from './httpServerAcceptance.js'
 import { websocketUpgradeAcceptanceSource } from './websocketUpgradeAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
+import { jsonScannerAcceptanceSource } from './jsonScannerAcceptance.js'
+import { utf8DecoderAcceptanceSource } from './utf8DecoderAcceptance.js'
+import { jsonReaderAcceptanceSource } from './jsonReaderAcceptance.js'
+import { jsonReflectAcceptanceSource } from './jsonReflectAcceptance.js'
+import { jsonValueAcceptanceSource } from './jsonValueAcceptance.js'
+import { jsonCodecAcceptanceSource } from './jsonCodecAcceptance.js'
 import { httpRequestAcceptanceSource } from './httpRequestAcceptance.js'
 import { httpClientOwnershipAcceptanceSource } from './httpClientOwnershipAcceptance.js'
 import {
@@ -508,6 +515,183 @@ effect fn build() -> i32 ! WriterError {
 }
 effect fn recover(error: WriterError) -> i32 { return 1 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
+
+/**
+ * Float presentation is checked through the real Writer boundary: fixed precision against pinned
+ * bytes, and the default shortest form against the parser it must round-trip through. Every
+ * failure returns its own code so a native run names the case.
+ */
+export const floatFormattingAcceptance = `import silk.effect { Effect }
+import silk.f32
+import silk.f64
+import silk.format { Alignment, Format, FormatOptions, ParseError, Sign }
+import silk.option { Option }
+import silk.result { Result }
+import silk.slice { Slice }
+import silk.string { String, InvalidUtf8 }
+import silk.u32
+import silk.u64
+import silk.usize
+import silk.writer { Writer, WriterError }
+
+struct Capture { bytes: [u8; 64] count: usize }
+
+effect fn writeAll(self: &mut Capture, bytes: &[u8]) -> () {
+  let mut offset = usize.ZERO
+  while offset < bytes.length {
+    if self.count < 64 {
+      self.bytes[self.count] = bytes[offset]
+      self.count = self.count + usize.ONE
+    }
+    offset = offset + usize.ONE
+  }
+  return ()
+}
+effect fn flush(self: &mut Capture) -> () { return () }
+impl Writer for Capture { writeAll: Capture.writeAll flush: Capture.flush }
+
+fn capture() -> Capture {
+  return Capture { bytes: [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ], count: usize.ZERO }
+}
+
+fn fixed(precision: usize) -> FormatOptions {
+  return FormatOptions {
+    width: Option.none<usize>(), alignment: Alignment.Default, fill: ' ',
+    sign: Sign.NegativeOnly, alternate: false, zeroPad: false,
+    precision: Option.some<usize>(precision), color: false,
+  }
+}
+
+fn padded(width: usize, alignment: Alignment, fill: char, sign: Sign, precision: Option<usize>)
+  -> FormatOptions {
+  return FormatOptions {
+    width: Option.some<usize>(width), alignment: alignment, fill: fill, sign: sign,
+    alternate: false, zeroPad: true, precision: move precision, color: false,
+  }
+}
+
+fn matches(self: &Capture, expected: &[u8]) -> bool {
+  if self.count != expected.length { return false }
+  let mut index = usize.ZERO
+  while index < self.count {
+    if self.bytes[index] != expected[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+effect fn rendersF64(value: f64, options: FormatOptions, expected: &[u8]) -> bool ! WriterError {
+  let mut capture = capture()
+  run Format.displayWith(&value, move options) |> Effect.provideMut<Writer>(&mut capture)
+  return matches(&capture, expected)
+}
+
+effect fn rendersF32(value: f32, options: FormatOptions, expected: &[u8]) -> bool ! WriterError {
+  let mut capture = capture()
+  run Format.displayWith(&value, move options) |> Effect.provideMut<Writer>(&mut capture)
+  return matches(&capture, expected)
+}
+
+// The default presentation must land on bits identical to its input, which is the round-trip
+// guarantee itself rather than a pinned spelling.
+effect fn roundTrips(bits: u64) -> bool ! WriterError {
+  let value = f64.fromBits(bits)
+  let mut capture = capture()
+  run Format.display(&value) |> Effect.provideMut<Writer>(&mut capture)
+  let bytes = Slice.view<u8>(&capture.bytes, usize.ZERO, capture.count)
+  return match move String.fromUtf8(bytes) {
+    Result<string, InvalidUtf8>.Failure { error: _ } => false
+    Result<string, InvalidUtf8>.Success { value: text } => match move Format.f64Value(text) {
+      Result<f64, ParseError>.Failure { error: _ } => false
+      Result<f64, ParseError>.Success { value: parsed } => f64.toBits(parsed) == bits
+    }
+  }
+}
+
+effect fn roundTripsF32(bits: u32) -> bool ! WriterError {
+  let value = f32.fromBits(bits)
+  let mut capture = capture()
+  run Format.display(&value) |> Effect.provideMut<Writer>(&mut capture)
+  let bytes = Slice.view<u8>(&capture.bytes, usize.ZERO, capture.count)
+  return match move String.fromUtf8(bytes) {
+    Result<string, InvalidUtf8>.Failure { error: _ } => false
+    Result<string, InvalidUtf8>.Success { value: text } => match move Format.f32Value(text) {
+      Result<f32, ParseError>.Failure { error: _ } => false
+      Result<f32, ParseError>.Success { value: parsed } => f32.toBits(parsed) == bits
+    }
+  }
+}
+
+effect fn check() -> i32 ! WriterError {
+  // Fixed precision truncates to the requested fractional digits and pads short expansions.
+  if !(run rendersF64(1.5, fixed(2), b"1.50")) { return 1 }
+  if !(run rendersF64(0.125, fixed(2), b"0.12")) { return 2 }
+  if !(run rendersF64(0.375, fixed(2), b"0.38")) { return 3 }
+  // Ties land on the even retained digit in both directions.
+  if !(run rendersF64(0.5, fixed(0), b"0")) { return 4 }
+  if !(run rendersF64(1.5, fixed(0), b"2")) { return 5 }
+  if !(run rendersF64(2.5, fixed(0), b"2")) { return 6 }
+  if !(run rendersF64(3.5, fixed(0), b"4")) { return 7 }
+  // A carry that escapes every retained digit widens the integer part.
+  if !(run rendersF64(9.99, fixed(1), b"10.0")) { return 8 }
+  if !(run rendersF64(0.99, fixed(1), b"1.0")) { return 9 }
+  // Values below the retained window round to zero, or up to one final unit.
+  if !(run rendersF64(0.0001, fixed(2), b"0.00")) { return 10 }
+  if !(run rendersF64(0.6, fixed(0), b"1")) { return 11 }
+  // 0.1 has no finite binary expansion; its exact decimal tail decides the last digit.
+  if !(run rendersF64(0.1, fixed(20), b"0.10000000000000000555")) { return 12 }
+  // Zero keeps its sign and still fills every requested place.
+  if !(run rendersF64(0.0, fixed(3), b"0.000")) { return 13 }
+  if !(run rendersF64(f64.fromBits(9223372036854775808), fixed(3), b"-0.000")) { return 14 }
+  if !(run rendersF64(f64.fromBits(9223372036854775808), fixed(0), b"-0")) { return 15 }
+  // Default output preserves signed zero without a fractional part.
+  if !(run rendersF64(f64.fromBits(9223372036854775808),
+    padded(0, Alignment.Default, ' ', Sign.NegativeOnly, Option.none<usize>()), b"-0")) { return 16 }
+  // Special values ignore precision and keep only the sign policy.
+  if !(run rendersF64(f64.fromBits(9218868437227405312), fixed(4), b"Infinity")) { return 17 }
+  if !(run rendersF64(f64.fromBits(18442240474082181120), fixed(4), b"-Infinity")) { return 18 }
+  if !(run rendersF64(f64.fromBits(9221120237041090560), fixed(4), b"NaN")) { return 19 }
+  // Sign policy and width apply to the fixed form; float padding uses the fill, not zeroes.
+  if !(run rendersF64(1.25,
+    padded(8, Alignment.Right, '*', Sign.Always, Option.some<usize>(1)), b"****+1.2")) { return 20 }
+  if !(run rendersF64(0.0 - 1.25,
+    padded(8, Alignment.Left, '.', Sign.NegativeOnly, Option.some<usize>(3)), b"-1.250..")) { return 21 }
+  if !(run rendersF64(1.0,
+    padded(7, Alignment.Center, '-', Sign.Space, Option.some<usize>(1)), b"- 1.0--")) { return 22 }
+  // f32 rounds its own exact expansion, which differs from the f64 nearest to the same literal.
+  if !(run rendersF32(f32.fromBits(1), fixed(3), b"0.000")) { return 23 }
+  if !(run rendersF32(0.1, fixed(10), b"0.1000000015")) { return 24 }
+  // Default output round-trips across subnormals, boundaries, halfway patterns, and a sweep.
+  if !(run roundTrips(0)) { return 25 }
+  if !(run roundTrips(1)) { return 26 }
+  if !(run roundTrips(4503599627370495)) { return 27 }
+  if !(run roundTrips(4503599627370496)) { return 28 }
+  if !(run roundTrips(9218868437227405311)) { return 29 }
+  if !(run roundTrips(4607182418800017408)) { return 30 }
+  if !(run roundTripsF32(1)) { return 31 }
+  if !(run roundTripsF32(8388607)) { return 32 }
+  if !(run roundTripsF32(8388608)) { return 33 }
+  if !(run roundTripsF32(2139095039)) { return 34 }
+  let mut state = u64.toU64(88172645463325252)
+  let mut trial = usize.ZERO
+  while trial < 128 {
+    state = u64.bitXor(state, u64.shiftLeft(state, 13))
+    state = u64.bitXor(state, u64.shiftRight(state, 7))
+    state = u64.bitXor(state, u64.shiftLeft(state, 17))
+    let candidate = u64.bitAnd(state, 9218868437227405311)
+    if !(run roundTrips(candidate)) { return 35 }
+    trial = trial + usize.ONE
+  }
+  return 42
+}
+
+effect fn recover(error: WriterError) -> i32 { return 99 }
+pub fn main() -> i32 { return run Effect.catchAll(check(), recover) }`
 
 /** Closed Effect values survive ordinary passing, storage, capture, return, and specialization. */
 export const effectHigherOrderValues = `effect fn succeed(value: i32) -> i32 { return value }
@@ -1766,6 +1950,11 @@ pub fn main() -> i32 {
     name: 'format-options',
     source: formatOptionsAcceptance,
     nativeStdout: `***-0042|+42...|éé000éé|-000042|·-7··|${'_'.repeat(33)}42`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'float-formatting',
+    source: floatFormattingAcceptance,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -5467,6 +5656,11 @@ pub fn main() -> i32 {
     source: program.source,
     expected: { _tag: 'Completes', result: 42 } as const,
   })),
+  ...checkedConversionPrograms.map((program) => ({
+    name: program.name,
+    source: program.source,
+    expected: { _tag: 'Completes', result: 42 } as const,
+  })),
   // Raw pointer parity: a formed slice pointer offset and written, then observed through the
   // array place; and a Silk callee writing through a `*mut i32` parameter observed by its caller.
   {
@@ -6568,6 +6762,91 @@ pub fn main() -> i32 { return run Effect.catchAll(verify(), recover) }`,
     name: 'base64-rfc4648',
     source: base64AcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'json-scanner',
+    source: jsonScannerAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'utf8-decoder',
+    source: utf8DecoderAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'format-float-parser',
+    source: `import silk.f32
+import silk.f64
+import silk.format { Format, ParseError }
+import silk.result { Result }
+
+fn check64(text: string, expected: u64) -> bool {
+  return match move Format.f64Value(text) {
+    Result<f64, ParseError>.Success { value } => f64.toBits(value) == expected
+    Result<f64, ParseError>.Failure { error } => false
+  }
+}
+
+fn check32(text: string, expected: u32) -> bool {
+  return match move Format.f32Value(text) {
+    Result<f32, ParseError>.Success { value } => f32.toBits(value) == expected
+    Result<f32, ParseError>.Failure { error } => false
+  }
+}
+
+fn rejects64(text: string) -> bool {
+  return match move Format.f64Value(text) {
+    Result<f64, ParseError>.Success { value } => false
+    Result<f64, ParseError>.Failure { error } => true
+  }
+}
+
+pub fn main() -> i32 {
+  if !check64("0", 0) { return 1 }
+  if !check64("-0.0", 9223372036854775808) { return 2 }
+  if !check64("1", 4607182418800017408) { return 3 }
+  if !check64("0.1", 4591870180066957722) { return 4 }
+  if !check64("9007199254740993", 4845873199050653696) { return 5 }
+  if !check64("4.9406564584124654e-324", 1) { return 6 }
+  if !check64("1e-325", 0) { return 7 }
+  if !check64("1.7976931348623157e308", 9218868437227405311) { return 8 }
+  if !check64("1e309", 9218868437227405312) { return 9 }
+  if !check64("2.2250738585072014e-308", 4503599627370496) { return 15 }
+  if !check64("2.2250738585072011e-308", 4503599627370495) { return 16 }
+  if !check64("1234567890123456789012345678901234567890e-340", 105036779111555283) { return 17 }
+  if !check64("0.3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333", 4599676419421066581) { return 18 }
+  if !check64("-1e-100000", 9223372036854775808) { return 19 }
+  if !check64("-1e100000", 18442240474082181120) { return 20 }
+  if !check32("1", 1065353216) { return 10 }
+  if !check32("1.401298464324817e-45", 1) { return 11 }
+  if !check32("3.4028234664e38", 2139095039) { return 12 }
+  if !check32("1.0000000596046447753906250000000001", 1065353217) { return 13 }
+  if !check32("16777217", 1266679808) { return 21 }
+  if !check32("1.17549435e-38", 8388608) { return 22 }
+  if !rejects64("NaN") || !rejects64("Infinity") || !rejects64("1e") || !rejects64("1x") { return 14 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'json-reader',
+    source: jsonReaderAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'json-value',
+    source: jsonValueAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'json-codec',
+    source: jsonCodecAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'json-reflect',
+    source: jsonReflectAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
   },
   {
     name: 'buffered-byte-io',

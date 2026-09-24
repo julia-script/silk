@@ -1228,6 +1228,8 @@ pub fn main() -> i32 {
         assert.deepEqual(yield* LayoutVerify.verify(planned.value), [])
       }
     }),
+  // Every target outcome layout took 20.2s locally on 2026-09-23 and exceeded 60s in CI shard 2.
+  120_000,
 )
 
 it.effect('rejects non-canonical failure tags before payload-member indexing', () =>

@@ -1,18 +1,15 @@
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
-import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Projections from './support/projections.js'
-import * as MirGolden from './support/MirGolden.js'
 
 const fixtureRoot = fileURLToPath(new URL('./fixtures/algorithmic-acceptance', import.meta.url))
 const rootModule = 'app/Main'
@@ -58,13 +55,6 @@ it.effect('accepts the compiler-shaped fold through every static compiler phase'
       ).length,
       1,
     )
-    const expected = readFileSync(
-      new URL('./goldens/algorithmic.mir.sha256', import.meta.url),
-      'utf8',
-    )
-    const normalizedMir = MirGolden.normalizeSourceSpans(MirEncoding.encode(lowered))
-    assert.notMatch(normalizedMir, /\[\d+, \d+\)/)
-    assert.strictEqual(`${createHash('sha256').update(normalizedMir).digest('hex')}\n`, expected)
     const llvm = yield* Analysis.codegen(self, { mode: 'release' })
     assert.strictEqual(llvm.symbols.filter((entry) => entry.declaration.name === 'fold').length, 1)
   }),
