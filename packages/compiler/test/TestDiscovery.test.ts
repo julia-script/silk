@@ -84,6 +84,20 @@ const defaultEnvironment: TestExecution.Environment = {
   complete: true,
 }
 
+const manifestOf = Effect.fnUntraced(function* (
+  analysis: Analysis.Snapshot,
+  environment: TestExecution.Environment,
+) {
+  const catalog = analysis.testCatalog
+  if (catalog === undefined) return unreachable('expected test catalog')
+  return yield* TestExecution.make({
+    catalog,
+    discovery: Analysis.instancesOf(analysis),
+    results: analysis.results,
+    environment,
+  })
+})
+
 const executionSnapshot = Effect.fnUntraced(function* (
   text: string,
   environment: TestExecution.Environment = defaultEnvironment,
@@ -100,15 +114,7 @@ const executionSnapshot = Effect.fnUntraced(function* (
     ),
   )
   assert.deepEqual(Analysis.diagnostics(analysis), [])
-  const catalog = analysis.testCatalog
-  assert.isDefined(catalog)
-  if (catalog === undefined) return unreachable('expected test catalog')
-  const manifest = yield* TestExecution.make({
-    catalog,
-    discovery: Analysis.instancesOf(analysis),
-    results: analysis.results,
-    environment,
-  })
+  const manifest = yield* manifestOf(analysis, environment)
   return { analysis, manifest }
 })
 
@@ -714,31 +720,16 @@ pub fn main() -> () {
       optimization: 'speed',
       safety: 'checked',
     })
-    const before = yield* executionManifest(source, {
+    const { analysis, manifest: before } = yield* executionSnapshot(source, {
+      ...defaultEnvironment,
       profileIdentity: published.identity,
-      bootstrapIdentity: 'bootstrap-a',
-      runnerIdentity: TestExecution.runnerPolicyIdentity,
-      compilerIdentity: 'compiler-a',
-      runtimeIdentity: 'runtime-a',
-      nativeIdentity: 'native-a',
-      complete: true,
     })
-    const changed = yield* executionManifest(source, {
+    const changed = yield* manifestOf(analysis, {
+      ...defaultEnvironment,
       profileIdentity: changedProfile.identity,
-      bootstrapIdentity: 'bootstrap-a',
-      runnerIdentity: TestExecution.runnerPolicyIdentity,
-      compilerIdentity: 'compiler-a',
-      runtimeIdentity: 'runtime-a',
-      nativeIdentity: 'native-a',
-      complete: true,
     })
-    const incomplete = yield* executionManifest(source, {
-      profileIdentity: 'profile-a',
-      bootstrapIdentity: 'bootstrap-a',
-      runnerIdentity: TestExecution.runnerPolicyIdentity,
-      compilerIdentity: 'compiler-a',
-      runtimeIdentity: 'runtime-a',
-      nativeIdentity: 'native-a',
+    const incomplete = yield* manifestOf(analysis, {
+      ...defaultEnvironment,
       complete: false,
     })
     assert.notStrictEqual(changed.environmentIdentity, before.environmentIdentity)

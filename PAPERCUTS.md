@@ -2,6 +2,11 @@
 
 Format: date · symptom · fix · project. Check here first when tooling is slow or fails mysteriously.
 
+- 2026-09-23 · A fresh task checkout had no `node_modules`; offline pnpm install missed cached
+  tarballs and sandboxed registry requests failed DNS resolution, then focused Vitest could not
+  import `ToolchainIntegrity.generated.js` · Run the lockfile install with approved network access
+  and `pnpm --filter @silklang/compiler toolchain:generate` before focused checks · compiler
+
 - 2026-09-23 · A delegated worktree had only a partial `node_modules`; `pnpm exec` automatically
   attempted a full install and stalled on unavailable npm registry DNS · Stop the retry, use the
   prepared main checkout's dependency links and binaries for focused checks, and pass Vitest
@@ -109,3 +114,18 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 cover bool` plus a parse error on each arm: `true` and `false` are not patterns, so the arms read
   as binding identifiers · Use an `if` with a `mut` local; `match` is for unions and enums only ·
   compiler
+- 2026-09-23 · A filtered `pnpm exec vitest list` probe unexpectedly started recreating root
+  `node_modules`, then registry DNS failures left `.bin` missing · Stop the install, move the
+  incomplete directory aside, link the prepared main checkout's `node_modules`, and invoke its
+  binaries directly for focused local checks · compiler CI
+- 2026-09-23 · The codebase-memory index worker refused this worktree because another generation
+  was active, so graph discovery could not start · Inspect its log, then use targeted source reads
+  for the workflow and report script until indexing is available · compiler CI
+- 2026-09-23 · Focused Oxlint on script paths passed, but CI's full type-aware lint found floating
+  Node test promises and direct process environment reads · Await Node test registrations, pass
+  the GitHub summary path as an argument, and verify against full-root lint when dependencies are
+  complete · compiler CI
+- 2026-09-23 · After the interrupted install was cleaned up, worktree Oxlint could not resolve its
+  preset, while main-checkout Oxlint treated the worktree config as a nested root config · Confirm
+  both lockfiles and Oxlint configs match, then lint the changed absolute paths from the prepared
+  checkout with `--disable-nested-config` · compiler CI
