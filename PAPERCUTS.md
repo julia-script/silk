@@ -220,3 +220,6 @@ HEAD...@{u}` before reporting a head, and confirm each claimed deliverable again
   checkout with `--disable-nested-config` · compiler CI
 - 2026-09-24 · `rtk vitest --version` produced no output and stalled during a focused merge check ·
   Stop that probe and invoke the prepared `node_modules/.bin/vitest` directly · compiler
+- 2026-09-24 · Focused TOML tests appeared to ignore recent Silk source edits because the compiler reads generated embedded stdlib text · Run `node packages/compiler/scripts/generate-stdlib.mjs` after each stdlib edit before testing · compiler
+- 2026-09-24 · `pnpm exec vitest` in the TOML task worktree retried unreachable registry downloads and left only a partial `node_modules` · Stop the repair, link the prepared main checkout dependencies, and invoke its Vitest binary directly · compiler
+- 2026-09-24 · Linked dependencies in a TOML task checkout changed while focused checks ran, leaving `effect` and `typescript` links broken; an offline install lacked a cached tarball · Run a lockfile-frozen install with network access in the task checkout before documentation and Vitest checks · compiler

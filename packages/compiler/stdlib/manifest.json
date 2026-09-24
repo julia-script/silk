@@ -1074,6 +1074,34 @@
     ]
   },
   {
+    "module": "silk/toml_codec",
+    "path": "silk/toml_codec.silk",
+    "namespace": "TomlCodec",
+    "aliases": ["Serialize", "Decode", "Deserialize"]
+  },
+  {
+    "module": "silk/toml_output",
+    "path": "silk/toml_output.silk",
+    "namespace": "TomlOutput"
+  },
+  {
+    "module": "silk/toml_scanner",
+    "path": "silk/toml_scanner.silk",
+    "namespace": "TomlScanner",
+    "aliases": ["TomlError", "TomlReason", "TomlScalarKind", "TomlSpan", "TomlToken"]
+  },
+  {
+    "module": "silk/toml_text",
+    "path": "silk/toml_text.silk",
+    "namespace": "TomlText"
+  },
+  {
+    "module": "silk/toml_value",
+    "path": "silk/toml_value.silk",
+    "namespace": "Toml",
+    "aliases": ["Value", "TomlEntry", "TomlChild", "TableKind"]
+  },
+  {
     "module": "silk/trust_anchor",
     "path": "silk/trust_anchor.silk",
     "namespace": "TrustAnchor"

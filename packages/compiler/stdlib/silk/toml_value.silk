@@ -1,0 +1,743 @@
+//! Owned TOML documents with ordered tables and distinct scalar kinds.
+//!
+//! # When to use
+//! Use [`Toml.parse`] to validate and own a complete TOML document, then borrow fields from
+//! its root table. Every allocation uses the ambient Allocator and partial trees drop on failure.
+//!
+//! # Details
+//! Tables keep key order. Numeric and date/time values keep their validated source text.
+//! String values contain decoded UTF-8 text.
+//!
+//! # Gotchas
+//! A borrowed field cannot outlive its document. Use `silk.toml_output` to write the owned tree.
+//!
+//! # Examples
+//! ## Read a nested string
+//! ```silk
+//! import silk.allocator as Allocators {Allocator, OutOfMemoryError}
+//! import silk.effect as Effects {Effect}
+//! import silk.option as Options {Option}
+//! import silk.toml_scanner as Scanners {TomlError}
+//! import silk.toml_value as Values {Toml}
+//!
+//! effect fn read() -> i32 ! TomlError | OutOfMemoryError {
+//!   let mut allocator = Allocator.systemAllocatorProvider()
+//!   let document = run Toml.parse(b"[owner]\nname = \"Ada\"\n")
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   let owner = Toml.field(&document, "owner")
+//!   let name = Toml.fieldAt(move owner, "name")
+//!     |> Toml.asString
+//!   return match move name {
+//!     Option<string>.Some {value} => {
+//!       if value == "Ada" {
+//!         return 0
+//!       }
+//!       return 1
+//!     }
+//!     Option<string>.None => {
+//!       return 2
+//!     }
+//!   }
+//! }
+//!
+//! effect fn recover(error: TomlError | OutOfMemoryError) -> i32 {
+//!   return 3
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   return run Effect.catchAll(read(), recover)
+//! }
+//! ```
+
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.box { Box }
+import silk.bytes { Bytes }
+import silk.option { Option }
+import silk.result { Result }
+import silk.slice { Slice }
+import silk.string { String }
+import silk.toml_scanner { TomlError, TomlReason, TomlScalarKind, TomlScanner, TomlSpan, TomlToken }
+import silk.toml_text { TomlText }
+import silk.u8
+import silk.usize
+import silk.vector { Vector }
+
+/// How a table was first defined. An inline table is closed to later document definitions.
+pub enum TableKind {
+  /// A table created by a later header path.
+  Implicit,
+  /// A table created by a dotted key.
+  Dotted,
+  /// A table defined by a header.
+  Explicit,
+  /// A table defined inside braces and closed to later definitions.
+  Inline,
+}
+
+/// One ordered table member.
+pub struct TomlEntry {
+  /// The decoded member key.
+  pub key: String
+  /// The owned member value.
+  pub value: Value
+}
+
+/// Recursive storage shared by tables and arrays.
+pub union TomlChild {
+  /// An array element without a key.
+  Item {
+    /// The owned element value.
+    pub value: Value
+  },
+  /// A table member with its key.
+  Member {
+    /// The owned key and value.
+    pub entry: TomlEntry
+  },
+}
+
+/// An owned TOML value. Numeric and temporal spellings retain their validated source precision.
+pub union Value {
+  /// A validated integer in its source spelling.
+  Integer {
+    /// The validated integer text.
+    pub text: String
+  },
+  /// A validated float in its source spelling.
+  Float {
+    /// The validated float text.
+    pub text: String
+  },
+  /// A TOML boolean.
+  Boolean {
+    /// The boolean value.
+    pub value: bool
+  },
+  /// A date and time with an explicit offset and retained precision.
+  OffsetDateTime {
+    /// The validated source text.
+    pub text: String
+  },
+  /// A date and time without an offset and with retained precision.
+  LocalDateTime {
+    /// The validated source text.
+    pub text: String
+  },
+  /// A calendar date without a time.
+  LocalDate {
+    /// The validated source text.
+    pub text: String
+  },
+  /// A clock time without a date and with retained precision.
+  LocalTime {
+    /// The validated source text.
+    pub text: String
+  },
+  /// Decoded UTF-8 text.
+  String {
+    /// The decoded text.
+    pub text: String
+  },
+  /// Ordered values or an array of tables.
+  Array {
+    /// The owned elements in source order.
+    pub values: Box<Vector<TomlChild>>,
+    /// Whether the array came from `[[table]]` headers.
+    pub tables: bool
+  },
+  /// Ordered key/value members.
+  Table {
+    /// The owned members in source order.
+    pub entries: Box<Vector<TomlChild>>,
+    /// How the table was defined.
+    pub kind: TableKind
+  },
+}
+
+struct KeyPart {
+  name: String
+  offset: usize
+}
+
+/// Operations on complete owned TOML documents.
+pub struct Toml {}
+
+impl Toml {
+  /// Parses one complete UTF-8 document into an owned root table.
+  ///
+  /// # Details
+  /// All allocations use the ambient allocator. Syntax errors include a reason and byte offset.
+  /// If parsing fails, the partial tree is released.
+  pub effect fn parse(bytes: &[u8]) -> Value ! TomlError | OutOfMemoryError ? &mut Allocator {
+    let mut scanner = TomlScanner.make(bytes)
+    let valid = TomlScanner.validate(&mut scanner)
+    match move valid {
+      Result<bool, TomlError>.Failure { error } => { fail move error }
+      Result<bool, TomlError>.Success { value: _ } => {}
+    }
+    let mut root = run table(TableKind.Explicit)
+    let mut current = Vector.make<KeyPart>()
+    while true {
+      let at = TomlScanner.offset(&scanner)
+      let first = run next(&mut scanner)
+      match move first {
+        TomlToken.EndOfInput => { return move root }
+        TomlToken.Newline => {}
+        TomlToken.ArrayBegin => {
+          let second = run next(&mut scanner)
+          let mut array = false
+          let mut keyFirst = move second
+          match &keyFirst {
+            TomlToken.ArrayBegin => { array = true }
+            _ => {}
+          }
+          if array { keyFirst = run next(&mut scanner) }
+          let parsed = run key(&mut scanner, move keyFirst)
+          let ParsedKey { parts, delimiter } = move parsed
+          let previous = Intrinsic.replace(current, move parts)
+          drop previous
+          match move delimiter {
+            TomlToken.ArrayEnd => {}
+            _ => { fail problem(TomlReason.UnexpectedByte, at) }
+          }
+          if array {
+            let close = run next(&mut scanner)
+            match move close {
+              TomlToken.ArrayEnd => {}
+              _ => { fail problem(TomlReason.UnexpectedByte, at) }
+            }
+          }
+          let path = Vector.asSlice<KeyPart>(&current)
+          let updated = run defineHeader(move root, path, usize.ZERO, array)
+          root = move updated
+        }
+        TomlToken.Text { span } => {
+          let updated = run assignment(&mut scanner, move root, &current, TomlToken.Text { span: span }, at)
+          root = move updated
+        }
+        TomlToken.String { span, literal, multiline } => {
+          let updated = run assignment(&mut scanner, move root, &current,
+            TomlToken.String { span: span, literal: literal, multiline: multiline }, at)
+          root = move updated
+        }
+        _ => { fail problem(TomlReason.UnexpectedByte, at) }
+      }
+    }
+    fail problem(TomlReason.UnexpectedEnd, bytes.length)
+  }
+
+  /// Borrows a table member by decoded key, or returns `None` for absence or another value kind.
+  pub fn field<'a>(self: &'a Value, name: string) -> Option<&'a Value> {
+    return match &self.* {
+      Value.Table { entries, kind: _ } => {
+        let boxed = Box.get<Vector<TomlChild>>(&entries)
+        return find(&boxed[0], name)
+      }
+      _ => Option.none<&'a Value>()
+    }
+  }
+
+  /// Borrows a nested table member through an optional value, or returns `None`.
+  pub fn fieldAt<'a>(self: Option<&'a Value>, name: string) -> Option<&'a Value> {
+    return match move self {
+      Option<&'a Value>.None => Option.none<&'a Value>()
+      Option<&'a Value>.Some { value } => Toml.field(value, name)
+    }
+  }
+
+  /// Borrows an array element, or returns None for an absent index or another value kind.
+  pub fn item<'a>(self: &'a Value, index: usize) -> Option<&'a Value> {
+    return match &self.* {
+      Value.Array { values, tables: _ } => {
+        let boxed = Box.get<Vector<TomlChild>>(&values)
+        let items = Vector.asSlice<TomlChild>(&boxed[0])
+        if index >= items.length { return Option.none<&'a Value>() }
+        return match &items[index] {
+          TomlChild.Item { value } => Option.some<&'a Value>(&value)
+          _ => Option.none<&'a Value>()
+        }
+      }
+      _ => Option.none<&'a Value>()
+    }
+  }
+
+  /// Borrows decoded UTF-8 string text, or returns `None` for another value kind.
+  pub fn asString<'a>(self: Option<&'a Value>) -> Option<string<'a>> {
+    return match move self {
+      Option<&'a Value>.None => Option.none<string<'a>>()
+      Option<&'a Value>.Some { value } => match &value.* {
+        Value.String { text } => Option.some<string<'a>>(String.view(&text))
+        _ => Option.none<string<'a>>()
+      }
+    }
+  }
+}
+
+struct ParsedKey {
+  parts: Vector<KeyPart>
+  delimiter: TomlToken
+}
+
+effect fn assignment(scanner: &mut TomlScanner, root: Value,
+  current: &Vector<KeyPart>, first: TomlToken, at: usize)
+  -> Value ! TomlError | OutOfMemoryError ? &mut Allocator {
+  let parsed = run key(&mut scanner.*, move first)
+  let ParsedKey { parts, delimiter } = move parsed
+  match move delimiter {
+    TomlToken.Equals => {}
+    _ => { fail problem(TomlReason.UnexpectedByte, at) }
+  }
+  let valueToken = run next(&mut scanner.*)
+  let value = run parseValue(&mut scanner.*, move valueToken)
+  return run insertAt(move root, Vector.asSlice<KeyPart>(current), usize.ZERO,
+    Vector.asSlice<KeyPart>(&parts), usize.ZERO, move value, false)
+}
+
+effect fn key(scanner: &mut TomlScanner, first: TomlToken)
+  -> ParsedKey ! TomlError | OutOfMemoryError ? &mut Allocator {
+  return run keyRest(&mut scanner.*, Vector.make<KeyPart>(), move first)
+}
+
+effect fn keyRest(scanner: &mut TomlScanner, parts: Vector<KeyPart>, token: TomlToken)
+  -> ParsedKey ! TomlError | OutOfMemoryError ? &mut Allocator {
+  let mut owned = move parts
+  let trailingDot = run appendKeyToken(&mut scanner.*, &mut owned, move token)
+  let separator = run next(&mut scanner.*)
+  if trailingDot { return run keyRest(&mut scanner.*, move owned, move separator) }
+  return match move separator {
+    TomlToken.Dot => {
+      let part = run next(&mut scanner.*)
+      return run keyRest(&mut scanner.*, move owned, move part)
+    }
+    TomlToken.Equals => ParsedKey { parts: move owned, delimiter: TomlToken.Equals }
+    TomlToken.ArrayEnd => ParsedKey { parts: move owned, delimiter: TomlToken.ArrayEnd }
+    TomlToken.Comma => ParsedKey { parts: move owned, delimiter: TomlToken.Comma }
+    _ => { fail problem(TomlReason.UnexpectedByte, TomlScanner.offset(&scanner.*)) }
+  }
+}
+
+effect fn appendKeyToken(scanner: &mut TomlScanner, parts: &mut Vector<KeyPart>, token: TomlToken)
+  -> bool ! TomlError | OutOfMemoryError ? &mut Allocator {
+  return match move token {
+    TomlToken.Text { span } => {
+      let raw = TomlScanner.slice(&scanner.*, span)
+      let mut start = usize.ZERO
+      let mut at = usize.ZERO
+      while at < raw.length {
+        if raw[at] == 46 {
+          if at == start { fail problem(TomlReason.UnexpectedByte, span.offset + at) }
+          let segment = Slice.view<u8>(raw, start, at - start)
+          run appendPart(&mut parts.*, segment, span.offset + start)
+          start = at + usize.ONE
+        }
+        at = at + usize.ONE
+      }
+      if start < raw.length {
+        run appendPart(&mut parts.*, Slice.view<u8>(raw, start, raw.length - start), span.offset + start)
+        return false
+      }
+      return true
+    }
+    TomlToken.String { span, literal, multiline } => {
+      let raw = TomlScanner.slice(&scanner.*, span)
+      let decoded = run TomlText.decode(raw, literal, multiline)
+      let name = unsafe String.fromBytesUnchecked(move decoded)
+      run Vector.append<KeyPart>(&mut parts.*, KeyPart { name: move name, offset: span.offset })
+      return false
+    }
+    _ => { fail problem(TomlReason.UnexpectedByte, TomlScanner.offset(&scanner.*)) }
+  }
+}
+
+effect fn appendPart(parts: &mut Vector<KeyPart>, raw: &[u8], offset: usize)
+  -> () ! OutOfMemoryError ? &mut Allocator {
+  let owned = run TomlText.copy(raw)
+  let name = unsafe String.fromBytesUnchecked(move owned)
+  return run Vector.append<KeyPart>(&mut parts.*, KeyPart { name: move name, offset: offset })
+}
+
+effect fn parseValue(scanner: &mut TomlScanner, token: TomlToken)
+  -> Value ! TomlError | OutOfMemoryError ? &mut Allocator {
+  return match move token {
+    TomlToken.String { span, literal, multiline } => {
+      let raw = TomlScanner.slice(&scanner.*, span)
+      let bytes = run TomlText.decode(raw, literal, multiline)
+      return Value.String { text: unsafe String.fromBytesUnchecked(move bytes) }
+    }
+    TomlToken.Text { span } => {
+      let kind = TomlScanner.scalarKind(&scanner.*, span)
+      let classified = match move kind {
+        Option<TomlScalarKind>.Some { value } => move value
+        Option<TomlScalarKind>.None => { fail problem(TomlReason.UnexpectedByte, span.offset) }
+      }
+      let raw = TomlScanner.slice(&scanner.*, span)
+      let boolean = match classified {
+        TomlScalarKind.Boolean => true
+        _ => false
+      }
+      if boolean { return Value.Boolean { value: raw[0] == 116 } }
+      let copied = run TomlText.copy(raw)
+      let text = unsafe String.fromBytesUnchecked(move copied)
+      return match move classified {
+        TomlScalarKind.Integer => Value.Integer { text: move text }
+        TomlScalarKind.Float => Value.Float { text: move text }
+        TomlScalarKind.OffsetDateTime => Value.OffsetDateTime { text: move text }
+        TomlScalarKind.LocalDateTime => Value.LocalDateTime { text: move text }
+        TomlScalarKind.LocalDate => Value.LocalDate { text: move text }
+        TomlScalarKind.LocalTime => Value.LocalTime { text: move text }
+        TomlScalarKind.Boolean => Value.Boolean { value: true }
+      }
+    }
+    TomlToken.ArrayBegin => run parseArray(&mut scanner.*)
+    TomlToken.InlineBegin => run parseInline(&mut scanner.*)
+    _ => { fail problem(TomlReason.UnexpectedByte, TomlScanner.offset(&scanner.*)) }
+  }
+}
+
+effect fn parseArray(scanner: &mut TomlScanner)
+  -> Value ! TomlError | OutOfMemoryError ? &mut Allocator {
+  let mut children = Vector.make<TomlChild>()
+  while true {
+    let token = run next(&mut scanner.*)
+    match move token {
+      TomlToken.ArrayEnd => {
+        let boxed = run Box.make<Vector<TomlChild>>(move children)
+        return Value.Array { values: move boxed, tables: false }
+      }
+      TomlToken.Text { span } => {
+        let value = run parseValue(&mut scanner.*, TomlToken.Text { span: span })
+        run Vector.append<TomlChild>(&mut children, TomlChild.Item { value: move value })
+      }
+      TomlToken.String { span, literal, multiline } => {
+        let value = run parseValue(&mut scanner.*, TomlToken.String {
+          span: span, literal: literal, multiline: multiline })
+        run Vector.append<TomlChild>(&mut children, TomlChild.Item { value: move value })
+      }
+      TomlToken.ArrayBegin => {
+        let value = run parseArray(&mut scanner.*)
+        run Vector.append<TomlChild>(&mut children, TomlChild.Item { value: move value })
+      }
+      TomlToken.InlineBegin => {
+        let value = run parseInline(&mut scanner.*)
+        run Vector.append<TomlChild>(&mut children, TomlChild.Item { value: move value })
+      }
+      _ => { fail problem(TomlReason.UnexpectedByte, TomlScanner.offset(&scanner.*)) }
+    }
+    let separator = run next(&mut scanner.*)
+    match move separator {
+      TomlToken.Comma => {}
+      TomlToken.ArrayEnd => {
+        let boxed = run Box.make<Vector<TomlChild>>(move children)
+        return Value.Array { values: move boxed, tables: false }
+      }
+      _ => { fail problem(TomlReason.UnexpectedByte, TomlScanner.offset(&scanner.*)) }
+    }
+  }
+  fail problem(TomlReason.UnexpectedEnd, TomlScanner.offset(&scanner.*))
+}
+
+effect fn parseInline(scanner: &mut TomlScanner)
+  -> Value ! TomlError | OutOfMemoryError ? &mut Allocator {
+  let mut value = run table(TableKind.Inline)
+  while true {
+    let token = run next(&mut scanner.*)
+    let parsed = match move token {
+      TomlToken.InlineEnd => { return move value }
+      TomlToken.Text { span } => run key(&mut scanner.*, TomlToken.Text { span: span })
+      TomlToken.String { span, literal, multiline } => run key(&mut scanner.*, TomlToken.String {
+        span: span, literal: literal, multiline: multiline })
+      _ => { fail problem(TomlReason.UnexpectedByte, TomlScanner.offset(&scanner.*)) }
+    }
+    let ParsedKey { parts, delimiter } = move parsed
+    match move delimiter {
+      TomlToken.Equals => {}
+      _ => { fail problem(TomlReason.UnexpectedByte, TomlScanner.offset(&scanner.*)) }
+    }
+    let nextValue = run next(&mut scanner.*)
+    let item = run parseValue(&mut scanner.*, move nextValue)
+    let updated = run insertKey(move value, Vector.asSlice<KeyPart>(&parts), usize.ZERO, move item, true)
+    value = move updated
+    let separator = run next(&mut scanner.*)
+    match move separator {
+      TomlToken.Comma => {}
+      TomlToken.InlineEnd => { return move value }
+      _ => { fail problem(TomlReason.UnexpectedByte, TomlScanner.offset(&scanner.*)) }
+    }
+  }
+  fail problem(TomlReason.UnexpectedEnd, TomlScanner.offset(&scanner.*))
+}
+
+effect fn table(kind: TableKind) -> Value ! OutOfMemoryError ? &mut Allocator {
+  let entries = run Box.make<Vector<TomlChild>>(Vector.make<TomlChild>())
+  return Value.Table { entries: move entries, kind: move kind }
+}
+
+fn find<'a>(entries: &'a Vector<TomlChild>, name: string) -> Option<&'a Value> {
+  let children = Vector.asSlice<TomlChild>(entries)
+  let mut at = usize.ZERO
+  while at < children.length {
+    match &children[at] {
+      TomlChild.Member { entry } => {
+        if String.view(&entry.key) == name { return Option.some<&'a Value>(&entry.value) }
+      }
+      _ => {}
+    }
+    at = at + usize.ONE
+  }
+  return Option.none<&'a Value>()
+}
+
+fn indexOf(entries: &Vector<TomlChild>, name: string) -> Option<usize> {
+  let children = Vector.asSlice<TomlChild>(entries)
+  let mut at = usize.ZERO
+  while at < children.length {
+    match &children[at] {
+      TomlChild.Member { entry } => {
+        if String.view(&entry.key) == name { return Option.some<usize>(at) }
+      }
+      _ => {}
+    }
+    at = at + usize.ONE
+  }
+  return Option.none<usize>()
+}
+
+effect fn insertAt(root: Value, current: &[KeyPart], at: usize,
+  parts: &[KeyPart], keyAt: usize, value: Value, inline: bool)
+  -> Value ! TomlError | OutOfMemoryError ? &mut Allocator {
+  if at == current.length { return run insertKey(move root, parts, keyAt, move value, inline) }
+  let mut owned = move root
+  match &mut owned {
+    Value.Table { entries, kind: _ } => {
+      let mut boxed = Box.getMut<Vector<TomlChild>>(&mut entries)
+      let found = indexOf(&boxed[0], String.view(&current[at].name))
+      let index = match move found {
+        Option<usize>.Some { value: position } => position
+        Option<usize>.None => { fail problem(TomlReason.TableConflict, current[at].offset) }
+      }
+      let removed = Vector.remove<TomlChild>(&mut boxed[0], index)
+      let entry = match move removed {
+        TomlChild.Member { entry } => move entry
+        _ => { fail problem(TomlReason.TableConflict, current[at].offset) }
+      }
+      let updated = run insertAt(move entry.value, current, at + usize.ONE, parts, keyAt, move value, inline)
+      run Vector.insert<TomlChild>(&mut boxed[0], index, TomlChild.Member {
+        entry: TomlEntry { key: move entry.key, value: move updated }
+      })
+    }
+    Value.Array { values, tables } => {
+      if tables {} else { fail problem(TomlReason.TableConflict, current[at].offset) }
+      let mut boxed = Box.getMut<Vector<TomlChild>>(&mut values)
+      let index = Vector.length<TomlChild>(&boxed[0]) - usize.ONE
+      let removed = Vector.remove<TomlChild>(&mut boxed[0], index)
+      let child = match move removed {
+        TomlChild.Item { value: item } => move item
+        _ => { fail problem(TomlReason.TableConflict, current[at].offset) }
+      }
+      let updated = run insertAt(move child, current, at, parts, keyAt, move value, inline)
+      run Vector.insert<TomlChild>(&mut boxed[0], index, TomlChild.Item { value: move updated })
+    }
+    _ => { fail problem(TomlReason.TableConflict, current[at].offset) }
+  }
+  return move owned
+}
+
+effect fn insertKey(root: Value, parts: &[KeyPart], at: usize, value: Value, inline: bool)
+  -> Value ! TomlError | OutOfMemoryError ? &mut Allocator {
+  let mut owned = move root
+  match &mut owned {
+    Value.Table { entries, kind } => {
+      let closed = match kind {
+        TableKind.Inline => true
+        _ => false
+      }
+      if closed && !inline { fail problem(TomlReason.TableConflict, parts[at].offset) }
+      let mut boxed = Box.getMut<Vector<TomlChild>>(&mut entries)
+      let found = indexOf(&boxed[0], String.view(&parts[at].name))
+      if at + usize.ONE == parts.length {
+        match move found {
+          Option<usize>.Some { value: _ } => { fail problem(TomlReason.DuplicateKey, parts[at].offset) }
+          Option<usize>.None => {
+            let name = run String.copy(String.view(&parts[at].name))
+            run Vector.append<TomlChild>(&mut boxed[0], TomlChild.Member {
+              entry: TomlEntry { key: move name, value: move value }
+            })
+            return move owned
+          }
+        }
+      }
+      let next = indexOf(&boxed[0], String.view(&parts[at].name))
+      let mut index = usize.ZERO
+      match move next {
+        Option<usize>.Some { value: position } => { index = position }
+        Option<usize>.None => {
+          let child = run table(TableKind.Dotted)
+          let name = run String.copy(String.view(&parts[at].name))
+          run Vector.append<TomlChild>(&mut boxed[0], TomlChild.Member {
+            entry: TomlEntry { key: move name, value: move child }
+          })
+          index = Vector.length<TomlChild>(&boxed[0]) - usize.ONE
+        }
+      }
+      let removed = Vector.remove<TomlChild>(&mut boxed[0], index)
+      let entry = match move removed {
+        TomlChild.Member { entry } => move entry
+        _ => { fail problem(TomlReason.TableConflict, parts[at].offset) }
+      }
+      let updated = run insertKey(move entry.value, parts, at + usize.ONE, move value, inline)
+      run Vector.insert<TomlChild>(&mut boxed[0], index, TomlChild.Member {
+        entry: TomlEntry { key: move entry.key, value: move updated }
+      })
+    }
+    Value.Array { values, tables } => {
+      if tables {} else { fail problem(TomlReason.TableConflict, parts[at].offset) }
+      let mut boxed = Box.getMut<Vector<TomlChild>>(&mut values)
+      let index = Vector.length<TomlChild>(&boxed[0]) - usize.ONE
+      let removed = Vector.remove<TomlChild>(&mut boxed[0], index)
+      let child = match move removed {
+        TomlChild.Item { value: item } => move item
+        _ => { fail problem(TomlReason.TableConflict, parts[at].offset) }
+      }
+      let updated = run insertKey(move child, parts, at, move value, inline)
+      run Vector.insert<TomlChild>(&mut boxed[0], index, TomlChild.Item { value: move updated })
+    }
+    _ => { fail problem(TomlReason.TableConflict, parts[at].offset) }
+  }
+  return move owned
+}
+
+effect fn defineHeader(root: Value, parts: &[KeyPart], at: usize, array: bool)
+  -> Value ! TomlError | OutOfMemoryError ? &mut Allocator {
+  let mut owned = move root
+  match &mut owned {
+    Value.Table { entries, kind } => {
+      let closed = match kind {
+        TableKind.Inline => true
+        _ => false
+      }
+      if closed { fail problem(TomlReason.TableConflict, parts[at].offset) }
+      let mut boxed = Box.getMut<Vector<TomlChild>>(&mut entries)
+      let found = indexOf(&boxed[0], String.view(&parts[at].name))
+      if at + usize.ONE == parts.length {
+        match move found {
+          Option<usize>.None => {
+            let name = run String.copy(String.view(&parts[at].name))
+            if array {
+              let child = run tableArray()
+              run Vector.append<TomlChild>(&mut boxed[0], TomlChild.Member {
+                entry: TomlEntry { key: move name, value: move child }
+              })
+            } else {
+              let child = run table(TableKind.Explicit)
+              run Vector.append<TomlChild>(&mut boxed[0], TomlChild.Member {
+                entry: TomlEntry { key: move name, value: move child }
+              })
+            }
+            return move owned
+          }
+          Option<usize>.Some { value: index } => {
+            let removed = Vector.remove<TomlChild>(&mut boxed[0], index)
+            let entry = match move removed {
+              TomlChild.Member { entry } => move entry
+              _ => { fail problem(TomlReason.TableConflict, parts[at].offset) }
+            }
+            let mut child = move entry.value
+            match &mut child {
+              Value.Table { entries: _, kind: childKind } => {
+                let implicit = match childKind {
+                  TableKind.Implicit => true
+                  _ => false
+                }
+                if array || !implicit {
+                  fail problem(TomlReason.TableConflict, parts[at].offset)
+                }
+              }
+              Value.Array { values, tables } => {
+                if !array { fail problem(TomlReason.TableConflict, parts[at].offset) }
+                if tables {} else { fail problem(TomlReason.TableConflict, parts[at].offset) }
+                let mut boxedArray = Box.getMut<Vector<TomlChild>>(&mut values)
+                let tableValue = run table(TableKind.Explicit)
+                run Vector.append<TomlChild>(&mut boxedArray[0], TomlChild.Item { value: move tableValue })
+              }
+              _ => { fail problem(TomlReason.TableConflict, parts[at].offset) }
+            }
+            let defined = match move child {
+              Value.Table { entries: tableEntries, kind: _ } => Value.Table { entries: move tableEntries, kind: TableKind.Explicit }
+              Value.Array { values, tables } => Value.Array { values: move values, tables: tables }
+              _ => { fail problem(TomlReason.TableConflict, parts[at].offset) }
+            }
+            run Vector.insert<TomlChild>(&mut boxed[0], index, TomlChild.Member {
+              entry: TomlEntry { key: move entry.key, value: move defined }
+            })
+            return move owned
+          }
+        }
+      }
+      let next = indexOf(&boxed[0], String.view(&parts[at].name))
+      let mut index = usize.ZERO
+      match move next {
+        Option<usize>.Some { value: position } => { index = position }
+        Option<usize>.None => {
+          let child = run table(TableKind.Implicit)
+          let name = run String.copy(String.view(&parts[at].name))
+          run Vector.append<TomlChild>(&mut boxed[0], TomlChild.Member {
+            entry: TomlEntry { key: move name, value: move child }
+          })
+          index = Vector.length<TomlChild>(&boxed[0]) - usize.ONE
+        }
+      }
+      let removed = Vector.remove<TomlChild>(&mut boxed[0], index)
+      let entry = match move removed {
+        TomlChild.Member { entry } => move entry
+        _ => { fail problem(TomlReason.TableConflict, parts[at].offset) }
+      }
+      let updated = run defineHeader(move entry.value, parts, at + usize.ONE, array)
+      run Vector.insert<TomlChild>(&mut boxed[0], index, TomlChild.Member {
+        entry: TomlEntry { key: move entry.key, value: move updated }
+      })
+    }
+    Value.Array { values, tables } => {
+      if tables {} else { fail problem(TomlReason.TableConflict, parts[at].offset) }
+      let mut boxed = Box.getMut<Vector<TomlChild>>(&mut values)
+      let index = Vector.length<TomlChild>(&boxed[0]) - usize.ONE
+      let removed = Vector.remove<TomlChild>(&mut boxed[0], index)
+      let child = match move removed {
+        TomlChild.Item { value } => move value
+        _ => { fail problem(TomlReason.TableConflict, parts[at].offset) }
+      }
+      let updated = run defineHeader(move child, parts, at, array)
+      run Vector.insert<TomlChild>(&mut boxed[0], index, TomlChild.Item { value: move updated })
+    }
+    _ => { fail problem(TomlReason.TableConflict, parts[at].offset) }
+  }
+  return move owned
+}
+
+effect fn tableArray() -> Value ! OutOfMemoryError ? &mut Allocator {
+  let mut values = Vector.make<TomlChild>()
+  let first = run table(TableKind.Explicit)
+  run Vector.append<TomlChild>(&mut values, TomlChild.Item { value: move first })
+  let boxed = run Box.make<Vector<TomlChild>>(move values)
+  return Value.Array { values: move boxed, tables: true }
+}
+
+effect fn next(scanner: &mut TomlScanner) -> TomlToken ! TomlError {
+  while true {
+    let token = TomlScanner.next(&mut scanner.*)
+    match move token {
+      Result<TomlToken, TomlError>.Success { value } => {
+        let newline = match &value {
+          TomlToken.Newline => true
+          _ => false
+        }
+        if !newline { return move value }
+      }
+      Result<TomlToken, TomlError>.Failure { error } => { fail move error }
+    }
+  }
+  fail problem(TomlReason.UnexpectedEnd, TomlScanner.offset(&scanner.*))
+}
+
+fn problem(reason: TomlReason, offset: usize) -> TomlError {
+  return TomlError { reason: move reason, offset: offset }
+}

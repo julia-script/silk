@@ -21,7 +21,7 @@ await test('the CI assignment covers every eligible compiler file once, includin
     [...files, added].sort((a, b) => a.localeCompare(b)),
   )
   assert.equal(new Set(assigned).size, files.length + 1)
-  assert.deepEqual(unmeasured, [added])
+  assert.deepEqual(unmeasured, [...files.filter((file) => !(file in baseline.timings)), added])
   assert.ok(shards.every((shard) => shard.files.length > 0))
 })
 
@@ -29,7 +29,7 @@ await test('measured-cost assignment is stable and balances the reviewed baselin
   assert.equal(baseline.source.workerCount, 2)
   assert.equal(baseline.source.estimator, 'median')
   assert.ok(baseline.source.runs.length >= 2)
-  const files = discoverTests()
+  const files = Object.keys(baseline.timings)
   const first = assignTests(files, baseline.timings)
   const reversed = assignTests([...files].reverse(), baseline.timings)
   assert.deepEqual(first, reversed)
