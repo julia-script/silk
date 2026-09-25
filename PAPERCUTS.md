@@ -3,8 +3,8 @@
 Format: date · symptom · fix · project. Check here first when tooling is slow or fails mysteriously.
 
 - 2026-09-25 · A focused source-written query test used `--file`, but the CLI still compiled the
-  manifest root and its full import graph for over two minutes · Use `--root
-  src/semantic/QueryCases.silk` to compile only the test module's import graph · self-hosted compiler
+  manifest root and its full import graph for over two minutes · Use `--root src/semantic/QueryCases.silk`
+  to compile only the test module's import graph · self-hosted compiler
 - 2026-09-25 · A generic scoped query answer passed `silk check` but native build failed with
   `SEM0138` for shared allocation provenance, then tried to emit cleanup for a generic payload ·
   Trace the recorded execution edges through the bracket callback and generate shared cleanup
