@@ -2692,6 +2692,14 @@ export const make = (operations: Operations) => {
     const sections = expressions.flatMap((expression) =>
       expression._tag === 'CallableSection' ? [expression] : [],
     )
+    // Discovery asks once per ancestry context; most bodies construct no callable at all.
+    if (
+      sections.length === 0 &&
+      !expressions.some(
+        (expression) => expression._tag === 'CallableApply' && expression.staged !== undefined,
+      )
+    )
+      return []
     const seen = new Set<string>()
     const instances: Array<CallableInstance> = []
     const context: EffectOriginContext = {
