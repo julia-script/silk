@@ -41,6 +41,10 @@ export const verifyMir = Flag.Boolean('verify-mir').pipe(
   Flag.withDefault(false),
 )
 
+export const trace = Flag.Boolean('trace').pipe(
+  Flag.withDescription('Enable tracing of the compilation process.'),
+  Flag.withDefault(false),
+)
 export const watch = Flag.Boolean('watch').pipe(
   Flag.withDescription('Run again after every change to a project source file.'),
   Flag.withDefault(false),
@@ -54,6 +58,7 @@ export interface Input {
   readonly profileInput?: string
   readonly optimization?: ToolchainPlan.OptimizationProfile
   readonly release: boolean
+  readonly trace?: boolean
 }
 
 export interface ProjectOptions {
@@ -63,6 +68,7 @@ export interface ProjectOptions {
   readonly profile?: string
   readonly profileInput?: string
   readonly optimization?: ToolchainPlan.OptimizationProfile
+  readonly trace?: boolean
 }
 
 /** Project command flags contradict one another. */
@@ -94,5 +100,6 @@ export const resolve = (input: Input): Result.Result<ProjectOptions, ProjectOpti
     ...(optimization === undefined ? {} : { optimization }),
     ...(input.profile === undefined ? {} : { profile: input.profile }),
     ...(input.profileInput === undefined ? {} : { profileInput: input.profileInput }),
+    ...(input.trace === undefined ? {} : { trace: input.trace }),
   })
 }

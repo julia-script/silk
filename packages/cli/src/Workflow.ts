@@ -36,6 +36,8 @@ import * as Report from './Report.js'
 import * as SourceSettlement from './SourceSettlement.js'
 import * as TestExchange from './TestExchange.js'
 import * as TestResult from './TestResult.js'
+import * as Layer from 'effect/Layer'
+import { Inspect } from 'effect-inspect'
 
 export type ExitStatus = 0 | 1 | 2
 
@@ -78,6 +80,7 @@ export interface CompileOptions {
   readonly scopeName: string
   readonly saveTemps?: boolean
   readonly timings?: boolean
+  readonly trace?: boolean
 }
 
 const loadProject = Effect.fnUntraced(function* (options: ProjectSelection) {
@@ -168,7 +171,14 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       scopeName: options.scopeName,
       saveTemps: options.saveTemps ?? false,
       verifyMir: options.verifyMir ?? false,
-    }).pipe(Effect.provide(FileSourceResolver.layer(resolver))),
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          FileSourceResolver.layer(resolver),
+          options.trace ? Inspect.layer() : Layer.empty,
+        ),
+      ),
+    ),
   )
 
   if (Result.isFailure(attempted)) {
@@ -328,6 +338,7 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
           ? {}
           : { nativeBindings: plan.project.build.nativeBindings }),
         scopeName: `${plan.project.name}-llvm-${plan.target.id}`,
+        ...(options.trace === undefined ? {} : { trace: options.trace }),
       }),
     { concurrency: 1 },
   )
@@ -842,6 +853,7 @@ export const test = Effect.fn('Workflow.test')(function* (
       ? {}
       : { nativeBindings: plan.project.build.nativeBindings }),
     scopeName: `${plan.project.name}-test`,
+    ...(options.trace === undefined ? {} : { trace: options.trace }),
   })
   if (attempted._tag === 'NotBuilt') return attempted.status
   if (attempted.artifactKind !== 'NativeExecutable') {

@@ -140,7 +140,8 @@
     "@silklang/compiler": "workspace:*",
     "@silklang/docgen": "workspace:*",
     "@silklang/formatter": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "effect-inspect": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

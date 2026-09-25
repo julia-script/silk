@@ -18,6 +18,7 @@ export const command = Command.make(
     release: ProjectOptions.release,
     verifyMir: ProjectOptions.verifyMir,
     watch: ProjectOptions.watch,
+    trace: ProjectOptions.trace,
   },
   Effect.fnUntraced(function* (config) {
     const options = ProjectOptions.resolve({
@@ -28,6 +29,7 @@ export const command = Command.make(
       ...(Option.isNone(config.profileInput) ? {} : { profileInput: config.profileInput.value }),
       release: config.release,
       verifyMir: config.verifyMir,
+      trace: config.trace,
     })
     if (Result.isFailure(options)) {
       yield* Console.error(options.failure.message)

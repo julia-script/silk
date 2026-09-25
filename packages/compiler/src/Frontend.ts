@@ -91,6 +91,7 @@ const semanticPersistence = Effect.map(
   Option.getOrUndefined,
 )
 
+/** Prepares declaration facts and a semantic query session before executable bodies are checked. */
 const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
   closure: ModuleClosure.Facts,
   report: Array<PhaseReport.PhaseReport>,
@@ -99,6 +100,8 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
   /** Persisted-record variant: the selected profile's identity, or null to skip persistence. */
   variant: string | null = '',
 ): Effect.fn.Return<HeaderFacts> {
+  // Collect identities and raw type paths across the full module closure before resolving them.
+  // Each measured phase appends its timing, input/output counts, and diagnostic count to report.
   const collected = PhaseReport.measureInto(
     report,
     'declaration-collection',
@@ -108,15 +111,18 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     (value) => value.diagnostics.length,
     options,
   )
+  // Yield between the synchronous phases so other fibers can run.
   yield* Effect.yieldNow
   const index = PhaseReport.measureInto(
     report,
     'declaration-index',
     collected.modules.length,
     () => {
+      // Preliminary scopes let completion resolve types and aliases in declaration headers.
       const preliminary = NameResolution.resolve(closure, collected)
       const resolvers = NameResolution.makeResolvers(preliminary, collected)
       const completed = DeclarationCompletion.complete(collected, resolvers, preliminary.contexts)
+      // Carry resolver work counters forward when replacing the collected index with the final one.
       ResolutionWork.share(completed, collected)
       return completed
     },
@@ -125,6 +131,7 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     options,
   )
   yield* Effect.yieldNow
+  // Rebuild scopes and bindings against completed declarations for subsequent semantic queries.
   const resolution = PhaseReport.measureInto(
     report,
     'name-resolution',
@@ -135,6 +142,7 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     options,
   )
   yield* Effect.yieldNow
+  // Capture module surfaces, including published members, for incremental invalidation.
   const surfaces = PhaseReport.measureInto(
     report,
     'module-surface',
@@ -144,6 +152,8 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     () => 0,
     options,
   )
+  // Identify the session's declaration universe by modules, canonical members, and publications.
+  // Length prefixes keep adjacent entries unambiguous; individual query records track dependencies.
   const epoch = index.modules
     .flatMap((module) => [
       `module:${module.module}`,
@@ -159,6 +169,8 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
     ])
     .map((part) => `${part.length}:${part}`)
     .join('')
+  // Seed reuse from the in-memory snapshot, supplementing it with persisted records when available.
+  // Records are keyed by the selected profile variant; null skips persistence during bootstrap.
   const persistence = variant === null ? undefined : yield* semanticPersistence
   const availablePrevious =
     persistence === undefined
@@ -170,6 +182,7 @@ const analyzeHeaders = Effect.fn('Frontend.analyzeHeaders')(function* (
           resolution,
           previous,
         ).pipe(Effect.orDie)
+  // Install the completed headers and reusable records; body checking is performed by later queries.
   const session = Semantic.makeSession(epoch, index, resolution, 'default', availablePrevious)
   return { index, resolution, session, surfaces }
 })

@@ -5,6 +5,7 @@ packages:
 catalog:
   '@effect/vitest': 4.0.0-rc.117
   effect: 4.0.0-rc.117
+  'effect-inspect': 0.2.0
 allowBuilds:
   esbuild: true
   msgpackr-extract: false
@@ -39,3 +40,5 @@ minimumReleaseAgeExclude:
   - '@oxfmt/binding-win32-ia32-msvc@0.66.0'
   - '@oxfmt/binding-win32-x64-msvc@0.66.0'
   - oxfmt@0.66.0
+  - effect-inspect@0.1.0 || 0.1.1 || 0.2.0
+  - lucide-react@1.48.0

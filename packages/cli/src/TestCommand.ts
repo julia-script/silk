@@ -41,6 +41,7 @@ export const command = Command.make(
     file,
     filter,
     noCache,
+    trace: ProjectOptions.trace,
   },
   Effect.fnUntraced(function* (config) {
     const options = ProjectOptions.resolve({
@@ -51,6 +52,7 @@ export const command = Command.make(
       ...(Option.isNone(config.profileInput) ? {} : { profileInput: config.profileInput.value }),
       release: config.release,
       verifyMir: config.verifyMir,
+      ...(typeof config.trace === 'undefined' ? {} : { trace: config.trace }),
     })
     if (Result.isFailure(options)) {
       yield* Console.error(options.failure.message)
