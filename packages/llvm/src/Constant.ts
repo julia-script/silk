@@ -284,25 +284,44 @@ export const integerUnsigned = (
  * @category constants
  * @since 0.0.0
  */
-export const fromGlobal = Effect.fnUntraced(function* (
+export const fromGlobal = (
   builder: Builder.Builder,
   global: Global.Global,
-): Effect.fn.Return<Constant, LlvmError> {
-  const resolved = yield* BuilderState.mutate(builder, 'Constant.fromGlobal', (state, owner) =>
-    GlobalState.resolve(builder, state, owner, global, 'Constant.fromGlobal'),
+): Effect.Effect<Constant, LlvmError> =>
+  BuilderState.mutate(builder, 'Constant.fromGlobal', (state, owner) =>
+    fromGlobalIn(builder, state, owner, global),
   )
-  const pointer = yield* Type.pointer(builder, resolved.description.addressSpace)
-  const description = yield* BuilderState.mutate(builder, 'Constant.fromGlobal', (_state, owner) =>
-    Result.gen(function* () {
-      return {
-        _tag: 'Global' as const,
-        type: yield* Handle.resolve(builder, owner, pointer, 'Type', 'Constant.fromGlobal'),
-        global: resolved.index,
-      }
+
+/**
+ * Interns a global's address constant inside a running builder transition.
+ *
+ * @internal
+ */
+export const fromGlobalIn = (
+  builder: Builder.Builder,
+  state: BuilderState.MutableState,
+  owner: OwnedHandle.Owner,
+  global: Global.Global,
+): Result.Result<Constant, LlvmError> => {
+  const resolved = GlobalState.resolve(builder, state, owner, global, 'Constant.fromGlobal')
+  if (Result.isFailure(resolved)) return Result.fail(resolved.failure)
+  const description: ConstantDescription.Description = {
+    _tag: 'Global',
+    type: Type.internIndex(state, owner, {
+      _tag: 'Pointer',
+      addressSpace: resolved.success.description.addressSpace,
     }),
+    global: resolved.success.index,
+  }
+  return Table.intern(
+    state.constants,
+    'Constant.intern',
+    'Constant',
+    descriptionKey(description),
+    description,
+    (index) => Handle.make('Constant', owner, index),
   )
-  return yield* intern(builder, description)
-})
+}
 
 /**
  * Interns a signed arbitrary-width integer and stores its exact two's-complement bit pattern.

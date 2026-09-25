@@ -112,34 +112,33 @@ export const indirectBranch = Effect.fnUntraced(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const branch = Effect.fnUntraced(function* (
+export const branch = (
   self: FunctionBody,
   destination: Block.Block,
-): Effect.fn.Return<Instruction, LlvmError> {
-  return yield* FunctionBodyState.mutate(self, 'FunctionBody.branch', (draft) =>
-    Result.gen(function* () {
-      const block = yield* FunctionBodyState.resolveBlock(draft, destination, 'FunctionBody.branch')
-      const predecessor = draft.cursor
-      if (predecessor === undefined) {
-        return yield* Result.fail(
-          invalidInput({
-            operation: 'FunctionBody.branch',
-            message: 'Set an insertion block before branching',
-            input: destination,
-          }),
-        )
-      }
-      const instruction = yield* FunctionBodyState.appendInstruction(draft, {
-        _tag: 'Branch',
-        destination: block,
-        result: undefined,
-        name: ByteString.empty,
-      })
-      yield* FunctionBodyState.addPredecessor(draft, block, predecessor)
-      return instruction
-    }),
-  )
-})
+): Effect.Effect<Instruction, LlvmError> =>
+  FunctionBodyState.mutate(self, 'FunctionBody.branch', (draft) => {
+    const block = FunctionBodyState.resolveBlock(draft, destination, 'FunctionBody.branch')
+    if (Result.isFailure(block)) return Result.fail(block.failure)
+    const predecessor = draft.cursor
+    if (predecessor === undefined) {
+      return Result.fail(
+        invalidInput({
+          operation: 'FunctionBody.branch',
+          message: 'Set an insertion block before branching',
+          input: destination,
+        }),
+      )
+    }
+    const instruction = FunctionBodyState.appendInstruction(draft, {
+      _tag: 'Branch',
+      destination: block.success,
+      result: undefined,
+      name: ByteString.empty,
+    })
+    if (Result.isFailure(instruction)) return instruction
+    const added = FunctionBodyState.addPredecessor(draft, block.success, predecessor)
+    return Result.isFailure(added) ? Result.fail(added.failure) : instruction
+  })
 
 /**
  * Terminates the insertion block with an `i1` conditional branch and records both edges.
@@ -147,79 +146,71 @@ export const branch = Effect.fnUntraced(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const conditionalBranch = Effect.fnUntraced(function* (
+export const conditionalBranch = (
   self: FunctionBody,
   condition: Value.Input,
   onTrue: Block.Block,
   onFalse: Block.Block,
   weights: 'none' | 'unpredictable' | 'true-likely' | 'false-likely' = 'none',
-): Effect.fn.Return<Instruction, LlvmError> {
-  const instruction = yield* FunctionBodyState.mutateModule(
+): Effect.Effect<Instruction, LlvmError> => {
+  const appended = FunctionBodyState.mutateModule(
     self,
     'FunctionBody.conditionalBranch',
-    (draft, module) =>
-      Result.gen(function* () {
-        const resolved = yield* FunctionBodyState.resolveOperand(
-          draft,
-          module,
-          condition,
-          'FunctionBody.conditionalBranch',
+    (draft, module) => {
+      const operation = 'FunctionBody.conditionalBranch'
+      const resolved = FunctionBodyState.resolveOperand(draft, module, condition, operation)
+      if (Result.isFailure(resolved)) return Result.fail(resolved.failure)
+      const type = FunctionBodyState.typeAt(module, resolved.success.type, operation)
+      if (Result.isFailure(type)) return Result.fail(type.failure)
+      if (type.success._tag !== 'Integer' || type.success.bitWidth !== 1) {
+        return Result.fail(
+          invalidInput({
+            operation,
+            message: 'Conditional branches require an i1 condition',
+            input: condition,
+          }),
         )
-        const type = yield* FunctionBodyState.typeAt(
-          module,
-          resolved.type,
-          'FunctionBody.conditionalBranch',
+      }
+      const trueBlock = FunctionBodyState.resolveBlock(draft, onTrue, operation)
+      if (Result.isFailure(trueBlock)) return Result.fail(trueBlock.failure)
+      const falseBlock = FunctionBodyState.resolveBlock(draft, onFalse, operation)
+      if (Result.isFailure(falseBlock)) return Result.fail(falseBlock.failure)
+      const predecessor = draft.cursor
+      if (predecessor === undefined) {
+        return Result.fail(
+          invalidInput({
+            operation,
+            message: 'Set an insertion block before branching',
+            input: condition,
+          }),
         )
-        if (type._tag !== 'Integer' || type.bitWidth !== 1) {
-          return yield* Result.fail(
-            invalidInput({
-              operation: 'FunctionBody.conditionalBranch',
-              message: 'Conditional branches require an i1 condition',
-              input: condition,
-            }),
-          )
-        }
-        const trueBlock = yield* FunctionBodyState.resolveBlock(
-          draft,
-          onTrue,
-          'FunctionBody.conditionalBranch',
-        )
-        const falseBlock = yield* FunctionBodyState.resolveBlock(
-          draft,
-          onFalse,
-          'FunctionBody.conditionalBranch',
-        )
-        const predecessor = draft.cursor
-        if (predecessor === undefined) {
-          return yield* Result.fail(
-            invalidInput({
-              operation: 'FunctionBody.conditionalBranch',
-              message: 'Set an insertion block before branching',
-              input: condition,
-            }),
-          )
-        }
-        const instruction = yield* FunctionBodyState.appendInstruction(draft, {
-          _tag: 'ConditionalBranch',
-          condition: resolved.operand,
-          onTrue: trueBlock,
-          onFalse: falseBlock,
-          weights,
-          result: undefined,
-          name: ByteString.empty,
-        })
-        yield* FunctionBodyState.addPredecessor(draft, trueBlock, predecessor)
-        yield* FunctionBodyState.addPredecessor(draft, falseBlock, predecessor)
-        return instruction
-      }),
+      }
+      const instruction = FunctionBodyState.appendInstruction(draft, {
+        _tag: 'ConditionalBranch',
+        condition: resolved.success.operand,
+        onTrue: trueBlock.success,
+        onFalse: falseBlock.success,
+        weights,
+        result: undefined,
+        name: ByteString.empty,
+      })
+      if (Result.isFailure(instruction)) return instruction
+      const addedTrue = FunctionBodyState.addPredecessor(draft, trueBlock.success, predecessor)
+      if (Result.isFailure(addedTrue)) return Result.fail(addedTrue.failure)
+      const addedFalse = FunctionBodyState.addPredecessor(draft, falseBlock.success, predecessor)
+      return Result.isFailure(addedFalse) ? Result.fail(addedFalse.failure) : instruction
+    },
   )
-  if (weights === 'unpredictable') {
-    yield* setUnpredictable(self, instruction)
-  } else if (weights === 'true-likely' || weights === 'false-likely') {
-    yield* setBranchWeights(self, instruction, weights === 'true-likely' ? [2000, 1] : [1, 2000])
-  }
-  return instruction
-})
+  if (weights === 'none') return appended
+  return Effect.flatMap(appended, (instruction) =>
+    Effect.as(
+      weights === 'unpredictable'
+        ? setUnpredictable(self, instruction)
+        : setBranchWeights(self, instruction, weights === 'true-likely' ? [2000, 1] : [1, 2000]),
+      instruction,
+    ),
+  )
+}
 
 /**
  * Starts a switch terminator whose cases must be added and then finalized with {@link sealSwitch}.
@@ -441,36 +432,34 @@ export const sealSwitch = Effect.fnUntraced(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const returnValue = Effect.fnUntraced(function* (
+export const returnValue = (
   self: FunctionBody,
   value: Value.Input,
-): Effect.fn.Return<Instruction, LlvmError> {
-  return yield* FunctionBodyState.mutateModule(self, 'FunctionBody.returnValue', (draft, module) =>
-    Result.gen(function* () {
-      const resolved = yield* FunctionBodyState.resolveOperand(
-        draft,
-        module,
-        value,
-        'FunctionBody.returnValue',
+): Effect.Effect<Instruction, LlvmError> =>
+  FunctionBodyState.mutateModule(self, 'FunctionBody.returnValue', (draft, module) => {
+    const resolved = FunctionBodyState.resolveOperand(
+      draft,
+      module,
+      value,
+      'FunctionBody.returnValue',
+    )
+    if (Result.isFailure(resolved)) return Result.fail(resolved.failure)
+    if (resolved.success.type !== draft.returnType) {
+      return Result.fail(
+        invalidInput({
+          operation: 'FunctionBody.returnValue',
+          message: 'Return value does not match the function return type',
+          input: value,
+        }),
       )
-      if (resolved.type !== draft.returnType) {
-        return yield* Result.fail(
-          invalidInput({
-            operation: 'FunctionBody.returnValue',
-            message: 'Return value does not match the function return type',
-            input: value,
-          }),
-        )
-      }
-      return yield* FunctionBodyState.appendInstruction(draft, {
-        _tag: 'Return',
-        value: resolved.operand,
-        result: undefined,
-        name: ByteString.empty,
-      })
-    }),
-  )
-})
+    }
+    return FunctionBodyState.appendInstruction(draft, {
+      _tag: 'Return',
+      value: resolved.success.operand,
+      result: undefined,
+      name: ByteString.empty,
+    })
+  })
 
 /**
  * Terminates the insertion block with `ret void` after checking the signature.
@@ -478,33 +467,25 @@ export const returnValue = Effect.fnUntraced(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const returnVoid = Effect.fnUntraced(function* (
-  self: FunctionBody,
-): Effect.fn.Return<Instruction, LlvmError> {
-  return yield* FunctionBodyState.mutateModule(self, 'FunctionBody.returnVoid', (draft, module) =>
-    Result.gen(function* () {
-      const returnType = yield* FunctionBodyState.typeAt(
-        module,
-        draft.returnType,
-        'FunctionBody.returnVoid',
+export const returnVoid = (self: FunctionBody): Effect.Effect<Instruction, LlvmError> =>
+  FunctionBodyState.mutateModule(self, 'FunctionBody.returnVoid', (draft, module) => {
+    const returnType = FunctionBodyState.typeAt(module, draft.returnType, 'FunctionBody.returnVoid')
+    if (Result.isFailure(returnType)) return Result.fail(returnType.failure)
+    if (returnType.success._tag !== 'Simple' || returnType.success.tag !== 'Void') {
+      return Result.fail(
+        invalidInput({
+          operation: 'FunctionBody.returnVoid',
+          message: 'returnVoid requires a void function return type',
+          input: draft.returnType,
+        }),
       )
-      if (returnType._tag !== 'Simple' || returnType.tag !== 'Void') {
-        return yield* Result.fail(
-          invalidInput({
-            operation: 'FunctionBody.returnVoid',
-            message: 'returnVoid requires a void function return type',
-            input: draft.returnType,
-          }),
-        )
-      }
-      return yield* FunctionBodyState.appendInstruction(draft, {
-        _tag: 'ReturnVoid',
-        result: undefined,
-        name: ByteString.empty,
-      })
-    }),
-  )
-})
+    }
+    return FunctionBodyState.appendInstruction(draft, {
+      _tag: 'ReturnVoid',
+      result: undefined,
+      name: ByteString.empty,
+    })
+  })
 
 /**
  * Terminates the insertion block with LLVM's `unreachable` instruction.
@@ -512,17 +493,14 @@ export const returnVoid = Effect.fnUntraced(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const unreachable = Effect.fnUntraced(function* (
-  self: FunctionBody,
-): Effect.fn.Return<Instruction, LlvmError> {
-  return yield* FunctionBodyState.mutate(self, 'FunctionBody.unreachable', (draft) =>
+export const unreachable = (self: FunctionBody): Effect.Effect<Instruction, LlvmError> =>
+  FunctionBodyState.mutate(self, 'FunctionBody.unreachable', (draft) =>
     FunctionBodyState.appendInstruction(draft, {
       _tag: 'Unreachable',
       result: undefined,
       name: ByteString.empty,
     }),
   )
-})
 
 /**
  * Begins a cleanup-only Itanium exception handler with the canonical `{ ptr, i32 }` result.
