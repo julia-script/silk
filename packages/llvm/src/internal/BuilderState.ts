@@ -13,6 +13,7 @@ import type * as Type from '../Type.js'
 import type * as Variable from '../Variable.js'
 import type * as AttributeDescription from './AttributeDescription.js'
 import type * as ConstantDescription from './ConstantDescription.js'
+import type * as FunctionBodyDescription from './FunctionBodyDescription.js'
 import type * as GlobalDescription from './GlobalDescription.js'
 import * as GlobalTable from './GlobalTable.js'
 import type * as MetadataDescription from './MetadataDescription.js'
@@ -42,6 +43,8 @@ export interface MutableState {
   constants: Table.Table<ConstantDescription.Description, Constant.Constant>
   /** Integer constants keyed by `type * 2 + signed`, then by the validated input value. */
   integerConstants: Map<number, Map<bigint, Constant.Constant>>
+  /** One shared function-body operand per constant; instruction descriptions retain operands. */
+  constantOperands: Array<FunctionBodyDescription.Operand | undefined>
   globals: GlobalTable.GlobalTable
   buildingFunctions: Set<number>
   /** Default intrinsic resolutions keyed by intrinsic id and overload type indices. */

@@ -101,6 +101,7 @@ export const make = Effect.fnUntraced(function* (
       buildingFunctions: new Set(),
       intrinsics: new Map(),
       integerConstants: new Map(),
+      constantOperands: [],
       memoryCallAttributes: new Map(),
       metadata: MetadataTable.make(),
     },

@@ -5,9 +5,9 @@ import type * as Builder from '../../Builder.js'
 import * as ByteString from '../../ByteString.js'
 import type * as FunctionBodyActor from '../../FunctionBody.js'
 import { invalidInput, invalidState, type LlvmError } from '../../LlvmError.js'
+import * as Type from '../../Type.js'
 import type * as ValueActor from '../../Value.js'
 import * as BuilderState from '../BuilderState.js'
-import * as CanonicalKey from '../CanonicalKey.js'
 import * as FunctionBodyDescription from '../FunctionBodyDescription.js'
 import * as Handle from '../Handle.js'
 import type * as OwnedHandle from '../OwnedHandle.js'
@@ -51,6 +51,7 @@ export const create = (
     openPhis: new Map(),
     instructionHandles: [],
     switchBlocks: new Map(),
+    localOperands: [],
     values: [],
     valueHandles: [],
     metadata: [],
@@ -186,10 +187,12 @@ const resolveLocalValue = (
   if (Result.isFailure(index)) return Result.fail(index.failure)
   const description = draft.values[index.success]
   if (description === undefined) return fail(operation, 'Local value table entry is missing', value)
-  return Result.succeed({
-    operand: { _tag: 'Local', value: index.success },
-    type: description.type,
-  })
+  let operand = draft.localOperands[index.success]
+  if (operand === undefined) {
+    operand = { _tag: 'Local', value: index.success }
+    draft.localOperands[index.success] = operand
+  }
+  return Result.succeed({ operand, type: description.type })
 }
 
 /** @internal */
@@ -207,10 +210,12 @@ export const resolveOperand = (
   if (Result.isFailure(index)) return Result.fail(index.failure)
   const constant = module.constants.descriptions[index.success]
   if (constant === undefined) return fail(operation, 'Constant table entry is missing', value)
-  return Result.succeed({
-    operand: { _tag: 'Constant', constant: index.success },
-    type: constant.type,
-  })
+  let operand = module.constantOperands[index.success]
+  if (operand === undefined) {
+    operand = { _tag: 'Constant', constant: index.success }
+    module.constantOperands[index.success] = operand
+  }
+  return Result.succeed({ operand, type: constant.type })
 }
 
 /** @internal */
@@ -230,105 +235,77 @@ const scalarType = (
   module: BuilderState.MutableState,
   index: number,
   operation: string,
-): Result.Result<TypeDescription.Description, LlvmError> =>
-  Result.gen(function* () {
-    const description = yield* typeAt(module, index, operation)
-    return description._tag === 'Vector'
-      ? yield* typeAt(module, description.child, operation)
-      : description
-  })
+): Result.Result<TypeDescription.Description, LlvmError> => {
+  const description = typeAt(module, index, operation)
+  if (Result.isFailure(description) || description.success._tag !== 'Vector') return description
+  return typeAt(module, description.success.child, operation)
+}
+
+const floatingTags: ReadonlySet<string> = new Set([
+  'Half',
+  'BFloat',
+  'Float',
+  'Double',
+  'X86Fp80',
+  'Fp128',
+  'PpcFp128',
+])
 
 /** @internal */
 export const isIntegerType = (
   module: BuilderState.MutableState,
   index: number,
   operation: string,
-): Result.Result<boolean, LlvmError> =>
-  Result.map(scalarType(module, index, operation), (description) => description._tag === 'Integer')
+): Result.Result<boolean, LlvmError> => {
+  const description = scalarType(module, index, operation)
+  if (Result.isFailure(description)) return Result.fail(description.failure)
+  return Result.succeed(description.success._tag === 'Integer')
+}
 
 /** @internal */
 export const isFloatingType = (
   module: BuilderState.MutableState,
   index: number,
   operation: string,
-): Result.Result<boolean, LlvmError> =>
-  Result.gen(function* () {
-    const description = yield* scalarType(module, index, operation)
-    return (
-      description._tag === 'Simple' &&
-      (description.tag === 'Half' ||
-        description.tag === 'BFloat' ||
-        description.tag === 'Float' ||
-        description.tag === 'Double' ||
-        description.tag === 'X86Fp80' ||
-        description.tag === 'Fp128' ||
-        description.tag === 'PpcFp128')
-    )
-  })
+): Result.Result<boolean, LlvmError> => {
+  const description = scalarType(module, index, operation)
+  if (Result.isFailure(description)) return Result.fail(description.failure)
+  return Result.succeed(
+    description.success._tag === 'Simple' && floatingTags.has(description.success.tag),
+  )
+}
 
 /** @internal */
 export const isPointerType = (
   module: BuilderState.MutableState,
   index: number,
   operation: string,
-): Result.Result<boolean, LlvmError> =>
-  Result.map(scalarType(module, index, operation), (description) => description._tag === 'Pointer')
-
-/** @internal */
-const typeKey = (description: TypeDescription.Description): Result.Result<string, LlvmError> => {
-  if (description._tag === 'Integer') {
-    return Result.succeed(
-      CanonicalKey.tagged('integer', [CanonicalKey.integer(description.bitWidth)]),
-    )
-  }
-  if (description._tag === 'Vector') {
-    return Result.succeed(
-      CanonicalKey.tagged('vector', [
-        CanonicalKey.integer(description.child),
-        CanonicalKey.integer(description.length),
-        description.scalable ? '1' : '0',
-      ]),
-    )
-  }
-  return fail('FunctionBody.typeKey', 'Unsupported comparison result type', description)
+): Result.Result<boolean, LlvmError> => {
+  const description = scalarType(module, index, operation)
+  if (Result.isFailure(description)) return Result.fail(description.failure)
+  return Result.succeed(description.success._tag === 'Pointer')
 }
-
-/** @internal */
-const internType = (
-  draft: Draft,
-  module: BuilderState.MutableState,
-  description: TypeDescription.Description,
-): Result.Result<number, LlvmError> =>
-  Result.gen(function* () {
-    const key = yield* typeKey(description)
-    const found = module.types.keys.get(key)
-    if (found !== undefined) return found
-    const index = module.types.descriptions.length
-    const handle = Handle.make('Type', draft.moduleOwner, index)
-    module.types.descriptions.push(description)
-    module.types.handles.push(handle)
-    module.types.keys.set(key, index)
-    return index
-  })
 
 /** @internal */
 export const comparisonType = (
   draft: Draft,
   module: BuilderState.MutableState,
   operandType: number,
-): Result.Result<number, LlvmError> =>
-  Result.gen(function* () {
-    const i1 = yield* internType(draft, module, { _tag: 'Integer', bitWidth: 1 })
-    const description = yield* typeAt(module, operandType, 'FunctionBody.compare')
-    return description._tag === 'Vector'
-      ? yield* internType(draft, module, {
+): Result.Result<number, LlvmError> => {
+  const i1 = Type.internIndex(module, draft.moduleOwner, { _tag: 'Integer', bitWidth: 1 })
+  const description = typeAt(module, operandType, 'FunctionBody.compare')
+  if (Result.isFailure(description)) return Result.fail(description.failure)
+  return Result.succeed(
+    description.success._tag === 'Vector'
+      ? Type.internIndex(module, draft.moduleOwner, {
           _tag: 'Vector',
           child: i1,
-          length: description.length,
-          scalable: description.scalable,
+          length: description.success.length,
+          scalable: description.success.scalable,
         })
-      : i1
-  })
+      : i1,
+  )
+}
 
 /** @internal */
 const valueHandle = (
@@ -392,10 +369,15 @@ export const addPredecessor = (
 }
 
 /** @internal */
-export const setCursor = (draft: Draft, block: BlockActor.Block): Result.Result<void, LlvmError> =>
-  Result.gen(function* () {
-    draft.cursor = yield* resolveBlock(draft, block, 'Block.setInsertionPoint')
-  })
+export const setCursor = (
+  draft: Draft,
+  block: BlockActor.Block,
+): Result.Result<void, LlvmError> => {
+  const index = resolveBlock(draft, block, 'Block.setInsertionPoint')
+  if (Result.isFailure(index)) return Result.fail(index.failure)
+  draft.cursor = index.success
+  return Result.void
+}
 
 /** @internal */
 export const argument = (draft: Draft, index: number): Result.Result<ValueActor.Value, LlvmError> =>

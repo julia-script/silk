@@ -10,6 +10,7 @@ import type * as ConstantDescription from './internal/ConstantDescription.js'
 import * as GlobalState from './internal/GlobalState.js'
 import * as Handle from './internal/Handle.js'
 import * as IntegerInput from './internal/IntegerInput.js'
+import type * as OwnedHandle from './internal/OwnedHandle.js'
 import * as Table from './internal/Table.js'
 import type * as TypeDescription from './internal/TypeDescription.js'
 import { invalidInput, type LlvmError } from './LlvmError.js'
@@ -171,60 +172,71 @@ const integerOf = (
   BuilderState.mutate(builder, 'Constant.integer', (state, owner) => {
     const typeIndex = Handle.resolve(builder, owner, type, 'Type', 'Constant.integer')
     if (Result.isFailure(typeIndex)) return Result.fail(typeIndex.failure)
-    const cacheKey = typeIndex.success * 2 + (signed ? 1 : 0)
-    const cached = state.integerConstants.get(cacheKey)?.get(value)
-    if (cached !== undefined) return Result.succeed(cached)
-    const typeValue = Table.descriptionAt(
-      state.types,
-      typeIndex.success,
-      'Constant.integer',
-      'Type',
-    )
-    if (Result.isFailure(typeValue)) return Result.fail(typeValue.failure)
-    const bitWidth = typeValue.success._tag === 'Integer' ? typeValue.success.bitWidth : undefined
-    if (bitWidth === undefined) {
-      return Result.fail(
-        invalidInput({
-          operation: 'Constant.integer',
-          message: 'Integer constants require an integer type',
-          input: type,
-        }),
-      )
-    }
-    const modulus = 1n << BigInt(bitWidth)
-    const minimum = signed ? -(1n << BigInt(bitWidth - 1)) : 0n
-    const maximum = signed ? (1n << BigInt(bitWidth - 1)) - 1n : modulus - 1n
-    if (value < minimum || value > maximum) {
-      return Result.fail(
-        invalidInput({
-          operation: 'Constant.integer',
-          message: `Integer value does not fit i${bitWidth}`,
-          input: value,
-        }),
-      )
-    }
-    const description: ConstantDescription.Description = {
-      _tag: 'Integer',
-      type: typeIndex.success,
-      bitPattern: value < 0n ? modulus + value : value,
-      signed,
-    }
-    const interned = Table.intern(
-      state.constants,
-      'Constant.intern',
-      'Constant',
-      descriptionKey(description),
-      description,
-      (index) => Handle.make('Constant', owner, index),
-    )
-    if (Result.isSuccess(interned)) {
-      const values = state.integerConstants.get(cacheKey)
-      if (values === undefined)
-        state.integerConstants.set(cacheKey, new Map([[value, interned.success]]))
-      else values.set(value, interned.success)
-    }
-    return interned
+    return integerIn(state, owner, typeIndex.success, value, signed, type)
   })
+
+/**
+ * Validates and interns an integer constant inside a running builder transition.
+ *
+ * @internal
+ */
+export const integerIn = (
+  state: BuilderState.MutableState,
+  owner: OwnedHandle.Owner,
+  typeIndex: number,
+  value: bigint,
+  signed: boolean,
+  type: unknown,
+): Result.Result<Constant, LlvmError> => {
+  const cacheKey = typeIndex * 2 + (signed ? 1 : 0)
+  const cached = state.integerConstants.get(cacheKey)?.get(value)
+  if (cached !== undefined) return Result.succeed(cached)
+  const typeValue = Table.descriptionAt(state.types, typeIndex, 'Constant.integer', 'Type')
+  if (Result.isFailure(typeValue)) return Result.fail(typeValue.failure)
+  const bitWidth = typeValue.success._tag === 'Integer' ? typeValue.success.bitWidth : undefined
+  if (bitWidth === undefined) {
+    return Result.fail(
+      invalidInput({
+        operation: 'Constant.integer',
+        message: 'Integer constants require an integer type',
+        input: type,
+      }),
+    )
+  }
+  const modulus = 1n << BigInt(bitWidth)
+  const minimum = signed ? -(1n << BigInt(bitWidth - 1)) : 0n
+  const maximum = signed ? (1n << BigInt(bitWidth - 1)) - 1n : modulus - 1n
+  if (value < minimum || value > maximum) {
+    return Result.fail(
+      invalidInput({
+        operation: 'Constant.integer',
+        message: `Integer value does not fit i${bitWidth}`,
+        input: value,
+      }),
+    )
+  }
+  const description: ConstantDescription.Description = {
+    _tag: 'Integer',
+    type: typeIndex,
+    bitPattern: value < 0n ? modulus + value : value,
+    signed,
+  }
+  const interned = Table.intern(
+    state.constants,
+    'Constant.intern',
+    'Constant',
+    descriptionKey(description),
+    description,
+    (index) => Handle.make('Constant', owner, index),
+  )
+  if (Result.isSuccess(interned)) {
+    const values = state.integerConstants.get(cacheKey)
+    if (values === undefined)
+      state.integerConstants.set(cacheKey, new Map([[value, interned.success]]))
+    else values.set(value, interned.success)
+  }
+  return interned
+}
 
 /**
  * Interns a non-negative arbitrary-width integer after checking it fits the declared integer type.

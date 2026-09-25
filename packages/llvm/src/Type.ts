@@ -9,6 +9,7 @@ import * as BuilderState from './internal/BuilderState.js'
 import * as CanonicalKey from './internal/CanonicalKey.js'
 import * as Handle from './internal/Handle.js'
 import * as IntegerInput from './internal/IntegerInput.js'
+import type * as OwnedHandle from './internal/OwnedHandle.js'
 import * as ResolveActor from './internal/resolveActor.js'
 import * as Table from './internal/Table.js'
 import type * as TypeDescription from './internal/TypeDescription.js'
@@ -115,6 +116,20 @@ const intern = (
       description,
       (index) => Handle.make('Type', owner, index),
     ),
+  )
+
+/**
+ * Interns an already-validated description inside a running builder transition.
+ *
+ * @internal
+ */
+export const internIndex = (
+  state: BuilderState.MutableState,
+  owner: OwnedHandle.Owner,
+  description: TypeDescription.Description,
+): number =>
+  Table.internIndex(state.types, keyForDescription(description), description, (index) =>
+    Handle.make('Type', owner, index),
   )
 
 /** @internal */

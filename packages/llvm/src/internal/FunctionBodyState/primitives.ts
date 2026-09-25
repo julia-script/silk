@@ -54,6 +54,8 @@ export interface Draft {
   readonly instructionHandles: Array<FunctionBodyActor.Instruction>
   /** Containing block of each switch terminator, keyed by instruction index. */
   readonly switchBlocks: Map<number, number>
+  /** One shared operand per local value; instruction descriptions retain operands. */
+  readonly localOperands: Array<FunctionBodyDescription.Operand | undefined>
   readonly values: Array<MutableValue>
   readonly valueHandles: Array<ValueActor.Value>
   readonly metadata: Array<ReadonlyArray<MetadataDescription.Attachment>>
