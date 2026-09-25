@@ -685,6 +685,30 @@ pub fn main() -> () { return run Intrinsic.catchFailure<SomeError>(failWithOwned
   }),
 )
 
+it.effect('discovers Drop hooks inside an opaque shared payload', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.bytes { Bytes }
+import silk.option { Option }
+import silk.shared { Shared }
+import silk.vector { Vector }
+pub fn main() -> () {
+  let value = Option.none<Shared<Vector<Option<Bytes>>>>()
+  drop value
+  return ()
+}`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.isTrue(
+      Analysis.instancesOf(result).instances.some(
+        (instance) =>
+          instance.key.declaration.module === 'silk/vector' &&
+          instance.key.declaration.name === 'drop@impl#0' &&
+          instance.key.typeArguments.map(Type.encodeGenericArgument).join(', ') ===
+            'silk/option.Option<silk/bytes.Bytes>',
+      ),
+    )
+  }),
+)
+
 it.effect('admits nested cleanup reached through a lexical service provider', () =>
   Effect.gen(function* () {
     const result = yield* snapshot(`import silk.effect { Effect }
