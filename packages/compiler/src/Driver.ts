@@ -591,6 +591,13 @@ export const compile = Effect.fn('Driver.compile')(
         : undefined
     // Reuse cached emission or ask LLVM to emit the prepared MIR, recording which path ran.
     // Pass source bytes for backend source information and convert BackendError to an outcome.
+    // Native toolchain resolution only queries installed tools, so it runs during emission.
+    const pendingToolchain =
+      stage === 'final' && target.kind === 'Native' && request.artifactKind !== 'WebAssemblyModule'
+        ? yield* Effect.forkChild(
+            Effect.result(NativeToolchain.resolveToolchain(request.toolchain, preparation.profile)),
+          )
+        : undefined
     const emitted =
       cachedEmission !== undefined
         ? PhaseReport.measureInto(
@@ -881,10 +888,10 @@ export const compile = Effect.fn('Driver.compile')(
 
           // 14. Resolve the native toolchain for the profile and turn LLVM bitcode into an object.
           // Track both generated object files and any helper capabilities reported by emission.
-          const toolchain = yield* NativeToolchain.resolveToolchain(
-            request.toolchain,
-            preparation.profile,
-          )
+          const toolchain =
+            pendingToolchain === undefined
+              ? yield* NativeToolchain.resolveToolchain(request.toolchain, preparation.profile)
+              : yield* Effect.fromResult(yield* Fiber.join(pendingToolchain))
           const object = yield* PhaseReport.measureEffectInto(
             report,
             'object',
