@@ -294,7 +294,8 @@ const child = (cursor: Cursor, role: string): Cursor => {
   cursor.counts.set(role, occurrence + 1)
   return {
     owner: cursor.owner,
-    path: [...cursor.path, { _tag: 'LocalSegment', role, occurrence }],
+    // Exact-size copy: anchors retain these paths for the whole compilation.
+    path: cursor.path.concat({ _tag: 'LocalSegment', role, occurrence }),
     counts: new Map(),
   }
 }
@@ -1619,16 +1620,14 @@ const ownerChild = (
     _tag: 'AuthoredIdentity',
     namespace: parent.namespace,
     module: parent.module,
-    path: [
-      ...parent.path,
-      {
-        _tag: 'OwnerSegment',
-        kind: key.kind,
-        ...(key.name === undefined ? {} : { name: key.name }),
-        ...(key.role === undefined ? {} : { role: key.role }),
-        occurrence,
-      },
-    ],
+    // `concat` allocates exactly; `[...path, segment]` leaves ~16 slots of slack per retained path.
+    path: parent.path.concat({
+      _tag: 'OwnerSegment',
+      kind: key.kind,
+      ...(key.name === undefined ? {} : { name: key.name }),
+      ...(key.role === undefined ? {} : { role: key.role }),
+      occurrence,
+    }),
   }
 }
 

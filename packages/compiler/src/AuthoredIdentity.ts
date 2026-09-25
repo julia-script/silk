@@ -83,7 +83,8 @@ export const children = (parent: Identity, keys: readonly Key[]): readonly Ident
       _tag: 'AuthoredIdentity',
       namespace: owner.namespace,
       module: owner.module,
-      path: [...owner.path, segment(key, occurrence)],
+      // Exact-size copy: `[...path, segment]` leaves ~16 slots of slack per retained identity.
+      path: owner.path.concat(segment(key, occurrence)),
     }
   })
 }
