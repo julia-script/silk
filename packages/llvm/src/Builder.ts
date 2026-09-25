@@ -99,6 +99,8 @@ export const make = Effect.fnUntraced(function* (
       constants: Table.make(),
       globals: GlobalTable.make(),
       buildingFunctions: new Set(),
+      intrinsics: new Map(),
+      memoryCallAttributes: new Map(),
       metadata: MetadataTable.make(),
     },
   })

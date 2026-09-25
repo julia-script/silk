@@ -42,7 +42,18 @@ export interface MutableState {
   constants: Table.Table<ConstantDescription.Description, Constant.Constant>
   globals: GlobalTable.GlobalTable
   buildingFunctions: Set<number>
+  /** Default intrinsic resolutions keyed by intrinsic id and overload type indices. */
+  intrinsics: Map<string, IntrinsicResolution>
+  /** Memory-intrinsic call attributes keyed by canonical attribute set and alignments. */
+  memoryCallAttributes: Map<string, Attribute.FunctionSet | undefined>
   metadata: MetadataTable.MetadataTable
+}
+
+export interface IntrinsicResolution {
+  readonly function: FunctionActor.Function
+  readonly index: number
+  readonly type: number
+  readonly attributes: number | undefined
 }
 
 export interface State {

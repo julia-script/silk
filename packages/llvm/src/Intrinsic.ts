@@ -613,6 +613,9 @@ export const resolve = Effect.fnUntraced(function* (
       state: id,
     })
   }
+  const cacheable = options.signature === undefined && options.attributes === undefined
+  const cached = cacheable ? yield* cachedResolution(builder, id, overloads) : undefined
+  if (cached?.function !== undefined) return cached.function
   const recipe = overloadedRecipes[id]
   const simple = simpleRecipes[id]
   let signature = options.signature
@@ -635,13 +638,78 @@ export const resolve = Effect.fnUntraced(function* (
     variadic === undefined ? {} : { variadic },
   )
   const attributes = options.attributes ?? (yield* commonAttributes(builder, id))
-  return yield* FunctionActor.declare(
+  const declared = yield* FunctionActor.declare(
     builder,
     yield* intrinsicName(builder, id, overloads),
     type,
     attributes === undefined ? {} : { attributes },
   )
+  const key = cached?.key
+  if (key !== undefined) {
+    yield* BuilderState.mutate(builder, 'Intrinsic.resolve', (state, owner) =>
+      Result.map(
+        Handle.resolve(builder, owner, declared, 'Function', 'Intrinsic.resolve'),
+        (index) => {
+          const description = state.globals.functions.descriptions[index]
+          if (description !== undefined) {
+            state.intrinsics.set(key, {
+              function: declared,
+              index,
+              type: description.type,
+              attributes: description.attributes,
+            })
+          }
+        },
+      ),
+    )
+  }
+  return declared
 })
+
+interface CachedResolution {
+  readonly key: string | undefined
+  readonly function: FunctionActor.Function | undefined
+}
+
+/**
+ * Default resolutions (no explicit signature or attributes) are cached per builder. Checked
+ * arithmetic, traps, and memory copies resolve the same intrinsic at every emitted site, and
+ * rebuilding its signature, attribute sets, and mangled name dominated their emission cost in the
+ * self-hosted compiler build. A cached declaration is reused only while it is unchanged, so an
+ * incompatible later edit still reaches `Function.declare` and fails there.
+ *
+ * @internal
+ */
+const cachedResolution = (
+  builder: Builder.Builder,
+  id: Id,
+  overloads: ReadonlyArray<Type.Type>,
+): Effect.Effect<CachedResolution, LlvmError> =>
+  BuilderState.mutate(
+    builder,
+    'Intrinsic.resolve',
+    (state, owner): Result.Result<CachedResolution, LlvmError> => {
+      let key: string = id
+      for (const type of overloads) {
+        const index = Handle.indexOf(type)
+        if (index === undefined || Handle.ownerOf(type)?.token !== owner.token) {
+          return Result.succeed({ key: undefined, function: undefined })
+        }
+        key += `\u0000${index}`
+      }
+      const entry = state.intrinsics.get(key)
+      const description =
+        entry === undefined ? undefined : state.globals.functions.descriptions[entry.index]
+      const unchanged =
+        entry !== undefined &&
+        description !== undefined &&
+        description.type === entry.type &&
+        description.attributes === entry.attributes &&
+        description.callingConvention === 0 &&
+        description.personality === undefined
+      return Result.succeed({ key, function: unchanged ? entry.function : undefined })
+    },
+  )
 
 /** @internal */
 const inputType = Effect.fnUntraced(function* (
@@ -664,6 +732,14 @@ const memoryCallAttributes = Effect.fnUntraced(function* (
   ) {
     return canonical
   }
+  // Every aligned copy of one intrinsic rebuilds the same derived set; cache it per builder.
+  const key = `${Handle.indexOf(canonical)}\u0000${alignments
+    .map((alignment) => alignment?.byteUnits ?? '')
+    .join('\u0000')}`
+  const cached = yield* BuilderState.mutate(builder, 'Intrinsic.memoryCallAttributes', (state) =>
+    Result.succeed(state.memoryCallAttributes.get(key)),
+  )
+  if (cached !== undefined) return cached
   const entries = yield* Attribute.functionSetEntries(builder, canonical)
   const parameters: Array<Attribute.Set> = []
   const length = Math.max(entries.parameterAttributes.length, alignments.length)
@@ -680,11 +756,16 @@ const memoryCallAttributes = Effect.fnUntraced(function* (
           ),
     )
   }
-  return yield* Attribute.functionSet(builder, {
+  const attributes = yield* Attribute.functionSet(builder, {
     functionAttributes: entries.functionAttributes,
     returnAttributes: entries.returnAttributes,
     parameterAttributes: parameters,
   })
+  yield* BuilderState.mutate(builder, 'Intrinsic.memoryCallAttributes', (state) => {
+    state.memoryCallAttributes.set(key, attributes)
+    return Result.void
+  })
+  return attributes
 })
 
 /**
