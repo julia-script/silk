@@ -1671,14 +1671,22 @@ export const discover = (
     Type.isNominal(type) ? `${type.module}\u0000${type.name}` : undefined
   const sameRuntimeType = (left: Type.Type, right: Type.Type): boolean =>
     Type.runtimeKey(left) === Type.runtimeKey(right)
+  // Runtime keys of every subterm of one whole type, shared by repeated subterm queries.
+  const runtimeSubtermKeys = new Map<string, ReadonlySet<string>>()
   const isStrictRuntimeStructuralSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
-    if (sameRuntimeType(candidate, whole)) return false
     const candidateKey = Type.runtimeKey(candidate)
-    let found = false
-    Type.visit(whole, (type) => {
-      if (Type.runtimeKey(type) === candidateKey) found = true
-    })
-    return found
+    const wholeKey = Type.runtimeKey(whole)
+    if (candidateKey === wholeKey) return false
+    let keys = runtimeSubtermKeys.get(wholeKey)
+    if (keys === undefined) {
+      const collected = new Set<string>()
+      Type.visit(whole, (type) => {
+        collected.add(Type.runtimeKey(type))
+      })
+      keys = collected
+      runtimeSubtermKeys.set(wholeKey, keys)
+    }
+    return keys.has(candidateKey)
   }
   /** A witness may delegate to a field's concrete type even when nominal types have no arguments. */
   const isDirectWitnessFieldSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
@@ -1760,10 +1768,27 @@ export const discover = (
     }
     return descended
   }
+  // Instance discovery asks the same cleanup-subterm questions for many instances; the
+  // answer depends only on runtime identities and the unfolding path, so memoize it.
+  const strictCleanupSubtermCache = new Map<string, boolean>()
   const isStrictCleanupSubterm = (
     candidate: Type.Type,
     whole: Type.Type,
     unfolding: ReadonlyMap<string, Type.Nominal> = new Map(),
+  ): boolean => {
+    let cacheKey = `${Type.runtimeKey(candidate)}\u0001${Type.runtimeKey(whole)}`
+    for (const nominal of unfolding.values()) cacheKey += `\u0001${Type.runtimeKey(nominal)}`
+    let cached = strictCleanupSubtermCache.get(cacheKey)
+    if (cached === undefined) {
+      cached = computeStrictCleanupSubterm(candidate, whole, unfolding)
+      strictCleanupSubtermCache.set(cacheKey, cached)
+    }
+    return cached
+  }
+  const computeStrictCleanupSubterm = (
+    candidate: Type.Type,
+    whole: Type.Type,
+    unfolding: ReadonlyMap<string, Type.Nominal>,
   ): boolean => {
     if (sameRuntimeType(candidate, whole)) return false
     const candidateDeclaration = nominalTypeText(candidate)
