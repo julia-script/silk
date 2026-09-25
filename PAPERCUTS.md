@@ -2,6 +2,26 @@
 
 Format: date · symptom · fix · project. Check here first when tooling is slow or fails mysteriously.
 
+- 2026-09-25 · Concurrent `pnpm exec` typechecks each triggered dependency auto-repair and raced
+  on a hoisted `node_modules` symlink · Invoke the prepared `node_modules/.bin` binaries directly
+  for focused checks and avoid parallel pnpm entry points · compiler
+- 2026-09-25 · A cached native acceptance object kept failing after an ownership fix because it
+  reused a stale binary · Disable the artifact cache for the focused compiler-lowering regression
+  so it compiles the current compiler code · compiler
+- 2026-09-25 · `silk format` rewrote hundreds of unrelated lines in touched HIR files, and even
+  the unchanged HEAD copy of Hir.silk failed its check · Keep the scoped source diff, verify
+  temporary formatted copies against the tested build, and use Oxfmt for CI-covered files · compiler
+- 2026-09-25 · Two `silk test --filter` calls for the same source-written HIR root each rebuilt its
+  native test executable for several minutes · Select related cases in one run when the filter
+  permits, then build the normal compiler once for corpus checks · self-hosted compiler
+- 2026-09-25 · A focused source-written query test used `--file`, but the CLI still compiled the
+  manifest root and its full import graph for over two minutes · Use `--root src/semantic/QueryCases.silk`
+  to compile only the test module's import graph · self-hosted compiler
+- 2026-09-25 · A generic scoped query answer passed `silk check` but native build failed with
+  `SEM0138` for shared allocation provenance, then tried to emit cleanup for a generic payload ·
+  Trace the recorded execution edges through the bracket callback and generate shared cleanup
+  only for concrete runtime payloads · compiler bootstrap
+
 - 2026-09-23 · A fresh task checkout had no `node_modules`; offline pnpm install missed cached
   tarballs and sandboxed registry requests failed DNS resolution, then focused Vitest could not
   import `ToolchainIntegrity.generated.js` · Run the lockfile install with approved network access
@@ -223,3 +243,12 @@ HEAD...@{u}` before reporting a head, and confirm each claimed deliverable again
 - 2026-09-24 · Focused TOML tests appeared to ignore recent Silk source edits because the compiler reads generated embedded stdlib text · Run `node packages/compiler/scripts/generate-stdlib.mjs` after each stdlib edit before testing · compiler
 - 2026-09-24 · `pnpm exec vitest` in the TOML task worktree retried unreachable registry downloads and left only a partial `node_modules` · Stop the repair, link the prepared main checkout dependencies, and invoke its Vitest binary directly · compiler
 - 2026-09-24 · Linked dependencies in a TOML task checkout changed while focused checks ran, leaving `effect` and `typescript` links broken; an offline install lacked a cached tarball · Run a lockfile-frozen install with network access in the task checkout before documentation and Vitest checks · compiler
+- 2026-09-25 · PR #510 CI stopped in the docs font build before compiler checks, leaving the compiler head unverified · Keep focused native evidence separate while the coordinator diagnoses and retries the docs gate · compiler CI
+- 2026-09-25 · A native `Query<Word, Vector<Option<Bytes>>, NoRejection>` fixture failed LLVM cleanup before tests, while either container alone passed · The scoped bootstrap repair at 4087d5e restored nested Drop resolution and independently passed the unchanged repro · compiler
+- 2026-09-25 · A recursive semantic Query provider calling the Query-backed SourceIndex failed with `SEM0053` during native emission, although direct recursive source demands passed · The scoped bootstrap repair at c4f09312 separated finite callable provider targets in specialization ancestry · compiler
+- 2026-09-25 · A borrowed `Shared.with` callback returning `false` from a union match reached LLVM as an `EnvironmentBorrow<bool>` pointer literal · The scoped bootstrap repair at f846dfc5 made non-consuming reads supply scalar builtin values while retaining the borrow · compiler
+- 2026-09-25 · `silk doc` for the compiler project stops at unchanged `src/main.silk:1:1` with `SEM0176 ModuleSelection.profile` during static evaluation · Use focused source check and formatter evidence for the new semantic API, and report the documentation-generation limit · compiler docs
+- 2026-09-25 · `rtk oxlint` was unavailable during the nested cleanup seed repair · Invoke the prepared `node_modules/.bin/oxlint` for scoped lint · compiler
+- 2026-09-25 · Full `SemanticCases` native emission spent about six minutes restarting finite instance discovery after a cleanup-path repair · Validate small structural cases first, then run the full consumer once after source checks · compiler
+- 2026-09-25 · A parked allocator in a nested semantic cancellation fixture kept the bootstrap frontend busy for more than six minutes without reaching one native test · Isolate the fixture and use a bounded compiler sample before deciding whether the test shape is practical · compiler
+- 2026-09-25 · Importing the full HIR case module into the combined M1 semantic test root exhausted Node's default heap before any test ran · Keep semantic cases in one native entry and run the existing integer HIR cases as a separate filtered root · self-hosted compiler

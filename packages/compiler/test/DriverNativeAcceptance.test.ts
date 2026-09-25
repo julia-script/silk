@@ -968,7 +968,10 @@ it.effect.each(selectedCorpus)(
           program.nativeSource ?? program.source,
           program.nativeImports,
           {
-            ...(program.name === 'test-exchange-binary-framing' ? { cache: false } : {}),
+            ...(program.name === 'test-exchange-binary-framing' ||
+            program.name === 'local-shared-nested-owned-result-cleanup'
+              ? { cache: false }
+              : {}),
             ...(program.nativeComponents === undefined
               ? {}
               : { components: program.nativeComponents }),

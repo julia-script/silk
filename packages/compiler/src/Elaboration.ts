@@ -2500,9 +2500,10 @@ const runtimeTirFunction = (
             _tag: 'EffectCapture',
             reference: parameter,
             access:
-              declared._tag === 'Resolved' && Type.isSlice(declared.type)
+              parameter.captureAccess ??
+              (declared._tag === 'Resolved' && Type.isSlice(declared.type)
                 ? declared.type.access
-                : 'Take',
+                : 'Take'),
             span: context.spanOf(parameter.anchor),
             anchor: parameter.anchor,
           },
@@ -2521,13 +2522,11 @@ const runtimeTirFunction = (
         if (declared._tag !== 'Resolved' || Type.isSlice(declared.type)) return capture
         return {
           ...capture,
-          access: ConformanceProof.copyType(
-            index,
-            declared.type,
-            copyAssumptionsOf(fact.declaration),
-          )
-            ? ('Copy' as const)
-            : ('Take' as const),
+          access:
+            capture.reference.captureAccess ??
+            (ConformanceProof.copyType(index, declared.type, copyAssumptionsOf(fact.declaration))
+              ? ('Copy' as const)
+              : ('Take' as const)),
         }
       })
     const semanticCaptureAccess = (capture: EffectCaptureFact): Type.Effect['access'] | 'Copy' => {

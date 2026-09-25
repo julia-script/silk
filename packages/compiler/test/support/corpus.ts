@@ -9172,6 +9172,48 @@ pub fn main() -> i32 { return run Effect.catchAll(conflictCase(), recover) }`,
     }),
   ),
   {
+    name: 'local-shared-nested-owned-result-cleanup',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.bytes { Bytes }
+import silk.effect { Effect }
+import silk.result { Result }
+import silk.shared { Shared }
+
+struct Rejection { code: i32 }
+struct Answer { marker: Bytes retained: Shared<Bytes> }
+
+fn apply<T, F: once fn(&mut T) -> () + Intrinsic.NonParking>(value: &mut T, use: F) -> () {
+  return use(move value)
+}
+
+effect fn exercise() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let retained = run Shared.make<Bytes>(run Bytes.copy(b"retained"))
+  let mut first = run Shared.make<Result<Answer, Rejection>>(
+    Result.succeed<Answer, Rejection>(Answer {
+      marker: run Bytes.copy(b"marker"),
+      retained: move retained,
+    }),
+  )
+  let mut completed = Shared.clone<Result<Answer, Rejection>>(&first)
+  apply(&mut first, fn(entry: &mut Shared<Result<Answer, Rejection>>) -> () {
+      completed = Shared.clone<Result<Answer, Rejection>>(&entry.*)
+      return ()
+    })
+  drop completed
+  drop first
+  return 42
+}
+
+effect fn withAllocator() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run exercise() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(withAllocator(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'local-shared-affine-movement',
     source: `import silk.allocator { Allocator }
 import silk.allocator { Allocator, OutOfMemoryError, SystemAllocator }

@@ -1,0 +1,196 @@
+//! Canonical owner-chain identity for declarations in a source module.
+//!
+//! # When to use
+//! Use [`DeclarationId`] across modules or revisions. A `HirId`, `Symbol`, or `OwnerKey` from
+//! authored HIR is local to one parsed module and cannot identify another module's declaration.
+//!
+//! # Details
+//! Each owner step stores its kind, exact name bytes or absence, and same-key occurrence. An
+//! occurrence is not sufficient evidence for matching two revisions when same-key siblings exist.
+
+import hir.Hir {Module, OwnerKey, OwnerKind}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.option {Option}
+import silk.usize
+import silk.vector {Vector}
+import semantic.ModuleId {ModuleId}
+
+/// One local owner key converted to bytes independent of a HIR string table.
+pub struct OwnerStep {
+  /// The declaration category of this step.
+  pub kind: OwnerKind
+  /// The exact name bytes, absent for unnamed declarations.
+  pub name: Option<Bytes>
+  /// The position among siblings with this kind and name.
+  pub occurrence: usize
+}
+
+/// A module identity and complete parent-to-child declaration owner chain.
+pub struct DeclarationId {
+  module: ModuleId
+  owners: Vector<OwnerStep>
+}
+
+fn sameBytes(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if left[index] != right[index] {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn sameName(left: &Option<Bytes>, right: &Option<Bytes>) -> bool {
+  return match & left.* {
+    Option<Bytes>.Some {value: leftBytes} => match & right.* {
+      Option<Bytes>.Some {value: rightBytes} => sameBytes(
+        Bytes.asSlice(&leftBytes),
+        Bytes.asSlice(&rightBytes),
+      )
+      Option<Bytes>.None => false
+    }
+    Option<Bytes>.None => match & right.* {
+      Option<Bytes>.Some {value: _} => false
+      Option<Bytes>.None => true
+    }
+  }
+}
+
+effect fn copyStep(step: &OwnerStep) -> OwnerStep ! OutOfMemoryError ? &mut Allocator {
+  let name = match & step.name {
+    Option<Bytes>.Some {value} => Option.some<Bytes>(run Bytes.copy(Bytes.asSlice(&value)))
+    Option<Bytes>.None => Option.none<Bytes>()
+  }
+  return OwnerStep {kind: step.kind, name: move name, occurrence: step.occurrence}
+}
+
+effect fn fromOwner(module: &Module, owner: OwnerKey) -> OwnerStep
+! OutOfMemoryError
+? &mut Allocator {
+  let mut name = Option.none<Bytes>()
+  if owner.name.present {
+    name = Option.some<Bytes>(run Bytes.copy(Module.text(module, owner.name.symbol)))
+  }
+  return OwnerStep {kind: owner.kind, name: move name, occurrence: owner.occurrence}
+}
+
+impl DeclarationId {
+  /// Borrows the canonical module identity that owns this declaration.
+  pub fn moduleId(self: &Self) -> &ModuleId {
+    return &self.module
+  }
+  /// Creates a canonical identity for a top-level authored declaration.
+  pub effect fn root(id: &ModuleId, module: &Module, owner: OwnerKey) -> DeclarationId
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let mut owners = Vector.make<OwnerStep>()
+    run Vector.append<OwnerStep>(&mut owners, run fromOwner(module, owner))
+    return DeclarationId {module: run ModuleId.copy(id), owners: move owners}
+  }
+  /// Creates a canonical identity for a declaration inside `self`.
+  pub effect fn child(self: &Self, module: &Module, owner: OwnerKey) -> DeclarationId
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let mut owners = Vector.make<OwnerStep>()
+    let parent = Vector.asSlice<OwnerStep>(&self.owners)
+    let mut index = usize.ZERO
+    while index < parent.length {
+      run Vector.append<OwnerStep>(&mut owners, run copyStep(&parent[index]))
+      index = index + usize.ONE
+    }
+    run Vector.append<OwnerStep>(&mut owners, run fromOwner(module, owner))
+    return DeclarationId {module: run ModuleId.copy(&self.module), owners: move owners}
+  }
+  /// Copies one canonical identity without retaining a HIR-local symbol.
+  pub effect fn copy(self: &Self) -> DeclarationId ! OutOfMemoryError ? &mut Allocator {
+    let mut owners = Vector.make<OwnerStep>()
+    let source = Vector.asSlice<OwnerStep>(&self.owners)
+    let mut index = usize.ZERO
+    while index < source.length {
+      run Vector.append<OwnerStep>(&mut owners, run copyStep(&source[index]))
+      index = index + usize.ONE
+    }
+    return DeclarationId {module: run ModuleId.copy(&self.module), owners: move owners}
+  }
+  /// Reports whether two values have the same module and complete owner chain.
+  pub fn equals(self: &Self, other: &DeclarationId) -> bool {
+    if !ModuleId.equals(&self.module, &other.module) {
+      return false
+    }
+    let left = Vector.asSlice<OwnerStep>(&self.owners)
+    let right = Vector.asSlice<OwnerStep>(&other.owners)
+    if left.length != right.length {
+      return false
+    }
+    let mut index = usize.ZERO
+    while index < left.length {
+      if left[index].kind != right[index].kind || left[index].occurrence != right[index].occurrence || !sameName(
+        &left[index].name,
+        &right[index].name,
+      ) {
+        return false
+      }
+      index = index + usize.ONE
+    }
+    return true
+  }
+  /// Reports whether this exact owner chain is a prefix of another identity, including equality.
+  ///
+  /// # Details
+  ///
+  /// A duplicate owner makes every declaration below it ambiguous across revisions, even when
+  /// the nested declaration itself has a unique local name.
+  pub fn isPrefixOf(self: &Self, other: &DeclarationId) -> bool {
+    if !ModuleId.equals(&self.module, &other.module) {
+      return false
+    }
+    let prefix = Vector.asSlice<OwnerStep>(&self.owners)
+    let full = Vector.asSlice<OwnerStep>(&other.owners)
+    if prefix.length > full.length {
+      return false
+    }
+    let mut index = usize.ZERO
+    while index < prefix.length {
+      if prefix[index].kind != full[index].kind || prefix[index].occurrence != full[index].occurrence || !sameName(
+        &prefix[index].name,
+        &full[index].name,
+      ) {
+        return false
+      }
+      index = index + usize.ONE
+    }
+    return true
+  }
+  /// Reports whether two declarations are same-key siblings, regardless of occurrence.
+  ///
+  /// # Details
+  ///
+  /// Matching either sibling across a revision change is ambiguous when this returns `true`.
+  pub fn sameSiblingKey(self: &Self, other: &DeclarationId) -> bool {
+    if !ModuleId.equals(&self.module, &other.module) {
+      return false
+    }
+    let left = Vector.asSlice<OwnerStep>(&self.owners)
+    let right = Vector.asSlice<OwnerStep>(&other.owners)
+    if left.length == usize.ZERO || left.length != right.length {
+      return false
+    }
+    let mut index = usize.ZERO
+    while index < left.length {
+      if left[index].kind != right[index].kind || !sameName(&left[index].name, &right[index].name) {
+        return false
+      }
+      if index + usize.ONE < left.length && left[index].occurrence != right[index].occurrence {
+        return false
+      }
+      index = index + usize.ONE
+    }
+    return true
+  }
+}

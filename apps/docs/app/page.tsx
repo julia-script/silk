@@ -1,17 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Metadata } from 'next'
-import { JetBrains_Mono } from 'next/font/google'
 import Link from 'next/link'
 import { RegisterSnippets } from './_introduction/RegisterSnippets'
+import { introMono } from './fonts'
 import './_introduction/introduction.css'
-
-const mono = JetBrains_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  style: ['normal', 'italic'],
-  variable: '--intro-mono',
-})
 
 // Title/description inherit from the root layout defaults.
 export const metadata: Metadata = {
@@ -25,7 +18,7 @@ export default function Home() {
   // until restart. Production renders this page once at build time either way.
   const html = readFileSync(join(process.cwd(), 'app/_introduction/introduction.html'), 'utf8')
   return (
-    <div className={`silk-intro ${mono.variable}`}>
+    <div className={`silk-intro ${introMono.variable}`}>
       <header className="bar">
         <span className="title">silk</span>
         <span className="spacer" />

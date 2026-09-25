@@ -141,3 +141,41 @@ it('keeps pressure-policy spellings out of the compiler privilege inventory', ()
     assert.notMatch(source, policyActorLiteral, phase)
   }
 })
+
+it.effect('keeps allocator provenance through a generic scoped callback', () =>
+  Effect.gen(function* () {
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.result { Result }
+import silk.shared { Shared }
+struct Rejection { code: i32 }
+struct Lease {}
+effect fn memo<'env, A, R, E, ?Requirements>(
+  provide: once fn<'env>() -> once Effect<'env; Result<A, R> ! E ? Requirements>
+) -> Shared<Result<A, R>> ! E | OutOfMemoryError ? Requirements | &mut Allocator {
+  let use = effect fn(resource: &mut Lease) -> Shared<Result<A, R>>
+  ! E | OutOfMemoryError ? Requirements | &mut Allocator {
+    let answer = run provide()
+    return run Shared.make<Result<A, R>>(move answer)
+  }
+  let release = effect fn(resource: &mut Lease) -> () { return () }
+  return run Effect.useReleaseNonParking(Lease {}, move use, move release)
+}
+effect fn accepted() -> Result<i32, Rejection> {
+  return Result.succeed<i32, Rejection>(41)
+}
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let shared = run memo(accepted) |> Effect.provideMut<Allocator>(&mut allocator)
+  drop shared
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
+pub fn main() -> i32 {
+  return run Effect.catchAll(program(), recover)
+}`
+    const snapshot = yield* realized('pressure/generic-scoped-shared-answer', source)
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.isAbove(Analysis.loweredMir(snapshot).functions.length, 0)
+  }),
+)

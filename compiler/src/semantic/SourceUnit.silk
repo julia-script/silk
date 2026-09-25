@@ -1,0 +1,83 @@
+//! Parsed source bytes and authored HIR for one module in one held revision.
+//!
+//! # When to use
+//! Use [`SourceUnit`] for syntax, authored declarations, and diagnostics from the same source
+//! capture. Its parser tree owns the exact bytes that its HIR spans address.
+
+import hir.Hir {Diagnostic, Module}
+import hir.Lower
+import lexer.Lexer {Lexer}
+import lexer.Token {Token}
+import parser.Parser
+import parser.SyntaxTree {SyntaxTree}
+import semantic.ModuleId {ModuleId}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.option {Option}
+import silk.usize
+import silk.vector {Vector}
+import Stream {Stream}
+
+/// A complete parsed source file and its authored HIR under one revision.
+pub struct SourceUnit {
+  /// The canonical module identity for these bytes.
+  pub id: ModuleId
+  /// The number of the revision that supplied these bytes.
+  pub revision: usize
+  /// The syntax tree that owns the exact parsed source bytes.
+  pub syntax: SyntaxTree
+  /// The HIR lowered from this syntax tree without semantic analysis.
+  pub authored: Module
+}
+
+effect fn lex(lexer: &mut Lexer) -> Vector<Token> ! OutOfMemoryError ? &mut Allocator {
+  let mut tokens = Vector.make<Token>()
+  while true {
+    let taken = run Stream.take(lexer)
+    if let Option<Token>.Some {value} = move taken {
+      run Vector.append<Token>(&mut tokens, move value)
+    } else {
+      break
+    }
+  }
+  return move tokens
+}
+
+impl SourceUnit {
+  /// Parses and lowers one complete source capture without resolving any import or type.
+  ///
+  /// # Details
+  ///
+  /// Syntax recovery remains in the returned tree and HIR. The source bytes remain in the tree
+  /// and do not depend on a later provider read.
+  pub effect fn parse(id: &ModuleId, revision: usize, source: Bytes) -> SourceUnit
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let mut lexer = Lexer.make(Bytes.asSlice(&source))
+    let tokens = run lex(&mut lexer)
+    let syntax = run Parser.parse(move source, move tokens)
+    let authored = run Lower.lower(&syntax)
+    return SourceUnit {
+      id: run ModuleId.copy(id),
+      revision: revision,
+      syntax: move syntax,
+      authored: move authored,
+    }
+  }
+  /// Borrows the exact bytes that were parsed and lowered for this unit.
+  pub fn bytes(self: &Self) -> &[u8] {
+    return Bytes.asSlice(&self.syntax.source)
+  }
+  /// Returns one frontend diagnostic with a span into this unit's retained bytes.
+  ///
+  /// # Gotchas
+  ///
+  /// `index` must be less than [`diagnosticCount`]. Otherwise, the program traps.
+  pub fn diagnostic(self: &Self, index: usize) -> Diagnostic {
+    return Vector.get<Diagnostic>(&self.authored.diagnostics, index)
+  }
+  /// Returns the number of frontend diagnostics in this unit.
+  pub fn diagnosticCount(self: &Self) -> usize {
+    return Vector.length<Diagnostic>(&self.authored.diagnostics)
+  }
+}

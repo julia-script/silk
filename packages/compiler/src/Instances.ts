@@ -1442,6 +1442,8 @@ export const discover = (
   interface CleanupMeasure {
     /** Concrete owner types whose exact cleanup plans selected this path. */
     readonly roots: ReadonlyArray<Type.Type>
+    /** Concrete arguments of the selected hook, usable only within this cleanup frame. */
+    readonly frame: ReadonlyArray<Type.Type>
   }
   interface WorkItem {
     readonly key: InstanceKey
@@ -1454,6 +1456,22 @@ export const discover = (
   }
   const declarationText = (key: InstanceKey): string =>
     `${key.declaration.module}\u0000${key.declaration.name}`
+  const familiesByDeclaration = new Map<string, Set<string>>()
+  /** A provider's finite callable target selects which body can continue a generic call cycle. */
+  const recursionFamily = (key: InstanceKey): string => {
+    const declaration = declarationText(key)
+    const targets = key.typeArguments
+      .filter(Type.isCallableIdentityArgument)
+      .map((argument) => argument.target)
+    const family = targets.length === 0 ? declaration : JSON.stringify([declaration, targets])
+    let families = familiesByDeclaration.get(declaration)
+    if (families === undefined) {
+      families = new Set()
+      familiesByDeclaration.set(declaration, families)
+    }
+    families.add(family)
+    return family
+  }
   const variableArguments = new Map<string, boolean>()
   const emptySubstitution: Type.Substitution = new Map()
   /**
@@ -1478,31 +1496,31 @@ export const discover = (
     return needed
   }
   /**
-   * Instance keys seen for one declaration, which is what its ancestry can ever distinguish.
+   * Instance keys seen for one finite declaration/provider-target family.
    *
    * `needsAncestor` admits a declaration whose arguments *may* vary. Whether they do is a fact
-   * about the program: a declaration discovery only ever realizes at one instance key has one
+   * about the program: a family discovery only ever realizes at one instance key has one
    * possible ancestor, equal to every target of it, so every guard below it is admitted and its
    * correlation with the rest of the history decides nothing. Recording it anyway is what made the
    * exact history of a few hundred mutually recursive walkers grow past what a process can hold,
    * because one strongly connected component projects onto itself and nothing else removes it.
-   * A declaration therefore enters the ancestry only once a second instance key proves it
+   * A family therefore enters the ancestry only once a second instance key proves it
    * discriminating, and discovery restarts so the histories built without it are rebuilt with it.
    */
   const realizedKeys = new Map<string, Set<string>>()
   const discriminating = new Set<string>()
   let discriminatingGrew = false
   const isDiscriminating = (key: InstanceKey): boolean => {
-    const declaration = declarationText(key)
-    if (discriminating.has(declaration)) return true
-    let keys = realizedKeys.get(declaration)
+    const family = recursionFamily(key)
+    if (discriminating.has(family)) return true
+    let keys = realizedKeys.get(family)
     if (keys === undefined) {
       keys = new Set()
-      realizedKeys.set(declaration, keys)
+      realizedKeys.set(family, keys)
     }
     keys.add(keyText(key))
     if (keys.size < 2) return false
-    discriminating.add(declaration)
+    discriminating.add(family)
     discriminatingGrew = true
     return true
   }
@@ -1517,7 +1535,7 @@ export const discover = (
       ancestor.structuralProvider === undefined ? null : Type.key(ancestor.structuralProvider),
     ])
     ancestorValues.set(value, ancestor)
-    return AncestorHistory.set(histories, history, declarationText(ancestor.key), value)
+    return AncestorHistory.set(histories, history, recursionFamily(ancestor.key), value)
   }
   /**
    * A guard below a call to `T` consults only the ancestors of declarations called beneath `T`.
@@ -1594,9 +1612,13 @@ export const discover = (
     ancestor: Ancestor,
   ): AncestorHistory.History => {
     const declaration = declarationText(ancestor.key)
+    recursionFamily(ancestor.key)
     const cycle = cycleOf(declaration)
     if (!projectedCycleSizes.has(declaration)) projectedCycleSizes.set(declaration, cycle.size)
-    return withAncestor(AncestorHistory.project(histories, history, cycle), ancestor)
+    const families = new Set(
+      [...cycle].flatMap((member) => [...(familiesByDeclaration.get(member) ?? [])]),
+    )
+    return withAncestor(AncestorHistory.project(histories, history, families), ancestor)
   }
   const cycleGrewAfterProjection = (): boolean => {
     for (const [declaration, size] of projectedCycleSizes)
@@ -1801,22 +1823,47 @@ export const discover = (
     measure.roots.some(
       (root) => sameRuntimeType(candidate, root) || isStrictCleanupSubterm(candidate, root),
     )
-  const cleanupMeasureOf = (roots: ReadonlyArray<Type.Type>): CleanupMeasure => ({
+  const cleanupMeasureOf = (
+    roots: ReadonlyArray<Type.Type>,
+    frame: ReadonlyArray<Type.Type> = [],
+  ): CleanupMeasure => ({
     roots: [...new Map(roots.map((root) => [Type.runtimeKey(root), root])).values()],
+    frame,
   })
   const cleanupTransition = (
     measure: CleanupMeasure | undefined,
     target: InstanceKey,
     selectedRoots: ReadonlyArray<Type.Type>,
+    ancestor: InstanceKey | undefined,
   ): CleanupMeasure | undefined => {
     if (measure === undefined)
       return selectedRoots.length === 0 ? undefined : cleanupMeasureOf(selectedRoots)
-    if (selectedRoots.length > 0)
-      return selectedRoots.some((root) => coveredByCleanupMeasure(measure, root))
-        ? measure
+    // Each selected cleanup hook may expose a more deeply owned payload hidden from the
+    // original roots by an opaque buffer. Its concrete arguments justify the next cleanup
+    // owner, provided a repeated hook family does not grow. Keep the original roots fixed.
+    if (selectedRoots.length > 0) {
+      const fromRoots = selectedRoots.some((root) => coveredByCleanupMeasure(measure, root))
+      const fromFrame =
+        (ancestor === undefined || nonGrowingTypeArguments(ancestor, target)) &&
+        selectedRoots.some((root) =>
+          measure.frame.some(
+            (frame) => sameRuntimeType(root, frame) || isStrictCleanupSubterm(root, frame),
+          ),
+        )
+      return fromRoots || fromFrame
+        ? cleanupMeasureOf(measure.roots, typeArgumentsOf(target))
         : undefined
+    }
     const targetTypes = typeArgumentsOf(target)
-    return targetTypes.every((type) => coveredByCleanupMeasure(measure, type)) ? measure : undefined
+    return targetTypes.every(
+      (type) =>
+        coveredByCleanupMeasure(measure, type) ||
+        measure.frame.some(
+          (frame) => sameRuntimeType(type, frame) || isStrictCleanupSubterm(type, frame),
+        ),
+    )
+      ? measure
+      : undefined
   }
   const sameVisibleArguments = (left: InstanceKey, right: InstanceKey): boolean => {
     const leftVisible = left.typeArguments.filter(
@@ -1905,6 +1952,7 @@ export const discover = (
     JSON.stringify([
       keyText(item.key),
       item.cleanupMeasure?.roots.map(Type.runtimeKey).sort() ?? null,
+      item.cleanupMeasure?.frame.map(Type.runtimeKey).sort() ?? null,
     ])
   const pending: Array<string> = []
   type StaticOrigins = ReadonlyArray<Evaluation.TextOrigin | undefined>
@@ -2331,7 +2379,7 @@ export const discover = (
           for (const [value, branchHistory] of AncestorHistory.partition(
             histories,
             item.ancestors,
-            declarationText(targetKey),
+            recursionFamily(targetKey),
           )) {
             const ancestor = value === undefined ? undefined : ancestorValues.get(value)
             const structurallyDescending =
@@ -2342,6 +2390,7 @@ export const discover = (
               item.cleanupMeasure,
               targetKey,
               ordinaryIdentities.has(identity) ? [] : (cleanupRoots.get(identity) ?? []),
+              ancestor?.key,
             )
             const terminalCallableSpecialization =
               ancestor !== undefined && sameRuntimeNonCallableArguments(ancestor.key, targetKey)
@@ -2435,11 +2484,10 @@ export const discover = (
         )
         for (const ownerContext of recordedContexts.get(keyText(provided.owner))?.values() ?? []) {
           addCallEdge(provided.owner, provided.target)
-          const declaration = declarationText(provided.target)
           for (const [value, branchHistory] of AncestorHistory.partition(
             histories,
             ownerContext.ancestors,
-            declaration,
+            recursionFamily(provided.target),
           )) {
             const ancestor = value === undefined ? undefined : ancestorValues.get(value)
             // A cleanup implementation can select another specialization of the same lexical service
@@ -2450,6 +2498,7 @@ export const discover = (
               ownerContext.cleanupMeasure,
               provided.target,
               cleanupRoots,
+              ancestor?.key,
             )
             const cleanupSpecialization = cleanupPermitsSpecialization(
               ancestor?.key,

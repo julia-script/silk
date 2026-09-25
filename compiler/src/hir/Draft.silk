@@ -999,7 +999,7 @@ pub fn recognizeBase(digits: &[u8]) -> Base {
   return Base {radix: Radix.Decimal, width: usize.ZERO, value: 10}
 }
 
-/// A decoded magnitude, or the report that no `u64` can hold it.
+/// A bounded magnitude for floating, duration, and character literals.
 pub struct Magnitude {
   /// Whether the magnitude fits `u64`.
   pub fits: bool
@@ -1013,8 +1013,7 @@ impl Copy for Magnitude {}
 ///
 /// # Details
 ///
-/// The bootstrap decoders accumulate into a `bigint` and never overflow. Decision 6 of the port
-/// caps a magnitude at `u64`, so every digit loop checks the room left before it scales.
+/// Floating and duration components use `u64`, so their digit loops check room before scaling.
 pub fn accumulate(value: u64, radix: u64, digit: u64) -> Magnitude {
   if value > u64.divide(u64.MAX - digit, radix) {
     return Magnitude {fits: false, value: 0}
@@ -1022,49 +1021,11 @@ pub fn accumulate(value: u64, radix: u64, digit: u64) -> Magnitude {
   return Magnitude {fits: true, value: value * radix + digit}
 }
 
-/// Reads the unsigned magnitude of one complete integer-literal slice.
+/// Lowers one integer token to an exact decimal magnitude and its written base.
 ///
 /// # Details
-///
-/// This is `internal/IntegerLiteral.magnitude` with the bootstrap's arbitrary precision replaced by
-/// a `u64` range check: the slice carries its own base, digit separators carry no value and are
-/// skipped, and a literal too wide for `u64` answers `fits: false` so its caller can lower an
-/// invalid expression with an overflow cause. A byte that is not a digit of the recognized base
-/// answers the same way, so a slice the lexer should never have produced cannot silently decode to
-/// a plausible-looking number.
-pub fn magnitudeOf(digits: &[u8]) -> Magnitude {
-  let base = recognizeBase(digits)
-  let mut value: u64 = 0
-  let mut index = base.width
-  while index < digits.length {
-    let byte = digits[index]
-    index = index + usize.ONE
-    if byte == UNDERSCORE {
-      continue
-    }
-    let digit = hexDigit(byte)
-    if digit >= base.value {
-      return Magnitude {fits: false, value: 0}
-    }
-    let stepped = accumulate(value, base.value, digit)
-    if !stepped.fits {
-      return Magnitude {fits: false, value: 0}
-    }
-    value = stepped.value
-  }
-  return Magnitude {fits: true, value: value}
-}
-
-/// Lowers one integer literal token, or an invalid expression when its magnitude overflows `u64`.
-///
-/// # Details
-///
-/// This is the bootstrap `integerFromToken` under decision 6 of the port: the bootstrap kept a
-/// `bigint`, so it never rejected a magnitude. Here a literal beyond `u64` becomes an
-/// [`Node.InvalidExpression`](hir.Hir.Node) carrying [`CauseCode.IntegerOverflow`].
-///
-/// `negative` is the bootstrap's own parameter: the sign is written by the enclosing expression,
-/// not by the digit token, so a position whose grammar admits no sign passes `false`.
+/// The sign is written by the enclosing expression. `negative` is false when that position has no
+/// sign. The digits have no storage limit. Invalid digits keep an invalid-expression cause.
 pub effect fn integerFromToken(
   draft: &mut Draft,
   tree: &SyntaxTree,
@@ -1077,10 +1038,57 @@ pub effect fn integerFromToken(
   let source = Bytes.asSlice(&tree.source)
   let content = Slice.view<u8>(source, digits.start, digits.end - digits.start)
   let base = recognizeBase(content)
-  let magnitude = magnitudeOf(content)
-  if !magnitude.fits {
-    return run undecodableLiteral(&mut draft.*, span, CauseCode.IntegerOverflow)
+  // Decimal digits are stored least significant first while each source digit scales the value.
+  let mut reversed = Vector.make<u8>()
+  run Vector.append<u8>(&mut reversed, 0)
+  let mut index = base.width
+  let mut sawDigit = false
+  let mut afterDigit = false
+  let mut valid = true
+  while index < content.length {
+    let byte = content[index]
+    index = index + usize.ONE
+    if byte == UNDERSCORE {
+      if !afterDigit {
+        valid = false
+        break
+      }
+      afterDigit = false
+      continue
+    }
+    let digit = hexDigit(byte)
+    if digit >= base.value {
+      valid = false
+      break
+    }
+    sawDigit = true
+    afterDigit = true
+    let mut carry = digit
+    let mut place = usize.ZERO
+    while place < Vector.length<u8>(&reversed) {
+      let scaled = u8.toU64(Vector.get<u8>(&reversed, place)) * base.value + carry
+      Vector.set<u8>(&mut reversed, place, u64.toU8(u64.remainder(scaled, 10)))
+      carry = u64.divide(scaled, 10)
+      place = place + usize.ONE
+    }
+    while carry > 0 {
+      run Vector.append<u8>(&mut reversed, u64.toU8(u64.remainder(carry, 10)))
+      carry = u64.divide(carry, 10)
+    }
   }
+  if !valid || !sawDigit || !afterDigit {
+    drop reversed
+    return run undecodableLiteral(&mut draft.*, span, CauseCode.InvalidLiteralEncoding)
+  }
+  let mut canonical = Vector.make<u8>()
+  let mut place = Vector.length<u8>(&reversed)
+  while place > usize.ZERO {
+    place = place - usize.ONE
+    run Vector.append<u8>(&mut canonical, Vector.get<u8>(&reversed, place) + 48)
+  }
+  let magnitude = run Module.intern(&mut draft.module, Vector.asSlice<u8>(&canonical))
+  drop canonical
+  drop reversed
   let mut sign = Sign.Positive
   if negative {
     sign = Sign.Negative
@@ -1089,7 +1097,7 @@ pub effect fn integerFromToken(
     &mut draft.*,
     Node.IntegerLiteral {
       sign: sign,
-      magnitude: magnitude.value,
+      magnitude: magnitude,
       radix: base.radix,
       suffix: SymbolRef.absent(),
     },

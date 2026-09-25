@@ -1,0 +1,166 @@
+//! Typed storage and scoped execution for one family of semantic queries.
+//!
+//! # When to use
+//! Use [`Query`] when a semantic fact can depend on another fact from the same family.
+//! Call [`demand`] to reuse a completed answer or to run its provider once.
+//!
+//! # Details
+//! A completed answer owns a success or semantic rejection. A provider failure does not
+//! complete the key. A later demand can run that provider again.
+//!
+//! # Gotchas
+//! A recursive demand for an active key reports [`Cycle`]. Fatal traps stop the process;
+//! they do not run reservation cleanup.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.effect {Effect}
+import silk.hash {Hash, HashKey}
+import silk.hash_map {HashMap}
+import silk.option {Option}
+import silk.result {Result}
+import silk.shared {Shared}
+
+/// A recursive demand for a key whose provider is still active.
+pub struct Cycle {}
+
+/// One reserved or completed query entry.
+union Entry<A, R> {
+  Active,
+  Complete {answer: Shared<Result<A, R>>},
+}
+
+/// A reservation whose release removes only an unpublished active entry.
+struct Reservation<'a, K, A, R> {
+  owner: &'a mut Query<K, A, R>
+  key: K
+  published: bool
+}
+
+/// A serial query store with owned keys and move-only completed answers.
+///
+/// # Details
+///
+/// The store retains a completed semantic rejection like a completed success.
+/// Typed provider failures and structured cancellation remove the active key.
+pub struct Query<K, A, R> {
+  entries: HashMap<K, Entry<A, R>>
+}
+
+impl<K, A, R> Query<K, A, R> {
+  /// Creates an empty query store with deterministic key hashing.
+  pub fn make() -> Query<K, A, R> {
+    return Query<K, A, R> {entries: HashMap.make<K, Entry<A, R>>(Hash.seed(0))}
+  }
+  /// Returns the number of active and completed keys in the store.
+  pub fn length(self: &Self) -> usize {
+    return HashMap.length<K, Entry<A, R>>(&self.entries)
+  }
+  /// Reports whether `key` has a published success or semantic rejection.
+  pub fn isComplete<K: HashKey + Copy>(self: &mut Self, key: K) -> bool {
+    let mut complete = false
+    let found = HashMap.withMut(
+      &mut self.entries,
+      key,
+      fn(entry: &mut Entry<A, R>) -> () {
+        if let Entry<A, R>.Complete {answer: _} = &entry.* {
+          complete = true
+        }
+        return ()
+      },
+    )
+    return found && complete
+  }
+  /// Returns a completed answer without running its provider, or `None` for an absent or active key.
+  pub fn completed<K: HashKey + Copy>(self: &mut Self, key: K) -> Option<Shared<Result<A, R>>> {
+    let mut answer = Option.none<Shared<Result<A, R>>>()
+    let found = HashMap.withMut(
+      &mut self.entries,
+      key,
+      fn(entry: &mut Entry<A, R>) -> () {
+        if let Entry<A, R>.Complete {answer: value} = &entry.* {
+          answer = Option.some<Shared<Result<A, R>>>(Shared.clone<Result<A, R>>(&value))
+        }
+        return ()
+      },
+    )
+    return move answer
+  }
+  /// Removes one completed key so its provider can run against a later revision.
+  pub fn forget<K: HashKey + Copy>(self: &mut Self, key: K) -> () {
+    if !Query.isComplete(&mut self.*, key) {
+      return ()
+    }
+    let removed = HashMap.remove<K, Entry<A, R>>(&mut self.entries, key)
+    drop removed
+    return ()
+  }
+  /// Runs the provider for an absent key and returns an owned handle to its completed answer.
+  ///
+  /// # Details
+  ///
+  /// A completed success or semantic rejection is reused without running `provide`.
+  /// An active key reports `Cycle`. Provider failure and structured cancellation
+  /// remove the reservation, so a later demand can retry the key.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must keep the returned `Shared` handle while it reads the answer.
+  /// Fatal traps stop the process and do not run cleanup.
+  pub effect fn demand<'owner, 'env, K: HashKey + Copy, E, ?Requirements>(
+    self: &'owner mut Self,
+    key: K,
+    provide: for<'scope> once fn<'env>(&'scope mut Self, K) -> once Effect<'scope & 'env; Result<
+      A,
+      R,
+    > ! E ? Requirements>,
+  ) -> Shared<Result<A, R>> ! Cycle | E | OutOfMemoryError ? Requirements | &mut Allocator {
+    let mut completed = Option.none<Shared<Result<A, R>>>()
+    let active = HashMap.withMut(
+      &mut self.entries,
+      key,
+      fn(entry: &mut Entry<A, R>) -> () {
+        match & entry.* {
+          Entry<A, R>.Active => {}
+          Entry<A, R>.Complete {answer} => {
+            completed = Option.some<Shared<Result<A, R>>>(Shared.clone<Result<A, R>>(&answer))
+          }
+        }
+        return ()
+      },
+    )
+    if let Option<Shared<Result<A, R>>>.Some {value} = move completed {
+      drop move provide
+      return move value
+    }
+    if active {
+      drop move provide
+      fail Cycle {}
+    }
+    let previous = run HashMap.insert<K, Entry<A, R>>(&mut self.entries, key, Entry<A, R>.Active)
+    drop previous
+    let reservation = Reservation<'owner, K, A, R> {owner: move self, key: key, published: false}
+    let use = effect fn(resource: &mut Reservation<'owner, K, A, R>) -> Shared<Result<A, R>>
+    ! E | OutOfMemoryError
+    ? Requirements | &mut Allocator {
+      let selected = resource.key
+      let answer = run provide(&mut resource.*.owner.*, selected)
+      let shared = run Shared.make<Result<A, R>>(move answer)
+      let prior = run HashMap.insert<K, Entry<A, R>>(
+        &mut resource.*.owner.*.entries,
+        resource.key,
+        Entry<A, R>.Complete {answer: Shared.clone<Result<A, R>>(&shared)},
+      )
+      drop prior
+      resource.*.published = true
+      return move shared
+    }
+    let release = effect fn(resource: &mut Reservation<'owner, K, A, R>) -> () {
+      if !resource.published {
+        let removed = HashMap.remove<K, Entry<A, R>>(&mut resource.*.owner.*.entries, resource.key)
+        drop removed
+      }
+      return ()
+    }
+    return run Effect.useReleaseNonParking(move reservation, move use, move release)
+  }
+}

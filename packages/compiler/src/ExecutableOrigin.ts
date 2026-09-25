@@ -443,46 +443,51 @@ export const make = (operations: Operations) => {
     index: DeclarationIndex.Index,
     includeWitnessDependencies = true,
     cleanupRoot: Type.Type = cleanup.type,
+    sharedPayloads: ReadonlySet<string> = new Set(),
   ): ReadonlyArray<CallTarget> => {
+    const nested = (plan: CleanupPlan.CleanupPlan): ReadonlyArray<CallTarget> =>
+      hookCalls(plan, index, includeWitnessDependencies, cleanupRoot, sharedPayloads)
     switch (cleanup._tag) {
+      case 'LocalSharedCoreCleanup': {
+        // The generated payload helper can invoke hooks hidden behind the opaque shared core.
+        // Reentering the same payload on this path would rediscover the same hooks forever.
+        const key = Type.key(cleanup.element)
+        return sharedPayloads.has(key)
+          ? []
+          : hookCalls(
+              CleanupPlan.cleanupPlan(index, cleanup.element),
+              index,
+              includeWitnessDependencies,
+              cleanupRoot,
+              new Set(sharedPayloads).add(key),
+            )
+      }
       case 'HookCleanup':
         return [
           ...(includeWitnessDependencies
             ? witnessDependencyCallTargets(index, cleanup.type, Type.dropCapability)
             : []),
           { declaration: cleanup.hook, typeArguments: cleanup.typeArguments },
-          ...hookCalls(cleanup.inner, index, includeWitnessDependencies, cleanupRoot),
+          ...nested(cleanup.inner),
         ].map((call) => ({ ...call, cleanupRoot }))
       case 'StructCleanup':
-        return cleanup.fields.flatMap((field) =>
-          hookCalls(field.cleanup, index, includeWitnessDependencies, cleanupRoot),
-        )
+        return cleanup.fields.flatMap((field) => nested(field.cleanup))
       case 'NominalUnionCleanup':
         return cleanup.variants.flatMap((variant) =>
-          variant.fields.flatMap((field) =>
-            hookCalls(field.cleanup, index, includeWitnessDependencies, cleanupRoot),
-          ),
+          variant.fields.flatMap((field) => nested(field.cleanup)),
         )
       case 'ArrayCleanup':
-        return hookCalls(cleanup.element, index, includeWitnessDependencies, cleanupRoot)
+        return nested(cleanup.element)
       case 'UnionCleanup':
-        return cleanup.cases.flatMap((entry) =>
-          hookCalls(entry.cleanup, index, includeWitnessDependencies, cleanupRoot),
-        )
+        return cleanup.cases.flatMap((entry) => nested(entry.cleanup))
       case 'RawBufferCleanup':
-        return hookCalls(cleanup.allocation, index, includeWitnessDependencies, cleanupRoot)
+        return nested(cleanup.allocation)
       case 'CallableCleanup':
-        return cleanup.slots.flatMap((slot) =>
-          hookCalls(slot.cleanup, index, includeWitnessDependencies, cleanupRoot),
-        )
+        return cleanup.slots.flatMap((slot) => nested(slot.cleanup))
       case 'EffectCleanup':
-        return cleanup.slots.flatMap((slot) =>
-          hookCalls(slot.cleanup, index, includeWitnessDependencies, cleanupRoot),
-        )
+        return cleanup.slots.flatMap((slot) => nested(slot.cleanup))
       case 'EffectCompositeCleanup':
-        return cleanup.alternatives.flatMap((alternative) =>
-          hookCalls(alternative, index, includeWitnessDependencies, cleanupRoot),
-        )
+        return cleanup.alternatives.flatMap(nested)
       default:
         return []
     }

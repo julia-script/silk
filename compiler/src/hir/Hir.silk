@@ -34,11 +34,9 @@
 //!   arena rather than inside each variant, so no variant pays for a field it rarely uses.
 //! - `AuthoredModule` is [`Module`] itself rather than a node variant, and `Declaration` keeps its
 //!   logical name through [`OwnerKey`] instead of a structured owner identity.
-//! - `IntegerLiteral.value` and the floating and duration magnitudes are `u64` rather than
-//!   arbitrary precision. A literal that exceeds `u64` lowers to [`Node.InvalidExpression`] with an
-//!   [`CauseCode.IntegerOverflow`] cause. The bootstrap's signed `FloatingLiteral.exponent` becomes
-//!   an unsigned magnitude paired with [`Node.FloatingLiteral`]'s `exponentSign`, because a `u64`
-//!   cannot carry the sign that `1.5` needs.
+//! - An integer magnitude is interned as exact decimal digits. Floating and duration magnitudes
+//!   remain `u64`. The bootstrap's signed `FloatingLiteral.exponent` becomes an unsigned magnitude
+//!   paired with [`Node.FloatingLiteral`]'s `exponentSign`.
 //! - `Parameter`, `Field`, `Property`, and the other list elements stay ordinary nodes referenced
 //!   through a [`Range`], so no parent embeds an array.
 //! - The bootstrap `NamedHeader` mixin is flattened: each named header variant declares its own
@@ -48,8 +46,7 @@
 //! - Field names that are Silk keywords are renamed, never dropped: `type` is `annotation`,
 //!   `public` is `isPublic`, `role` is `rolePath` or `roleName` by its child kind, and `effect`,
 //!   `test`, `unsafe`, `static`, and `move` take an `is` prefix. The bootstrap's signed
-//!   `IntegerLiteral.value` becomes an unsigned `magnitude` paired with a `sign`, for the same
-//!   reason `FloatingLiteral` splits its exponent: a `u64` cannot carry the sign.
+//!   `IntegerLiteral.value` becomes an unsigned decimal `magnitude` paired with a `sign`.
 //! - `Requirement.access` and `NamedType.mode` are non-optional enums paired with a `hasAccess` or
 //!   `hasMode` flag, because an enum cannot carry an absence marker and a reserved variant would
 //!   make one written mode unrepresentable.
@@ -363,8 +360,6 @@ pub enum CauseCode {
   MissingSyntax,
   /// The syntax node in this position belongs to a different grammar category.
   UnexpectedSyntax,
-  /// An integer literal's magnitude exceeds `u64`.
-  IntegerOverflow,
   /// A floating-point literal's coefficient or exponent exceeds `u64`.
   FloatingOverflow,
   /// A duration component's magnitude exceeds `u64`.
@@ -769,12 +764,12 @@ pub union Node {
 
   // Literals.
 
-  /// An integer literal whose magnitude fits `u64`.
+  /// An integer literal with an exact unsigned magnitude.
   IntegerLiteral {
     /// The written sign of the literal.
     pub sign: Sign,
-    /// The decoded magnitude.
-    pub magnitude: u64,
+    /// The interned canonical decimal digits of the unsigned magnitude.
+    pub magnitude: Symbol,
     /// The written base.
     pub radix: Radix,
     /// The interned literal suffix, if written.
@@ -1714,7 +1709,6 @@ pub fn causeCodeName(code: CauseCode) -> string<'static> {
     CauseCode.NestingLimit => "NestingLimit"
     CauseCode.MissingSyntax => "MissingSyntax"
     CauseCode.UnexpectedSyntax => "UnexpectedSyntax"
-    CauseCode.IntegerOverflow => "IntegerOverflow"
     CauseCode.FloatingOverflow => "FloatingOverflow"
     CauseCode.DurationOverflow => "DurationOverflow"
     CauseCode.InvalidLiteralEncoding => "InvalidLiteralEncoding"
@@ -1903,6 +1897,14 @@ effect fn writeBoolField(name: string<'static>, value: bool) -> () ! WriterError
 effect fn writeMagnitudeField(name: string<'static>, value: u64) -> () ! WriterError ? &mut Writer {
   run writeFieldName(name)
   run Format.display(&value)
+  return run Writer.writeString("\n")
+}
+
+effect fn writeIntegerMagnitudeField(module: &Module, magnitude: Symbol) -> ()
+! WriterError
+? &mut Writer {
+  run writeFieldName("magnitude")
+  run Writer.writeAll(StringTable.get(&module.strings, magnitude))
   return run Writer.writeString("\n")
 }
 
@@ -2306,7 +2308,7 @@ effect fn writeNodeFields(module: &Module, node: Node) -> () ! WriterError ? &mu
     }
     Node.IntegerLiteral {sign, magnitude, radix, suffix} => {
       run writeSignField("sign", sign)
-      run writeMagnitudeField("magnitude", magnitude)
+      run writeIntegerMagnitudeField(module, magnitude)
       run writeRadixField("radix", radix)
       run writeSymbolRefField(module, "suffix", suffix)
     }
@@ -3164,7 +3166,8 @@ effect fn verifyNode(module: &Module, parent: usize, found: &mut Vector<Defect>)
       run recordId(module, parent, operation, &mut found.*)
       run recordRange(module, parent, properties, &mut found.*)
     }
-    Node.IntegerLiteral {sign: ignored1, magnitude: ignored2, radix: ignored3, suffix} => {
+    Node.IntegerLiteral {sign: ignored1, magnitude, radix: ignored3, suffix} => {
+      run recordSymbol(module, parent, magnitude, &mut found.*)
       run recordSymbolRef(module, parent, suffix, &mut found.*)
     }
     Node.TextLiteral {value} => {

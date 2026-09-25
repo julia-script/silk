@@ -1,0 +1,433 @@
+//! Focused source tests for held revisions and syntax-only declaration indexing.
+
+import semantic.DeclarationId {DeclarationId}
+import semantic.ModuleId {ModuleId}
+import semantic.ModuleIndex {ModuleIndex, NameObservation}
+import semantic.SourceIndex {
+  EventKind,
+  IndexedSource,
+  NoRejection,
+  RevisionMismatch,
+  SourceIndex,
+  SourceResult,
+}
+import semantic.SourceRevision {Observation, Revision}
+import semantic.SourceUnit {SourceUnit}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.effect {Effect}
+import silk.layout {Layout}
+import silk.option {Option}
+import silk.result {Result}
+import silk.shared {Shared}
+import silk.string {String}
+import silk.testing {AssertionError, Testing}
+import silk.usize
+import semantic.ModuleId {InvalidModulePath}
+import semantic.Query {Cycle}
+
+effect fn module(path: string) -> ModuleId ! InvalidModulePath | OutOfMemoryError ? &mut Allocator {
+  return run ModuleId.make(b"memory", b"example", String.utf8Bytes(path))
+}
+
+effect fn present(text: string) -> Option<Bytes> ! OutOfMemoryError ? &mut Allocator {
+  return Option.some<Bytes>(run Bytes.copy(String.utf8Bytes(text)))
+}
+
+effect fn revisionClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let entry = run module("entry.silk")
+  let unused = run module("unused.silk")
+  let start = Revision.make()
+  let source = run present("pub fn entry() -> i32 { return 1 }\n")
+  let first = run Revision.publish(&start, &entry, &source)
+  let oldEntry = run Revision.observe(&first, &entry)
+  let oldUnused = run Revision.observe(&first, &unused)
+  run Testing.expect(Observation.isPresent(&oldEntry), "present source captured")
+  run Testing.expect(!Observation.isPresent(&oldUnused), "unlisted source is absent")
+  let added = run present("pub fn unused() -> i32 { return 2 }\n")
+  let second = run Revision.publish(&first, &unused, &added)
+  run Testing.expect(Observation.matches(&oldEntry, &second), "unrelated source keeps observation")
+  run Testing.expect(!Observation.matches(&oldUnused, &second), "absent source becomes present")
+  let heldUnused = run Revision.observe(&first, &unused)
+  run Testing.expect(!Observation.isPresent(&heldUnused), "held revision stays absent")
+  let removed = run Revision.publish(&first, &entry, &Option.none<Bytes>())
+  let absentEntry = run Revision.observe(&removed, &entry)
+  run Testing.expect(
+    !Observation.isPresent(&absentEntry) && !Observation.matches(&oldEntry, &removed),
+    "explicit absence replaces bytes only in new revision",
+  )
+  let changed = run present("pub fn entry() -> i32 { return 3 }\n")
+  let third = run Revision.publish(&second, &entry, &changed)
+  run Testing.expect(
+    !Observation.matches(&oldEntry, &third),
+    "changed source invalidates old bytes",
+  )
+  let oldBytes = run Observation.copyContent(&oldEntry)
+  if let Option<Bytes>.Some {value} = move oldBytes {
+    run Testing.expect(Bytes.asSlice(&value)[31] == 49, "held bytes still spell the old literal")
+  } else {
+    run Testing.expect(false, "held bytes must be present")
+  }
+  return ()
+}
+
+test effect fn holdsExactRevisionMappings() -> ()
+! InvalidModulePath | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run revisionClaims()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn indexClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | AssertionError<'static>
+? &mut Allocator {
+  let firstId = run module("first.silk")
+  let secondId = run module("second.silk")
+  let text = "import missing as Ghost\nfn same() -> i32 { return 1 }\nfn same() -> i32 { return 2 }\n"
+  let firstBytes = run Bytes.copy(String.utf8Bytes(text))
+  let secondBytes = run Bytes.copy(String.utf8Bytes(text))
+  let first = run SourceUnit.parse(&firstId, usize.ONE, move firstBytes)
+  let second = run SourceUnit.parse(&secondId, usize.ONE, move secondBytes)
+  let index = run ModuleIndex.build(&first)
+  let other = run ModuleIndex.build(&second)
+  run Testing.expect(
+    SourceUnit.diagnosticCount(&first) == usize.ZERO,
+    "valid source has no syntax errors",
+  )
+  run Testing.expect(ModuleIndex.listDeclarations(&index).length == 3, "all declarations indexed")
+  run Testing.expect(ModuleIndex.listCollisions(&index).length == 1, "duplicate name has collision")
+  let declarations = ModuleIndex.listDeclarations(&index)
+  let elsewhere = ModuleIndex.listDeclarations(&other)
+  run Testing.expect(
+    declarations[1].ambiguous && declarations[2].ambiguous,
+    "same-key occurrence is ambiguous",
+  )
+  run Testing.expect(
+    !DeclarationId.equals(&declarations[1].identity, &elsewhere[1].identity),
+    "equal local HIR positions in different modules have distinct identities",
+  )
+  let matched = run ModuleIndex.matchesDeclaration(&index, &first, 1, &index, &first, 2)
+  run Testing.expect(!matched, "ambiguous occurrence is not matched by a local ordinal")
+  let nested = run SourceUnit.parse(
+    &firstId,
+    usize.ONE,
+    run Bytes.copy(
+      b"service twin { effect fn field(self: &Self) -> i32 }\nservice twin { effect fn field(self: &Self) -> i32 }\n",
+    ),
+  )
+  let nestedIndex = run ModuleIndex.build(&nested)
+  run Testing.expect(SourceUnit.diagnosticCount(&nested) == usize.ZERO, "nested fixture parses")
+  let nestedItems = ModuleIndex.listDeclarations(&nestedIndex)
+  run Testing.expect(nestedItems.length == 4, "nested authored declarations are indexed")
+  let nestedMatch = run ModuleIndex.matchesDeclaration(
+    &nestedIndex,
+    &nested,
+    1,
+    &nestedIndex,
+    &nested,
+    1,
+  )
+  run Testing.expect(!nestedMatch, "ambiguous parent makes its child unstable")
+  let same = run ModuleIndex.observeName(&index, b"same")
+  let absent = run ModuleIndex.observeName(&index, b"unknown")
+  let imported = run ModuleIndex.observeName(&index, b"Ghost")
+  run Testing.expect(NameObservation.listMembers(&same).length == 2, "complete duplicate bucket")
+  run Testing.expect(
+    NameObservation.listMembers(&absent).length == 0,
+    "negative bucket is complete",
+  )
+  run Testing.expect(
+    NameObservation.listMembers(&imported).length == 1,
+    "import alias indexed as syntax",
+  )
+  let hybrid = run SourceUnit.parse(
+    &firstId,
+    usize.ONE,
+    run Bytes.copy(b"pub import model.User as Tree { User as Person }\n"),
+  )
+  run Testing.expect(SourceUnit.diagnosticCount(&hybrid) == usize.ZERO, "hybrid import parses")
+  let hybridIndex = run ModuleIndex.build(&hybrid)
+  let namespace = run ModuleIndex.observeName(&hybridIndex, b"Tree")
+  let selected = run ModuleIndex.observeName(&hybridIndex, b"Person")
+  let defaultName = run ModuleIndex.observeName(&hybridIndex, b"User")
+  run Testing.expect(
+    NameObservation.listMembers(&namespace).length == 1 && NameObservation.listMembers(&selected).length == 1 && NameObservation.listMembers(
+      &defaultName,
+    ).length == usize.ZERO,
+    "hybrid import keeps the explicit namespace and selected aliases only",
+  )
+  let later = run SourceUnit.parse(
+    &firstId,
+    2,
+    run Bytes.copy(b"fn unknown() -> i32 { return 3 }\n"),
+  )
+  let laterIndex = run ModuleIndex.build(&later)
+  let appeared = run ModuleIndex.observeName(&laterIndex, b"unknown")
+  let oldElsewhere = run ModuleIndex.observeName(&index, b"elsewhere")
+  let stillAbsent = run ModuleIndex.observeName(&laterIndex, b"elsewhere")
+  run Testing.expect(
+    !NameObservation.equals(&absent, &appeared),
+    "new name invalidates negative bucket",
+  )
+  run Testing.expect(
+    NameObservation.equals(&oldElsewhere, &stillAbsent),
+    "unchanged negative bucket survives source edit",
+  )
+  let collision = ModuleIndex.listCollisions(&index)[usize.ZERO]
+  let source = SourceUnit.bytes(&first)
+  run Testing.expect(
+    collision.span.start == 57 && collision.span.end == 61 && source[57] == 115 && source[60] == 101,
+    "collision span addresses the second name",
+  )
+  let damaged = run SourceUnit.parse(
+    &firstId,
+    usize.ONE,
+    run Bytes.copy(b"fn work( -> () { return () }\n"),
+  )
+  run Testing.expect(
+    SourceUnit.diagnosticCount(&damaged) > usize.ZERO,
+    "damaged syntax is retained",
+  )
+  let damagedIndex = run ModuleIndex.build(&damaged)
+  run Testing.expect(
+    ModuleIndex.listDeclarations(&damagedIndex).length == 1,
+    "damaged declaration keeps identity",
+  )
+  let diagnostic = SourceUnit.diagnostic(&damaged, usize.ZERO)
+  let damagedBytes = SourceUnit.bytes(&damaged)
+  run Testing.expect(
+    diagnostic.span.start == 9 && diagnostic.span.end == 9 && damagedBytes[9] == 45 && damagedBytes[10] == 62,
+    "missing-token span sits before the retained arrow bytes",
+  )
+  return ()
+}
+
+test effect fn indexesNamesWithoutSemanticWork() -> ()
+! InvalidModulePath | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run indexClaims()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+fn wasPresent(answer: &Result<SourceResult, NoRejection>) -> bool {
+  return match & answer.* {
+    Result<SourceResult, NoRejection>.Success {value} => match & value {
+      SourceResult.Present {slot: _, observation: ignored} => true
+      SourceResult.Absent {observation: _} => false
+    }
+    Result<SourceResult, NoRejection>.Failure {error: _} => false
+  }
+}
+
+fn firstSlot(answer: &Result<SourceResult, NoRejection>) -> bool {
+  return match & answer.* {
+    Result<SourceResult, NoRejection>.Success {value} => match & value {
+      SourceResult.Present {slot, observation: _} => slot == usize.ZERO
+      SourceResult.Absent {observation: ignored} => false
+    }
+    Result<SourceResult, NoRejection>.Failure {error: ignored} => false
+  }
+}
+
+struct PublicationAllocator {
+  armed: bool
+  rejected: bool
+}
+
+impl PublicationAllocator {
+  effect fn allocate(self: &mut Self, layout: Layout) -> Allocation ! OutOfMemoryError {
+    if self.armed {
+      self.armed = false
+      self.rejected = true
+      fail OutOfMemoryError {}
+    }
+    let element = Layout.of<IndexedSource>()
+    if layout.bytes == element.bytes * 4 && layout.alignment == element.alignment {
+      self.armed = true
+    }
+    let mut system = Allocator.systemAllocatorProvider()
+    return run Allocator.allocate(move layout)
+      |> Effect.provideMut<Allocator>(&mut system)
+  }
+}
+
+impl Allocator for PublicationAllocator {
+  allocate: PublicationAllocator.allocate
+}
+
+fn bucketSize(observation: &NameObservation) -> usize {
+  return NameObservation.listMembers(observation).length
+}
+
+effect fn queryClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static>
+? &mut Allocator {
+  let entry = run module("entry.silk")
+  let source = run present("import missing as Missing\nfn entry() -> i32 { return 1 }\n")
+  let revision = run Revision.publish(&Revision.make(), &entry, &source)
+  let mut index = SourceIndex.make(move revision)
+  let first = run SourceIndex.demand(&mut index, &entry)
+  let again = run SourceIndex.demand(&mut index, &entry)
+  run Testing.expect(
+    Shared.with<Result<SourceResult, NoRejection>, bool>(&first, wasPresent),
+    "requested module indexed",
+  )
+  run Testing.expect(
+    Shared.with<Result<SourceResult, NoRejection>, bool>(&again, wasPresent),
+    "completed query reused",
+  )
+  let borrowed = SourceIndex.source(&index, &again, &entry)
+  if let Option<&IndexedSource>.Some {value} = move borrowed {
+    run Testing.expect(
+      ModuleIndex.listDeclarations(IndexedSource.moduleIndex(value)).length == 2,
+      "cache hit borrows the one retained syntax index",
+    )
+  } else {
+    run Testing.expect(false, "present cache hit retains an indexed source")
+  }
+  let imported = run SourceIndex.observeName(&mut index, &again, &entry, b"Missing")
+  let absent = run SourceIndex.observeName(&mut index, &again, &entry, b"Unknown")
+  if let Option<Shared<NameObservation>>.Some {value} = move imported {
+    run Testing.expect(
+      Shared.with<NameObservation, usize>(&value, bucketSize) == 1,
+      "cached answer exposes import binding bucket",
+    )
+  } else {
+    run Testing.expect(false, "present source has a name bucket")
+  }
+  if let Option<Shared<NameObservation>>.Some {value} = move absent {
+    run Testing.expect(
+      Shared.with<NameObservation, usize>(&value, bucketSize) == 0,
+      "cached answer exposes negative bucket",
+    )
+  } else {
+    run Testing.expect(false, "present source has an empty name bucket")
+  }
+  let events = SourceIndex.eventLog(&index)
+  run Testing.expect(events.length == 6, "start read finish hit and both name buckets")
+  run Testing.expect(
+    events[0].kind == EventKind.QueryStart && events[1].kind == EventKind.SourceRead && events[1].present && ModuleId.equals(
+      &events[1].module,
+      &entry,
+    ),
+    "only entry source is read on miss",
+  )
+  run Testing.expect(
+    events[2].kind == EventKind.QueryFinish && events[3].kind == EventKind.QueryHit,
+    "hit has no provider read",
+  )
+  run Testing.expect(
+    events[4].kind == EventKind.NameBucket && events[4].members == 1 && events[5].kind == EventKind.NameBucket && events[5].members == 0,
+    "name events carry complete membership counts",
+  )
+  return ()
+}
+
+test effect fn readsOnlyDemandedSources() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run queryClaims()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn foreignAnswerClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static>
+? &mut Allocator {
+  let entry = run module("entry.silk")
+  let firstBytes = run present("pub fn first() -> i32 { return 1 }\n")
+  let secondBytes = run present("pub fn second() -> i32 { return 2 }\n")
+  let firstRevision = run Revision.publish(&Revision.make(), &entry, &firstBytes)
+  let secondRevision = run Revision.publish(&Revision.make(), &entry, &secondBytes)
+  let mut first = SourceIndex.make(move firstRevision)
+  let mut second = SourceIndex.make(move secondRevision)
+  let answer = run SourceIndex.demand(&mut first, &entry)
+  let own = run SourceIndex.demand(&mut second, &entry)
+  run Testing.expect(
+    SourceIndex.revisionNumber(&first) == SourceIndex.revisionNumber(&second),
+    "independent revisions deliberately share a number",
+  )
+  run Testing.expect(
+    Shared.with<Result<SourceResult, NoRejection>, bool>(&answer, firstSlot) && Shared.with<
+      Result<SourceResult, NoRejection>,
+      bool,
+    >(&own, firstSlot),
+    "independent stores deliberately share a source slot",
+  )
+  let foreignSource = SourceIndex.source(&second, &answer, &entry)
+  run Testing.expect(
+    match move foreignSource {
+      Option<&IndexedSource>.None => true
+      Option<&IndexedSource>.Some {value: ignored} => false
+    },
+    "foreign answer does not borrow different retained bytes",
+  )
+  let foreignName = run Effect.result(
+    SourceIndex.observeName(&mut second, &answer, &entry, b"first"),
+  )
+  run Testing.expect(
+    match move foreignName {
+      Result<Option<Shared<NameObservation>>, RevisionMismatch | OutOfMemoryError>.Failure {error} => match move error {
+        RevisionMismatch {} => true
+        OutOfMemoryError {} => false
+      }
+      Result<Option<Shared<NameObservation>>, RevisionMismatch | OutOfMemoryError>.Success {
+        value: ignored,
+      } => false
+    },
+    "foreign answer cannot observe a different name bucket",
+  )
+  return ()
+}
+
+test effect fn rejectsCrossStorePresentAnswer() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run foreignAnswerClaims()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn publicationFailureClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | AssertionError<'static> {
+  let mut system = Allocator.systemAllocatorProvider()
+  let entry = run module("entry.silk")
+    |> Effect.provideMut<Allocator>(&mut system)
+  let bytes = run present("pub fn entry() -> i32 { return 1 }\n")
+    |> Effect.provideMut<Allocator>(&mut system)
+  let revision = run Revision.publish(&Revision.make(), &entry, &bytes)
+    |> Effect.provideMut<Allocator>(&mut system)
+  let mut index = SourceIndex.make(move revision)
+  let mut allocator = PublicationAllocator {armed: false, rejected: false}
+  let attempted = run Effect.result(SourceIndex.demand(&mut index, &entry))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    match move attempted {
+      Result<Shared<Result<SourceResult, NoRejection>>, Cycle | OutOfMemoryError>.Failure {error} => match move error {
+        OutOfMemoryError {} => true
+        Cycle {} => false
+      }
+      Result<Shared<Result<SourceResult, NoRejection>>, Cycle | OutOfMemoryError>.Success {
+        value: ignored,
+      } => false
+    } && allocator.rejected,
+    "allocation after retained-source append rejects publication",
+  )
+  let retried = run SourceIndex.demand(&mut index, &entry)
+    |> Effect.provideMut<Allocator>(&mut system)
+  run Testing.expect(
+    Shared.with<Result<SourceResult, NoRejection>, bool>(&retried, firstSlot),
+    "retry reuses the first source slot after rollback",
+  )
+  let events = SourceIndex.eventLog(&index)
+  run Testing.expect(
+    events.length == 5 && events[0].kind == EventKind.QueryStart && events[1].kind == EventKind.SourceRead && events[2].kind == EventKind.QueryStart && events[3].kind == EventKind.SourceRead && events[4].kind == EventKind.QueryFinish,
+    "failed publication leaves no completion and retry rereads once",
+  )
+  return ()
+}
+
+test effect fn rollsBackUnpublishedSource() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | AssertionError<'static> {
+  return run publicationFailureClaims()
+}

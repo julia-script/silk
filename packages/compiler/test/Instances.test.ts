@@ -685,6 +685,72 @@ pub fn main() -> () { return run Intrinsic.catchFailure<SomeError>(failWithOwned
   }),
 )
 
+it.effect('discovers Drop hooks inside an opaque shared payload', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.bytes { Bytes }
+import silk.option { Option }
+import silk.shared { Shared }
+import silk.vector { Vector }
+pub fn main() -> () {
+  let value = Option.none<Shared<Vector<Option<Bytes>>>>()
+  drop value
+  return ()
+}`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.isTrue(
+      Analysis.instancesOf(result).instances.some(
+        (instance) =>
+          instance.key.declaration.module === 'silk/vector' &&
+          instance.key.declaration.name === 'drop@impl#0' &&
+          instance.key.typeArguments.map(Type.encodeGenericArgument).join(', ') ===
+            'silk/option.Option<silk/bytes.Bytes>',
+      ),
+    )
+  }),
+)
+
+it.effect('admits finite owned payload cleanup nested through a shared vector', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.bytes { Bytes }
+import silk.shared { Shared }
+import silk.vector { Vector }
+struct Evidence { value: Bytes }
+struct Cached { items: Vector<Shared<Evidence>> }
+struct Root { answer: Shared<Cached> }
+pub fn main() -> () {
+  let roots = Vector.make<Root>()
+  drop roots
+  return ()
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    assert.deepEqual(result.instances.violations, [])
+    const main =
+      result.instances.instances.find((instance) => instance.key.declaration.name === 'main') ??
+      unreachable('expected cleanup root')
+    assert.deepEqual(Instances.executionClosure(result.instances, main.key).gaps, [])
+    assert.isTrue(
+      result.instances.instances.some(
+        (instance) =>
+          instance.key.declaration.module === 'silk/vector' &&
+          instance.key.declaration.name === 'drop@impl#0' &&
+          instance.key.typeArguments.map(Type.encodeGenericArgument).join(', ') ===
+            'silk/shared.Shared<golden/program.Evidence>',
+      ),
+    )
+    assert.isTrue(
+      result.instances.instances.some(
+        (instance) =>
+          instance.key.declaration.module === 'silk/vector' &&
+          instance.key.declaration.name === 'drop@impl#0' &&
+          instance.key.typeArguments.map(Type.encodeGenericArgument).join(', ') === 'u8',
+      ),
+    )
+  }),
+)
+
 it.effect('admits nested cleanup reached through a lexical service provider', () =>
   Effect.gen(function* () {
     const result = yield* snapshot(`import silk.effect { Effect }
@@ -734,6 +800,54 @@ pub fn main() -> i32 {
       result.instances.violations.at(0)?.target.typeArguments.map(Type.encodeGenericArgument),
       ['Array<i32, 1>'],
     )
+  }),
+)
+
+it.effect('admits nested generic calls that select distinct finite provider bodies', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`fn demand<T>(value: T, provide: once fn(T) -> i32) -> i32 {
+  return provide(move value)
+}
+fn inner(value: bool) -> i32 { return 1 }
+fn outer(value: i32) -> i32 { return demand<bool>(true, inner) }
+pub fn main() -> i32 { return demand<i32>(0, outer) }`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(result.instances.violations, [])
+    assert.deepEqual(
+      result.instances.instances
+        .filter((instance) => instance.key.declaration.name === 'demand')
+        .map((instance) =>
+          Type.encodeGenericArgument(
+            instance.key.typeArguments.at(0) ?? unreachable('expected demand value type'),
+          ),
+        )
+        .sort(),
+      ['bool', 'i32'],
+    )
+  }),
+)
+
+it.effect('rejects type growth across alternating provider bodies', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`fn demand<T>(value: T, provide: once fn(T) -> i32) -> i32 {
+  return provide(move value)
+}
+fn left<T>(value: T) -> i32 {
+  return demand<[T; 1]>([move value], fn(next: [T; 1]) -> i32 {
+    return right<[T; 1]>(move next)
+  })
+}
+fn right<T>(value: T) -> i32 {
+  return demand<[T; 1]>([move value], fn(next: [T; 1]) -> i32 {
+    return left<[T; 1]>(move next)
+  })
+}
+pub fn main() -> i32 { return left<i32>(0) }`)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    assert.strictEqual(result.instances.violations.length, 1)
   }),
 )
 

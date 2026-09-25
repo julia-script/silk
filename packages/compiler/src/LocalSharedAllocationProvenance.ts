@@ -229,6 +229,13 @@ const patternBindingKey = (
 /** Plans exact source allocation provenance over specialized TIR, including ordinary calls. */
 export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Index): Plan => {
   const instances = new Map(discovery.instances.map((instance) => [ownerKey(instance), instance]))
+  const executionTargetsByOwner = new Map<string, Array<Instances.InstanceKey>>()
+  for (const edge of discovery.executionEdges) {
+    const owner = Instances.keyText(edge.owner)
+    const targets = executionTargetsByOwner.get(owner) ?? []
+    targets.push(edge.target)
+    executionTargetsByOwner.set(owner, targets)
+  }
   const contexts = new Map<string, FunctionContext>()
   for (const instance of discovery.instances) {
     const statements = nestedStatements(instance.function.statements)
@@ -744,13 +751,14 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         sameProvidedOwner(candidate.key.declaration, expected.key.declaration)
       )
         return true
+      // Execution edges include bracket callbacks that ordinary call records omit.
       // The set is shared across sibling branches, not copied per path: a caller fully explored
       // without reaching the owner cannot reach it through another path either, so reachability is
       // unchanged while the walk stays linear in the call graph.
       seen.add(identity)
       if (
-        (callsByOwner(discovery.calls).get(identity) ?? []).some((call) => {
-          const target = instances.get(Instances.keyText(call.target))
+        (executionTargetsByOwner.get(identity) ?? []).some((targetKey) => {
+          const target = instances.get(Instances.keyText(targetKey))
           return target !== undefined && reachesExecutionOwner(target, expected, seen)
         })
       )

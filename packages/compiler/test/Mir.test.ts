@@ -64,6 +64,48 @@ const operationRegion = (region: Mir.Region | undefined): Mir.OperationRegion =>
   return region
 }
 
+it.effect('reads borrowed match scalars before lowering builtin value operations', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'mir/borrowed-match-scalar',
+      ascii(`union Flag { Present { enabled: bool }, Absent }
+fn disabled(value: &Flag) -> bool {
+  return match & value.* {
+    Flag.Present { enabled } => !enabled
+    _ => false
+  }
+}
+pub fn main() -> i32 {
+  let value = Flag.Absent
+  if disabled(&value) { return 1 }
+  return 0
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    const disabled =
+      program.functions.find((fn) => fn.id.name === 'disabled') ??
+      raise('expected disabled function')
+    const operations = MirVerification.operations(disabled)
+    const match = operations.find((operation) => operation._tag === 'Match')
+    const binding = match?.arms.at(0)?.bindings.at(0)
+    assert.strictEqual(binding?.type._tag, 'EnvironmentBorrow')
+    const read = operations.find((operation) => operation._tag === 'ReadPlace')
+    assert.strictEqual(read?.root.ordinal, binding?.destination.ordinal)
+    assert.strictEqual(read?.type._tag, 'bool')
+    const negation = operations.find(
+      (operation) => operation._tag === 'Binary' && operation.operator === 'Equals',
+    )
+    if (negation?._tag !== 'Binary') return raise('expected scalar negation')
+    assert.strictEqual(negation.left.ordinal, read?.destination.ordinal)
+    assert.strictEqual(negation.type._tag, 'bool')
+    const literals = operations.filter((operation) => operation._tag === 'Literal')
+    assert.isAbove(literals.length, 0)
+    assert.isTrue(literals.every((operation) => operation.type._tag === 'bool'))
+    assert.deepEqual(yield* MirVerification.verify(program), [])
+  }),
+)
+
 it.effect(
   'lowers scalar enum constants, projection, equality, and matches with logical identity',
   () =>
