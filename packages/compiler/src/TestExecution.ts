@@ -70,6 +70,31 @@ export interface Input {
 
 const digest = (value: string): string => ToolchainIntegrity.contentDigest(value)
 
+// Test closures share most of their items, and the platform-neutral digest is slow; hash each
+// item once per discovery and build closure identities from item digests.
+const closureItemCaches = new WeakMap<Instances.Discovery, Map<string, string>>()
+
+const closureItemCache = (discovery: Instances.Discovery): Map<string, string> => {
+  let cache = closureItemCaches.get(discovery)
+  if (cache === undefined) {
+    cache = new Map()
+    closureItemCaches.set(discovery, cache)
+  }
+  return cache
+}
+
+const itemDigests = (cache: Map<string, string>, items: ReadonlyArray<string>): string =>
+  Canonical.array(
+    items.map((item) => {
+      let itemDigest = cache.get(item)
+      if (itemDigest === undefined) {
+        itemDigest = digest(item)
+        cache.set(item, itemDigest)
+      }
+      return itemDigest
+    }),
+  )
+
 const declarationIdentity = (declaration: DeclarationFacts.CanonicalId): string =>
   Canonical.record('Declaration', [declaration.module, declaration.name])
 
@@ -458,23 +483,27 @@ const executionEncoding = Effect.fnUntraced(function* (
     }
   }
 
+  const itemCache = closureItemCache(discovery)
   return {
     _tag: 'Complete',
-    encoding: Canonical.record('ExecutionClosure.v3', [
-      Canonical.array(
+    encoding: Canonical.record('ExecutionClosure.v4', [
+      itemDigests(
+        itemCache,
         closure.instances.map((instance) =>
           instanceEncoding(instance, authored.get(Instances.keyText(instance.key)) ?? ''),
         ),
       ),
-      Canonical.array(closure.edges.map(edgeEncoding)),
-      Canonical.array(closure.callables.map(callableEncoding)),
-      Canonical.array(closure.effects.map(effectEncoding)),
-      Canonical.array(
+      itemDigests(itemCache, closure.edges.map(edgeEncoding)),
+      itemDigests(itemCache, closure.callables.map(callableEncoding)),
+      itemDigests(itemCache, closure.effects.map(effectEncoding)),
+      itemDigests(
+        itemCache,
         closure.intrinsics.map((call) =>
           Canonical.record('Intrinsic', [Intrinsic.operationText(call.operation)]),
         ),
       ),
-      Canonical.array(
+      itemDigests(
+        itemCache,
         closure.foreignCalls.map((call) =>
           Canonical.record('Foreign', [
             call.symbol,
@@ -483,10 +512,10 @@ const executionEncoding = Effect.fnUntraced(function* (
           ]),
         ),
       ),
-      Canonical.array(closure.residualBodies.map(residualEncoding)),
-      Canonical.array(constantEncodings),
-      Canonical.array([...semanticTypeEncodings.values()].sort(Canonical.compare)),
-      Canonical.array([...nominalTypeEncodings.values()].sort(Canonical.compare)),
+      itemDigests(itemCache, closure.residualBodies.map(residualEncoding)),
+      itemDigests(itemCache, constantEncodings),
+      itemDigests(itemCache, [...semanticTypeEncodings.values()].sort(Canonical.compare)),
+      itemDigests(itemCache, [...nominalTypeEncodings.values()].sort(Canonical.compare)),
     ]),
   }
 })
