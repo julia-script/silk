@@ -29,51 +29,47 @@ export interface Phi extends Handle.Handle<'Phi'> {}
  * @category instructions
  * @since 0.0.0
  */
-export const phi = Effect.fnUntraced(function* (
+export const phi = (
   self: FunctionBody,
   type: Type.Type,
   name?: ByteString.ByteString | Uint8Array | string,
   options: { readonly fastMath?: FastMathInput } = {},
-): Effect.fn.Return<Phi, LlvmError> {
-  return yield* FunctionBodyState.mutateModule(self, 'FunctionBody.phi', (draft, module) =>
-    Result.gen(function* () {
-      const typeIndex = yield* Handle.resolve(
-        draft.builder,
-        draft.moduleOwner,
-        type,
-        'Type',
-        'FunctionBody.phi',
-      )
-      if (
-        FastMathActor.toBitcode(fastMath(options.fastMath)) !== 0 &&
-        !(yield* FunctionBodyState.isFloatingType(module, typeIndex, 'FunctionBody.phi'))
-      ) {
-        return yield* Result.fail(
+): Effect.Effect<Phi, LlvmError> =>
+  FunctionBodyState.mutateModule(self, 'FunctionBody.phi', (draft, module) => {
+    const operation = 'FunctionBody.phi'
+    const typeIndex = Handle.resolve(draft.builder, draft.moduleOwner, type, 'Type', operation)
+    if (Result.isFailure(typeIndex)) return Result.fail(typeIndex.failure)
+    const math = fastMath(options.fastMath)
+    if (FastMathActor.toBitcode(math) !== 0) {
+      const floating = FunctionBodyState.isFloatingType(module, typeIndex.success, operation)
+      if (Result.isFailure(floating)) return Result.fail(floating.failure)
+      if (!floating.success) {
+        return Result.fail(
           invalidInput({
-            operation: 'FunctionBody.phi',
+            operation,
             message: 'Fast-math phi requires a floating-point type',
             input: type,
           }),
         )
       }
-      const appended = yield* FunctionBodyState.appendResult(
-        draft,
-        typeIndex,
-        name,
-        (result, finalName) => ({
-          _tag: 'Phi',
-          type: typeIndex,
-          incoming: [],
-          fastMath: fastMath(options.fastMath),
-          sealed: false,
-          result,
-          name: finalName,
-        }),
-      )
-      return yield* FunctionBodyState.makePhiHandle(draft, appended.instruction)
-    }),
-  )
-})
+    }
+    const appended = FunctionBodyState.appendResult(
+      draft,
+      typeIndex.success,
+      name,
+      (result, finalName) => ({
+        _tag: 'Phi',
+        type: typeIndex.success,
+        incoming: [],
+        fastMath: math,
+        sealed: false,
+        result,
+        name: finalName,
+      }),
+    )
+    if (Result.isFailure(appended)) return Result.fail(appended.failure)
+    return FunctionBodyState.makePhiHandle(draft, appended.success.instruction)
+  })
 
 /**
  * Returns the SSA result of an open or sealed phi instruction.
@@ -121,66 +117,47 @@ export const phiValue = Effect.fnUntraced(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const addPhiIncoming = Effect.fnUntraced(function* (
+export const addPhiIncoming = (
   self: FunctionBody,
   phiHandle: Phi,
   value: Value.Input,
   block: Block.Block,
-): Effect.fn.Return<void, LlvmError> {
-  yield* FunctionBodyState.mutateModule(self, 'FunctionBody.addPhiIncoming', (draft, module) =>
-    Result.gen(function* () {
-      const index = yield* FunctionBodyState.resolvePhi(
-        draft,
-        phiHandle,
-        'FunctionBody.addPhiIncoming',
+): Effect.Effect<void, LlvmError> =>
+  FunctionBodyState.mutateModule(self, 'FunctionBody.addPhiIncoming', (draft, module) => {
+    const operation = 'FunctionBody.addPhiIncoming'
+    const index = FunctionBodyState.resolvePhi(draft, phiHandle, operation)
+    if (Result.isFailure(index)) return Result.fail(index.failure)
+    const instruction = draft.instructions[index.success]
+    const pending = draft.openPhis.get(index.success)
+    if (instruction?._tag !== 'Phi' || instruction.sealed || pending === undefined) {
+      return Result.fail(
+        invalidState({ operation, message: 'Phi is missing or already sealed', state: phiHandle }),
       )
-      const instruction = draft.instructions[index]
-      const pending = draft.openPhis.get(index)
-      if (instruction?._tag !== 'Phi' || instruction.sealed || pending === undefined) {
-        return yield* Result.fail(
-          invalidState({
-            operation: 'FunctionBody.addPhiIncoming',
-            message: 'Phi is missing or already sealed',
-            state: phiHandle,
-          }),
-        )
-      }
-      const resolved = yield* FunctionBodyState.resolveOperand(
-        draft,
-        module,
-        value,
-        'FunctionBody.addPhiIncoming',
+    }
+    const resolved = FunctionBodyState.resolveOperand(draft, module, value, operation)
+    if (Result.isFailure(resolved)) return Result.fail(resolved.failure)
+    if (resolved.success.type !== instruction.type) {
+      return Result.fail(
+        invalidInput({ operation, message: 'Phi incoming value has the wrong type', input: value }),
       )
-      if (resolved.type !== instruction.type) {
-        return yield* Result.fail(
-          invalidInput({
-            operation: 'FunctionBody.addPhiIncoming',
-            message: 'Phi incoming value has the wrong type',
-            input: value,
-          }),
-        )
-      }
-      const blockIndex = yield* FunctionBodyState.resolveBlock(
-        draft,
-        block,
-        'FunctionBody.addPhiIncoming',
+    }
+    const blockIndex = FunctionBodyState.resolveBlock(draft, block, operation)
+    if (Result.isFailure(blockIndex)) return Result.fail(blockIndex.failure)
+    if (pending.blocks.has(blockIndex.success)) {
+      return Result.fail(
+        invalidState({
+          operation,
+          message: 'Phi already has an incoming value for this block',
+          state: block,
+        }),
       )
-      if (pending.blocks.has(blockIndex)) {
-        return yield* Result.fail(
-          invalidState({
-            operation: 'FunctionBody.addPhiIncoming',
-            message: 'Phi already has an incoming value for this block',
-            state: block,
-          }),
-        )
-      }
-      // Copying and freezing the growing list made 2,048 inputs take 378ms in the
-      // construction probe. Keep draft-owned inputs mutable until the phi is sealed.
-      pending.incoming.push({ value: resolved.operand, block: blockIndex })
-      pending.blocks.add(blockIndex)
-    }),
-  )
-})
+    }
+    // Copying and freezing the growing list made 2,048 inputs take 378ms in the
+    // construction probe. Keep draft-owned inputs mutable until the phi is sealed.
+    pending.incoming.push({ value: resolved.success.operand, block: blockIndex.success })
+    pending.blocks.add(blockIndex.success)
+    return Result.void
+  })
 
 /**
  * Validates predecessor coverage, finalizes a phi exactly once, and returns its SSA value.
@@ -188,41 +165,28 @@ export const addPhiIncoming = Effect.fnUntraced(function* (
  * @category instructions
  * @since 0.0.0
  */
-export const sealPhi = Effect.fnUntraced(function* (
+export const sealPhi = (
   self: FunctionBody,
   phiHandle: Phi,
-): Effect.fn.Return<Value.Value, LlvmError> {
-  return yield* FunctionBodyState.mutate(self, 'FunctionBody.sealPhi', (draft) =>
-    Result.gen(function* () {
-      const index = yield* FunctionBodyState.resolvePhi(draft, phiHandle, 'FunctionBody.sealPhi')
-      const instruction = draft.instructions[index]
-      const pending = draft.openPhis.get(index)
-      if (instruction?._tag !== 'Phi' || instruction.sealed || pending === undefined) {
-        return yield* Result.fail(
-          invalidState({
-            operation: 'FunctionBody.sealPhi',
-            message: 'Phi is missing or already sealed',
-            state: phiHandle,
-          }),
-        )
-      }
-      draft.instructions[index] = {
-        ...instruction,
-        incoming: pending.incoming,
-        sealed: true,
-      }
-      draft.openPhis.delete(index)
-      const value = draft.valueHandles[instruction.result]
-      if (value === undefined) {
-        return yield* Result.fail(
-          invalidState({
-            operation: 'FunctionBody.sealPhi',
-            message: 'Phi result value is missing',
-            state: phiHandle,
-          }),
-        )
-      }
-      return value
-    }),
-  )
-})
+): Effect.Effect<Value.Value, LlvmError> =>
+  FunctionBodyState.mutate(self, 'FunctionBody.sealPhi', (draft) => {
+    const operation = 'FunctionBody.sealPhi'
+    const index = FunctionBodyState.resolvePhi(draft, phiHandle, operation)
+    if (Result.isFailure(index)) return Result.fail(index.failure)
+    const instruction = draft.instructions[index.success]
+    const pending = draft.openPhis.get(index.success)
+    if (instruction?._tag !== 'Phi' || instruction.sealed || pending === undefined) {
+      return Result.fail(
+        invalidState({ operation, message: 'Phi is missing or already sealed', state: phiHandle }),
+      )
+    }
+    draft.instructions[index.success] = { ...instruction, incoming: pending.incoming, sealed: true }
+    draft.openPhis.delete(index.success)
+    const value = draft.valueHandles[instruction.result]
+    if (value === undefined) {
+      return Result.fail(
+        invalidState({ operation, message: 'Phi result value is missing', state: phiHandle }),
+      )
+    }
+    return Result.succeed(value)
+  })

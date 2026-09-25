@@ -540,13 +540,12 @@ export const instructionResult = (
 export const makePhiHandle = (
   draft: Draft,
   instruction: FunctionBodyActor.Instruction,
-): Result.Result<FunctionBodyActor.Phi, LlvmError> =>
-  Result.gen(function* () {
-    const index = yield* resolveInstruction(draft, instruction, 'FunctionBody.phi')
-    const handle = Handle.make('Phi', draft.owner, index)
-    draft.openPhis.set(index, { incoming: [], blocks: new Set() })
-    return handle
-  })
+): Result.Result<FunctionBodyActor.Phi, LlvmError> => {
+  const index = resolveInstruction(draft, instruction, 'FunctionBody.phi')
+  if (Result.isFailure(index)) return Result.fail(index.failure)
+  draft.openPhis.set(index.success, { incoming: [], blocks: new Set() })
+  return Result.succeed(Handle.make('Phi', draft.owner, index.success))
+}
 
 /** @internal */
 export const makeSwitchHandle = (
