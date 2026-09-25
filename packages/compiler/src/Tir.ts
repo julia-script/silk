@@ -154,12 +154,21 @@ export interface Local {
 }
 
 /** The canonical text of an artifact identity: the key a body is requested and stored under. */
-export const artifactKey = (self: ArtifactId): string =>
-  JSON.stringify([
-    AuthoredIdentity.key(self.owner),
-    self.request._tag === 'Check' ? null : self.request.application,
-    self.parent === undefined ? null : artifactKey(self.parent),
-  ])
+// Artifact identities are immutable and keyed on every node, borrow, and site lookup.
+const artifactKeys = new WeakMap<ArtifactId, string>()
+
+export const artifactKey = (self: ArtifactId): string => {
+  let key = artifactKeys.get(self)
+  if (key === undefined) {
+    key = JSON.stringify([
+      AuthoredIdentity.key(self.owner),
+      self.request._tag === 'Check' ? null : self.request.application,
+      self.parent === undefined ? null : artifactKey(self.parent),
+    ])
+    artifactKeys.set(self, key)
+  }
+  return key
+}
 
 /** Canonical identity of one executable node across checked artifacts. */
 export const nodeRefKey = (self: NodeRef): string =>

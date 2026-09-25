@@ -106,11 +106,23 @@ export const witnessKey = (witness: DeclarationFacts.ConformanceWitness): string
 export const providedContractEntry = (requirement: Omit<ProvidedRequirement, 'local'>): string =>
   `provided:${Type.key(requirement.capability)}@${requirement.role}:${requirement.requirementAccess}:${requirement.access}:${Type.key(requirement.providerType)}:${requirement.witness._tag}`
 
-const effectRunnerSiteKey = (type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>): string =>
-  runnerSiteKey(
-    type.storage?.realization.runnerInstance ?? type.environment.instance,
-    type.storage?.realization.site ?? type.site,
-  )
+// Runner selection compares the requested site against every generated runner's site.
+const effectRunnerSiteKeys = new WeakMap<
+  Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
+  string
+>()
+
+const effectRunnerSiteKey = (type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>): string => {
+  let key = effectRunnerSiteKeys.get(type)
+  if (key === undefined) {
+    key = runnerSiteKey(
+      type.storage?.realization.runnerInstance ?? type.environment.instance,
+      type.storage?.realization.site ?? type.site,
+    )
+    effectRunnerSiteKeys.set(type, key)
+  }
+  return key
+}
 
 const effectRunnerKey = (type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>): string =>
   baseRunnerKey(
@@ -651,10 +663,11 @@ export const ensureEffectRunner = (
   // physical owner and site. Match that identity and the exact execution channels;
   // concreteSpecialization re-solves provider witnesses from these complete runtime
   // arguments; object identity would reject equivalent contextual specializations.
+  const site = effectRunnerSiteKey(type)
   const physical = fn.generatedRunners.filter(
     (candidate) =>
       candidate.providedRequirements.length === 0 &&
-      effectRunnerSiteKey(candidate.type) === effectRunnerSiteKey(type) &&
+      effectRunnerSiteKey(candidate.type) === site &&
       EffectExecutionContract.matches(candidate.type.type, type.type, requirements),
   )
   const base = physical.length === 1 ? physical.at(0) : undefined
