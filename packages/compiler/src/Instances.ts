@@ -510,6 +510,76 @@ export const keyText = (key: InstanceKey): string => {
   return cached
 }
 
+const siteText = (owner: InstanceKey, span: SourceSpan.SourceSpan): string =>
+  `${keyText(owner)}\u0005${span.sourceId}:${span.start}:${span.end}`
+
+// Lowering resolves every call site against the whole program's call list; each list is indexed
+// once, on first query, instead of rescanned per site. Discovery arrays are never mutated after
+// publication, so the identity-keyed index cannot go stale.
+const callSiteIndex = new WeakMap<
+  ReadonlyArray<CallInstance>,
+  ReadonlyMap<string, ReadonlyArray<CallInstance>>
+>()
+
+/** The calls `owner` recorded at `span`, in `calls` order. */
+export const callsAtSite = (
+  calls: ReadonlyArray<CallInstance>,
+  owner: InstanceKey,
+  span: SourceSpan.SourceSpan,
+): ReadonlyArray<CallInstance> => {
+  let index = callSiteIndex.get(calls)
+  if (index === undefined) {
+    const built = new Map<string, Array<CallInstance>>()
+    for (const call of calls) {
+      const text = siteText(call.owner, call.span)
+      const group = built.get(text)
+      if (group === undefined) built.set(text, [call])
+      else group.push(call)
+    }
+    callSiteIndex.set(calls, built)
+    index = built
+  }
+  return index.get(siteText(owner, span)) ?? []
+}
+
+interface InstanceIndex {
+  readonly byKey: ReadonlyMap<string, Instance>
+  readonly byDeclaration: ReadonlyMap<string, ReadonlyArray<Instance>>
+}
+
+const instanceIndexCache = new WeakMap<ReadonlyArray<Instance>, InstanceIndex>()
+
+const instanceIndex = (instances: ReadonlyArray<Instance>): InstanceIndex => {
+  const cached = instanceIndexCache.get(instances)
+  if (cached !== undefined) return cached
+  const byKey = new Map<string, Instance>()
+  const byDeclaration = new Map<string, Array<Instance>>()
+  for (const instance of instances) {
+    const text = keyText(instance.key)
+    if (!byKey.has(text)) byKey.set(text, instance)
+    const declaration = `${instance.key.declaration.module}\u0000${instance.key.declaration.name}`
+    const group = byDeclaration.get(declaration)
+    if (group === undefined) byDeclaration.set(declaration, [instance])
+    else group.push(instance)
+  }
+  const built = { byKey, byDeclaration }
+  instanceIndexCache.set(instances, built)
+  return built
+}
+
+/** The first instance in `instances` with `key`'s identity. */
+export const instanceByKey = (
+  instances: ReadonlyArray<Instance>,
+  key: InstanceKey,
+): Instance | undefined => instanceIndex(instances).byKey.get(keyText(key))
+
+/** Every instance of one declaration, in `instances` order. */
+export const instancesOf = (
+  instances: ReadonlyArray<Instance>,
+  declaration: { readonly module: string; readonly name: string },
+): ReadonlyArray<Instance> =>
+  instanceIndex(instances).byDeclaration.get(`${declaration.module}\u0000${declaration.name}`) ?? []
+
 /** Identifies the machine body shared by proof contexts with one emitted contract. */
 export const runtimeKeyText = (key: InstanceKey): string =>
   `${Specialization.runtimeKey({
