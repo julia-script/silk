@@ -1,14 +1,7 @@
 import type { Metadata } from 'next'
-import { JetBrains_Mono } from 'next/font/google'
+import { shareMono } from '../fonts'
 import { ShareWorkbench } from './ShareWorkbench'
 import * as SourceCode from './SourceCode'
-
-const mono = JetBrains_Mono({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  style: ['normal'],
-  variable: '--share-mono',
-})
 
 const defaultSource = `import silk.allocator { Allocator, SystemAllocator }
 
@@ -76,7 +69,7 @@ export default async function SharePage({ searchParams }: { readonly searchParam
         width: integer(first(parameters.width), 320, 1600, 960),
       }}
       initialSource={source}
-      monoClassName={mono.variable}
+      monoClassName={shareMono.variable}
     />
   )
 }
