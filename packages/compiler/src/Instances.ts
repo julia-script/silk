@@ -1834,16 +1834,26 @@ export const discover = (
     measure: CleanupMeasure | undefined,
     target: InstanceKey,
     selectedRoots: ReadonlyArray<Type.Type>,
+    ancestor: InstanceKey | undefined,
   ): CleanupMeasure | undefined => {
     if (measure === undefined)
       return selectedRoots.length === 0 ? undefined : cleanupMeasureOf(selectedRoots)
-    // A selected hook belongs to an already-proved finite plan. Its concrete arguments form the
-    // local frame even when an opaque buffer hides them from the outer owner's fields. Keep the
-    // original roots fixed, so this frame cannot justify the next hook in a growing cycle.
-    if (selectedRoots.length > 0)
-      return selectedRoots.some((root) => coveredByCleanupMeasure(measure, root))
+    // Each selected cleanup hook may expose a more deeply owned payload hidden from the
+    // original roots by an opaque buffer. Its concrete arguments justify the next cleanup
+    // owner, provided a repeated hook family does not grow. Keep the original roots fixed.
+    if (selectedRoots.length > 0) {
+      const fromRoots = selectedRoots.some((root) => coveredByCleanupMeasure(measure, root))
+      const fromFrame =
+        (ancestor === undefined || nonGrowingTypeArguments(ancestor, target)) &&
+        selectedRoots.some((root) =>
+          measure.frame.some(
+            (frame) => sameRuntimeType(root, frame) || isStrictCleanupSubterm(root, frame),
+          ),
+        )
+      return fromRoots || fromFrame
         ? cleanupMeasureOf(measure.roots, typeArgumentsOf(target))
         : undefined
+    }
     const targetTypes = typeArgumentsOf(target)
     return targetTypes.every(
       (type) =>
@@ -2380,6 +2390,7 @@ export const discover = (
               item.cleanupMeasure,
               targetKey,
               ordinaryIdentities.has(identity) ? [] : (cleanupRoots.get(identity) ?? []),
+              ancestor?.key,
             )
             const terminalCallableSpecialization =
               ancestor !== undefined && sameRuntimeNonCallableArguments(ancestor.key, targetKey)
@@ -2487,6 +2498,7 @@ export const discover = (
               ownerContext.cleanupMeasure,
               provided.target,
               cleanupRoots,
+              ancestor?.key,
             )
             const cleanupSpecialization = cleanupPermitsSpecialization(
               ancestor?.key,

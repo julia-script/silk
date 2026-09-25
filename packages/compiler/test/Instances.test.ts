@@ -709,11 +709,12 @@ pub fn main() -> () {
   }),
 )
 
-it.effect('admits finite vector cleanup nested through a shared payload', () =>
+it.effect('admits finite owned payload cleanup nested through a shared vector', () =>
   Effect.gen(function* () {
-    const result = yield* snapshot(`import silk.shared { Shared }
+    const result = yield* snapshot(`import silk.bytes { Bytes }
+import silk.shared { Shared }
 import silk.vector { Vector }
-struct Evidence { value: i32 }
+struct Evidence { value: Bytes }
 struct Cached { items: Vector<Shared<Evidence>> }
 struct Root { answer: Shared<Cached> }
 pub fn main() -> () {
@@ -737,6 +738,14 @@ pub fn main() -> () {
           instance.key.declaration.name === 'drop@impl#0' &&
           instance.key.typeArguments.map(Type.encodeGenericArgument).join(', ') ===
             'silk/shared.Shared<golden/program.Evidence>',
+      ),
+    )
+    assert.isTrue(
+      result.instances.instances.some(
+        (instance) =>
+          instance.key.declaration.module === 'silk/vector' &&
+          instance.key.declaration.name === 'drop@impl#0' &&
+          instance.key.typeArguments.map(Type.encodeGenericArgument).join(', ') === 'u8',
       ),
     )
   }),
