@@ -460,7 +460,10 @@ export const lowerProgram = (
         layout.entries.flatMap((entry) => {
           if (!Type.isSharedCore(entry.type)) return []
           const element = Type.typeArgumentAt(entry.type, 0)
-          return element === undefined ? [] : [[Type.key(element), element] as const]
+          // Generic layout entries do not have a runtime payload to clean up.
+          return element === undefined || !Type.isRuntimeConcrete(element)
+            ? []
+            : [[Type.key(element), element] as const]
         }),
       ).values(),
     ].sort((left, right) => Type.key(left).localeCompare(Type.key(right)))
