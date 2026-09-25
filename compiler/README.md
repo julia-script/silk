@@ -116,8 +116,8 @@ vector with a frame-start stack, so opening and closing a scope truncates rather
 The syntax accessors, the recovery-cause selection, and the name, path, and literal lowerings port
 the bootstrap `AuthoredLowering` helpers of the same names; the literal decoders port
 `internal/IntegerLiteral`, `internal/DurationLiteral`, `LiteralForm`, `StaticText`, and
-`internal/Escape`. A magnitude that no `u64` can hold lowers to an invalid expression with an
-overflow cause rather than widening the vocabulary.
+`internal/Escape`. Integer magnitudes are exact interned decimal digits; their sign and written
+radix stay separate. Floating and duration magnitudes remain `u64` and can have overflow causes.
 
 `hir/LowerType.silk` lowers every type operand, generic binder list, row, `where` constraint, and
 callable contract. `LowerType.lowerType` is the one type entry point: it unwraps grouping

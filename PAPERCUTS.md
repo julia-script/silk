@@ -2,6 +2,12 @@
 
 Format: date · symptom · fix · project. Check here first when tooling is slow or fails mysteriously.
 
+- 2026-09-25 · `silk format` rewrote hundreds of unrelated lines in touched HIR files, and even
+  the unchanged HEAD copy of Hir.silk failed its check · Keep the scoped source diff, verify
+  temporary formatted copies against the tested build, and use Oxfmt for CI-covered files · compiler
+- 2026-09-25 · Two `silk test --filter` calls for the same source-written HIR root each rebuilt its
+  native test executable for several minutes · Select related cases in one run when the filter
+  permits, then build the normal compiler once for corpus checks · self-hosted compiler
 - 2026-09-25 · A focused source-written query test used `--file`, but the CLI still compiled the
   manifest root and its full import graph for over two minutes · Use `--root src/semantic/QueryCases.silk`
   to compile only the test module's import graph · self-hosted compiler

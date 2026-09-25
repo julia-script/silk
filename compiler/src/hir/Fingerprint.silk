@@ -268,11 +268,18 @@ effect fn encodeNumber(state: &mut EncodeState, value: u64) -> ()
   return ()
 }
 
-/// Frames an integer magnitude a node carries as a `u64`.
+/// Frames a bounded magnitude used by floating and duration literals.
 effect fn encodeMagnitude(state: &mut EncodeState, value: u64) -> ()
 ! OutOfMemoryError
 ? &mut Allocator {
   return run encodeNumber(&mut state.*, value)
+}
+
+/// Frames the exact decimal digits of an integer magnitude as a number.
+effect fn encodeIntegerMagnitude(state: &mut EncodeState, module: &Module, magnitude: Symbol) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  return run frameBytes(&mut state.*, Tag.Number, StringTable.get(&module.strings, magnitude))
 }
 
 /// Frames a character literal's Unicode scalar value.
@@ -583,7 +590,7 @@ effect fn encodeFields(state: &mut EncodeState, module: &Module, node: Node) -> 
     }
     Node.IntegerLiteral {sign, magnitude, radix, suffix} => {
       run encodeName(&mut state.*, Hir.signName(sign))
-      run encodeMagnitude(&mut state.*, magnitude)
+      run encodeIntegerMagnitude(&mut state.*, module, magnitude)
       run encodeName(&mut state.*, Hir.radixName(radix))
       run encodeSymbolRef(&mut state.*, module, suffix)
     }
