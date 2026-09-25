@@ -1,0 +1,107 @@
+//! Canonical identity for one logical source module.
+//!
+//! # When to use
+//! Use [`ModuleId`] to identify a module across source revisions. Local HIR indexes and interned
+//! symbols identify values only inside one parsed source unit.
+//!
+//! # Details
+//! The origin, package, and path are exact bytes. A path uses slash-separated nonempty segments.
+//! It has no leading or trailing slash, backslash, or `.` or `..` segment.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.usize
+
+/// A module path that does not use the canonical logical form.
+pub struct InvalidModulePath {}
+
+/// A source origin, package, and normalized logical path.
+pub struct ModuleId {
+  origin: Bytes
+  package: Bytes
+  path: Bytes
+}
+
+fn sameBytes(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if left[index] != right[index] {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn validPath(path: &[u8]) -> bool {
+  if path.length == usize.ZERO || path[usize.ZERO] == 47 || path[path.length - usize.ONE] == 47 {
+    return false
+  }
+  let mut start = usize.ZERO
+  let mut index = usize.ZERO
+  while index <= path.length {
+    if index == path.length || path[index] == 47 {
+      let length = index - start
+      if length == usize.ZERO || (length == usize.ONE && path[start] == 46) || (length == 2 && path[start] == 46 && path[start + usize.ONE] == 46) {
+        return false
+      }
+      start = index + usize.ONE
+    } else {
+      if path[index] == 92 {
+        return false
+      }
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+impl ModuleId {
+  /// Copies a canonical module identity from its source origin, package, and logical path.
+  ///
+  /// # Gotchas
+  ///
+  /// An empty origin or package fails. A path with empty, `.` or `..` segments or a backslash fails.
+  pub effect fn make(origin: &[u8], package: &[u8], path: &[u8]) -> ModuleId
+  ! InvalidModulePath | OutOfMemoryError
+  ? &mut Allocator {
+    if origin.length == usize.ZERO || package.length == usize.ZERO || !validPath(path) {
+      fail InvalidModulePath {}
+    }
+    return ModuleId {
+      origin: run Bytes.copy(origin),
+      package: run Bytes.copy(package),
+      path: run Bytes.copy(path),
+    }
+  }
+  /// Copies an identity without changing its origin, package, or path.
+  pub effect fn copy(self: &Self) -> ModuleId ! OutOfMemoryError ? &mut Allocator {
+    return ModuleId {
+      origin: run Bytes.copy(Bytes.asSlice(&self.origin)),
+      package: run Bytes.copy(Bytes.asSlice(&self.package)),
+      path: run Bytes.copy(Bytes.asSlice(&self.path)),
+    }
+  }
+  /// Reports whether two identities name the same module in the same source origin.
+  pub fn equals(self: &Self, other: &ModuleId) -> bool {
+    return sameBytes(Bytes.asSlice(&self.origin), Bytes.asSlice(&other.origin)) && sameBytes(
+      Bytes.asSlice(&self.package),
+      Bytes.asSlice(&other.package),
+    ) && sameBytes(Bytes.asSlice(&self.path), Bytes.asSlice(&other.path))
+  }
+  /// Borrows the source-origin identity bytes for constructing a related module ID.
+  pub fn sourceOrigin(self: &Self) -> &[u8] {
+    return Bytes.asSlice(&self.origin)
+  }
+  /// Borrows the package identity bytes for constructing a related module ID.
+  pub fn packageIdentity(self: &Self) -> &[u8] {
+    return Bytes.asSlice(&self.package)
+  }
+  /// Borrows the normalized logical path bytes.
+  pub fn logicalPath(self: &Self) -> &[u8] {
+    return Bytes.asSlice(&self.path)
+  }
+}

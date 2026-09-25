@@ -2,6 +2,12 @@
 
 Format: date · symptom · fix · project. Check here first when tooling is slow or fails mysteriously.
 
+- 2026-09-25 · Concurrent `pnpm exec` typechecks each triggered dependency auto-repair and raced
+  on a hoisted `node_modules` symlink · Invoke the prepared `node_modules/.bin` binaries directly
+  for focused checks and avoid parallel pnpm entry points · compiler
+- 2026-09-25 · A cached native acceptance object kept failing after an ownership fix because it
+  reused a stale binary · Disable the artifact cache for the focused compiler-lowering regression
+  so it compiles the current compiler code · compiler
 - 2026-09-25 · `silk format` rewrote hundreds of unrelated lines in touched HIR files, and even
   the unchanged HEAD copy of Hir.silk failed its check · Keep the scoped source diff, verify
   temporary formatted copies against the tested build, and use Oxfmt for CI-covered files · compiler

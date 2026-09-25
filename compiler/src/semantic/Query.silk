@@ -55,6 +55,21 @@ impl<K, A, R> Query<K, A, R> {
   pub fn length(self: &Self) -> usize {
     return HashMap.length<K, Entry<A, R>>(&self.entries)
   }
+  /// Reports whether `key` has a published success or semantic rejection.
+  pub fn isComplete<K: HashKey + Copy>(self: &mut Self, key: K) -> bool {
+    let mut complete = false
+    let found = HashMap.withMut(
+      &mut self.entries,
+      key,
+      fn(entry: &mut Entry<A, R>) -> () {
+        if let Entry<A, R>.Complete {answer: _} = &entry.* {
+          complete = true
+        }
+        return ()
+      },
+    )
+    return found && complete
+  }
   /// Runs the provider for an absent key and returns an owned handle to its completed answer.
   ///
   /// # Details

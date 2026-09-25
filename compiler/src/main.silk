@@ -16,6 +16,13 @@ import parser.ParserCases
 import parser.SyntaxTree
 import semantic.Query
 import semantic.QueryCases
+import semantic.ModuleId
+import semantic.SourceRevision
+import semantic.SourceUnit
+import semantic.DeclarationId
+import semantic.ModuleIndex
+import semantic.SourceIndex
+import semantic.SourceIndexCases
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
 import silk.effect {Effect}

@@ -1,0 +1,343 @@
+//! Query-backed loading and syntax indexing for one immutable source revision.
+//!
+//! # When to use
+//! Use [`SourceIndex`] to request a module from a held [`Revision`](semantic.SourceRevision.Revision).
+//! An unused import target is not read when its importing module is indexed.
+//!
+//! # Details
+//! Each source demand uses [`Query`](semantic.Query.Query) for typed reservation and completed
+//! answers. Events record actual query starts, hits, finishes, and source map reads.
+
+import semantic.ModuleId {ModuleId}
+import semantic.ModuleIndex {ModuleIndex, NameObservation}
+import semantic.Query {Cycle, Query}
+import semantic.SourceRevision {Observation, Revision}
+import semantic.SourceUnit {SourceUnit}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.hash {Hash, Word}
+import silk.option {Option}
+import silk.result {Result}
+import silk.shared {Shared}
+import silk.usize
+import silk.vector {Vector}
+
+/// A completed source demand with retained bytes and a syntax-only index.
+pub struct IndexedSource {
+  observation: Observation
+  unit: SourceUnit
+  index: ModuleIndex
+}
+
+/// An absent or present source result from the same held revision.
+pub union SourceResult {
+  /// The module path was absent in the held revision.
+  Absent {pub observation: Observation},
+  /// The module path had bytes in the held revision.
+  Present {pub source: IndexedSource},
+}
+
+struct NameSelection {
+  valid: bool
+  present: bool
+  found: Option<Shared<NameObservation>>
+}
+
+/// An empty semantic rejection type for source queries that return presence or absence.
+pub struct NoRejection {}
+
+/// An indexed unit that does not belong to this store's held source revision.
+pub struct RevisionMismatch {}
+
+/// One actual source-index operation recorded in demand order.
+pub enum EventKind {
+  /// A source index query started its provider.
+  QueryStart,
+  /// A source index query reused a completed answer.
+  QueryHit,
+  /// A source index provider completed and published its answer.
+  QueryFinish,
+  /// The held revision's source mapping was read.
+  SourceRead,
+  /// A complete syntax name bucket, including an empty bucket, was observed.
+  NameBucket,
+}
+
+/// One observable query or source-read event.
+pub struct Event {
+  /// The kind of operation that occurred.
+  pub kind: EventKind
+  /// The canonical module path involved in the operation.
+  pub module: ModuleId
+  /// The held revision number.
+  pub revision: usize
+  /// Whether a `SourceRead` found bytes; unused for other event kinds.
+  pub present: bool
+  /// The queried spelling for a `NameBucket` event; absent for other kinds.
+  pub name: Option<Bytes>
+  /// The complete bucket size for a `NameBucket` event; zero for other kinds.
+  pub members: usize
+}
+
+/// The fixed semantic environment for M1 source and name queries.
+pub enum Environment {
+  /// A completed Final profile with no package-parameter queries in this slice.
+  Final,
+}
+
+/// A serial source-query store bound to one immutable Final environment and revision.
+///
+/// # Details
+///
+/// M1 has one fixed Final environment. Package-parameter queries and bootstrap environments are
+/// outside this actor. The store never reads a host filesystem or follows an unused import.
+pub struct SourceIndex {
+  environment: Environment
+  revision: Revision
+  keys: Vector<ModuleId>
+  query: Query<Word, SourceResult, NoRejection>
+  events: Vector<Event>
+}
+
+effect fn record(
+  events: &mut Vector<Event>,
+  kind: EventKind,
+  id: &ModuleId,
+  revision: usize,
+  present: bool,
+) -> () ! OutOfMemoryError ? &mut Allocator {
+  run Vector.append<Event>(
+    &mut events.*,
+    Event {
+      kind: kind,
+      module: run ModuleId.copy(id),
+      revision: revision,
+      present: present,
+      name: Option.none<Bytes>(),
+      members: usize.ZERO,
+    },
+  )
+  return ()
+}
+
+effect fn recordName(
+  events: &mut Vector<Event>,
+  id: &ModuleId,
+  revision: usize,
+  name: &[u8],
+  members: usize,
+) -> () ! OutOfMemoryError ? &mut Allocator {
+  run Vector.append<Event>(
+    &mut events.*,
+    Event {
+      kind: EventKind.NameBucket,
+      module: run ModuleId.copy(id),
+      revision: revision,
+      present: false,
+      name: Option.some<Bytes>(run Bytes.copy(name)),
+      members: members,
+    },
+  )
+  return ()
+}
+
+effect fn keyFor(store: &mut SourceIndex, id: &ModuleId) -> Word ! OutOfMemoryError ? &mut Allocator {
+  let keys = Vector.asSlice<ModuleId>(&store.keys)
+  let mut ordinal = usize.ZERO
+  while ordinal < keys.length {
+    if ModuleId.equals(&keys[ordinal], id) {
+      return Hash.word(usize.toU64(ordinal))
+    }
+    ordinal = ordinal + usize.ONE
+  }
+  let next = keys.length
+  run Vector.append<ModuleId>(&mut store.keys, run ModuleId.copy(id))
+  return Hash.word(usize.toU64(next))
+}
+
+fn selectName(
+  answer: &Result<SourceResult, NoRejection>,
+  id: &ModuleId,
+  held: &Revision,
+  number: usize,
+  name: &[u8],
+) -> NameSelection {
+  return match & answer.* {
+    Result<SourceResult, NoRejection>.Success {value} => match & value {
+      SourceResult.Present {source} => {
+        if !ModuleId.equals(&source.unit.id, id) || source.unit.revision != number || !Observation.matches(
+          &source.observation,
+          held,
+        ) {
+          return NameSelection {
+            valid: false,
+            present: false,
+            found: Option.none<Shared<NameObservation>>(),
+          }
+        }
+        let found = ModuleIndex.cachedName(&source.index, name)
+        return NameSelection {valid: true, present: true, found: move found}
+      }
+      SourceResult.Absent {observation} => {
+        if ModuleId.equals(Observation.moduleId(&observation), id) && Observation.matches(
+          &observation,
+          held,
+        ) {
+          return NameSelection {
+            valid: true,
+            present: false,
+            found: Option.none<Shared<NameObservation>>(),
+          }
+        }
+        return NameSelection {
+          valid: false,
+          present: false,
+          found: Option.none<Shared<NameObservation>>(),
+        }
+      }
+    }
+    Result<SourceResult, NoRejection>.Failure {error: _} => NameSelection {
+      valid: false,
+      present: false,
+      found: Option.none<Shared<NameObservation>>(),
+    }
+  }
+}
+
+impl IndexedSource {
+  /// Borrows the exact present-path observation captured on the source-query miss.
+  pub fn sourceObservation(self: &Self) -> &Observation {
+    return &self.observation
+  }
+  /// Borrows the retained bytes, syntax tree, and authored HIR for this indexed source.
+  pub fn sourceUnit(self: &Self) -> &SourceUnit {
+    return &self.unit
+  }
+  /// Borrows the syntax-only declarations and name candidates for this indexed source.
+  pub fn moduleIndex(self: &Self) -> &ModuleIndex {
+    return &self.index
+  }
+}
+
+impl SourceIndex {
+  /// Creates a source-query store for one held in-memory revision and fixed Final environment.
+  pub fn make(revision: Revision) -> SourceIndex {
+    return SourceIndex {
+      environment: Environment.Final,
+      revision: move revision,
+      keys: Vector.make<ModuleId>(),
+      query: Query.make<Word, SourceResult, NoRejection>(),
+      events: Vector.make<Event>(),
+    }
+  }
+  /// Returns the fixed Final environment selected for this M1 store.
+  pub fn queryEnvironment(self: &Self) -> Environment {
+    return self.environment
+  }
+  /// Borrows the demand, source-read, and name-bucket events recorded by this store.
+  pub fn eventLog(self: &Self) -> &[Event] {
+    return Vector.asSlice<Event>(&self.events)
+  }
+  /// Returns the held revision number for this store.
+  pub fn revisionNumber(self: &Self) -> usize {
+    return Revision.revisionNumber(&self.revision)
+  }
+  /// Requests one source and its complete syntax index through the typed query store.
+  ///
+  /// # Details
+  ///
+  /// A miss reads only this module path, then parses and indexes all of its declarations. A hit
+  /// returns the completed answer without another source read. Source absence also completes.
+  /// Provider failure removes the active query reservation.
+  pub effect fn demand(self: &mut Self, id: &ModuleId) -> Shared<Result<SourceResult, NoRejection>>
+  ! Cycle | OutOfMemoryError
+  ? &mut Allocator {
+    let key = run keyFor(&mut self.*, id)
+    let number = Revision.revisionNumber(&self.revision)
+    let hit = Query.isComplete(&mut self.query, key)
+    let revision = &self.revision
+    let events = &mut self.events
+    let answer = run Query.demand(
+      &mut self.query,
+      key,
+      effect fn(owner: &mut Query<Word, SourceResult, NoRejection>, queryKey: Word) -> Result<
+        SourceResult,
+        NoRejection,
+      > ! OutOfMemoryError ? &mut Allocator {
+        run record(&mut events.*, EventKind.QueryStart, id, number, false)
+        let observed = run Revision.observe(revision, id)
+        let present = Observation.isPresent(&observed)
+        run record(&mut events.*, EventKind.SourceRead, id, number, present)
+        let content = run Observation.copyContent(&observed)
+        if let Option<Bytes>.Some {value} = move content {
+          let unit = run SourceUnit.parse(id, number, move value)
+          let index = run ModuleIndex.build(&unit)
+          let source = IndexedSource {
+            observation: move observed,
+            unit: move unit,
+            index: move index,
+          }
+          return Result.succeed<SourceResult, NoRejection>(
+            SourceResult.Present {source: move source},
+          )
+        }
+        return Result.succeed<SourceResult, NoRejection>(
+          SourceResult.Absent {observation: move observed},
+        )
+      },
+    )
+    if hit {
+      run record(&mut self.events, EventKind.QueryHit, id, number, false)
+    } else {
+      run record(&mut self.events, EventKind.QueryFinish, id, number, false)
+    }
+    return move answer
+  }
+  /// Observes a complete name bucket from a completed source answer without reopening the source.
+  ///
+  /// # Details
+  ///
+  /// A written bucket is precomputed during syntax indexing and cloned without allocation. An
+  /// unwritten spelling produces an owned empty observation. An absent source returns `None`;
+  /// its source observation is already in the answer. No import, type, body, or layout work runs.
+  ///
+  /// # Gotchas
+  ///
+  /// If `answer` is from another module or held revision, this operation fails with
+  /// `RevisionMismatch`.
+  pub effect fn observeName(
+    self: &mut Self,
+    answer: &Shared<Result<SourceResult, NoRejection>>,
+    id: &ModuleId,
+    name: &[u8],
+  ) -> Option<Shared<NameObservation>> ! RevisionMismatch | OutOfMemoryError ? &mut Allocator {
+    let held = &self.revision
+    let number = Revision.revisionNumber(held)
+    let selected = Shared.with<Result<SourceResult, NoRejection>, NameSelection>(
+      answer,
+      fn(value: &Result<SourceResult, NoRejection>) -> NameSelection {
+        return selectName(value, id, held, number, name)
+      },
+    )
+    if !selected.valid {
+      fail RevisionMismatch {}
+    }
+    if !selected.present {
+      return Option.none<Shared<NameObservation>>()
+    }
+    let observed = match move selected.found {
+      Option<Shared<NameObservation>>.Some {value} => move value
+      Option<Shared<NameObservation>>.None => run Shared.make<NameObservation>(
+        run NameObservation.empty(id, name),
+      )
+    }
+    let count = Shared.with<NameObservation, usize>(
+      &observed,
+      fn(value: &NameObservation) -> usize {
+        return NameObservation.listMembers(&value).length
+      },
+    )
+    run recordName(&mut self.events, id, number, name, count)
+    return Option.some<Shared<NameObservation>>(move observed)
+  }
+}

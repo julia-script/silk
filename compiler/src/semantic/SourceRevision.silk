@@ -1,0 +1,197 @@
+//! Immutable in-memory source mappings and exact source observations.
+//!
+//! # When to use
+//! Use [`Revision`] to hold one source view during a compiler request. Call [`publish`] to make
+//! another view after one present or absent mapping changes.
+//!
+//! # Details
+//! A held revision never reads a host filesystem. Every module path resolves to the bytes stored
+//! in that revision or to absence, including paths that were not named when it was created.
+
+import semantic.ModuleId {ModuleId}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.option {Option}
+import silk.usize
+import silk.vector {Vector}
+
+/// One explicit present or absent mapping in a revision.
+struct Mapping {
+  id: ModuleId
+  content: Option<Bytes>
+}
+
+/// One immutable set of in-memory module contents.
+pub struct Revision {
+  number: usize
+  mappings: Vector<Mapping>
+}
+
+/// The exact bytes or absence observed for one module path.
+///
+/// # Details
+///
+/// [`matches`] compares exact content and presence against a later revision. An unrelated source
+/// update does not change this observation.
+pub struct Observation {
+  id: ModuleId
+  content: Option<Bytes>
+}
+
+fn sameBytes(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if left[index] != right[index] {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+effect fn copyContent(content: &Option<Bytes>) -> Option<Bytes> ! OutOfMemoryError ? &mut Allocator {
+  return match & content.* {
+    Option<Bytes>.Some {value} => Option.some<Bytes>(run Bytes.copy(Bytes.asSlice(&value)))
+    Option<Bytes>.None => Option.none<Bytes>()
+  }
+}
+
+fn mappingAt(revision: &Revision, id: &ModuleId) -> Option<usize> {
+  let mappings = Vector.asSlice<Mapping>(&revision.mappings)
+  let mut index = usize.ZERO
+  while index < mappings.length {
+    if ModuleId.equals(&mappings[index].id, id) {
+      return Option.some<usize>(index)
+    }
+    index = index + usize.ONE
+  }
+  return Option.none<usize>()
+}
+
+impl Revision {
+  /// Creates an empty revision in which every module path is absent.
+  pub fn make() -> Revision {
+    return Revision {number: usize.ZERO, mappings: Vector.make<Mapping>()}
+  }
+  /// Returns the publication number of this held in-memory revision.
+  pub fn revisionNumber(self: &Self) -> usize {
+    return self.number
+  }
+  /// Copies a held revision, including its exact present and absent mappings.
+  pub effect fn copy(self: &Self) -> Revision ! OutOfMemoryError ? &mut Allocator {
+    let mut mappings = Vector.make<Mapping>()
+    let source = Vector.asSlice<Mapping>(&self.mappings)
+    let mut index = usize.ZERO
+    while index < source.length {
+      run Vector.append<Mapping>(
+        &mut mappings,
+        Mapping {
+          id: run ModuleId.copy(&source[index].id),
+          content: run copyContent(&source[index].content),
+        },
+      )
+      index = index + usize.ONE
+    }
+    return Revision {number: self.number, mappings: move mappings}
+  }
+  /// Publishes a new revision with one path set to exact bytes or explicit absence.
+  ///
+  /// # Details
+  ///
+  /// This function copies the map before it changes one entry. `self` remains valid and unchanged
+  /// even if the new allocation fails.
+  pub effect fn publish(self: &Self, id: &ModuleId, content: &Option<Bytes>) -> Revision
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let mut next = Vector.make<Mapping>()
+    let mappings = Vector.asSlice<Mapping>(&self.mappings)
+    let mut replaced = false
+    let mut index = usize.ZERO
+    while index < mappings.length {
+      let entry = &mappings[index]
+      let isTarget = ModuleId.equals(&entry.id, id)
+      let mut updated = Option.none<Bytes>()
+      if isTarget {
+        updated = run copyContent(content)
+      } else {
+        updated = run copyContent(&entry.content)
+      }
+      run Vector.append<Mapping>(
+        &mut next,
+        Mapping {id: run ModuleId.copy(&entry.id), content: move updated},
+      )
+      if isTarget {
+        replaced = true
+      }
+      index = index + usize.ONE
+    }
+    if !replaced {
+      run Vector.append<Mapping>(
+        &mut next,
+        Mapping {id: run ModuleId.copy(id), content: run copyContent(content)},
+      )
+    }
+    return Revision {number: self.number + usize.ONE, mappings: move next}
+  }
+  /// Captures the exact stored bytes or absence of one module path.
+  ///
+  /// # Details
+  ///
+  /// The observation owns its content. It remains valid after another revision is published.
+  pub effect fn observe(self: &Self, id: &ModuleId) -> Observation
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let found = mappingAt(self, id)
+    let mut content = Option.none<Bytes>()
+    if let Option<usize>.Some {value} = move found {
+      let mappings = Vector.asSlice<Mapping>(&self.mappings)
+      content = run copyContent(&mappings[value].content)
+    }
+    return Observation {id: run ModuleId.copy(id), content: move content}
+  }
+}
+
+impl Observation {
+  /// Borrows the canonical module path whose bytes or absence were captured.
+  pub fn moduleId(self: &Self) -> &ModuleId {
+    return &self.id
+  }
+  /// Reports whether the observed module had source bytes.
+  pub fn isPresent(self: &Self) -> bool {
+    return match & self.content {
+      Option<Bytes>.Some {value: _} => true
+      Option<Bytes>.None => false
+    }
+  }
+  /// Copies the observed bytes, or returns absence.
+  pub effect fn copyContent(self: &Self) -> Option<Bytes> ! OutOfMemoryError ? &mut Allocator {
+    return run copyContent(&self.content)
+  }
+  /// Reports whether a later revision has the same exact bytes or absence at this module path.
+  pub fn matches(self: &Self, revision: &Revision) -> bool {
+    let found = mappingAt(revision, &self.id)
+    let mappings = Vector.asSlice<Mapping>(&revision.mappings)
+    return match & self.content {
+      Option<Bytes>.Some {value} => match move found {
+        Option<usize>.Some {value: index} => match & mappings[index].content {
+          Option<Bytes>.Some {value: current} => sameBytes(
+            Bytes.asSlice(&value),
+            Bytes.asSlice(&current),
+          )
+          Option<Bytes>.None => false
+        }
+        Option<usize>.None => false
+      }
+      Option<Bytes>.None => match move found {
+        Option<usize>.Some {value: index} => match & mappings[index].content {
+          Option<Bytes>.Some {value: _} => false
+          Option<Bytes>.None => true
+        }
+        Option<usize>.None => true
+      }
+    }
+  }
+}

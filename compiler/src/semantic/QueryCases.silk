@@ -9,6 +9,8 @@ import silk.result {Result}
 import silk.shared {Shared}
 import silk.testing {AssertionError, Testing}
 import silk.vector {Vector}
+import silk.bytes {Bytes}
+import silk.usize
 
 struct Rejection {
   code: i32
@@ -16,6 +18,40 @@ struct Rejection {
 
 struct ProviderError {
   code: i32
+}
+
+struct NestedAnswer {
+  marker: Bytes
+  retained: Shared<Bytes>
+}
+
+effect fn ownedNested(owner: &mut Query<Word, NestedAnswer, Rejection>, key: Word) -> Result<
+  NestedAnswer,
+  Rejection,
+> ! OutOfMemoryError ? &mut Allocator {
+  let retained = run Shared.make<Bytes>(run Bytes.copy(b"retained"))
+  return Result.succeed<NestedAnswer, Rejection>(
+    NestedAnswer {marker: run Bytes.copy(b"marker"), retained: move retained},
+  )
+}
+
+effect fn nestedAnswerHit() -> ()
+! OutOfMemoryError | Cycle | AssertionError<'static>
+? &mut Allocator {
+  let mut query = Query.make<Word, NestedAnswer, Rejection>()
+  let first = run Query.demand(&mut query, Hash.word(12), ownedNested)
+  let again = run Query.demand(&mut query, Hash.word(12), ownedNested)
+  run Testing.expect(Query.length(&query) == 1, "nested answer remains completed")
+  drop first
+  drop again
+  return ()
+}
+
+test effect fn reusesAnswerContainingSharedHandle() -> ()
+! OutOfMemoryError | Cycle | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run nestedAnswerHit()
+    |> Effect.provideMut<Allocator>(&mut allocator)
 }
 
 effect fn accepted(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i32, Rejection> {
@@ -193,9 +229,14 @@ effect fn moveOnlyAnswer() -> ()
 ? &mut Allocator {
   let mut query = Query.make<Word, Vector<u8>, Rejection>()
   let answer = run Query.demand(&mut query, Hash.word(7), ownedBytes)
+  let repeated = run Query.demand(&mut query, Hash.word(7), ownedBytes)
   run Testing.expect(
     Shared.with<Result<Vector<u8>, Rejection>, bool>(&answer, oneOwnedByte),
     "move-only answer stays owned",
+  )
+  run Testing.expect(
+    Shared.with<Result<Vector<u8>, Rejection>, bool>(&repeated, oneOwnedByte),
+    "move-only cache hit stays owned",
   )
   return ()
 }
@@ -203,6 +244,36 @@ effect fn moveOnlyAnswer() -> ()
 test effect fn storesMoveOnlyAnswers() -> () ! OutOfMemoryError | Cycle | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   return run moveOnlyAnswer()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn capturedHit() -> () ! OutOfMemoryError | Cycle | AssertionError<'static> ? &mut Allocator {
+  let marker = run Bytes.copy(b"source")
+  let mut query = Query.make<Word, i32, Rejection>()
+  let first = run Query.demand(
+    &mut query,
+    Hash.word(9),
+    effect fn(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i32, Rejection> {
+      return Result.succeed<i32, Rejection>(usize.toI32(Bytes.length(&marker)))
+    },
+  )
+  let second = run Query.demand(
+    &mut query,
+    Hash.word(9),
+    effect fn(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i32, Rejection> {
+      return Result.succeed<i32, Rejection>(usize.toI32(Bytes.length(&marker)))
+    },
+  )
+  run Testing.expect(Query.length(&query) == 1, "captured hit keeps one answer")
+  drop first
+  drop second
+  return ()
+}
+
+test effect fn reusesAnswerWithCapturedProvider() -> ()
+! OutOfMemoryError | Cycle | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run capturedHit()
     |> Effect.provideMut<Allocator>(&mut allocator)
 }
 
