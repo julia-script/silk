@@ -1,4 +1,5 @@
 import * as NativeDiagnosticOutcome from './NativeDiagnosticOutcome.js'
+import * as FunctionIndex from './internal/FunctionIndex.js'
 import type * as Builder from '@silklang/llvm/Builder'
 import * as Block from '@silklang/llvm/Block'
 import * as Constant from '@silklang/llvm/Constant'
@@ -41,7 +42,7 @@ export const prepare = Effect.fnUntraced(function* (context: Context) {
       type.storage?.realization.targetArguments ??
       type.typeArguments ??
       []
-    const target = context.declared.find((candidate) =>
+    const target = FunctionIndex.nativeCandidates(context.declared, targetId).find((candidate) =>
       Mir.matchesInstance(candidate.fn, targetId, arguments_),
     )
     if (target === undefined || target.suspendable || target.diagnosticParameter === undefined)

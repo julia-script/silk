@@ -283,6 +283,14 @@ const blockLocalReferences = (block: LinearBlock) => {
   return { initial, starting, ending }
 }
 
+export interface ResumeThunk {
+  readonly handle: FunctionActor.Function
+  readonly region: Mir.RunSuspendableEffectRegion
+  readonly owner: NativeLoweringContext.DeclaredFunction
+  readonly frame: Mir.CoroutineFrameTargetLayout
+  readonly layout: Mir.CoroutineFrameTargetStateLayout
+}
+
 export interface EmissionContext {
   readonly runtimeFeatures: Set<Backend.RuntimeFeature>
   readonly builder: Builder.Builder
@@ -331,16 +339,7 @@ export interface EmissionContext {
       readonly owner: NativeLoweringContext.DeclaredFunction
     }
   >
-  readonly resumeThunks: ReadonlyMap<
-    string,
-    {
-      readonly handle: FunctionActor.Function
-      readonly region: Mir.RunSuspendableEffectRegion
-      readonly owner: NativeLoweringContext.DeclaredFunction
-      readonly frame: Mir.CoroutineFrameTargetLayout
-      readonly layout: Mir.CoroutineFrameTargetStateLayout
-    }
-  >
+  readonly resumeThunks: ReadonlyMap<string, ResumeThunk>
   readonly debug: boolean
   readonly compileUnit: LlvmMetadata.Optional
   readonly file: LlvmMetadata.Optional
@@ -396,6 +395,19 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
     debugContext,
     termination,
   } = context
+  // The per-function prologue used to rescan every resume thunk and coroutine frame, which grew
+  // quadratically with the number of emitted functions; group both collections once.
+  const resumesByOwner = new Map<NativeLoweringContext.DeclaredFunction, Array<ResumeThunk>>()
+  for (const resume of resumeThunks.values()) {
+    const owned = resumesByOwner.get(resume.owner)
+    if (owned === undefined) resumesByOwner.set(resume.owner, [resume])
+    else owned.push(resume)
+  }
+  const coroutineFrames = new Map<string, Mir.CoroutineFrameTargetLayout>()
+  for (const frame of program.coroutineFrames?.entries ?? []) {
+    const key = Instances.keyText(frame.function)
+    if (!coroutineFrames.has(key)) coroutineFrames.set(key, frame)
+  }
   for (const entry of declared) {
     yield* Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({
@@ -441,18 +453,14 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
               (region) => [region.operation, region] as const,
             ),
           )
-          const resumeControls = [...resumeThunks.values()]
-            .filter((resume) => resume.owner === entry)
+          const resumeControls = (resumesByOwner.get(entry) ?? [])
             .sort((left, right) =>
               suspensionPointKey(left.region.point).localeCompare(
                 suspensionPointKey(right.region.point),
               ),
             )
             .map((resume, ordinal) => ({ ...resume, ordinal: ordinal + 1 }))
-          const coroutineFrame = program.coroutineFrames?.entries.find(
-            (candidate) =>
-              Instances.keyText(candidate.function) === Instances.keyText(entry.fn.instance),
-          )
+          const coroutineFrame = coroutineFrames.get(Instances.keyText(entry.fn.instance))
           yield* LlvmBlock.make(body, 'entry')
           const dispatchBlock = entry.suspendable
             ? yield* LlvmBlock.make(body, 'suspend_dispatch')

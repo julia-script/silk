@@ -1,4 +1,5 @@
 import * as NativePlace from './NativePlace.js'
+import * as FunctionIndex from './internal/FunctionIndex.js'
 import * as NativeArgument from './NativeArgument.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as NativePayload from './NativePayload.js'
@@ -197,7 +198,10 @@ const exactEffect = (context: Context, package_: ExecutionPackage.Plan) => {
   const target =
     environment === undefined
       ? undefined
-      : context.declared.find((candidate) =>
+      : FunctionIndex.nativeCandidates(
+          context.declared,
+          Tir.effectRunnerId(environment.instance.declaration, environment.site),
+        ).find((candidate) =>
           Mir.matchesEffectInstance(
             candidate.fn,
             Tir.effectRunnerId(environment.instance.declaration, environment.site),
@@ -556,7 +560,7 @@ const runCancellationFinalizer = Effect.fnUntraced(function* (
 ) {
   if (finalizer === undefined) return new Set<number>()
   const { body, declared } = context
-  const target = declared.find((candidate) =>
+  const target = FunctionIndex.nativeCandidates(declared, finalizer.runner).find((candidate) =>
     Mir.matchesEffectInstance(
       candidate.fn,
       finalizer.runner,
@@ -594,8 +598,9 @@ const runCancellationFinalizer = Effect.fnUntraced(function* (
     const releaseType = owner.localTypes.at(finalizer.release.ordinal)
     if (releaseType?._tag !== 'CallableValue')
       throw new RangeError('LLVM resource finalizer lost its release callable')
-    const releaseTarget = declared.find((candidate) =>
-      Mir.matchesInstance(candidate.fn, finalizer.releaseTarget, finalizer.releaseTypeArguments),
+    const releaseTarget = FunctionIndex.nativeCandidates(declared, finalizer.releaseTarget).find(
+      (candidate) =>
+        Mir.matchesInstance(candidate.fn, finalizer.releaseTarget, finalizer.releaseTypeArguments),
     )
     if (releaseTarget === undefined)
       throw new RangeError('LLVM resource finalizer lost its release builder target')

@@ -1,4 +1,5 @@
 import * as NativeExecutionStorage from './NativeExecutionStorage.js'
+import * as FunctionIndex from './internal/FunctionIndex.js'
 import * as NativeArgument from './NativeArgument.js'
 import * as Alignment from '@silklang/llvm/Alignment'
 import * as LlvmBlock from '@silklang/llvm/Block'
@@ -667,7 +668,10 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
           laneTag,
         )
       })
-      const helper = declared.find((candidate) =>
+      const helper = FunctionIndex.nativeCandidates(
+        declared,
+        LocalSharedPayloadCleanup.declaration,
+      ).find((candidate) =>
         Mir.matchesInstance(candidate.fn, LocalSharedPayloadCleanup.declaration, [plan.element]),
       )
       if (helper === undefined)
@@ -715,7 +719,7 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
       return
     }
     case 'HookCleanup': {
-      const target = declared.find((candidate) =>
+      const target = FunctionIndex.nativeCandidates(declared, plan.hook).find((candidate) =>
         Mir.matchesInstance(candidate.fn, plan.hook, plan.typeArguments),
       )
       if (target === undefined)

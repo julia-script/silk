@@ -1,4 +1,5 @@
 import * as NativePlace from './NativePlace.js'
+import * as FunctionIndex from './internal/FunctionIndex.js'
 import * as NativeResult from './NativeResult.js'
 import * as NativePayload from './NativePayload.js'
 import * as NativeArgument from './NativeArgument.js'
@@ -493,7 +494,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'RunEffect': {
-      const target = declared.find((candidate) =>
+      const target = FunctionIndex.nativeCandidates(declared, operation.target).find((candidate) =>
         Mir.matchesEffectInstance(
           candidate.fn,
           operation.target,
@@ -658,14 +659,15 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           otherwise,
         )
         yield* LlvmBlock.setInsertionPoint(body, selected)
-        const target = declared.find((candidate) =>
-          Mir.matchesEffectInstance(
-            candidate.fn,
-            alternative.runner,
-            alternative.runnerTypeArguments,
-            alternative.runnerStaticArguments,
-            alternative.type.type,
-          ),
+        const target = FunctionIndex.nativeCandidates(declared, alternative.runner).find(
+          (candidate) =>
+            Mir.matchesEffectInstance(
+              candidate.fn,
+              alternative.runner,
+              alternative.runnerTypeArguments,
+              alternative.runnerStaticArguments,
+              alternative.type.type,
+            ),
         )
         if (target === undefined)
           throw new RangeError(
@@ -873,7 +875,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operation._tag === 'RunStaticEffect'
           ? [...operation.captures.map((capture) => capture.source), ...operation.arguments]
           : undefined
-      const target = declared.find(
+      const target = FunctionIndex.nativeCandidates(declared, operation.runner).find(
         (candidate) =>
           Mir.matchesEffectInstance(
             candidate.fn,
@@ -1063,7 +1065,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'CatchEffect': {
-      const target = declared.find((candidate) =>
+      const target = FunctionIndex.nativeCandidates(declared, operation.runner).find((candidate) =>
         Mir.matchesEffectInstance(
           candidate.fn,
           operation.runner,
