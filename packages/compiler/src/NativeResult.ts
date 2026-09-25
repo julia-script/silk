@@ -126,7 +126,7 @@ export const allocate = (
     : Emitter.alloca(body, target.resultStorage.type, name, {
         placement: 'entry',
         ...(target.resultStorage._tag === 'Canonical'
-          ? { alignment: Emitter.alignment(target.resultStorage.alignment) }
+          ? { alignment: Emitter.alignment(body, target.resultStorage.alignment) }
           : {}),
       })
 }

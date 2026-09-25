@@ -162,7 +162,10 @@ export const emit = (context: Context, operation: Operation) => {
             ),
             `ptr_read${destination}_${ordinal}`,
             {
-              alignment: Emitter.alignment(accessAlignment(context, operation.pointer, offset)),
+              alignment: Emitter.alignment(
+                body,
+                accessAlignment(context, operation.pointer, offset),
+              ),
             },
           ),
         )
@@ -211,7 +214,7 @@ export const emit = (context: Context, operation: Operation) => {
             `ptr_write${destination}_${ordinal}_ptr`,
           ),
           {
-            alignment: Emitter.alignment(accessAlignment(context, operation.pointer, offset)),
+            alignment: Emitter.alignment(body, accessAlignment(context, operation.pointer, offset)),
           },
         )
       }

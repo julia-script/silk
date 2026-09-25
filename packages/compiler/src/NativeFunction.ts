@@ -620,7 +620,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
               root,
               Emitter.alloca(body, i8, `addr${root}`, {
                 count,
-                alignment: Emitter.alignment(layout.alignment),
+                alignment: Emitter.alignment(body, layout.alignment),
               }),
             )
           }

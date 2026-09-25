@@ -717,7 +717,7 @@ export const dropThroughPlan = (
         // A transport-only payload has no owning address until it enters this cleanup.
         const base = Emitter.alloca(body, i8, `${tag}_hook_storage`, {
           count: Emitter.integerUnsigned(builder, i32, BigInt(layoutEntry.size)),
-          alignment: Emitter.alignment(layoutEntry.alignment),
+          alignment: Emitter.alignment(body, layoutEntry.alignment),
         })
         receiver = NativePlace.stored(program.layout, plan.type, base)
         NativePlace.storeLanes(

@@ -113,7 +113,7 @@ export const allocate = (
       context.lanePointers.offsetType,
       BigInt(layout.size),
     ),
-    alignment: Emitter.alignment(layout.alignment),
+    alignment: Emitter.alignment(context.body, layout.alignment),
     placement,
   })
   return make(context.types.program.layout, type, base)
@@ -214,7 +214,7 @@ const access = (self: NativePlace, context: Context, offset: number, lane: Layou
     throw new RangeError('Selected lane exceeds its planned place extent')
   let alignment = Math.min(self.alignment, physical.alignment)
   while (offset % alignment !== 0) alignment /= 2
-  return { alignment: Emitter.alignment(alignment) }
+  return { alignment: Emitter.alignment(context.body, alignment) }
 }
 interface WriteRequest extends ReadRequest {
   readonly value: Value.Input
@@ -585,8 +585,8 @@ export const copy = (destination: NativePlace, context: Context, source: NativeP
       BigInt(destination.size),
     ),
     {
-      destinationAlignment: Emitter.alignment(destination.alignment),
-      sourceAlignment: Emitter.alignment(source.alignment),
+      destinationAlignment: Emitter.alignment(context.body, destination.alignment),
+      sourceAlignment: Emitter.alignment(context.body, source.alignment),
     },
   )
 }
@@ -631,8 +631,11 @@ export const copyFailure = (
     storedPointer(source, context, from.payloadOffset, 'failure_source'),
     Emitter.integerUnsigned(context.body, context.lanePointers.offsetType, BigInt(size)),
     {
-      destinationAlignment: Emitter.alignment(Math.min(destination.alignment, to.alignment)),
-      sourceAlignment: Emitter.alignment(Math.min(source.alignment, from.alignment)),
+      destinationAlignment: Emitter.alignment(
+        context.body,
+        Math.min(destination.alignment, to.alignment),
+      ),
+      sourceAlignment: Emitter.alignment(context.body, Math.min(source.alignment, from.alignment)),
     },
   )
 }

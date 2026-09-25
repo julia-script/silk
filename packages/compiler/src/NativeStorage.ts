@@ -496,7 +496,7 @@ export const ensureAddressRoot = (context: Context, root: Mir.LocalId) => {
       root.ordinal,
       Emitter.alloca(context.body, context.byteType, `callable_addr${root.ordinal}`, {
         count: Emitter.integerUnsigned(context.builder, context.offsetType, BigInt(layout.size)),
-        alignment: Emitter.alignment(layout.alignment),
+        alignment: Emitter.alignment(context.body, layout.alignment),
       }),
     )
   }

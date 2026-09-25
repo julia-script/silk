@@ -2109,7 +2109,7 @@ export const emit = (context: Context, operation: Operation) => {
               i32,
               BigInt(Math.max(context.transferStorageSize, 1)),
             ),
-            alignment: Emitter.alignment(program.layout.target.pointerAlignment),
+            alignment: Emitter.alignment(body, program.layout.target.pointerAlignment),
           },
         )
         const statePointer = NativeLanePointer.lanePointer(

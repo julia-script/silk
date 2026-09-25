@@ -476,7 +476,7 @@ export const emitThunks = (context: ThunkContext) => {
         arguments_.push(Emitter.argument(body, ordinal))
       const transfer = Emitter.alloca(body, i8, 'suspend_transfer', {
         count: Emitter.integerUnsigned(builder, i32, BigInt(Math.max(transferStorageSize, 1))),
-        alignment: Emitter.alignment(program.layout.target.pointerAlignment),
+        alignment: Emitter.alignment(body, program.layout.target.pointerAlignment),
       })
       const nullPointer = Emitter.nullValue(builder, pointer)
       if (executionStorage === undefined || usizeType === undefined)

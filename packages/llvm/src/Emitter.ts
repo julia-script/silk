@@ -274,14 +274,16 @@ export const doubleFromNumber = moduleOp((context, type: Type.Type, value: numbe
 export const constantAggregate = moduleOp(Constant.aggregateIn)
 
 /**
- * Validates a power-of-two byte alignment inside a session. It needs no builder state; like every
- * emitter operation, an invalid value aborts the enclosing session.
+ * Validates a power-of-two byte alignment inside a session. It reads no builder state, but like
+ * every emitter operation an invalid value aborts the enclosing session.
  *
  * @category constants
  * @since 0.0.0
  */
-export const alignment = (byteUnits: number | bigint): Alignment.Alignment =>
-  unwrap(Alignment.fromByteUnitsResult(byteUnits))
+export const alignment = (self: Module, byteUnits: number | bigint): Alignment.Alignment => {
+  contextOf(self)
+  return unwrap(Alignment.fromByteUnitsResult(byteUnits))
+}
 
 // Attributes
 

@@ -897,8 +897,8 @@ export const emit = (context: Context, operation: Operation) => {
       )
       // memmove, not memcpy: an overlapping source and destination is a defined move.
       Emitter.memmove(body, target, sourceAddress, byteLength, {
-        destinationAlignment: Emitter.alignment(element.alignment),
-        sourceAlignment: Emitter.alignment(element.alignment),
+        destinationAlignment: Emitter.alignment(body, element.alignment),
+        sourceAlignment: Emitter.alignment(body, element.alignment),
       })
       NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, [])
       break
