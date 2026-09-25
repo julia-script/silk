@@ -1356,6 +1356,27 @@ export const content = (self: LifetimeFlow): LifetimeFlow => ({
   spans: new Map(),
 })
 
+const originSpanKey = (span: SourceSpan.SourceSpan): string =>
+  `${span.sourceId}\u0000${span.start}\u0000${span.end}`
+
+const originsBySpanCache = new WeakMap<LifetimeFlow, Map<string, Array<string>>>()
+
+/** Origin keys grouped by their exact creation span, built once per flow for liveness queries. */
+const originsBySpan = (self: LifetimeFlow): ReadonlyMap<string, ReadonlyArray<string>> => {
+  let index = originsBySpanCache.get(self)
+  if (index === undefined) {
+    index = new Map()
+    for (const [key, origin] of self.origins) {
+      const spanKey = originSpanKey(origin.span)
+      const keys = index.get(spanKey)
+      if (keys === undefined) index.set(spanKey, [key])
+      else keys.push(key)
+    }
+    originsBySpanCache.set(self, index)
+  }
+  return index
+}
+
 /** Tests concrete loan liveness at an access using the solved holder uses and source CFG. */
 export const liveAt = (
   self: LifetimeFlow,
@@ -1365,13 +1386,8 @@ export const liveAt = (
   write = false,
 ): boolean | undefined => {
   if (self.solution._tag !== 'Solved') return undefined
-  const origins = [...self.origins.entries()].filter(
-    ([, origin]) =>
-      origin.span.sourceId === start.sourceId &&
-      origin.span.start === start.start &&
-      origin.span.end === start.end,
-  )
-  if (origins.length === 0) return undefined
+  const origins = originsBySpan(self).get(originSpanKey(start))
+  if (origins === undefined) return undefined
   const created = BodyControlFlow.at(self.controlFlow, start)
   const accessed = BodyControlFlow.at(self.controlFlow, access)
   if (created === undefined || accessed === undefined) return undefined
@@ -1380,7 +1396,7 @@ export const liveAt = (
     : accessed.before
   if (!BodyControlFlow.reaches(self.controlFlow, created.after, at, created.before)) return false
   let observedHolderUse = false
-  for (const [key] of origins)
+  for (const key of origins)
     for (const point of self.solution.required.get(key) ?? []) {
       const span = self.spans.get(point)
       if (span !== undefined && span.start >= start.end) observedHolderUse = true
@@ -1584,27 +1600,33 @@ export const validateCleanup = (
     points: new Set(bound.points),
   }))
   const spans = new Map(self.spans)
+  const regionRoots = [...regions.values()].map((region) => {
+    const origin = self.origins.get(Lifetime.key(region.lifetime))
+    return { region, root: origin?.root === undefined ? undefined : Ownership.siteKey(origin.root) }
+  })
   let pointCount = self.input.pointCount
   for (const exit of ownership.exits) {
     const sourcePoint = cleanupSourcePoint(self, exit.span)
+    // Fresh destructor points never equal the source point, so membership tests against it
+    // are fixed for the whole exit.
+    const activeBounds =
+      sourcePoint === undefined
+        ? []
+        : activatedConstraints.filter((bound) => bound.points.has(sourcePoint))
+    const availableRegions = regionRoots.filter(
+      ({ region }) =>
+        region.lifetime._tag === 'StaticLifetime' ||
+        (sourcePoint !== undefined && region.available.has(sourcePoint)),
+    )
     const released = new Set<string>()
     for (const release of exit.releases) {
       const point = pointCount++
       spans.set(point, exit.span)
       // Ordered destructor points inherit the bounds active at this exit, including
       // dependencies installed after the holder's original acquisition.
-      for (const bound of activatedConstraints)
-        if (sourcePoint !== undefined && bound.points.has(sourcePoint)) bound.points.add(point)
-      for (const region of regions.values()) {
-        const origin = self.origins.get(Lifetime.key(region.lifetime))
-        if (origin?.root === undefined || !released.has(Ownership.siteKey(origin.root))) {
-          if (
-            region.lifetime._tag === 'StaticLifetime' ||
-            (sourcePoint !== undefined && region.available.has(sourcePoint))
-          )
-            region.available.add(point)
-        }
-      }
+      for (const bound of activeBounds) bound.points.add(point)
+      for (const { region, root } of availableRegions)
+        if (root === undefined || !released.has(root)) region.available.add(point)
       for (const lifetime of cleanupLifetimes(release.cleanup, release.initialization))
         regions.get(Lifetime.key(lifetime))?.required.add(point)
       released.add(Ownership.siteKey(release.binding.site))
