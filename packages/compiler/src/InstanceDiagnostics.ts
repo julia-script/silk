@@ -279,6 +279,19 @@ export const storedExecutableViolations = (
     Callable: [] as Array<StoredExecutableViolationKey>,
     Effect: [] as Array<StoredExecutableViolationKey>,
   }
+  // Most constructions retain no executable storage, and one aggregate type recurs across many
+  // constructions; remember which types were proved free of it.
+  const executableFree = { Callable: new Set<string>(), Effect: new Set<string>() }
+  const storedExecutableOf = (
+    type: Type.Type,
+    kind: 'Callable' | 'Effect',
+  ): StoredExecutable | undefined => {
+    const typeKey = Type.key(type)
+    if (executableFree[kind].has(typeKey)) return undefined
+    const stored = storedExecutable(index, type, kind)
+    if (stored === undefined) executableFree[kind].add(typeKey)
+    return stored
+  }
   const violation = (
     instance: Instances.Instance,
     expression: Extract<
@@ -288,7 +301,7 @@ export const storedExecutableViolations = (
     aggregate: Type.Type,
     kind: 'Callable' | 'Effect',
   ): Diagnostic.Diagnostic | undefined => {
-    const stored = storedExecutable(index, aggregate, kind)
+    const stored = storedExecutableOf(aggregate, kind)
     if (stored === undefined) return undefined
     if (
       stored.represented &&
@@ -296,7 +309,7 @@ export const storedExecutableViolations = (
       FieldRealization.supportsInstance(fieldRealizations, aggregate)
     )
       return undefined
-    const declared = storedExecutable(index, expression.type, kind)
+    const declared = storedExecutableOf(expression.type, kind)
     const specializing =
       declared === undefined || declared.open
         ? specializingCalls.get(Instances.keyText(instance.key))
