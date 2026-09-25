@@ -20,7 +20,6 @@ import {
   fail,
   localIndex,
   localName,
-  lookup,
   type OperandInput,
 } from './primitives.js'
 
@@ -32,7 +31,7 @@ export const create = (
   functionType: number,
   signature: Extract<TypeDescription.Description, { readonly _tag: 'Function' }>,
   creatorFiber: number,
-  localNames: Map<string, ByteString.ByteString>,
+  module: BuilderState.MutableState,
 ): FunctionBodyActor.FunctionBody => {
   const owner: OwnedHandle.Owner = { token: Symbol('llvm-function-body-owner') }
   const self = Handle.make('FunctionBody', owner, 0)
@@ -54,7 +53,7 @@ export const create = (
     instructionHandles: [],
     switchBlocks: new Map(),
     localOperands: [],
-    localNames,
+    module,
     values: [],
     valueHandles: [],
     metadata: [],
@@ -92,12 +91,10 @@ export const builder = (
   self: FunctionBodyActor.FunctionBody,
 ): Effect.Effect<Builder.Builder, LlvmError> =>
   Effect.withFiber((fiber) => {
-    const found = lookup(self, 'FunctionBody.builder')
-    if (Result.isFailure(found)) return Effect.fail(found.failure)
-    const active = assertActive(found.success, fiber.id, 'FunctionBody.builder')
-    return Result.isFailure(active)
-      ? Effect.fail(active.failure)
-      : Effect.succeed(found.success.builder)
+    const draft = drafts.get(self)
+    if (draft === undefined) return unknownDraft(self, 'FunctionBody.builder')
+    const active = assertActive(draft, fiber.id, 'FunctionBody.builder')
+    return Result.isFailure(active) ? Effect.fail(active.failure) : Effect.succeed(draft.builder)
   })
 
 /** @internal */
@@ -107,12 +104,12 @@ export const mutate = <A>(
   transition: (draft: Draft) => Result.Result<A, LlvmError>,
 ): Effect.Effect<A, LlvmError> =>
   Effect.withFiber((fiber) => {
-    const found = lookup(self, operation)
-    if (Result.isFailure(found)) return Effect.fail(found.failure)
-    const active = assertActive(found.success, fiber.id, operation)
+    const draft = drafts.get(self)
+    if (draft === undefined) return unknownDraft(self, operation)
+    const active = assertActive(draft, fiber.id, operation)
     return Result.isFailure(active)
       ? Effect.fail(active.failure)
-      : Effect.fromResult(transition(found.success))
+      : Effect.fromResult(transition(draft))
   })
 
 /** @internal */
@@ -122,16 +119,19 @@ export const mutateModule = <A>(
   transition: (draft: Draft, module: BuilderState.MutableState) => Result.Result<A, LlvmError>,
 ): Effect.Effect<A, LlvmError> =>
   Effect.withFiber((fiber) => {
-    const found = lookup(self, operation)
-    if (Result.isFailure(found)) return Effect.fail(found.failure)
-    const draft = found.success
-    return Effect.fromResult(
-      BuilderState.transitionResult(draft.builder, operation, (module) => {
-        const active = assertActive(draft, fiber.id, operation)
-        return Result.isFailure(active) ? Result.fail(active.failure) : transition(draft, module)
-      }),
-    )
+    const draft = drafts.get(self)
+    if (draft === undefined) return unknownDraft(self, operation)
+    const active = assertActive(draft, fiber.id, operation)
+    return Result.isFailure(active)
+      ? Effect.fail(active.failure)
+      : Effect.fromResult(transition(draft, draft.module))
   })
+
+const unknownDraft = (
+  self: FunctionBodyActor.FunctionBody,
+  operation: string,
+): Effect.Effect<never, LlvmError> =>
+  Effect.fail(invalidInput({ operation, message: 'Unknown function-body draft', input: self }))
 
 /** @internal */
 export const close = (

@@ -1,6 +1,7 @@
 import * as Result from 'effect/Result'
 import type * as BlockActor from '../../Block.js'
 import type * as Builder from '../../Builder.js'
+import type * as BuilderState from '../BuilderState.js'
 import * as ByteString from '../../ByteString.js'
 import type * as Constant from '../../Constant.js'
 import type * as FunctionBodyActor from '../../FunctionBody.js'
@@ -56,8 +57,8 @@ export interface Draft {
   readonly switchBlocks: Map<number, number>
   /** One shared operand per local value; instruction descriptions retain operands. */
   readonly localOperands: Array<FunctionBodyDescription.Operand | undefined>
-  /** The module's shared local-name encodings. */
-  readonly localNames: Map<string, ByteString.ByteString>
+  /** The owning builder's module state; a body only exists inside that builder. */
+  readonly module: BuilderState.MutableState
   readonly values: Array<MutableValue>
   readonly valueHandles: Array<ValueActor.Value>
   readonly metadata: Array<ReadonlyArray<MetadataDescription.Attachment>>
@@ -80,10 +81,10 @@ export const localName = (
   name: ByteString.ByteString | Uint8Array | string | undefined,
 ): ByteString.ByteString => {
   if (typeof name !== 'string') return ByteString.coerceOrEmpty(name)
-  let encoded = draft.localNames.get(name)
+  let encoded = draft.module.localNames.get(name)
   if (encoded === undefined) {
     encoded = ByteString.fromString(name)
-    draft.localNames.set(name, encoded)
+    draft.module.localNames.set(name, encoded)
   }
   return encoded
 }
@@ -95,16 +96,6 @@ export const fail = (
   cause: unknown,
 ): Result.Result<never, LlvmError> =>
   Result.fail(invalidInput({ operation, message, input: cause }))
-
-/** @internal */
-export const lookup = (
-  self: FunctionBodyActor.FunctionBody,
-  operation: string,
-): Result.Result<Draft, LlvmError> => {
-  const draft = drafts.get(self)
-  if (draft === undefined) return fail(operation, 'Unknown function-body draft', self)
-  return Result.succeed(draft)
-}
 
 /** @internal */
 export const assertActive = (
