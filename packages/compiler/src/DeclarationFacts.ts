@@ -953,8 +953,26 @@ const contractParameterMode = (type: Type.Type): CallableContract.ParameterMode 
   return 'Value'
 }
 
+// Declaration facts are never edited after collection; body checking asks for the same
+// declaration's environment at every call site.
+const executableLifetimesCache = new WeakMap<
+  DeclarationFact | ServiceOperationFact,
+  Type.ExecutableLifetimes
+>()
+
 /** Computes the retained environment from a declaration's input contracts and written bounds. */
 export const executableLifetimes = (
+  declaration: DeclarationFact | ServiceOperationFact,
+): Type.ExecutableLifetimes => {
+  let cached = executableLifetimesCache.get(declaration)
+  if (cached === undefined) {
+    cached = computeExecutableLifetimes(declaration)
+    executableLifetimesCache.set(declaration, cached)
+  }
+  return cached
+}
+
+const computeExecutableLifetimes = (
   declaration: DeclarationFact | ServiceOperationFact,
 ): Type.ExecutableLifetimes => {
   const inputs = declaration.parameters.flatMap((parameter) =>
