@@ -37,7 +37,6 @@ import * as SourceSettlement from './SourceSettlement.js'
 import * as TestExchange from './TestExchange.js'
 import * as TestResult from './TestResult.js'
 import * as Layer from 'effect/Layer'
-import { Inspect } from 'effect-inspect'
 
 export type ExitStatus = 0 | 1 | 2
 
@@ -127,6 +126,15 @@ const outcomeStatus = (outcome: Exclude<Driver.Outcome, { readonly _tag: 'Compil
   }
 }
 
+/**
+ * The effect-inspect trace exporter, loaded only when tracing is requested: the package also ships
+ * an inspector web application, so the CLI declares it as an optional peer.
+ */
+const inspectLayer = Effect.tryPromise({
+  try: () => import('effect-inspect'),
+  catch: (cause) => cause,
+}).pipe(Effect.map((module) => module.Inspect.layer()))
+
 /** Compiles one selected entry and classifies source versus operational failures. */
 export const compile = Effect.fn('Workflow.compile')(function* (
   options: CompileOptions,
@@ -143,6 +151,14 @@ export const compile = Effect.fn('Workflow.compile')(function* (
   )
   if (Result.isFailure(prepared)) {
     yield* Console.error(`Cannot prepare build directory for ${options.destination}`)
+    return { _tag: 'NotBuilt', status: 2 }
+  }
+
+  const tracing = options.trace === true ? yield* Effect.result(inspectLayer) : undefined
+  if (tracing !== undefined && Result.isFailure(tracing)) {
+    yield* Console.error(
+      'Tracing requires the effect-inspect package; install it alongside @silklang/cli.',
+    )
     return { _tag: 'NotBuilt', status: 2 }
   }
 
@@ -175,7 +191,7 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       Effect.provide(
         Layer.mergeAll(
           FileSourceResolver.layer(resolver),
-          options.trace ? Inspect.layer() : Layer.empty,
+          tracing === undefined ? Layer.empty : tracing.success,
         ),
       ),
     ),

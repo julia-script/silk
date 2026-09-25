@@ -381,6 +381,7 @@ test('the llvm release candidate is a self-contained ESM package', () => {
       './DIFlags',
       './DISPFlags',
       './DataLayout',
+      './Emitter',
       './FastMath',
       './Function',
       './FunctionBody',
@@ -1047,7 +1048,6 @@ test('the CLI release candidate installs with its project-first command surface'
       '@silklang/docgen',
       '@silklang/formatter',
       'effect',
-      'effect-inspect',
     ])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
