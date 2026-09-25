@@ -1442,6 +1442,8 @@ export const discover = (
   interface CleanupMeasure {
     /** Concrete owner types whose exact cleanup plans selected this path. */
     readonly roots: ReadonlyArray<Type.Type>
+    /** Concrete arguments of the selected hook, usable only within this cleanup frame. */
+    readonly frame: ReadonlyArray<Type.Type>
   }
   interface WorkItem {
     readonly key: InstanceKey
@@ -1821,8 +1823,12 @@ export const discover = (
     measure.roots.some(
       (root) => sameRuntimeType(candidate, root) || isStrictCleanupSubterm(candidate, root),
     )
-  const cleanupMeasureOf = (roots: ReadonlyArray<Type.Type>): CleanupMeasure => ({
+  const cleanupMeasureOf = (
+    roots: ReadonlyArray<Type.Type>,
+    frame: ReadonlyArray<Type.Type> = [],
+  ): CleanupMeasure => ({
     roots: [...new Map(roots.map((root) => [Type.runtimeKey(root), root])).values()],
+    frame,
   })
   const cleanupTransition = (
     measure: CleanupMeasure | undefined,
@@ -1831,12 +1837,23 @@ export const discover = (
   ): CleanupMeasure | undefined => {
     if (measure === undefined)
       return selectedRoots.length === 0 ? undefined : cleanupMeasureOf(selectedRoots)
+    // A selected hook belongs to an already-proved finite plan. Its concrete arguments form the
+    // local frame even when an opaque buffer hides them from the outer owner's fields. Keep the
+    // original roots fixed, so this frame cannot justify the next hook in a growing cycle.
     if (selectedRoots.length > 0)
       return selectedRoots.some((root) => coveredByCleanupMeasure(measure, root))
-        ? measure
+        ? cleanupMeasureOf(measure.roots, typeArgumentsOf(target))
         : undefined
     const targetTypes = typeArgumentsOf(target)
-    return targetTypes.every((type) => coveredByCleanupMeasure(measure, type)) ? measure : undefined
+    return targetTypes.every(
+      (type) =>
+        coveredByCleanupMeasure(measure, type) ||
+        measure.frame.some(
+          (frame) => sameRuntimeType(type, frame) || isStrictCleanupSubterm(type, frame),
+        ),
+    )
+      ? measure
+      : undefined
   }
   const sameVisibleArguments = (left: InstanceKey, right: InstanceKey): boolean => {
     const leftVisible = left.typeArguments.filter(
@@ -1925,6 +1942,7 @@ export const discover = (
     JSON.stringify([
       keyText(item.key),
       item.cleanupMeasure?.roots.map(Type.runtimeKey).sort() ?? null,
+      item.cleanupMeasure?.frame.map(Type.runtimeKey).sort() ?? null,
     ])
   const pending: Array<string> = []
   type StaticOrigins = ReadonlyArray<Evaluation.TextOrigin | undefined>

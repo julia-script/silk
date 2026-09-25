@@ -709,6 +709,39 @@ pub fn main() -> () {
   }),
 )
 
+it.effect('admits finite vector cleanup nested through a shared payload', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.shared { Shared }
+import silk.vector { Vector }
+struct Evidence { value: i32 }
+struct Cached { items: Vector<Shared<Evidence>> }
+struct Root { answer: Shared<Cached> }
+pub fn main() -> () {
+  let roots = Vector.make<Root>()
+  drop roots
+  return ()
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    assert.deepEqual(result.instances.violations, [])
+    const main =
+      result.instances.instances.find((instance) => instance.key.declaration.name === 'main') ??
+      unreachable('expected cleanup root')
+    assert.deepEqual(Instances.executionClosure(result.instances, main.key).gaps, [])
+    assert.isTrue(
+      result.instances.instances.some(
+        (instance) =>
+          instance.key.declaration.module === 'silk/vector' &&
+          instance.key.declaration.name === 'drop@impl#0' &&
+          instance.key.typeArguments.map(Type.encodeGenericArgument).join(', ') ===
+            'silk/shared.Shared<golden/program.Evidence>',
+      ),
+    )
+  }),
+)
+
 it.effect('admits nested cleanup reached through a lexical service provider', () =>
   Effect.gen(function* () {
     const result = yield* snapshot(`import silk.effect { Effect }
