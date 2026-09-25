@@ -23,21 +23,20 @@ import {
   type OperandInput,
 } from './primitives.js'
 
-/** @internal */
-export const create = (
-  builder: Builder.Builder,
-  moduleOwner: OwnedHandle.Owner,
+/** Creates an active draft for one function body transaction. @internal */
+export const makeDraft = (
+  context: BuilderState.Context,
   functionIndex: number,
   functionType: number,
   signature: Extract<TypeDescription.Description, { readonly _tag: 'Function' }>,
   creatorFiber: number,
-  module: BuilderState.MutableState,
-): FunctionBodyActor.FunctionBody => {
+): Draft => {
   const owner: OwnedHandle.Owner = { token: Symbol('llvm-function-body-owner') }
-  const self = Handle.make('FunctionBody', owner, 0)
   const draft: Draft = {
-    builder,
-    moduleOwner,
+    builder: context.builder,
+    moduleOwner: context.owner,
+    module: context.state,
+    context,
     owner,
     functionIndex,
     functionType,
@@ -53,7 +52,6 @@ export const create = (
     instructionHandles: [],
     switchBlocks: new Map(),
     localOperands: [],
-    module,
     values: [],
     valueHandles: [],
     metadata: [],
@@ -72,6 +70,19 @@ export const create = (
     draft.valueHandles.push(handle)
     draft.arguments.push(valueIndex)
   }
+  return draft
+}
+
+/** Creates a draft reachable through an effectful body handle. @internal */
+export const create = (
+  context: BuilderState.Context,
+  functionIndex: number,
+  functionType: number,
+  signature: Extract<TypeDescription.Description, { readonly _tag: 'Function' }>,
+  creatorFiber: number,
+): FunctionBodyActor.FunctionBody => {
+  const draft = makeDraft(context, functionIndex, functionType, signature, creatorFiber)
+  const self = Handle.make('FunctionBody', draft.owner, 0)
   drafts.set(self, draft)
   return self
 }
@@ -550,85 +561,91 @@ export const makeSwitchHandle = (
 export const validate = Effect.fn('FunctionBody.validate')(function* (
   self: FunctionBodyActor.FunctionBody,
 ): Effect.fn.Return<FunctionBodyDescription.Snapshot, LlvmError> {
-  return yield* mutate(self, 'FunctionBody.validate', (draft) => {
-    if (draft.blocks.length === 0) {
-      return fail('FunctionBody.validate', 'A function body requires at least one block', self)
+  return yield* mutate(self, 'FunctionBody.validate', (draft) => validateDraft(draft, self))
+})
+
+/** Validates a finished draft and hands its tables to the committed snapshot. @internal */
+export const validateDraft = (
+  draft: Draft,
+  self: unknown,
+): Result.Result<FunctionBodyDescription.Snapshot, LlvmError> => {
+  if (draft.blocks.length === 0) {
+    return fail('FunctionBody.validate', 'A function body requires at least one block', self)
+  }
+  for (let blockIndex = 0; blockIndex < draft.blocks.length; blockIndex += 1) {
+    const block = draft.blocks[blockIndex]
+    if (block === undefined || block.instructions.length === 0) {
+      return fail('FunctionBody.validate', 'Every block must contain a terminator', blockIndex)
     }
-    for (let blockIndex = 0; blockIndex < draft.blocks.length; blockIndex += 1) {
-      const block = draft.blocks[blockIndex]
-      if (block === undefined || block.instructions.length === 0) {
-        return fail('FunctionBody.validate', 'Every block must contain a terminator', blockIndex)
-      }
-      const terminatorIndex = block.instructions.at(-1)
-      const terminator =
-        terminatorIndex === undefined ? undefined : draft.instructions[terminatorIndex]
-      if (terminator === undefined || !FunctionBodyDescription.isTerminator(terminator)) {
+    const terminatorIndex = block.instructions.at(-1)
+    const terminator =
+      terminatorIndex === undefined ? undefined : draft.instructions[terminatorIndex]
+    if (terminator === undefined || !FunctionBodyDescription.isTerminator(terminator)) {
+      return fail(
+        'FunctionBody.validate',
+        'Every block must end in exactly one terminator',
+        blockIndex,
+      )
+    }
+    for (const instructionIndex of block.instructions) {
+      const instruction = draft.instructions[instructionIndex]
+      if (instruction === undefined) {
         return fail(
           'FunctionBody.validate',
-          'Every block must end in exactly one terminator',
-          blockIndex,
+          'Block references a missing instruction',
+          instructionIndex,
         )
       }
-      for (const instructionIndex of block.instructions) {
-        const instruction = draft.instructions[instructionIndex]
-        if (instruction === undefined) {
+      if (instruction._tag === 'Switch' && !instruction.sealed) {
+        return fail(
+          'FunctionBody.validate',
+          'Switch construction was not finalized',
+          instructionIndex,
+        )
+      }
+      if (instruction._tag === 'Phi') {
+        if (!instruction.sealed) {
           return fail(
             'FunctionBody.validate',
-            'Block references a missing instruction',
+            'Phi construction was not finalized',
             instructionIndex,
           )
         }
-        if (instruction._tag === 'Switch' && !instruction.sealed) {
+        const incoming = new Set(instruction.incoming.map((entry) => entry.block))
+        if (
+          incoming.size !== block.predecessors.size ||
+          [...block.predecessors].some((predecessor) => !incoming.has(predecessor))
+        ) {
           return fail(
             'FunctionBody.validate',
-            'Switch construction was not finalized',
-            instructionIndex,
+            'Phi incoming blocks must cover every predecessor once',
+            {
+              block: blockIndex,
+              predecessors: [...block.predecessors],
+              incoming: [...incoming],
+            },
           )
-        }
-        if (instruction._tag === 'Phi') {
-          if (!instruction.sealed) {
-            return fail(
-              'FunctionBody.validate',
-              'Phi construction was not finalized',
-              instructionIndex,
-            )
-          }
-          const incoming = new Set(instruction.incoming.map((entry) => entry.block))
-          if (
-            incoming.size !== block.predecessors.size ||
-            [...block.predecessors].some((predecessor) => !incoming.has(predecessor))
-          ) {
-            return fail(
-              'FunctionBody.validate',
-              'Phi incoming blocks must cover every predecessor once',
-              {
-                block: blockIndex,
-                predecessors: [...block.predecessors],
-                incoming: [...incoming],
-              },
-            )
-          }
         }
       }
     }
-    const validated = validateInstructions(draft)
-    if (Result.isFailure(validated)) return Result.fail(validated.failure)
-    // The body commits right after validation and the draft is closed, so the snapshot takes
-    // ownership of the draft's tables instead of copying them.
-    return Result.succeed({
-      arguments: draft.arguments,
-      blocks: draft.blocks.map((block) => ({
-        name: block.name,
-        instructions: block.instructions,
-        predecessors: [...block.predecessors].sort((left, right) => left - right),
-      })),
-      instructions: draft.instructions,
-      values: draft.values,
-      metadata: draft.metadata,
-      debugLocations: draft.debugLocations,
-    })
+  }
+  const validated = validateInstructions(draft)
+  if (Result.isFailure(validated)) return Result.fail(validated.failure)
+  // The body commits right after validation and the draft is closed, so the snapshot takes
+  // ownership of the draft's tables instead of copying them.
+  return Result.succeed({
+    arguments: draft.arguments,
+    blocks: draft.blocks.map((block) => ({
+      name: block.name,
+      instructions: block.instructions,
+      predecessors: [...block.predecessors].sort((left, right) => left - right),
+    })),
+    instructions: draft.instructions,
+    values: draft.values,
+    metadata: draft.metadata,
+    debugLocations: draft.debugLocations,
   })
-})
+}
 
 /** @internal */
 export const snapshotDraft = (self: FunctionBodyActor.FunctionBody): Draft | undefined =>

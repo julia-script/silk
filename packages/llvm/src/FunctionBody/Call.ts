@@ -325,7 +325,7 @@ const directCallee = (
   }
   const global = GlobalState.handleAt(module, description.global, 'Function.global')
   if (Result.isFailure(global)) return Result.fail(global.failure)
-  const callee = Constant.fromGlobalIn(builder, module, owner, global.success)
+  const callee = Constant.fromGlobalIn({ builder, state: module, owner }, global.success)
   if (Result.isFailure(callee)) return Result.fail(callee.failure)
   return Result.succeed({
     typeIndex: description.type,
@@ -346,27 +346,40 @@ const callInternal = (
   options: CallOptions,
   destinations?: { readonly normal: Block.Block; readonly unwind: Block.Block },
 ): Effect.Effect<Value.Value | undefined, LlvmError> =>
-  FunctionBodyState.mutateModule(self, 'FunctionBody.call', (draft, module) => {
-    const functionTypeIndex = Handle.resolve(
-      draft.builder,
-      draft.moduleOwner,
-      functionType,
-      'Type',
-      'FunctionBody.call',
-    )
-    if (Result.isFailure(functionTypeIndex)) return Result.fail(functionTypeIndex.failure)
-    return callTransition(
-      draft,
-      module,
-      functionTypeIndex.success,
-      functionType,
-      callee,
-      args,
-      name,
-      options,
-      destinations,
-    )
-  })
+  FunctionBodyState.mutate(self, 'FunctionBody.call', (draft) =>
+    callIn(draft, functionType, callee, args, name, options, destinations),
+  )
+
+/** Calls a typed callee (or invokes it with unwind destinations) inside a body transition. @internal */
+export const callIn = (
+  draft: FunctionBodyState.Draft,
+  functionType: Type.Type,
+  callee: Value.Input,
+  args: ReadonlyArray<Value.Input>,
+  name: ByteString.ByteString | Uint8Array | string | undefined,
+  options: CallOptions,
+  destinations?: { readonly normal: Block.Block; readonly unwind: Block.Block },
+): Result.Result<Value.Value | undefined, LlvmError> => {
+  const functionTypeIndex = Handle.resolve(
+    draft.builder,
+    draft.moduleOwner,
+    functionType,
+    'Type',
+    'FunctionBody.call',
+  )
+  if (Result.isFailure(functionTypeIndex)) return Result.fail(functionTypeIndex.failure)
+  return callTransition(
+    draft,
+    draft.module,
+    functionTypeIndex.success,
+    functionType,
+    callee,
+    args,
+    name,
+    options,
+    destinations,
+  )
+}
 
 /**
  * Calls a typed callee operand with exact arity, argument types, attributes, and operand bundles.
@@ -390,7 +403,7 @@ export const call = (
  * @category instructions
  * @since 0.0.0
  */
-export const callAssembly = Effect.fnUntraced(function* (
+export const callAssembly = (
   self: FunctionBody,
   functionType: Type.Type,
   assembly: ByteString.ByteString | Uint8Array | string,
@@ -399,17 +412,35 @@ export const callAssembly = Effect.fnUntraced(function* (
   name?: ByteString.ByteString | Uint8Array | string,
   assemblyOptions: Constant.AssemblyOptions = {},
   callOptions: CallOptions = {},
-): Effect.fn.Return<Value.Value | undefined, LlvmError> {
-  const builder = yield* FunctionBodyState.builder(self)
-  const callee = yield* Constant.assembly(
-    builder,
-    functionType,
-    assembly,
-    constraints,
-    assemblyOptions,
+): Effect.Effect<Value.Value | undefined, LlvmError> =>
+  FunctionBodyState.mutate(self, 'FunctionBody.callAssembly', (draft) =>
+    callAssemblyIn(
+      draft,
+      functionType,
+      assembly,
+      constraints,
+      args,
+      name,
+      assemblyOptions,
+      callOptions,
+    ),
   )
-  return yield* callInternal(self, functionType, callee, args, name, callOptions)
-})
+
+/** @internal */
+export const callAssemblyIn = (
+  draft: FunctionBodyState.Draft,
+  functionType: Type.Type,
+  assembly: ByteString.ByteString | Uint8Array | string,
+  constraints: ByteString.ByteString | Uint8Array | string,
+  args: ReadonlyArray<Value.Input>,
+  name?: ByteString.ByteString | Uint8Array | string,
+  assemblyOptions: Constant.AssemblyOptions = {},
+  callOptions: CallOptions = {},
+): Result.Result<Value.Value | undefined, LlvmError> =>
+  Result.flatMap(
+    Constant.assemblyIn(draft.context, functionType, assembly, constraints, assemblyOptions),
+    (callee) => callIn(draft, functionType, callee, args, name, callOptions),
+  )
 
 /**
  * Calls a declared function while inheriting its signature, convention, and default attributes.
@@ -424,28 +455,40 @@ export const callDirect = (
   name?: ByteString.ByteString | Uint8Array | string,
   options: CallOptions = {},
 ): Effect.Effect<Value.Value | undefined, LlvmError> =>
-  FunctionBodyState.mutateModule(self, 'FunctionBody.call', (draft, module) => {
-    // Resolves the target's properties and global address constant in the same transition as
-    // the call: direct calls are emitted constantly and each separate request cost a builder
-    // round trip (self-hosted compiler build profile).
-    const target = directCallee(draft.builder, module, draft.moduleOwner, targetFunction)
-    if (Result.isFailure(target)) return Result.fail(target.failure)
-    const attributes = options.attributes ?? target.success.attributes
-    return callTransition(
-      draft,
-      module,
-      target.success.typeIndex,
-      target.success.type,
-      target.success.callee,
-      args,
-      name,
-      {
-        ...options,
-        callingConvention: options.callingConvention ?? target.success.callingConvention,
-        ...(attributes === undefined ? {} : { attributes }),
-      },
-    )
-  })
+  FunctionBodyState.mutate(self, 'FunctionBody.call', (draft) =>
+    callDirectIn(draft, targetFunction, args, name, options),
+  )
+
+/** @internal */
+export const callDirectIn = (
+  draft: FunctionBodyState.Draft,
+  targetFunction: FunctionActor.Function,
+  args: ReadonlyArray<Value.Input>,
+  name?: ByteString.ByteString | Uint8Array | string,
+  options: CallOptions = {},
+): Result.Result<Value.Value | undefined, LlvmError> => {
+  const module = draft.module
+  // Resolves the target's properties and global address constant in the same transition as
+  // the call: direct calls are emitted constantly and each separate request cost a builder
+  // round trip (self-hosted compiler build profile).
+  const target = directCallee(draft.builder, module, draft.moduleOwner, targetFunction)
+  if (Result.isFailure(target)) return Result.fail(target.failure)
+  const attributes = options.attributes ?? target.success.attributes
+  return callTransition(
+    draft,
+    module,
+    target.success.typeIndex,
+    target.success.type,
+    target.success.callee,
+    args,
+    name,
+    {
+      ...options,
+      callingConvention: options.callingConvention ?? target.success.callingConvention,
+      ...(attributes === undefined ? {} : { attributes }),
+    },
+  )
+}
 
 /**
  * Calls a fixed-signature callee and terminates the block with normal and unwind successors.
@@ -456,7 +499,7 @@ export const callDirect = (
  * @category instructions
  * @since 0.0.0
  */
-export const invoke = Effect.fn('FunctionBody.invoke')(function* (
+export const invoke = (
   self: FunctionBody,
   functionType: Type.Type,
   callee: Value.Input,
@@ -465,6 +508,5 @@ export const invoke = Effect.fn('FunctionBody.invoke')(function* (
   unwind: Block.Block,
   name?: ByteString.ByteString | Uint8Array | string,
   options: Omit<CallOptions, 'tail' | 'fastMath'> = {},
-): Effect.fn.Return<Value.Value | undefined, LlvmError> {
-  return yield* callInternal(self, functionType, callee, args, name, options, { normal, unwind })
-})
+): Effect.Effect<Value.Value | undefined, LlvmError> =>
+  callInternal(self, functionType, callee, args, name, options, { normal, unwind })

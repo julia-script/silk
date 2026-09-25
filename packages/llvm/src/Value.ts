@@ -202,11 +202,10 @@ export const setName = Effect.fnUntraced(function* (
  * @category values
  * @since 0.0.0
  */
-export const instruction = Effect.fnUntraced(function* (
+export const instruction = (
   body: FunctionBody.FunctionBody,
   self: Value,
-): Effect.fn.Return<FunctionBody.Instruction | undefined, LlvmError> {
-  return yield* FunctionBodyState.mutate(body, 'Value.instruction', (draft) =>
+): Effect.Effect<FunctionBody.Instruction | undefined, LlvmError> =>
+  FunctionBodyState.mutate(body, 'Value.instruction', (draft) =>
     FunctionBodyState.valueInstruction(draft, self),
   )
-})

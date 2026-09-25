@@ -144,15 +144,20 @@ const intern = (
   builder: Builder.Builder,
   description: ConstantDescription.Description,
 ): Effect.Effect<Constant, LlvmError> =>
-  BuilderState.mutate(builder, 'Constant.intern', (state, owner) =>
-    Table.intern(
-      state.constants,
-      'Constant.intern',
-      'Constant',
-      descriptionKey(description),
-      description,
-      (index) => Handle.make('Constant', owner, index),
-    ),
+  BuilderState.transition(builder, 'Constant.intern', (context) => internIn(context, description))
+
+/** Interns a validated description inside a running builder transition. @internal */
+export const internIn = (
+  context: BuilderState.Context,
+  description: ConstantDescription.Description,
+): Result.Result<Constant, LlvmError> =>
+  Table.intern(
+    context.state.constants,
+    'Constant.intern',
+    'Constant',
+    descriptionKey(description),
+    description,
+    (index) => Handle.make('Constant', context.owner, index),
   )
 
 /**
@@ -166,14 +171,33 @@ const intern = (
 const integerOf = (
   builder: Builder.Builder,
   type: Type.Type,
-  value: bigint,
+  value: number | bigint,
   signed: boolean,
 ): Effect.Effect<Constant, LlvmError> =>
-  BuilderState.mutate(builder, 'Constant.integer', (state, owner) => {
-    const typeIndex = Handle.resolve(builder, owner, type, 'Type', 'Constant.integer')
-    if (Result.isFailure(typeIndex)) return Result.fail(typeIndex.failure)
-    return integerIn(state, owner, typeIndex.success, value, signed, type)
+  BuilderState.transition(builder, 'Constant.integer', (context) =>
+    integerOfIn(context, type, value, signed),
+  )
+
+/**
+ * Normalizes, validates, and interns an integer constant inside a running builder transition.
+ *
+ * @internal
+ */
+export const integerOfIn = (
+  context: BuilderState.Context,
+  type: Type.Type,
+  value: number | bigint,
+  signed: boolean,
+): Result.Result<Constant, LlvmError> => {
+  const exact = IntegerInput.normalize(value, {
+    operation: signed ? 'Constant.integerSigned' : 'Constant.integerUnsigned',
+    message: 'LLVM integer constants require finite safe integers or bigints',
   })
+  if (Result.isFailure(exact)) return Result.fail(exact.failure)
+  const typeIndex = Handle.resolve(context.builder, context.owner, type, 'Type', 'Constant.integer')
+  if (Result.isFailure(typeIndex)) return Result.fail(typeIndex.failure)
+  return integerIn(context.state, context.owner, typeIndex.success, exact.success, signed, type)
+}
 
 /**
  * Validates and interns an integer constant inside a running builder transition.
@@ -268,15 +292,7 @@ export const integerUnsigned = (
   builder: Builder.Builder,
   type: Type.Type,
   value: number | bigint,
-): Effect.Effect<Constant, LlvmError> => {
-  const exact = IntegerInput.normalize(value, {
-    operation: 'Constant.integerUnsigned',
-    message: 'LLVM integer constants require finite safe integers or bigints',
-  })
-  return Result.isFailure(exact)
-    ? Effect.fail(exact.failure)
-    : integerOf(builder, type, exact.success, false)
-}
+): Effect.Effect<Constant, LlvmError> => integerOf(builder, type, value, false)
 
 /**
  * Interns the opaque pointer constant that refers to a module global.
@@ -288,8 +304,8 @@ export const fromGlobal = (
   builder: Builder.Builder,
   global: Global.Global,
 ): Effect.Effect<Constant, LlvmError> =>
-  BuilderState.mutate(builder, 'Constant.fromGlobal', (state, owner) =>
-    fromGlobalIn(builder, state, owner, global),
+  BuilderState.transition(builder, 'Constant.fromGlobal', (context) =>
+    fromGlobalIn(context, global),
   )
 
 /**
@@ -298,11 +314,10 @@ export const fromGlobal = (
  * @internal
  */
 export const fromGlobalIn = (
-  builder: Builder.Builder,
-  state: BuilderState.MutableState,
-  owner: OwnedHandle.Owner,
+  context: BuilderState.Context,
   global: Global.Global,
 ): Result.Result<Constant, LlvmError> => {
+  const { builder, state, owner } = context
   const resolved = GlobalState.resolve(builder, state, owner, global, 'Constant.fromGlobal')
   if (Result.isFailure(resolved)) return Result.fail(resolved.failure)
   const description: ConstantDescription.Description = {
@@ -333,15 +348,7 @@ export const integerSigned = (
   builder: Builder.Builder,
   type: Type.Type,
   value: number | bigint,
-): Effect.Effect<Constant, LlvmError> => {
-  const exact = IntegerInput.normalize(value, {
-    operation: 'Constant.integerSigned',
-    message: 'LLVM integer constants require finite safe integers or bigints',
-  })
-  return Result.isFailure(exact)
-    ? Effect.fail(exact.failure)
-    : integerOf(builder, type, exact.success, true)
-}
+): Effect.Effect<Constant, LlvmError> => integerOf(builder, type, value, true)
 
 const formatTypeTag: Record<FloatFormat, TypeDescription.SimpleTag> = {
   half: 'Half',
@@ -398,45 +405,59 @@ const formatBytes: Record<FloatFormat, number> = {
  * @category constants
  * @since 0.0.0
  */
-export const floatingRaw = Effect.fnUntraced(function* (
+export const floatingRaw = (
   builder: Builder.Builder,
   type: Type.Type,
   format: FloatFormat,
   bits: ByteString.ByteString | Uint8Array,
-): Effect.fn.Return<Constant, LlvmError> {
-  const value = bits instanceof Uint8Array ? ByteString.fromUint8Array(bits) : bits
-  const description = yield* BuilderState.mutate(builder, 'Constant.floatingRaw', (state, owner) =>
-    Result.gen(function* () {
-      const typeIndex = yield* Handle.resolve(builder, owner, type, 'Type', 'Constant.floatingRaw')
-      const typeValue = yield* Table.descriptionAt(
-        state.types,
-        typeIndex,
-        'Constant.floatingRaw',
-        'Type',
-      )
-      if (typeValue._tag !== 'Simple' || typeValue.tag !== formatTypeTag[format]) {
-        return yield* Result.fail(
-          invalidInput({
-            operation: 'Constant.floatingRaw',
-            message: `Raw ${format} bits require the matching LLVM floating type`,
-            input: type,
-          }),
-        )
-      }
-      if (value.bytes.length !== formatBytes[format]) {
-        return yield* Result.fail(
-          invalidInput({
-            operation: 'Constant.floatingRaw',
-            message: `${format} requires exactly ${formatBytes[format]} bytes`,
-            input: bits,
-          }),
-        )
-      }
-      return { _tag: 'Float' as const, type: typeIndex, format, bits: value }
-    }),
+): Effect.Effect<Constant, LlvmError> =>
+  BuilderState.transition(builder, 'Constant.floatingRaw', (context) =>
+    floatingRawIn(context, type, format, bits),
   )
-  return yield* intern(builder, description)
-})
+
+/** @internal */
+export const floatingRawIn = (
+  context: BuilderState.Context,
+  type: Type.Type,
+  format: FloatFormat,
+  bits: ByteString.ByteString | Uint8Array,
+): Result.Result<Constant, LlvmError> => {
+  const value = bits instanceof Uint8Array ? ByteString.fromUint8Array(bits) : bits
+  const typeIndex = Handle.resolve(
+    context.builder,
+    context.owner,
+    type,
+    'Type',
+    'Constant.floatingRaw',
+  )
+  if (Result.isFailure(typeIndex)) return Result.fail(typeIndex.failure)
+  const typeValue = Table.descriptionAt(
+    context.state.types,
+    typeIndex.success,
+    'Constant.floatingRaw',
+    'Type',
+  )
+  if (Result.isFailure(typeValue)) return Result.fail(typeValue.failure)
+  if (typeValue.success._tag !== 'Simple' || typeValue.success.tag !== formatTypeTag[format]) {
+    return Result.fail(
+      invalidInput({
+        operation: 'Constant.floatingRaw',
+        message: `Raw ${format} bits require the matching LLVM floating type`,
+        input: type,
+      }),
+    )
+  }
+  if (value.bytes.length !== formatBytes[format]) {
+    return Result.fail(
+      invalidInput({
+        operation: 'Constant.floatingRaw',
+        message: `${format} requires exactly ${formatBytes[format]} bytes`,
+        input: bits,
+      }),
+    )
+  }
+  return internIn(context, { _tag: 'Float', type: typeIndex.success, format, bits: value })
+}
 
 /**
  * Convenience constructor for a raw 16-bit IEEE `half` payload.
@@ -472,7 +493,8 @@ export const bfloatBits = Effect.fnUntraced(function* (
 })
 
 /** @internal */
-const numberBytes = (value: number, byteLength: 4 | 8): Uint8Array => {
+/** @internal */
+export const numberBytes = (value: number, byteLength: 4 | 8): Uint8Array => {
   const result = new Uint8Array(byteLength)
   const view = new DataView(result.buffer)
   if (byteLength === 4) view.setFloat32(0, value, true)
@@ -509,16 +531,25 @@ export const doubleFromNumber = Effect.fnUntraced(function* (
 })
 
 /** @internal */
-const special = Effect.fnUntraced(function* (
+const special = (
   builder: Builder.Builder,
   type: Type.Type,
-  kind: Extract<ConstantDescription.Description, { readonly _tag: 'Special' }>['kind'],
-) {
-  const typeIndex = yield* BuilderState.mutate(builder, `Constant.${kind}`, (_state, owner) =>
-    Handle.resolve(builder, owner, type, 'Type', `Constant.${kind}`),
-  )
-  return yield* intern(builder, { _tag: 'Special', type: typeIndex, kind })
-})
+  kind: SpecialKind,
+): Effect.Effect<Constant, LlvmError> =>
+  BuilderState.transition(builder, `Constant.${kind}`, (context) => specialIn(context, type, kind))
+
+type SpecialKind = Extract<ConstantDescription.Description, { readonly _tag: 'Special' }>['kind']
+
+/** @internal */
+export const specialIn = (
+  context: BuilderState.Context,
+  type: Type.Type,
+  kind: SpecialKind,
+): Result.Result<Constant, LlvmError> => {
+  const typeIndex = Handle.resolve(context.builder, context.owner, type, 'Type', `Constant.${kind}`)
+  if (Result.isFailure(typeIndex)) return Result.fail(typeIndex.failure)
+  return internIn(context, { _tag: 'Special', type: typeIndex.success, kind })
+}
 
 /**
  * Returns the canonical `null` constant for a type.
@@ -576,23 +607,40 @@ export const poison = Effect.fnUntraced(function* (builder: Builder.Builder, typ
  * @category constants
  * @since 0.0.0
  */
-export const string = Effect.fnUntraced(function* (
+export const string = (
   builder: Builder.Builder,
   value: ByteString.ByteString | Uint8Array | string,
   options: { readonly nullTerminated?: boolean } = {},
-): Effect.fn.Return<Constant, LlvmError> {
+): Effect.Effect<Constant, LlvmError> =>
+  BuilderState.transition(builder, 'Constant.string', (context) =>
+    stringIn(context, value, options),
+  )
+
+/** @internal */
+export const stringIn = (
+  context: BuilderState.Context,
+  value: ByteString.ByteString | Uint8Array | string,
+  options: { readonly nullTerminated?: boolean } = {},
+): Result.Result<Constant, LlvmError> => {
   const input = ByteString.coerce(value)
   const contents = options.nullTerminated
     ? ByteString.concat([input, ByteString.fromUint8Array(Uint8Array.of(0))])
     : input
-  const i8 = yield* Type.integer(builder, 8)
-  const type = yield* Type.array(builder, i8, contents.bytes.length)
-  if (ByteString.isEmpty(contents)) return yield* zero(builder, type)
-  const typeIndex = yield* BuilderState.mutate(builder, 'Constant.string', (_state, owner) =>
-    Handle.resolve(builder, owner, type, 'Type', 'Constant.string'),
+  const i8 = Type.internIn(context, { _tag: 'Integer', bitWidth: 8 })
+  if (Result.isFailure(i8)) return Result.fail(i8.failure)
+  const type = Type.arrayIn(context, i8.success, contents.bytes.length)
+  if (Result.isFailure(type)) return Result.fail(type.failure)
+  if (ByteString.isEmpty(contents)) return specialIn(context, type.success, 'zeroinitializer')
+  const typeIndex = Handle.resolve(
+    context.builder,
+    context.owner,
+    type.success,
+    'Type',
+    'Constant.string',
   )
-  return yield* intern(builder, { _tag: 'String', type: typeIndex, bytes: contents })
-})
+  if (Result.isFailure(typeIndex)) return Result.fail(typeIndex.failure)
+  return internIn(context, { _tag: 'String', type: typeIndex.success, bytes: contents })
+}
 
 /**
  * Interns an array, vector, or complete structure after exact element-count and type validation.
@@ -600,16 +648,32 @@ export const string = Effect.fnUntraced(function* (
  * @category constants
  * @since 0.0.0
  */
-export const aggregate = Effect.fnUntraced(function* (
+export const aggregate = (
   builder: Builder.Builder,
   type: Type.Type,
   elements: ReadonlyArray<Constant>,
-): Effect.fn.Return<Constant, LlvmError> {
-  const description = yield* BuilderState.mutate(builder, 'Constant.aggregate', (state, owner) =>
+): Effect.Effect<Constant, LlvmError> =>
+  BuilderState.transition(builder, 'Constant.aggregate', (context) =>
+    aggregateIn(context, type, elements),
+  )
+
+/** @internal */
+export const aggregateIn = (
+  context: BuilderState.Context,
+  type: Type.Type,
+  elements: ReadonlyArray<Constant>,
+): Result.Result<Constant, LlvmError> =>
+  Result.flatMap(
     Result.gen(function* () {
-      const typeIndex = yield* Handle.resolve(builder, owner, type, 'Type', 'Constant.aggregate')
+      const typeIndex = yield* Handle.resolve(
+        context.builder,
+        context.owner,
+        type,
+        'Type',
+        'Constant.aggregate',
+      )
       const typeValue = yield* Table.descriptionAt(
-        state.types,
+        context.state.types,
         typeIndex,
         'Constant.aggregate',
         'Type',
@@ -617,7 +681,13 @@ export const aggregate = Effect.fnUntraced(function* (
       const mutableElementIndices: Array<number> = []
       for (const element of elements) {
         mutableElementIndices.push(
-          yield* Handle.resolve(builder, owner, element, 'Constant', 'Constant.aggregate'),
+          yield* Handle.resolve(
+            context.builder,
+            context.owner,
+            element,
+            'Constant',
+            'Constant.aggregate',
+          ),
         )
       }
       const elementIndices = mutableElementIndices
@@ -654,7 +724,7 @@ export const aggregate = Effect.fnUntraced(function* (
       }
       for (let index = 0; index < elementIndices.length; index += 1) {
         const element = yield* Table.descriptionAt(
-          state.constants,
+          context.state.constants,
           elementIndices[index] ?? -1,
           'Constant.aggregate',
           'Constant',
@@ -676,9 +746,8 @@ export const aggregate = Effect.fnUntraced(function* (
         elements: elementIndices,
       }
     }),
+    (description) => internIn(context, description),
   )
-  return yield* intern(builder, description)
-})
 
 /**
  * Interns a vector splat whose scalar value exactly matches the vector child type.
@@ -1241,27 +1310,39 @@ export const getElementPtr = Effect.fnUntraced(function* (
  * @category constants
  * @since 0.0.0
  */
-export const assembly = Effect.fnUntraced(function* (
+export const assembly = (
   builder: Builder.Builder,
   type: Type.Type,
   assembly: ByteString.ByteString | Uint8Array | string,
   constraints: ByteString.ByteString | Uint8Array | string,
   options: AssemblyOptions = {},
-): Effect.fn.Return<Constant, LlvmError> {
-  const typeIndex = yield* BuilderState.mutate(builder, 'Constant.assembly', (_state, owner) =>
-    Handle.resolve(builder, owner, type, 'Type', 'Constant.assembly'),
+): Effect.Effect<Constant, LlvmError> =>
+  BuilderState.transition(builder, 'Constant.assembly', (context) =>
+    assemblyIn(context, type, assembly, constraints, options),
   )
-  return yield* intern(builder, {
-    _tag: 'Assembly',
-    type: typeIndex,
-    assembly: ByteString.coerce(assembly),
-    constraints: ByteString.coerce(constraints),
-    sideEffect: options.sideEffect ?? false,
-    alignStack: options.alignStack ?? false,
-    intelDialect: options.intelDialect ?? false,
-    canThrow: options.canThrow ?? false,
-  })
-})
+
+/** @internal */
+export const assemblyIn = (
+  context: BuilderState.Context,
+  type: Type.Type,
+  assembly: ByteString.ByteString | Uint8Array | string,
+  constraints: ByteString.ByteString | Uint8Array | string,
+  options: AssemblyOptions = {},
+): Result.Result<Constant, LlvmError> =>
+  Result.flatMap(
+    Handle.resolve(context.builder, context.owner, type, 'Type', 'Constant.assembly'),
+    (typeIndex) =>
+      internIn(context, {
+        _tag: 'Assembly',
+        type: typeIndex,
+        assembly: ByteString.coerce(assembly),
+        constraints: ByteString.coerce(constraints),
+        sideEffect: options.sideEffect ?? false,
+        alignStack: options.alignStack ?? false,
+        intelDialect: options.intelDialect ?? false,
+        canThrow: options.canThrow ?? false,
+      }),
+  )
 
 /**
  * Returns the builder-owned LLVM type of a constant.

@@ -60,6 +60,7 @@ export interface Draft {
   readonly localOperands: Array<FunctionBodyDescription.Operand | undefined>
   /** The owning builder's module state; a body only exists inside that builder. */
   readonly module: BuilderState.MutableState
+  readonly context: BuilderState.Context
   readonly values: Array<MutableValue>
   readonly valueHandles: Array<ValueActor.Value>
   readonly metadata: Array<ReadonlyArray<MetadataDescription.Attachment>>

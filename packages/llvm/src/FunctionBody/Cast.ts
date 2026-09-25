@@ -89,87 +89,95 @@ export const cast = (
   name?: ByteString.ByteString | Uint8Array | string,
   options: CastOptions = {},
 ): Effect.Effect<Value.Input, LlvmError> =>
-  FunctionBodyState.mutateModule(
-    self,
-    'FunctionBody.cast',
-    (draft, module): Result.Result<Value.Input, LlvmError> => {
-      const operation = 'FunctionBody.cast'
-      const source = FunctionBodyState.resolveOperand(draft, module, operand, operation)
-      if (Result.isFailure(source)) return Result.fail(source.failure)
-      const destination = Handle.resolve(
-        draft.builder,
-        draft.moduleOwner,
-        destinationType,
-        'Type',
-        operation,
-      )
-      if (Result.isFailure(destination)) return Result.fail(destination.failure)
-      if (source.success.type === destination.success) return Result.succeed(operand)
-      const from = classify(module, source.success.type)
-      if (Result.isFailure(from)) return Result.fail(from.failure)
-      const to = classify(module, destination.success)
-      if (Result.isFailure(to)) return Result.fail(to.failure)
-      const sourceWidth = from.success.width ?? 0
-      const destinationWidth = to.success.width ?? 0
-      const valid =
-        (kind === 'trunc' &&
-          from.success.integer &&
-          to.success.integer &&
-          sourceWidth > destinationWidth) ||
-        ((kind === 'zext' || kind === 'sext') &&
-          from.success.integer &&
-          to.success.integer &&
-          sourceWidth < destinationWidth) ||
-        ((kind === 'fptoui' || kind === 'fptosi') && from.success.floating && to.success.integer) ||
-        ((kind === 'uitofp' || kind === 'sitofp') && from.success.integer && to.success.floating) ||
-        (kind === 'fptrunc' &&
-          from.success.floating &&
-          to.success.floating &&
-          sourceWidth > destinationWidth) ||
-        (kind === 'fpext' &&
-          from.success.floating &&
-          to.success.floating &&
-          sourceWidth < destinationWidth) ||
-        (kind === 'ptrtoint' && from.success.pointer && to.success.integer) ||
-        (kind === 'inttoptr' && from.success.integer && to.success.pointer) ||
-        (kind === 'bitcast' &&
-          (from.success.width === to.success.width ||
-            (from.success.pointer && to.success.pointer))) ||
-        (kind === 'addrspacecast' && from.success.pointer && to.success.pointer)
-      if (!valid) {
-        return Result.fail(
-          invalidInput({
-            operation,
-            message: `${kind} is invalid for the source and destination types`,
-            input: { operand, destinationType },
-          }),
-        )
-      }
-      if ((options.noSignedWrap || options.noUnsignedWrap) && kind !== 'trunc') {
-        return Result.fail(
-          invalidInput({
-            operation,
-            message: 'No-wrap cast flags are only valid on trunc',
-            input: kind,
-          }),
-        )
-      }
-      const sourceOperand = source.success.operand
-      const appended = FunctionBodyState.appendResult(
-        draft,
-        destination.success,
-        name,
-        (result, finalName) => ({
-          _tag: 'Cast',
-          kind,
-          operand: sourceOperand,
-          destinationType: destination.success,
-          noSignedWrap: options.noSignedWrap ?? false,
-          noUnsignedWrap: options.noUnsignedWrap ?? false,
-          result,
-          name: finalName,
-        }),
-      )
-      return appended
-    },
+  FunctionBodyState.mutate(self, 'FunctionBody.cast', (draft) =>
+    castIn(draft, kind, operand, destinationType, name, options),
   )
+
+/** @internal */
+export const castIn = (
+  draft: FunctionBodyState.Draft,
+  kind: CastKind,
+  operand: Value.Input,
+  destinationType: Type.Type,
+  name?: ByteString.ByteString | Uint8Array | string,
+  options: CastOptions = {},
+): Result.Result<Value.Input, LlvmError> => {
+  const module = draft.module
+  const operation = 'FunctionBody.cast'
+  const source = FunctionBodyState.resolveOperand(draft, module, operand, operation)
+  if (Result.isFailure(source)) return Result.fail(source.failure)
+  const destination = Handle.resolve(
+    draft.builder,
+    draft.moduleOwner,
+    destinationType,
+    'Type',
+    operation,
+  )
+  if (Result.isFailure(destination)) return Result.fail(destination.failure)
+  if (source.success.type === destination.success) return Result.succeed(operand)
+  const from = classify(module, source.success.type)
+  if (Result.isFailure(from)) return Result.fail(from.failure)
+  const to = classify(module, destination.success)
+  if (Result.isFailure(to)) return Result.fail(to.failure)
+  const sourceWidth = from.success.width ?? 0
+  const destinationWidth = to.success.width ?? 0
+  const valid =
+    (kind === 'trunc' &&
+      from.success.integer &&
+      to.success.integer &&
+      sourceWidth > destinationWidth) ||
+    ((kind === 'zext' || kind === 'sext') &&
+      from.success.integer &&
+      to.success.integer &&
+      sourceWidth < destinationWidth) ||
+    ((kind === 'fptoui' || kind === 'fptosi') && from.success.floating && to.success.integer) ||
+    ((kind === 'uitofp' || kind === 'sitofp') && from.success.integer && to.success.floating) ||
+    (kind === 'fptrunc' &&
+      from.success.floating &&
+      to.success.floating &&
+      sourceWidth > destinationWidth) ||
+    (kind === 'fpext' &&
+      from.success.floating &&
+      to.success.floating &&
+      sourceWidth < destinationWidth) ||
+    (kind === 'ptrtoint' && from.success.pointer && to.success.integer) ||
+    (kind === 'inttoptr' && from.success.integer && to.success.pointer) ||
+    (kind === 'bitcast' &&
+      (from.success.width === to.success.width || (from.success.pointer && to.success.pointer))) ||
+    (kind === 'addrspacecast' && from.success.pointer && to.success.pointer)
+  if (!valid) {
+    return Result.fail(
+      invalidInput({
+        operation,
+        message: `${kind} is invalid for the source and destination types`,
+        input: { operand, destinationType },
+      }),
+    )
+  }
+  if ((options.noSignedWrap || options.noUnsignedWrap) && kind !== 'trunc') {
+    return Result.fail(
+      invalidInput({
+        operation,
+        message: 'No-wrap cast flags are only valid on trunc',
+        input: kind,
+      }),
+    )
+  }
+  const sourceOperand = source.success.operand
+  const appended = FunctionBodyState.appendResult(
+    draft,
+    destination.success,
+    name,
+    (result, finalName) => ({
+      _tag: 'Cast',
+      kind,
+      operand: sourceOperand,
+      destinationType: destination.success,
+      noSignedWrap: options.noSignedWrap ?? false,
+      noUnsignedWrap: options.noUnsignedWrap ?? false,
+      result,
+      name: finalName,
+    }),
+  )
+  return appended
+}

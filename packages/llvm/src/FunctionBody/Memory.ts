@@ -96,102 +96,109 @@ export const alloca = (
   name?: ByteString.ByteString | Uint8Array | string,
   options: AllocaOptions = {},
 ): Effect.Effect<Value.Value, LlvmError> =>
-  FunctionBodyState.mutateModule(self, 'FunctionBody.alloca', (draft, module) => {
-    const operation = 'FunctionBody.alloca'
-    // Intern the result pointer type and default count first, matching the table order of the
-    // standalone type and constant requests this transition replaces.
-    const addressSpace = options.addressSpace ?? AddrSpace.defaultAddrSpace
-    const resultType = Type.internIndex(module, draft.moduleOwner, {
-      _tag: 'Pointer',
-      addressSpace,
-    })
-    let count: Value.Input
-    if (options.count === undefined) {
-      const i32 = Type.internIndex(module, draft.moduleOwner, { _tag: 'Integer', bitWidth: 32 })
-      const one = Constant.integerIn(module, draft.moduleOwner, i32, 1n, false, i32)
-      if (Result.isFailure(one)) return Result.fail(one.failure)
-      count = one.success
-    } else count = options.count
-    const allocationTypeIndex = Handle.resolve(
-      draft.builder,
-      draft.moduleOwner,
-      allocationType,
-      'Type',
-      operation,
-    )
-    if (Result.isFailure(allocationTypeIndex)) return Result.fail(allocationTypeIndex.failure)
-    const allocation = FunctionBodyState.typeAt(module, allocationTypeIndex.success, operation)
-    if (Result.isFailure(allocation)) return Result.fail(allocation.failure)
-    if (
-      allocation.success._tag === 'Simple' &&
-      (allocation.success.tag === 'Void' || allocation.success.tag === 'Label')
-    ) {
-      return failInput(operation, 'alloca requires an allocatable value type', allocationType)
-    }
-    if (allocation.success._tag === 'Function') {
-      return failInput(operation, 'alloca cannot allocate a function type', allocationType)
-    }
-    const countValue = FunctionBodyState.resolveOperand(draft, module, count, operation)
-    if (Result.isFailure(countValue)) return Result.fail(countValue.failure)
-    const countIsInteger = FunctionBodyState.isIntegerType(
-      module,
-      countValue.success.type,
-      operation,
-    )
-    if (Result.isFailure(countIsInteger)) return Result.fail(countIsInteger.failure)
-    if (!countIsInteger.success) {
-      return failInput(operation, 'alloca count must have integer type', count)
-    }
-    if (
-      options.placement === 'entry' &&
-      (countValue.success.operand._tag !== 'Constant' || options.inAlloca === true)
-    ) {
-      return failInput(
-        operation,
-        'Entry allocation requires a constant count and cannot use inalloca',
-        options,
-      )
-    }
-    const countOperand = countValue.success.operand
-    const allocated = FunctionBodyState.appendResult(
-      draft,
-      resultType,
-      name,
-      (result, finalName) => ({
-        _tag: 'Alloca',
-        allocationType: allocationTypeIndex.success,
-        count: countOperand,
-        addressSpace: addressSpace.value,
-        alignment: options.alignment ?? Alignment.defaultAlignment,
-        inAlloca: options.inAlloca ?? false,
-        result,
-        name: finalName,
-      }),
-    )
-    if (Result.isFailure(allocated)) return Result.fail(allocated.failure)
-    if (options.placement === 'entry' && draft.cursor !== 0) {
-      const current = draft.cursor === undefined ? undefined : draft.blocks.at(draft.cursor)
-      const entry = draft.blocks.at(0)
-      const index = current?.instructions.pop()
-      if (entry === undefined || index === undefined)
-        return Result.fail(
-          invalidState({
-            operation,
-            message: 'Entry allocation lost its block',
-            state: draft.cursor,
-          }),
-        )
-      const last = entry.instructions.at(-1)
-      const terminator = last === undefined ? undefined : draft.instructions.at(last)
-      entry.instructions.splice(
-        entry.instructions.length -
-          (terminator !== undefined && FunctionBodyDescription.isTerminator(terminator) ? 1 : 0),
-        0,
-        index,
-      )
-    }
-    return Result.succeed(allocated.success)
+  FunctionBodyState.mutate(self, 'FunctionBody.alloca', (draft) =>
+    allocaIn(draft, allocationType, name, options),
+  )
+
+/** @internal */
+export const allocaIn = (
+  draft: FunctionBodyState.Draft,
+  allocationType: Type.Type,
+  name?: ByteString.ByteString | Uint8Array | string,
+  options: AllocaOptions = {},
+): Result.Result<Value.Value, LlvmError> => {
+  const module = draft.module
+  const operation = 'FunctionBody.alloca'
+  // Intern the result pointer type and default count first, matching the table order of the
+  // standalone type and constant requests this transition replaces.
+  const addressSpace = options.addressSpace ?? AddrSpace.defaultAddrSpace
+  const resultType = Type.internIndex(module, draft.moduleOwner, {
+    _tag: 'Pointer',
+    addressSpace,
   })
+  let count: Value.Input
+  if (options.count === undefined) {
+    const i32 = Type.internIndex(module, draft.moduleOwner, { _tag: 'Integer', bitWidth: 32 })
+    const one = Constant.integerIn(module, draft.moduleOwner, i32, 1n, false, i32)
+    if (Result.isFailure(one)) return Result.fail(one.failure)
+    count = one.success
+  } else count = options.count
+  const allocationTypeIndex = Handle.resolve(
+    draft.builder,
+    draft.moduleOwner,
+    allocationType,
+    'Type',
+    operation,
+  )
+  if (Result.isFailure(allocationTypeIndex)) return Result.fail(allocationTypeIndex.failure)
+  const allocation = FunctionBodyState.typeAt(module, allocationTypeIndex.success, operation)
+  if (Result.isFailure(allocation)) return Result.fail(allocation.failure)
+  if (
+    allocation.success._tag === 'Simple' &&
+    (allocation.success.tag === 'Void' || allocation.success.tag === 'Label')
+  ) {
+    return failInput(operation, 'alloca requires an allocatable value type', allocationType)
+  }
+  if (allocation.success._tag === 'Function') {
+    return failInput(operation, 'alloca cannot allocate a function type', allocationType)
+  }
+  const countValue = FunctionBodyState.resolveOperand(draft, module, count, operation)
+  if (Result.isFailure(countValue)) return Result.fail(countValue.failure)
+  const countIsInteger = FunctionBodyState.isIntegerType(module, countValue.success.type, operation)
+  if (Result.isFailure(countIsInteger)) return Result.fail(countIsInteger.failure)
+  if (!countIsInteger.success) {
+    return failInput(operation, 'alloca count must have integer type', count)
+  }
+  if (
+    options.placement === 'entry' &&
+    (countValue.success.operand._tag !== 'Constant' || options.inAlloca === true)
+  ) {
+    return failInput(
+      operation,
+      'Entry allocation requires a constant count and cannot use inalloca',
+      options,
+    )
+  }
+  const countOperand = countValue.success.operand
+  const allocated = FunctionBodyState.appendResult(
+    draft,
+    resultType,
+    name,
+    (result, finalName) => ({
+      _tag: 'Alloca',
+      allocationType: allocationTypeIndex.success,
+      count: countOperand,
+      addressSpace: addressSpace.value,
+      alignment: options.alignment ?? Alignment.defaultAlignment,
+      inAlloca: options.inAlloca ?? false,
+      result,
+      name: finalName,
+    }),
+  )
+  if (Result.isFailure(allocated)) return Result.fail(allocated.failure)
+  if (options.placement === 'entry' && draft.cursor !== 0) {
+    const current = draft.cursor === undefined ? undefined : draft.blocks.at(draft.cursor)
+    const entry = draft.blocks.at(0)
+    const index = current?.instructions.pop()
+    if (entry === undefined || index === undefined)
+      return Result.fail(
+        invalidState({
+          operation,
+          message: 'Entry allocation lost its block',
+          state: draft.cursor,
+        }),
+      )
+    const last = entry.instructions.at(-1)
+    const terminator = last === undefined ? undefined : draft.instructions.at(last)
+    entry.instructions.splice(
+      entry.instructions.length -
+        (terminator !== undefined && FunctionBodyDescription.isTerminator(terminator) ? 1 : 0),
+      0,
+      index,
+    )
+  }
+  return Result.succeed(allocated.success)
+}
 
 /**
  * Appends a typed load from a pointer or vector of pointers after ordering validation.
@@ -205,42 +212,45 @@ export const load = (
   pointer: Value.Input,
   name?: ByteString.ByteString | Uint8Array | string,
   options: MemoryAccess.Input = {},
-): Effect.Effect<Value.Value, LlvmError> => {
+): Effect.Effect<Value.Value, LlvmError> =>
+  FunctionBodyState.mutate(self, 'FunctionBody.load', (draft) =>
+    loadIn(draft, valueType, pointer, name, options),
+  )
+
+/** @internal */
+export const loadIn = (
+  draft: FunctionBodyState.Draft,
+  valueType: Type.Type,
+  pointer: Value.Input,
+  name?: ByteString.ByteString | Uint8Array | string,
+  options: MemoryAccess.Input = {},
+): Result.Result<Value.Value, LlvmError> => {
   const access = accessInfo(options)
   if (access.ordering === 'release' || access.ordering === 'acq_rel') {
-    return Effect.fail(
-      invalidInput({
-        operation: 'MemoryAccess.validateLoadOrdering',
-        message: 'Atomic loads cannot use release or acq_rel ordering',
-        input: access.ordering,
-      }),
+    return failInput(
+      'MemoryAccess.validateLoadOrdering',
+      'Atomic loads cannot use release or acq_rel ordering',
+      access.ordering,
     )
   }
-  return FunctionBodyState.mutateModule(self, 'FunctionBody.load', (draft, module) => {
-    const operation = 'FunctionBody.load'
-    const pointerValue = FunctionBodyState.resolveOperand(draft, module, pointer, operation)
-    if (Result.isFailure(pointerValue)) return Result.fail(pointerValue.failure)
-    const isPointer = FunctionBodyState.isPointerType(module, pointerValue.success.type, operation)
-    if (Result.isFailure(isPointer)) return Result.fail(isPointer.failure)
-    if (!isPointer.success) return failInput(operation, 'load requires a pointer operand', pointer)
-    const type = Handle.resolve(draft.builder, draft.moduleOwner, valueType, 'Type', operation)
-    if (Result.isFailure(type)) return Result.fail(type.failure)
-    const pointerOperand = pointerValue.success.operand
-    const appended = FunctionBodyState.appendResult(
-      draft,
-      type.success,
-      name,
-      (result, finalName) => ({
-        _tag: 'Load',
-        valueType: type.success,
-        pointer: pointerOperand,
-        access,
-        result,
-        name: finalName,
-      }),
-    )
-    return appended
-  })
+  const module = draft.module
+  const operation = 'FunctionBody.load'
+  const pointerValue = FunctionBodyState.resolveOperand(draft, module, pointer, operation)
+  if (Result.isFailure(pointerValue)) return Result.fail(pointerValue.failure)
+  const isPointer = FunctionBodyState.isPointerType(module, pointerValue.success.type, operation)
+  if (Result.isFailure(isPointer)) return Result.fail(isPointer.failure)
+  if (!isPointer.success) return failInput(operation, 'load requires a pointer operand', pointer)
+  const type = Handle.resolve(draft.builder, draft.moduleOwner, valueType, 'Type', operation)
+  if (Result.isFailure(type)) return Result.fail(type.failure)
+  const pointerOperand = pointerValue.success.operand
+  return FunctionBodyState.appendResult(draft, type.success, name, (result, finalName) => ({
+    _tag: 'Load',
+    valueType: type.success,
+    pointer: pointerOperand,
+    access,
+    result,
+    name: finalName,
+  }))
 }
 
 /**
@@ -254,36 +264,44 @@ export const store = (
   value: Value.Input,
   pointer: Value.Input,
   options: MemoryAccess.Input = {},
-): Effect.Effect<Instruction, LlvmError> => {
+): Effect.Effect<Instruction, LlvmError> =>
+  FunctionBodyState.mutate(self, 'FunctionBody.store', (draft) =>
+    storeIn(draft, value, pointer, options),
+  )
+
+/** @internal */
+export const storeIn = (
+  draft: FunctionBodyState.Draft,
+  value: Value.Input,
+  pointer: Value.Input,
+  options: MemoryAccess.Input = {},
+): Result.Result<Instruction, LlvmError> => {
   const access = accessInfo(options)
   if (access.ordering === 'acquire' || access.ordering === 'acq_rel') {
-    return Effect.fail(
-      invalidInput({
-        operation: 'MemoryAccess.validateStoreOrdering',
-        message: 'Atomic stores require monotonic, release, or seq_cst ordering',
-        input: access.ordering,
-      }),
+    return failInput(
+      'MemoryAccess.validateStoreOrdering',
+      'Atomic stores require monotonic, release, or seq_cst ordering',
+      access.ordering,
     )
   }
-  return FunctionBodyState.mutateModule(self, 'FunctionBody.store', (draft, module) => {
-    const operation = 'FunctionBody.store'
-    const stored = FunctionBodyState.resolveOperand(draft, module, value, operation)
-    if (Result.isFailure(stored)) return Result.fail(stored.failure)
-    const destination = FunctionBodyState.resolveOperand(draft, module, pointer, operation)
-    if (Result.isFailure(destination)) return Result.fail(destination.failure)
-    const isPointer = FunctionBodyState.isPointerType(module, destination.success.type, operation)
-    if (Result.isFailure(isPointer)) return Result.fail(isPointer.failure)
-    if (!isPointer.success) {
-      return failInput(operation, 'store requires a pointer destination', pointer)
-    }
-    return FunctionBodyState.appendInstruction(draft, {
-      _tag: 'Store',
-      value: stored.success.operand,
-      pointer: destination.success.operand,
-      access,
-      result: undefined,
-      name: ByteString.empty,
-    })
+  const module = draft.module
+  const operation = 'FunctionBody.store'
+  const stored = FunctionBodyState.resolveOperand(draft, module, value, operation)
+  if (Result.isFailure(stored)) return Result.fail(stored.failure)
+  const destination = FunctionBodyState.resolveOperand(draft, module, pointer, operation)
+  if (Result.isFailure(destination)) return Result.fail(destination.failure)
+  const isPointer = FunctionBodyState.isPointerType(module, destination.success.type, operation)
+  if (Result.isFailure(isPointer)) return Result.fail(isPointer.failure)
+  if (!isPointer.success) {
+    return failInput(operation, 'store requires a pointer destination', pointer)
+  }
+  return FunctionBodyState.appendInstruction(draft, {
+    _tag: 'Store',
+    value: stored.success.operand,
+    pointer: destination.success.operand,
+    access,
+    result: undefined,
+    name: ByteString.empty,
   })
 }
 
@@ -424,36 +442,44 @@ export const getElementPtr = (
   name?: ByteString.ByteString | Uint8Array | string,
   options: GetElementPtrOptions = {},
 ): Effect.Effect<Value.Value, LlvmError> =>
-  FunctionBodyState.mutateModule(self, 'FunctionBody.getElementPtr', (draft, module) => {
-    const plan = gepPlan(draft, module, sourceType, base, indices, options)
-    if (Result.isFailure(plan)) return Result.fail(plan.failure)
-    const { vector } = plan.success
-    const resultType =
-      vector !== undefined && !plan.success.baseIsVector
-        ? Type.internIndex(module, draft.moduleOwner, {
-            _tag: 'Vector',
-            child: plan.success.pointerScalarType,
-            length: vector.length,
-            scalable: vector.scalable,
-          })
-        : plan.success.pointerType
-    const appended = FunctionBodyState.appendResult(
-      draft,
-      resultType,
-      name,
-      (result, finalName) => ({
-        _tag: 'GetElementPtr',
-        sourceType: plan.success.sourceType,
-        base: plan.success.base,
-        indices: plan.success.indices,
-        inbounds: options.inbounds ?? false,
-        inrange: options.inrange,
-        result,
-        name: finalName,
-      }),
-    )
-    return appended
-  })
+  FunctionBodyState.mutate(self, 'FunctionBody.getElementPtr', (draft) =>
+    getElementPtrIn(draft, sourceType, base, indices, name, options),
+  )
+
+/** @internal */
+export const getElementPtrIn = (
+  draft: FunctionBodyState.Draft,
+  sourceType: Type.Type,
+  base: Value.Input,
+  indices: ReadonlyArray<Value.Input>,
+  name?: ByteString.ByteString | Uint8Array | string,
+  options: GetElementPtrOptions = {},
+): Result.Result<Value.Value, LlvmError> => {
+  const module = draft.module
+  const plan = gepPlan(draft, module, sourceType, base, indices, options)
+  if (Result.isFailure(plan)) return Result.fail(plan.failure)
+  const { vector } = plan.success
+  const resultType =
+    vector !== undefined && !plan.success.baseIsVector
+      ? Type.internIndex(module, draft.moduleOwner, {
+          _tag: 'Vector',
+          child: plan.success.pointerScalarType,
+          length: vector.length,
+          scalable: vector.scalable,
+        })
+      : plan.success.pointerType
+  const appended = FunctionBodyState.appendResult(draft, resultType, name, (result, finalName) => ({
+    _tag: 'GetElementPtr',
+    sourceType: plan.success.sourceType,
+    base: plan.success.base,
+    indices: plan.success.indices,
+    inbounds: options.inbounds ?? false,
+    inrange: options.inrange,
+    result,
+    name: finalName,
+  }))
+  return appended
+}
 
 /**
  * Converts numeric aggregate indices to constants and delegates to {@link getElementPtr}.
@@ -461,30 +487,50 @@ export const getElementPtr = (
  * @category instructions
  * @since 0.0.0
  */
-export const structuredGetElementPtr = Effect.fnUntraced(function* (
+export const structuredGetElementPtr = (
   self: FunctionBody,
   sourceType: Type.Type,
   base: Value.Input,
   fields: ReadonlyArray<number>,
   name?: ByteString.ByteString | Uint8Array | string,
   options: GetElementPtrOptions = {},
-): Effect.fn.Return<Value.Value, LlvmError> {
-  const builder = yield* FunctionBodyState.builder(self)
-  const i32 = yield* Type.integer(builder, 32)
-  const exact = [0, ...fields]
+): Effect.Effect<Value.Value, LlvmError> =>
+  FunctionBodyState.mutate(self, 'FunctionBody.structuredGetElementPtr', (draft) =>
+    structuredGetElementPtrIn(draft, sourceType, base, fields, name, options),
+  )
+
+/** @internal */
+export const structuredGetElementPtrIn = (
+  draft: FunctionBodyState.Draft,
+  sourceType: Type.Type,
+  base: Value.Input,
+  fields: ReadonlyArray<number>,
+  name?: ByteString.ByteString | Uint8Array | string,
+  options: GetElementPtrOptions = {},
+): Result.Result<Value.Value, LlvmError> => {
+  const i32 = Type.internIndex(draft.module, draft.moduleOwner, { _tag: 'Integer', bitWidth: 32 })
   const indices: Array<Constant.Constant> = []
-  for (const field of exact) {
+  for (const field of [0, ...fields]) {
     if (!Number.isSafeInteger(field) || field < 0) {
-      return yield* invalidInput({
-        operation: 'FunctionBody.structuredGetElementPtr',
-        message: 'Structured GEP fields must be non-negative integers',
-        input: field,
-      })
+      return failInput(
+        'FunctionBody.structuredGetElementPtr',
+        'Structured GEP fields must be non-negative integers',
+        field,
+      )
     }
-    indices.push(yield* Constant.integerUnsigned(builder, i32, field))
+    const index = Constant.integerIn(
+      draft.module,
+      draft.moduleOwner,
+      i32,
+      BigInt(field),
+      false,
+      i32,
+    )
+    if (Result.isFailure(index)) return Result.fail(index.failure)
+    indices.push(index.success)
   }
-  return yield* getElementPtr(self, sourceType, base, indices, name, options)
-})
+  return getElementPtrIn(draft, sourceType, base, indices, name, options)
+}
 
 /**
  * Appends an atomic fence with acquire-or-stronger validated ordering.

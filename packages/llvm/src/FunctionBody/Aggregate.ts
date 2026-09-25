@@ -80,27 +80,38 @@ export const extractValue = (
   indices: ReadonlyArray<number>,
   name?: ByteString.ByteString | Uint8Array | string,
 ): Effect.Effect<Value.Value, LlvmError> =>
-  FunctionBodyState.mutateModule(self, 'FunctionBody.extractValue', (draft, module) => {
-    const operation = 'FunctionBody.extractValue'
-    const resolved = FunctionBodyState.resolveOperand(draft, module, aggregate, operation)
-    if (Result.isFailure(resolved)) return Result.fail(resolved.failure)
-    const resultType = aggregatePath(module, resolved.success.type, indices, operation)
-    if (Result.isFailure(resultType)) return Result.fail(resultType.failure)
-    const aggregateOperand = resolved.success.operand
-    const appended = FunctionBodyState.appendResult(
-      draft,
-      resultType.success,
-      name,
-      (result, finalName) => ({
-        _tag: 'ExtractValue',
-        aggregate: aggregateOperand,
-        indices,
-        result,
-        name: finalName,
-      }),
-    )
-    return appended
-  })
+  FunctionBodyState.mutate(self, 'FunctionBody.extractValue', (draft) =>
+    extractValueIn(draft, aggregate, indices, name),
+  )
+
+/** @internal */
+export const extractValueIn = (
+  draft: FunctionBodyState.Draft,
+  aggregate: Value.Input,
+  indices: ReadonlyArray<number>,
+  name?: ByteString.ByteString | Uint8Array | string,
+): Result.Result<Value.Value, LlvmError> => {
+  const module = draft.module
+  const operation = 'FunctionBody.extractValue'
+  const resolved = FunctionBodyState.resolveOperand(draft, module, aggregate, operation)
+  if (Result.isFailure(resolved)) return Result.fail(resolved.failure)
+  const resultType = aggregatePath(module, resolved.success.type, indices, operation)
+  if (Result.isFailure(resultType)) return Result.fail(resultType.failure)
+  const aggregateOperand = resolved.success.operand
+  const appended = FunctionBodyState.appendResult(
+    draft,
+    resultType.success,
+    name,
+    (result, finalName) => ({
+      _tag: 'ExtractValue',
+      aggregate: aggregateOperand,
+      indices,
+      result,
+      name: finalName,
+    }),
+  )
+  return appended
+}
 
 /**
  * Inserts a same-typed value along a validated aggregate path.
@@ -115,40 +126,52 @@ export const insertValue = (
   indices: ReadonlyArray<number>,
   name?: ByteString.ByteString | Uint8Array | string,
 ): Effect.Effect<Value.Value, LlvmError> =>
-  FunctionBodyState.mutateModule(self, 'FunctionBody.insertValue', (draft, module) => {
-    const operation = 'FunctionBody.insertValue'
-    const aggregateValue = FunctionBodyState.resolveOperand(draft, module, aggregate, operation)
-    if (Result.isFailure(aggregateValue)) return Result.fail(aggregateValue.failure)
-    const elementValue = FunctionBodyState.resolveOperand(draft, module, element, operation)
-    if (Result.isFailure(elementValue)) return Result.fail(elementValue.failure)
-    const selected = aggregatePath(module, aggregateValue.success.type, indices, operation)
-    if (Result.isFailure(selected)) return Result.fail(selected.failure)
-    if (elementValue.success.type !== selected.success) {
-      return Result.fail(
-        invalidInput({
-          operation,
-          message: 'Inserted value does not match the aggregate path type',
-          input: { aggregate, element, indices },
-        }),
-      )
-    }
-    const aggregateOperand = aggregateValue.success.operand
-    const elementOperand = elementValue.success.operand
-    const appended = FunctionBodyState.appendResult(
-      draft,
-      aggregateValue.success.type,
-      name,
-      (result, finalName) => ({
-        _tag: 'InsertValue',
-        aggregate: aggregateOperand,
-        element: elementOperand,
-        indices,
-        result,
-        name: finalName,
+  FunctionBodyState.mutate(self, 'FunctionBody.insertValue', (draft) =>
+    insertValueIn(draft, aggregate, element, indices, name),
+  )
+
+/** @internal */
+export const insertValueIn = (
+  draft: FunctionBodyState.Draft,
+  aggregate: Value.Input,
+  element: Value.Input,
+  indices: ReadonlyArray<number>,
+  name?: ByteString.ByteString | Uint8Array | string,
+): Result.Result<Value.Value, LlvmError> => {
+  const module = draft.module
+  const operation = 'FunctionBody.insertValue'
+  const aggregateValue = FunctionBodyState.resolveOperand(draft, module, aggregate, operation)
+  if (Result.isFailure(aggregateValue)) return Result.fail(aggregateValue.failure)
+  const elementValue = FunctionBodyState.resolveOperand(draft, module, element, operation)
+  if (Result.isFailure(elementValue)) return Result.fail(elementValue.failure)
+  const selected = aggregatePath(module, aggregateValue.success.type, indices, operation)
+  if (Result.isFailure(selected)) return Result.fail(selected.failure)
+  if (elementValue.success.type !== selected.success) {
+    return Result.fail(
+      invalidInput({
+        operation,
+        message: 'Inserted value does not match the aggregate path type',
+        input: { aggregate, element, indices },
       }),
     )
-    return appended
-  })
+  }
+  const aggregateOperand = aggregateValue.success.operand
+  const elementOperand = elementValue.success.operand
+  const appended = FunctionBodyState.appendResult(
+    draft,
+    aggregateValue.success.type,
+    name,
+    (result, finalName) => ({
+      _tag: 'InsertValue',
+      aggregate: aggregateOperand,
+      element: elementOperand,
+      indices,
+      result,
+      name: finalName,
+    }),
+  )
+  return appended
+}
 
 /**
  * Builds an aggregate from a poison seed and a complete, exact sequence of element values.
@@ -156,36 +179,54 @@ export const insertValue = (
  * @category instructions
  * @since 0.0.0
  */
-export const buildAggregate = Effect.fnUntraced(function* (
+export const buildAggregate = (
   self: FunctionBody,
   type: Type.Type,
   elements: ReadonlyArray<Value.Input>,
   name?: ByteString.ByteString | Uint8Array | string,
-): Effect.fn.Return<Value.Input, LlvmError> {
-  const builder = yield* FunctionBodyState.builder(self)
-  const shape = yield* Type.aggregateShape(builder, type)
-  const expectedLength = shape.length === undefined ? shape.fields.length : Number(shape.length)
+): Effect.Effect<Value.Input, LlvmError> =>
+  FunctionBodyState.mutate(self, 'FunctionBody.buildAggregate', (draft) =>
+    buildAggregateIn(draft, type, elements, name),
+  )
+
+/** @internal */
+export const buildAggregateIn = (
+  draft: FunctionBodyState.Draft,
+  type: Type.Type,
+  elements: ReadonlyArray<Value.Input>,
+  name?: ByteString.ByteString | Uint8Array | string,
+): Result.Result<Value.Input, LlvmError> => {
+  const shape = Type.aggregateShapeIn(draft.context, type)
+  if (Result.isFailure(shape)) return Result.fail(shape.failure)
+  const expectedLength =
+    shape.success.length === undefined ? shape.success.fields.length : Number(shape.success.length)
   if (elements.length !== expectedLength) {
-    return yield* invalidInput({
-      operation: 'FunctionBody.buildAggregate',
-      message: 'Aggregate element count does not match its type',
-      input: elements,
-    })
+    return Result.fail(
+      invalidInput({
+        operation: 'FunctionBody.buildAggregate',
+        message: 'Aggregate element count does not match its type',
+        input: elements,
+      }),
+    )
   }
-  let aggregate: Value.Input = yield* Constant.poison(builder, type)
+  const poison = Constant.specialIn(draft.context, type, 'poison')
+  if (Result.isFailure(poison)) return Result.fail(poison.failure)
+  let aggregate: Value.Input = poison.success
   for (let index = 0; index < elements.length; index += 1) {
     const element = elements[index]
     if (element === undefined) continue
-    aggregate = yield* insertValue(
-      self,
+    const inserted = insertValueIn(
+      draft,
       aggregate,
       element,
       [index],
       index === elements.length - 1 ? name : undefined,
     )
+    if (Result.isFailure(inserted)) return Result.fail(inserted.failure)
+    aggregate = inserted.success
   }
-  return aggregate
-})
+  return Result.succeed(aggregate)
+}
 
 /**
  * Extracts one vector lane using a scalar integer index.

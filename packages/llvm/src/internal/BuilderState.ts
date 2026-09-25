@@ -68,6 +68,13 @@ export interface State {
   readonly value: MutableState
 }
 
+/** A builder's mutable state with its identity, as seen by one synchronous transition. */
+export interface Context {
+  readonly builder: Builder.Builder
+  readonly state: MutableState
+  readonly owner: OwnedHandle.Owner
+}
+
 export interface Snapshot {
   readonly owner: OwnedHandle.Owner
   readonly strip: boolean
@@ -100,10 +107,41 @@ export interface Snapshot {
 
 const states = new WeakMap<Builder.Builder, State>()
 
+const contexts = new WeakMap<Builder.Builder, Context>()
+
 /** @internal */
 export const register = (self: Builder.Builder, state: State): void => {
   states.set(self, state)
+  contexts.set(self, { builder: self, state: state.value, owner: state.owner })
 }
+
+/** @internal */
+export const context = (
+  self: Builder.Builder,
+  operation: string,
+): Result.Result<Context, LlvmError> => {
+  const found = contexts.get(self)
+  return found === undefined
+    ? Result.fail(invalidState({ operation, message: 'Unknown LLVM builder value', state: self }))
+    : Result.succeed(found)
+}
+
+/**
+ * Runs one synchronous transition over a builder context as a single suspended step.
+ *
+ * @internal
+ */
+export const transition = <A>(
+  self: Builder.Builder,
+  operation: string,
+  f: (context: Context) => Result.Result<A, LlvmError>,
+): Effect.Effect<A, LlvmError> =>
+  Effect.suspend(() => {
+    const found = contexts.get(self)
+    return found === undefined
+      ? Effect.fail(invalidState({ operation, message: 'Unknown LLVM builder value', state: self }))
+      : Effect.fromResult(f(found))
+  })
 
 /**
  * Transitions and snapshots are synchronous `Result` computations, so each critical section
