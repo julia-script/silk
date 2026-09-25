@@ -1438,10 +1438,14 @@ export const liveAt = (
     for (const use of requiredUses(self, self.solution, key)) {
       if (use.start !== undefined && use.start >= start.end) observedHolderUse = true
       if (use.retired) continue
-      if (use.after !== undefined && reachable.has(use.after)) return true
+      if (use.after !== undefined && BodyControlFlow.includes(reachable, use.after)) return true
     }
   const retainedEnd = BodyControlFlow.at(self.controlFlow, end)
-  if (!observedHolderUse && retainedEnd !== undefined && reachable.has(retainedEnd.after))
+  if (
+    !observedHolderUse &&
+    retainedEnd !== undefined &&
+    BodyControlFlow.includes(reachable, retainedEnd.after)
+  )
     return true
 
   return false

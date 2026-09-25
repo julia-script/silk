@@ -13,6 +13,16 @@ export interface Boundary {
   readonly after: number
 }
 
+/**
+ * Points reachable from one start: bit `point & 31` of word `point >>> 5`. Answers stay cached for
+ * the life of the graph, and a bitset is a small fraction of a `Set<number>` of the same points.
+ */
+export type Reachable = Uint32Array
+
+/** Whether a reachability answer contains one point. */
+export const includes = (self: Reachable, point: number): boolean =>
+  (((self[point >>> 5] ?? 0) >>> (point & 31)) & 1) === 1
+
 /** Finite semantic control flow, independent of source offsets and backend lowering. */
 export interface BodyControlFlow {
   readonly boundaries: ReadonlyMap<string, Boundary>
@@ -24,7 +34,7 @@ export interface BodyControlFlow {
   readonly writes: ReadonlyMap<string, number>
   readonly edges: ReadonlyArray<ReadonlyArray<number>>
   /** Answered reachability by start point, then by barrier (-1 for none, or a sorted list). */
-  readonly queries: Map<number, Map<number | string, ReadonlySet<number>>>
+  readonly queries: Map<number, Map<number | string, Reachable>>
   readonly work: { queries: number; cacheHits: number; visitedEdges: number }
 }
 
@@ -261,7 +271,7 @@ export const reachable = (
   self: BodyControlFlow,
   from: number,
   barrier?: number | ReadonlyArray<number>,
-): ReadonlySet<number> => {
+): Reachable => {
   self.work.queries += 1
   // Ownership asks the same few (start, barrier) pairs many thousand times: key the cache by
   // numbers, allocating a key only for a list of barriers.
@@ -281,11 +291,11 @@ export const reachable = (
   }
   const barriers = new Set(typeof barrier === 'number' ? [barrier] : (barrier ?? []))
   const pending = [from]
-  const visited = new Set<number>()
+  const visited: Reachable = new Uint32Array((self.edges.length + 31) >>> 5)
   while (pending.length > 0) {
     const current = pending.pop()
-    if (current === undefined || barriers.has(current) || visited.has(current)) continue
-    visited.add(current)
+    if (current === undefined || barriers.has(current) || includes(visited, current)) continue
+    visited[current >>> 5] = (visited[current >>> 5] ?? 0) | (1 << (current & 31))
     for (const next of self.edges.at(current) ?? []) {
       self.work.visitedEdges += 1
       pending.push(next)
@@ -301,4 +311,4 @@ export const reaches = (
   from: number,
   to: number,
   barrier?: number | ReadonlyArray<number>,
-): boolean => reachable(self, from, barrier).has(to)
+): boolean => includes(reachable(self, from, barrier), to)
