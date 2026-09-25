@@ -14,6 +14,7 @@ import { borrowKey } from './Lower.js'
 import type {} from './LowerExpression.js'
 import { lowerExpression } from './LowerExpression.js'
 import * as Mir from './Mir.js'
+import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 import { baseRunnerKey, effectValueAtSite } from './ValueType.js'
@@ -559,19 +560,28 @@ export const lowerBuiltinArguments = (
     const actual = fn.localTypes.at(lowered.result.ordinal)
     const callParameter = intrinsic.callParameters.at(ordinal)
     const primitiveParameter = intrinsic.rule.parameters.at(ordinal)
-    if (
-      actual?._tag !== 'Reference' ||
-      callParameter === undefined ||
-      primitiveParameter === undefined ||
-      !Type.isReference(callParameter) ||
-      callParameter.access !== 'Shared' ||
-      Type.runtimeKey(actual.type) !== Type.runtimeKey(callParameter) ||
-      !Type.equals(callParameter.target, primitiveParameter)
-    ) {
+    const sharedScalarReference =
+      actual?._tag === 'Reference' &&
+      callParameter !== undefined &&
+      primitiveParameter !== undefined &&
+      Type.isReference(callParameter) &&
+      callParameter.access === 'Shared' &&
+      Type.runtimeKey(actual.type) === Type.runtimeKey(callParameter) &&
+      Type.equals(callParameter.target, primitiveParameter)
+    // A borrowed match field is pointer-shaped in MIR even when this primitive takes its value.
+    const borrowedScalarValue =
+      actual?._tag === 'EnvironmentBorrow' &&
+      typeof actual.type === 'string' &&
+      Scalar.find(actual.type) !== undefined &&
+      callParameter !== undefined &&
+      primitiveParameter !== undefined &&
+      Type.equals(actual.type, callParameter) &&
+      Type.equals(actual.type, primitiveParameter)
+    if (!sharedScalarReference && !borrowedScalarValue) {
       loweredArguments.push(lowered.result)
       continue
     }
-    const type = fn.type(callParameter.target)
+    const type = fn.type(primitiveParameter)
     if (type === undefined) return undefined
     const destination = fn.alloc(type)
     fn.emit({
