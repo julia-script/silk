@@ -519,21 +519,21 @@ const keyOf = (
   }
 }
 
-const keyTextCache = new WeakMap<InstanceKey, string>()
+/** Memoized on the key object itself: most keys are fresh and read once or twice. */
+const cachedKeyText: unique symbol = Symbol('Instances.keyText')
 
 export const keyText = (key: InstanceKey): string => {
-  let cached = keyTextCache.get(key)
-  if (cached === undefined) {
-    cached = `${key.declaration.module}\u0000${key.declaration.name}\u0000${Type.runtimeArgumentKeys(
-      key.typeArguments,
-    ).join('\u0000')}${key.evidence.length === 0 ? '' : `\u0004${key.evidence.join('\u0000')}`}${
-      key.staticArguments.length === 0
-        ? ''
-        : `\u0001${key.staticArguments.map(StaticValue.key).join('\u0000')}`
-    }\u0002${key.contractRow.join('\u0000')}`
-    keyTextCache.set(key, cached)
-  }
-  return cached
+  const cached: unknown = Reflect.get(key, cachedKeyText)
+  if (typeof cached === 'string') return cached
+  const computed = `${key.declaration.module}\u0000${key.declaration.name}\u0000${Type.runtimeArgumentKeys(
+    key.typeArguments,
+  ).join('\u0000')}${key.evidence.length === 0 ? '' : `\u0004${key.evidence.join('\u0000')}`}${
+    key.staticArguments.length === 0
+      ? ''
+      : `\u0001${key.staticArguments.map(StaticValue.key).join('\u0000')}`
+  }\u0002${key.contractRow.join('\u0000')}`
+  Object.defineProperty(key, cachedKeyText, { value: computed })
+  return computed
 }
 
 const siteText = (owner: InstanceKey, span: SourceSpan.SourceSpan): string =>

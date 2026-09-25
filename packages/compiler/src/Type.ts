@@ -4137,23 +4137,22 @@ export const runtimeGenericArgumentKey = (self: GenericArgument): string => {
   return runtimeKey(self)
 }
 
-const runtimeKeyCache = new WeakMap<Exclude<Type, string>, string>()
+/** Memoized on the type object itself, like `key`. */
+const cachedRuntimeKey: unique symbol = Symbol('Type.runtimeKey')
 
 /**
  * Encodes a layout/instance type identity with all lifetime proof arguments erased.
- * Like semantic keys, runtime keys are memoized by immutable type identity. Layout and
- * native lowering repeatedly query the same nested types during a cold build; retaining
- * only weak keys avoids repeating their canonical string construction without keeping
- * completed analysis snapshots alive or introducing a persistent compilation cache.
+ * Like semantic keys, runtime keys are memoized on the immutable type object in a
+ * non-enumerable property: instance keys and layouts key many fresh substitution results
+ * exactly once, where a weak map paid an ephemeron insertion each and grew every major GC.
  */
 export const runtimeKey = (self: Type): string => {
   if (typeof self === 'string') return key(self)
-  let cached = runtimeKeyCache.get(self)
-  if (cached === undefined) {
-    cached = computeRuntimeKey(self)
-    runtimeKeyCache.set(self, cached)
-  }
-  return cached
+  const cached: unknown = Reflect.get(self, cachedRuntimeKey)
+  if (typeof cached === 'string') return cached
+  const computed = computeRuntimeKey(self)
+  Object.defineProperty(self, cachedRuntimeKey, { value: computed })
+  return computed
 }
 
 const computeRuntimeKey = (self: Exclude<Type, string>): string => {
