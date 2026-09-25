@@ -7,13 +7,13 @@ import * as CommandExit from './CommandExit.js'
 import * as DocumentationWorkflow from './DocumentationWorkflow.js'
 import * as ProjectOptions from './ProjectOptions.js'
 
-const output = Flag.string('output').pipe(
+const output = Flag.String('output').pipe(
   Flag.withAlias('o'),
   Flag.withDescription('Destination JSON path, relative to the project directory.'),
   Flag.optional,
 )
 
-const includePrivate = Flag.boolean('include-private').pipe(
+const includePrivate = Flag.Boolean('include-private').pipe(
   Flag.withDescription('Include private declarations and fields in generated documentation.'),
   Flag.withDefault(false),
 )

@@ -6,12 +6,12 @@ import { Argument, Command, Flag } from 'effect/unstable/cli'
 import * as CommandExit from './CommandExit.js'
 import * as ProjectInitializer from './ProjectInitializer.js'
 
-const path = Argument.string('path').pipe(
+const path = Argument.String('path').pipe(
   Argument.withDescription('Project directory. Defaults to the current directory.'),
   Argument.optional,
 )
 
-const name = Flag.string('name').pipe(
+const name = Flag.String('name').pipe(
   Flag.withDescription('Portable package name override.'),
   Flag.optional,
 )

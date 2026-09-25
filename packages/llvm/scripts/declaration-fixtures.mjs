@@ -12,7 +12,7 @@ const fixtureRoot = resolve(packageRoot, 'fixtures/declarations')
 const moduleScript = resolve(packageRoot, 'scripts/declaration-module.mjs')
 const command = process.argv[2] ?? 'verify'
 const executable = (name, variable) =>
-  Effect.runSync(Config.string(variable).pipe(Config.withDefault(name)))
+  Effect.runSync(Config.String(variable).pipe(Config.withDefault(name)))
 
 if (command === 'regenerate') {
   const text = execFileSync(process.execPath, [moduleScript, 'text'])

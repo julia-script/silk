@@ -55,7 +55,7 @@ const defaultClang = (): string => {
 }
 
 const configured = (name: string, fallback = ''): string =>
-  Effect.runSync(Config.string(name).pipe(Config.withDefault(fallback)))
+  Effect.runSync(Config.String(name).pipe(Config.withDefault(fallback)))
 const clang = configured('SILK_TEST_CLANG', defaultClang())
 const defaultLlvmAr = join(dirname(clang), 'llvm-ar')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({

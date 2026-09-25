@@ -59,17 +59,17 @@ const program = Effect.gen(function* () {
       )
     },
   )
-  const selectedClang = yield* Config.string('SILK_SUPPLY_CLANG').pipe(
+  const selectedClang = yield* Config.String('SILK_SUPPLY_CLANG').pipe(
     Config.withDefault('/opt/homebrew/opt/llvm/bin/clang'),
   )
-  const selectedTarget = yield* Config.string('SILK_SUPPLY_TARGET').pipe(Config.withDefault(''))
-  const selectedImage = yield* Config.string('SILK_SUPPLY_IMAGE').pipe(Config.withDefault(''))
+  const selectedTarget = yield* Config.String('SILK_SUPPLY_TARGET').pipe(Config.withDefault(''))
+  const selectedImage = yield* Config.String('SILK_SUPPLY_IMAGE').pipe(Config.withDefault(''))
   const bin = path.dirname(selectedClang)
   const clang = selectedClang
-  const llvmAr = yield* Config.string('SILK_SUPPLY_AR').pipe(
+  const llvmAr = yield* Config.String('SILK_SUPPLY_AR').pipe(
     Config.withDefault(path.join(bin, 'llvm-ar')),
   )
-  const linker = yield* Config.string('SILK_SUPPLY_LINKER').pipe(
+  const linker = yield* Config.String('SILK_SUPPLY_LINKER').pipe(
     Config.withDefault('/opt/homebrew/bin/ld.lld'),
   )
   const readelf = path.join(bin, 'llvm-readelf')

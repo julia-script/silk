@@ -14,7 +14,7 @@
   "dependencies": {
     "@ai-sdk/react": "^4.0.86",
     "@base-ui/react": "^1.7.0",
-    "@effect/atom-react": "4.0.0-rc.112",
+    "@effect/atom-react": "4.0.0-rc.117",
     "@fuma-translate/react": "^1.0.2",
     "@fumadocs/base-ui": "^16.15.4",
     "@openrouter/ai-sdk-provider": "^3.0.0",

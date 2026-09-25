@@ -12,12 +12,12 @@ import * as IrText from '../dist/IrText.js'
 import * as Type from '../dist/Type.js'
 import * as Value from '../dist/Value.js'
 
-const stopAfter = Effect.runSync(Config.string('CORE_STOP_AFTER').pipe(Config.withDefault('')))
+const stopAfter = Effect.runSync(Config.String('CORE_STOP_AFTER').pipe(Config.withDefault('')))
 const floatBinaryCount = Effect.runSync(
-  Config.integer('CORE_FLOAT_BINARY_COUNT').pipe(Config.withDefault(5)),
+  Config.Int('CORE_FLOAT_BINARY_COUNT').pipe(Config.withDefault(5)),
 )
 const floatCompareCount = Effect.runSync(
-  Config.integer('CORE_FLOAT_COMPARE_COUNT').pipe(Config.withDefault(15)),
+  Config.Int('CORE_FLOAT_COMPARE_COUNT').pipe(Config.withDefault(15)),
 )
 
 const output = await Effect.runPromise(

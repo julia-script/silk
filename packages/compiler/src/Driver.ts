@@ -323,7 +323,7 @@ export const compile = Effect.fn('Driver.compile')(
     const heapObservation = yield* HeapObservation.HeapObservation
     const heapBytes = heapObservation.heapBytes
     const distribution = request.distribution ?? ToolchainIntegrity.installed()
-    const nativeCacheDirectory = yield* Config.string('SILK_NATIVE_CACHE_DIR').pipe(
+    const nativeCacheDirectory = yield* Config.String('SILK_NATIVE_CACHE_DIR').pipe(
       Config.withDefault(''),
       Effect.orDie,
     )

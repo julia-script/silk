@@ -9,7 +9,7 @@ import type * as NativeToolchain from '../../src/NativeToolchain.js'
 export const configured = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  let clang = yield* Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(''))
+  let clang = yield* Config.String('SILK_TEST_CLANG').pipe(Config.withDefault(''))
   if (clang.length === 0) {
     clang = 'clang'
     for (const candidate of ['/opt/homebrew/opt/llvm/bin/clang', '/usr/local/opt/llvm/bin/clang']) {
@@ -20,7 +20,7 @@ export const configured = Effect.gen(function* () {
     }
   }
   const adjacentAr = path.join(path.dirname(clang), 'llvm-ar')
-  const llvmAr = yield* Config.string('SILK_TEST_LLVM_AR').pipe(
+  const llvmAr = yield* Config.String('SILK_TEST_LLVM_AR').pipe(
     Config.withDefault((yield* fs.exists(adjacentAr)) ? adjacentAr : 'llvm-ar'),
   )
   const selected: NativeToolchain.Toolchain = { _tag: 'Toolchain', clang, llvmAr }

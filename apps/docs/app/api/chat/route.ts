@@ -115,9 +115,9 @@ export const makePost = (options: Options) => async (req: Request) => {
 
 export const POST = (request: Request): Promise<Response> =>
   makePost({
-    apiKey: Effect.runSync(Config.string('OPENROUTER_API_KEY').pipe(Config.withDefault(''))),
+    apiKey: Effect.runSync(Config.String('OPENROUTER_API_KEY').pipe(Config.withDefault(''))),
     model: Effect.runSync(
-      Config.string('OPENROUTER_MODEL').pipe(Config.withDefault('anthropic/claude-sonnet-5')),
+      Config.String('OPENROUTER_MODEL').pipe(Config.withDefault('anthropic/claude-sonnet-5')),
     ),
   })(request)
 

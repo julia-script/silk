@@ -12,7 +12,7 @@ const fixtureRoot = resolve(packageRoot, 'fixtures/metadata')
 const moduleScript = resolve(packageRoot, 'scripts/metadata-module.mjs')
 const command = process.argv[2] ?? 'verify'
 const executable = (name, variable) =>
-  Effect.runSync(Config.string(variable).pipe(Config.withDefault(name)))
+  Effect.runSync(Config.String(variable).pipe(Config.withDefault(name)))
 const currentText = () => execFileSync(process.execPath, [moduleScript, 'text'])
 const currentBitcode = () => execFileSync(process.execPath, [moduleScript, 'bitcode'])
 

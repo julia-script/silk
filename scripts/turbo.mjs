@@ -52,7 +52,7 @@ const turboBin = require.resolve('turbo/bin/turbo')
  */
 const worktreeRoot = process.cwd().match(/^(.*?)[\\/]\.claude[\\/]worktrees[\\/]/)
 const explicitCacheDirectory = Effect.runSync(
-  Config.string('TURBO_CACHE_DIR').pipe(Config.withDefault('')),
+  Config.String('TURBO_CACHE_DIR').pipe(Config.withDefault('')),
 )
 const effectiveTurboArgs =
   worktreeRoot !== null && explicitCacheDirectory.length === 0

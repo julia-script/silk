@@ -7,7 +7,7 @@ import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 
 const configured = (name, fallback) =>
-  Effect.runSync(Config.string(name).pipe(Config.withDefault(fallback)))
+  Effect.runSync(Config.String(name).pipe(Config.withDefault(fallback)))
 
 const root = dirname(fileURLToPath(import.meta.url))
 const temporary = mkdtempSync(join(tmpdir(), 'silk-effect-native-lowering-spike-'))

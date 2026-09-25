@@ -15,7 +15,7 @@ import * as Type from '../dist/Type.js'
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const samples = Effect.runSync(
-  Config.number('PARITY_BENCHMARK_SAMPLES').pipe(Config.withDefault(7)),
+  Config.Number('PARITY_BENCHMARK_SAMPLES').pipe(Config.withDefault(7)),
 )
 
 const median = (values) =>

@@ -874,7 +874,7 @@ export const materializeObject = Effect.fnUntraced(function* (
         : []),
     ],
     environment: toolchain.supply?.environment ?? {
-      PATH: yield* Config.string('PATH').pipe(Config.withDefault(''), Effect.orDie),
+      PATH: yield* Config.String('PATH').pipe(Config.withDefault(''), Effect.orDie),
       LC_ALL: 'C',
       LANG: 'C',
     },

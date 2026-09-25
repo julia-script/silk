@@ -12,22 +12,22 @@ import * as CommandExit from './CommandExit.js'
 
 /** The `silk docs-site` command: one documentation JSON file in, one directory of HTML out. */
 
-const input = Flag.string('input').pipe(
+const input = Flag.String('input').pipe(
   Flag.withAlias('i'),
   Flag.withDescription('Documentation JSON written by `silk doc`.'),
 )
 
-const output = Flag.string('output').pipe(
+const output = Flag.String('output').pipe(
   Flag.withAlias('o'),
   Flag.withDescription('Directory the site is written to.'),
 )
 
-const title = Flag.string('title').pipe(
+const title = Flag.String('title').pipe(
   Flag.withDescription(`Site title. Defaults to "${Site.defaultTitle}".`),
   Flag.optional,
 )
 
-const snippetBundle = Flag.string('snippet-bundle').pipe(
+const snippetBundle = Flag.String('snippet-bundle').pipe(
   Flag.withDescription('Optional JavaScript bundle that registers the <silk-snippet> element.'),
   Flag.optional,
 )

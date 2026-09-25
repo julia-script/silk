@@ -21,7 +21,7 @@ import * as ChromeTrace from './ChromeTrace.js'
 const program = Effect.gen(function* () {
   // Set the default to true here, or use SILK_SCRATCHPAD_CACHE=true for a cached run.
   // False bypasses semantic persistence and backend artifact caches without deleting them.
-  const cache = yield* Config.boolean('SILK_SCRATCHPAD_CACHE').pipe(Config.withDefault(false))
+  const cache = yield* Config.Boolean('SILK_SCRATCHPAD_CACHE').pipe(Config.withDefault(false))
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const directory = yield* path.fromFileUrl(new URL('.', import.meta.url))
@@ -32,12 +32,12 @@ const program = Effect.gen(function* () {
 
   const homebrewClang = '/opt/homebrew/opt/llvm/bin/clang'
   const defaultClang = (yield* fs.exists(homebrewClang)) ? homebrewClang : 'clang'
-  const clang = yield* Config.string('SILK_CLANG').pipe(Config.withDefault(defaultClang))
+  const clang = yield* Config.String('SILK_CLANG').pipe(Config.withDefault(defaultClang))
   const siblingArchiver = path.join(path.dirname(clang), 'llvm-ar')
   const defaultArchiver = (yield* fs.exists(siblingArchiver)) ? siblingArchiver : 'llvm-ar'
-  const llvmAr = yield* Config.string('SILK_LLVM_AR').pipe(Config.withDefault(defaultArchiver))
+  const llvmAr = yield* Config.String('SILK_LLVM_AR').pipe(Config.withDefault(defaultArchiver))
   yield* fs.makeDirectory(path.dirname(destination), { recursive: true })
-  const cacheDirectory = yield* Config.string('SILK_SCRATCHPAD_CACHE_DIR').pipe(
+  const cacheDirectory = yield* Config.String('SILK_SCRATCHPAD_CACHE_DIR').pipe(
     Config.withDefault(path.join(directory, 'dist', 'cache')),
   )
   // One store backs both caches here; each is its own tag, so they can be split by providing
@@ -77,7 +77,7 @@ const program = Effect.gen(function* () {
 })
 
 const TracingLive = Layer.unwrap(
-  Config.string('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT').pipe(
+  Config.String('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT').pipe(
     Config.withDefault('http://127.0.0.1:4318/v1/traces'),
     Effect.map((url) =>
       OtlpTracer.layer({

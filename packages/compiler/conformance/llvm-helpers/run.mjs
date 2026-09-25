@@ -24,16 +24,16 @@ const program = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const target = yield* Config.string('SILK_SUPPLY_TARGET')
-  const clang = yield* Config.string('SILK_SUPPLY_CLANG')
-  const llvmAr = yield* Config.string('SILK_SUPPLY_AR')
-  const linker = yield* Config.string('SILK_SUPPLY_LINKER')
-  const inspect = yield* Config.string('SILK_SUPPLY_READOBJ')
-  const root = yield* Config.string('SILK_SUPPLY_ROOT')
-  const gcc = yield* Config.string('SILK_SUPPLY_GCC').pipe(Config.withDefault(''))
-  const image = yield* Config.string('SILK_SUPPLY_IMAGE').pipe(Config.withDefault(''))
+  const target = yield* Config.String('SILK_SUPPLY_TARGET')
+  const clang = yield* Config.String('SILK_SUPPLY_CLANG')
+  const llvmAr = yield* Config.String('SILK_SUPPLY_AR')
+  const linker = yield* Config.String('SILK_SUPPLY_LINKER')
+  const inspect = yield* Config.String('SILK_SUPPLY_READOBJ')
+  const root = yield* Config.String('SILK_SUPPLY_ROOT')
+  const gcc = yield* Config.String('SILK_SUPPLY_GCC').pipe(Config.withDefault(''))
+  const image = yield* Config.String('SILK_SUPPLY_IMAGE').pipe(Config.withDefault(''))
   const output = path.resolve(
-    yield* Config.string('SILK_SUPPLY_OUTPUT').pipe(Config.withDefault('.scratch/llvm-helpers')),
+    yield* Config.String('SILK_SUPPLY_OUTPUT').pipe(Config.withDefault('.scratch/llvm-helpers')),
   )
   yield* fs.makeDirectory(output, { recursive: true })
   const run = Effect.fnUntraced(

@@ -727,7 +727,7 @@ class CLayoutOracleError extends Data.TaggedError('CLayoutOracleError')<{
 
 const cLayoutOracleToolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
-  clang: Effect.runSync(Config.string('SILK_TEST_CLANG').pipe(Config.withDefault('clang'))),
+  clang: Effect.runSync(Config.String('SILK_TEST_CLANG').pipe(Config.withDefault('clang'))),
   llvmAr: 'llvm-ar',
   runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
 })

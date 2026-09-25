@@ -74,9 +74,9 @@ const program = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const clang = yield* Config.string('SILK_SUPPLY_CLANG')
+  const clang = yield* Config.String('SILK_SUPPLY_CLANG')
   const output = path.resolve(
-    yield* Config.string('SILK_STORAGE_WASM_OUTPUT').pipe(
+    yield* Config.String('SILK_STORAGE_WASM_OUTPUT').pipe(
       Config.withDefault('.scratch/execution-storage/wasm32'),
     ),
   )

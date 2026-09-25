@@ -3,7 +3,7 @@ import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 
 const configured = (name: string): string =>
-  Effect.runSync(Config.string(name).pipe(Config.withDefault('')))
+  Effect.runSync(Config.String(name).pipe(Config.withDefault('')))
 
 /**
  * Locating the LLVM command line tools a test cross-checks itself against.

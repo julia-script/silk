@@ -3,8 +3,8 @@ packages:
   - apps/*
   - examples/*
 catalog:
-  '@effect/vitest': 4.0.0-rc.112
-  effect: 4.0.0-rc.112
+  '@effect/vitest': 4.0.0-rc.117
+  effect: 4.0.0-rc.117
 allowBuilds:
   esbuild: true
   msgpackr-extract: false

@@ -70,7 +70,7 @@ const defaultClang = (): string => {
   return 'clang'
 }
 const wasmClang = Effect.runSync(
-  Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
+  Config.String('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
 )
 
 const isI32Main = (value: unknown): value is () => number => typeof value === 'function'
