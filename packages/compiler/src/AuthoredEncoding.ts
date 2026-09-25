@@ -155,24 +155,23 @@ const validateOwnership = (
   const binders = new Set<string>()
   const references: string[] = []
   const visited = new Set<object>()
-  const pending: Array<{ readonly value: unknown; readonly owner: unknown }> = [
-    { value: self, owner: self.owner },
-  ]
-  while (pending.length > 0) {
-    const item = pending.pop()
-    if (item === undefined) break
-    const value = item.value
-    if (value === null || typeof value !== 'object') continue
+  // Parallel stacks: one record per pending child would dominate this walk's allocation.
+  const pendingValues: Array<object> = [self]
+  const pendingOwners: Array<unknown> = [self.owner]
+  while (pendingValues.length > 0) {
+    const value = pendingValues.pop()
+    const parentOwner = pendingOwners.pop()
+    if (value === undefined) break
     const tag = read(value, '_tag')
-    let owner = item.owner
+    let owner = parentOwner
     if (tag === 'Declaration') {
       owner = read(value, 'owner')
       const key = identityKey(owner)
       if (
         key === undefined ||
         declarations.has(key) ||
-        key === identityKey(item.owner) ||
-        !isWithinOwner(owner, item.owner)
+        key === identityKey(parentOwner) ||
+        !isWithinOwner(owner, parentOwner)
       ) {
         return Result.fail(invalid('Declaration owners must be distinct within a module'))
       }
@@ -217,7 +216,13 @@ const validateOwnership = (
       if (key === undefined) return Result.fail(invalid('Invalid lexical reference'))
       references.push(key)
     }
-    for (const child of Object.values(value)) pending.push({ value: child, owner })
+    for (const key in value) {
+      const child = read(value, key)
+      if (child !== null && typeof child === 'object') {
+        pendingValues.push(child)
+        pendingOwners.push(owner)
+      }
+    }
   }
   if (references.some((key) => !binders.has(key))) {
     return Result.fail(invalid('Lexical reference has no authored binder in its module'))
@@ -225,9 +230,8 @@ const validateOwnership = (
   return Result.succeed(undefined)
 }
 
-type Work =
-  | { readonly _tag: 'Value'; readonly value: unknown }
-  | { readonly _tag: 'End'; readonly value: object; readonly lengthOffset: number }
+/** Closes the innermost open record or sequence frame on the `encode` work stack. */
+const end: unique symbol = Symbol('AuthoredEncoding.end')
 
 /**
  * One iterative walk supplies both structural validation and canonical framing. No recursion depth
@@ -246,7 +250,9 @@ const encode = (
   // validation is a pure function of a subtree and a completed subtree is acyclic, so
   // validation-only walks mark finished objects done and visit each object once.
   const states = new Map<object, 'Active' | 'Done'>()
-  const work: Work[] = [{ _tag: 'Value', value: root }]
+  // Values are pushed bare; `end` pops the matching frame, so leaves allocate no work records.
+  const work: unknown[] = [root]
+  const frames: Array<{ readonly value: object; readonly lengthOffset: number }> = []
   const length = (value: number) => {
     output.push((value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255)
   }
@@ -260,23 +266,23 @@ const encode = (
     frame(2, encoder.encode(String(version)))
   }
   while (work.length > 0) {
-    const next = work.pop()
-    if (next === undefined) break
-    if (next._tag === 'End') {
+    const value = work.pop()
+    if (value === end) {
+      const frame = frames.pop()
+      if (frame === undefined) break
       if (!emit) {
-        states.set(next.value, 'Done')
+        states.set(frame.value, 'Done')
         continue
       }
-      states.delete(next.value)
-      const size = output.length - next.lengthOffset - 4
+      states.delete(frame.value)
+      const size = output.length - frame.lengthOffset - 4
       if (size > 0xffffffff) return Result.fail(invalid('Canonical frame exceeds u32 length'))
-      output[next.lengthOffset] = (size >>> 24) & 255
-      output[next.lengthOffset + 1] = (size >>> 16) & 255
-      output[next.lengthOffset + 2] = (size >>> 8) & 255
-      output[next.lengthOffset + 3] = size & 255
+      output[frame.lengthOffset] = (size >>> 24) & 255
+      output[frame.lengthOffset + 1] = (size >>> 16) & 255
+      output[frame.lengthOffset + 2] = (size >>> 8) & 255
+      output[frame.lengthOffset + 3] = size & 255
       continue
     }
-    const value = next.value
     if (value === undefined) {
       if (emit) frame(3, [])
     } else if (typeof value === 'string') {
@@ -317,10 +323,9 @@ const encode = (
           output.push(8)
           length(0)
         }
-        work.push({ _tag: 'End', value, lengthOffset })
-        for (let index = items.length - 1; index >= 0; index -= 1) {
-          work.push({ _tag: 'Value', value: items[index] })
-        }
+        frames.push({ value, lengthOffset })
+        work.push(end)
+        for (let index = items.length - 1; index >= 0; index -= 1) work.push(items[index])
         continue
       }
       const tag = property(value, '_tag')
@@ -450,7 +455,8 @@ const encode = (
         length(0)
         frame(4, encoder.encode(tag))
       }
-      work.push({ _tag: 'End', value, lengthOffset })
+      frames.push({ value, lengthOffset })
+      work.push(end)
       // Owner identity belongs to the identity channel. Content anchors are owner-relative.
       const contentKeys =
         domain === 'artifact'
@@ -460,7 +466,7 @@ const encode = (
             )
       for (let index = contentKeys.length - 1; index >= 0; index -= 1) {
         const key = contentKeys[index]
-        if (key !== undefined) work.push({ _tag: 'Value', value: property(value, key) })
+        if (key !== undefined) work.push(record[key])
       }
     }
   }
