@@ -1361,6 +1361,43 @@ const originSpanKey = (span: SourceSpan.SourceSpan): string =>
 
 const originsBySpanCache = new WeakMap<LifetimeFlow, Map<string, Array<string>>>()
 
+interface RequiredUse {
+  /** Source start of the requiring point, when it has a span. */
+  readonly start: number | undefined
+  readonly retired: boolean
+  /** Control-flow point after the requiring use, when the use is an executed boundary. */
+  readonly after: number | undefined
+}
+
+const requiredUsesCache = new WeakMap<LifetimeFlow, Map<string, ReadonlyArray<RequiredUse>>>()
+
+/** One origin's required points resolved to spans and boundaries once per flow. */
+const requiredUses = (
+  self: LifetimeFlow,
+  solution: Extract<Lifetime.Solution, { readonly _tag: 'Solved' }>,
+  key: string,
+): ReadonlyArray<RequiredUse> => {
+  let byOrigin = requiredUsesCache.get(self)
+  if (byOrigin === undefined) {
+    byOrigin = new Map()
+    requiredUsesCache.set(self, byOrigin)
+  }
+  let uses = byOrigin.get(key)
+  if (uses === undefined) {
+    const retired = self.retiredUses.get(key)
+    uses = [...(solution.required.get(key) ?? [])].map((point): RequiredUse => {
+      const span = self.spans.get(point)
+      return {
+        start: span?.start,
+        retired: retired?.has(point) === true,
+        after: span === undefined ? undefined : BodyControlFlow.at(self.controlFlow, span)?.after,
+      }
+    })
+    byOrigin.set(key, uses)
+  }
+  return uses
+}
+
 /** Origin keys grouped by their exact creation span, built once per flow for liveness queries. */
 const originsBySpan = (self: LifetimeFlow): ReadonlyMap<string, ReadonlyArray<string>> => {
   let index = originsBySpanCache.get(self)
@@ -1396,24 +1433,15 @@ export const liveAt = (
     : accessed.before
   if (!BodyControlFlow.reaches(self.controlFlow, created.after, at, created.before)) return false
   let observedHolderUse = false
+  const reachable = BodyControlFlow.reachable(self.controlFlow, at, created.before)
   for (const key of origins)
-    for (const point of self.solution.required.get(key) ?? []) {
-      const span = self.spans.get(point)
-      if (span !== undefined && span.start >= start.end) observedHolderUse = true
-      if (self.retiredUses.get(key)?.has(point)) continue
-      const use = span === undefined ? undefined : BodyControlFlow.at(self.controlFlow, span)
-      if (
-        use !== undefined &&
-        BodyControlFlow.reaches(self.controlFlow, at, use.after, created.before)
-      )
-        return true
+    for (const use of requiredUses(self, self.solution, key)) {
+      if (use.start !== undefined && use.start >= start.end) observedHolderUse = true
+      if (use.retired) continue
+      if (use.after !== undefined && reachable.has(use.after)) return true
     }
   const retainedEnd = BodyControlFlow.at(self.controlFlow, end)
-  if (
-    !observedHolderUse &&
-    retainedEnd !== undefined &&
-    BodyControlFlow.reaches(self.controlFlow, at, retainedEnd.after, created.before)
-  )
+  if (!observedHolderUse && retainedEnd !== undefined && reachable.has(retainedEnd.after))
     return true
 
   return false

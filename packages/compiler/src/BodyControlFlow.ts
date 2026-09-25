@@ -23,12 +23,21 @@ export interface BodyControlFlow {
   readonly spans: ReadonlyMap<string, Boundary>
   readonly writes: ReadonlyMap<string, number>
   readonly edges: ReadonlyArray<ReadonlyArray<number>>
-  readonly queries: Map<string, ReadonlySet<number>>
+  /** Answered reachability by start point, then by barrier (-1 for none, or a sorted list). */
+  readonly queries: Map<number, Map<number | string, ReadonlySet<number>>>
   readonly work: { queries: number; cacheHits: number; visitedEdges: number }
 }
 
-const spanKey = (span: SourceSpan.SourceSpan): string =>
-  `${span.sourceId}:${span.start}:${span.end}`
+// Spans are immutable and ownership probes the same span objects repeatedly.
+const spanKeys = new WeakMap<SourceSpan.SourceSpan, string>()
+const spanKey = (span: SourceSpan.SourceSpan): string => {
+  let key = spanKeys.get(span)
+  if (key === undefined) {
+    key = `${span.sourceId}:${span.start}:${span.end}`
+    spanKeys.set(span, key)
+  }
+  return key
+}
 const loopKey = (loop: Tir.LoopId): string =>
   `${loop.function.sourceId}:${loop.function.ordinal}:${loop.ordinal}`
 
@@ -222,7 +231,7 @@ export const present = (
     ...self,
     spans,
     writes,
-    queries: new Map(self.queries),
+    queries: new Map([...self.queries].map(([from, answers]) => [from, new Map(answers)])),
     work: { queries: 0, cacheHits: 0, visitedEdges: 0 },
   }
 }
@@ -244,21 +253,33 @@ export const at = (self: BodyControlFlow, span: SourceSpan.SourceSpan): Boundary
 export const writeAt = (self: BodyControlFlow, span: SourceSpan.SourceSpan): number | undefined =>
   self.writes.get(spanKey(span))
 
-/** Lazily reuses reachability from requested starts; barriers stop re-creation of a loan. */
-export const reaches = (
+/**
+ * Every point reachable from one start without passing a barrier, computed lazily and reused for
+ * every later query from the same start and barriers.
+ */
+export const reachable = (
   self: BodyControlFlow,
   from: number,
-  to: number,
   barrier?: number | ReadonlyArray<number>,
-): boolean => {
+): ReadonlySet<number> => {
   self.work.queries += 1
-  const barriers = new Set(typeof barrier === 'number' ? [barrier] : (barrier ?? []))
-  const key = `${from}:${[...barriers].sort((left, right) => left - right).join(',')}`
-  const cached = self.queries.get(key)
+  // Ownership asks the same few (start, barrier) pairs many thousand times: key the cache by
+  // numbers, allocating a key only for a list of barriers.
+  let key: number | string = -1
+  if (typeof barrier === 'number') key = barrier
+  else if (barrier !== undefined)
+    key = [...new Set(barrier)].sort((left, right) => left - right).join(',')
+  let answers = self.queries.get(from)
+  if (answers === undefined) {
+    answers = new Map()
+    self.queries.set(from, answers)
+  }
+  const cached = answers.get(key)
   if (cached !== undefined) {
     self.work.cacheHits += 1
-    return cached.has(to)
+    return cached
   }
+  const barriers = new Set(typeof barrier === 'number' ? [barrier] : (barrier ?? []))
   const pending = [from]
   const visited = new Set<number>()
   while (pending.length > 0) {
@@ -270,6 +291,14 @@ export const reaches = (
       pending.push(next)
     }
   }
-  self.queries.set(key, visited)
-  return visited.has(to)
+  answers.set(key, visited)
+  return visited
 }
+
+/** Lazily reuses reachability from requested starts; barriers stop re-creation of a loan. */
+export const reaches = (
+  self: BodyControlFlow,
+  from: number,
+  to: number,
+  barrier?: number | ReadonlyArray<number>,
+): boolean => reachable(self, from, barrier).has(to)
