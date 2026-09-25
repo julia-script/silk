@@ -4593,6 +4593,13 @@ const checkFunction = (
       const mutable = state.bindings.get(site)
       if (fact === undefined || mutable === undefined) return []
       // Scope frames track borrowed bindings too, but their owner retains cleanup authority.
+      if (mutable.site._tag === 'Parameter') {
+        const ordinal = mutable.site.parameter.ordinal
+        const access = declaration.parameters.find(
+          (parameter) => parameter.id.ordinal === ordinal,
+        )?.captureAccess
+        if (access === 'Shared' || access === 'Exclusive') return []
+      }
       if (
         mutable.matchAccess === 'Shared' ||
         mutable.matchAccess === 'Exclusive' ||
