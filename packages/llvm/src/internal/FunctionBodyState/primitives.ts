@@ -52,7 +52,8 @@ export interface Draft {
       readonly blocks: Set<number>
     }
   >
-  readonly instructionHandles: Array<FunctionBodyActor.Instruction>
+  /** Instruction handles, minted on first request for result-producing instructions. */
+  readonly instructionHandles: Array<FunctionBodyActor.Instruction | undefined>
   /** Containing block of each switch terminator, keyed by instruction index. */
   readonly switchBlocks: Map<number, number>
   /** One shared operand per local value; instruction descriptions retain operands. */

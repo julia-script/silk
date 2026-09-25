@@ -12,7 +12,7 @@ import * as FunctionBodyDescription from '../FunctionBodyDescription.js'
 import * as Handle from '../Handle.js'
 import type * as OwnedHandle from '../OwnedHandle.js'
 import type * as TypeDescription from '../TypeDescription.js'
-import { validateInstructions } from './InstructionEncoder.js'
+import { instructionHandleAt, validateInstructions } from './InstructionEncoder.js'
 import {
   assertActive,
   type Draft,
@@ -323,18 +323,6 @@ const valueHandle = (
 }
 
 /** @internal */
-const instructionHandle = (
-  draft: Draft,
-  index: number,
-  operation: string,
-): Result.Result<FunctionBodyActor.Instruction, LlvmError> => {
-  const handle = draft.instructionHandles[index]
-  return handle === undefined
-    ? fail(operation, 'Instruction table handle is missing', index)
-    : Result.succeed(handle)
-}
-
-/** @internal */
 export const makeBlock = (
   draft: Draft,
   name: ByteString.ByteString | Uint8Array | string | undefined,
@@ -519,7 +507,7 @@ export const valueInstruction = (
     const index = yield* localIndex(draft, value, 'Value', 'Value.instruction', 'value')
     const source = draft.values[index]?.source
     return source?._tag === 'Instruction'
-      ? yield* instructionHandle(draft, source.instruction, 'Value.instruction')
+      ? yield* instructionHandleAt(draft, source.instruction, 'Value.instruction')
       : undefined
   })
 
@@ -539,12 +527,10 @@ export const instructionResult = (
 /** @internal */
 export const makePhiHandle = (
   draft: Draft,
-  instruction: FunctionBodyActor.Instruction,
+  index: number,
 ): Result.Result<FunctionBodyActor.Phi, LlvmError> => {
-  const index = resolveInstruction(draft, instruction, 'FunctionBody.phi')
-  if (Result.isFailure(index)) return Result.fail(index.failure)
-  draft.openPhis.set(index.success, { incoming: [], blocks: new Set() })
-  return Result.succeed(Handle.make('Phi', draft.owner, index.success))
+  draft.openPhis.set(index, { incoming: [], blocks: new Set() })
+  return Result.succeed(Handle.make('Phi', draft.owner, index))
 }
 
 /** @internal */

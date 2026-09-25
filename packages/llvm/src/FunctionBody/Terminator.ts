@@ -411,17 +411,7 @@ export const sealSwitch = Effect.fnUntraced(function* (
         )
       }
       draft.instructions[index] = { ...instruction, sealed: true }
-      const handle = draft.instructionHandles[index]
-      if (handle === undefined) {
-        return yield* Result.fail(
-          invalidState({
-            operation: 'FunctionBody.sealSwitch',
-            message: 'Switch instruction handle is missing',
-            state: switchHandle,
-          }),
-        )
-      }
-      return handle
+      return yield* FunctionBodyState.instructionHandleAt(draft, index, 'FunctionBody.sealSwitch')
     }),
   )
 })
@@ -530,12 +520,12 @@ export const cleanupLandingPad = Effect.fn('FunctionBody.cleanupLandingPad')(fun
         'Type',
         'FunctionBody.cleanupLandingPad',
       )
-      return (yield* FunctionBodyState.appendResult(
-        draft,
-        typeIndex,
-        name,
-        (result, finalName) => ({ _tag: 'LandingPad', result, name: finalName, type: typeIndex }),
-      )).value
+      return yield* FunctionBodyState.appendResult(draft, typeIndex, name, (result, finalName) => ({
+        _tag: 'LandingPad',
+        result,
+        name: finalName,
+        type: typeIndex,
+      }))
     }),
   )
 })

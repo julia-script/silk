@@ -188,9 +188,7 @@ export const binary = (
         name: finalName,
       }),
     )
-    return Result.isFailure(appended)
-      ? Result.fail(appended.failure)
-      : Result.succeed(appended.success.value)
+    return appended
   })
 
 const exactKinds: ReadonlyArray<BinaryKind> = ['udiv', 'sdiv', 'lshr', 'ashr']
@@ -343,9 +341,7 @@ export const integerCompare = (
         name: finalName,
       }),
     )
-    return Result.isFailure(appended)
-      ? Result.fail(appended.failure)
-      : Result.succeed(appended.success.value)
+    return appended
   })
 
 /**
@@ -396,9 +392,7 @@ export const floatingCompare = (
         name: finalName,
       }),
     )
-    return Result.isFailure(appended)
-      ? Result.fail(appended.failure)
-      : Result.succeed(appended.success.value)
+    return appended
   })
 
 /**
@@ -486,7 +480,5 @@ export const select = (
         name: finalName,
       }),
     )
-    return Result.isFailure(appended)
-      ? Result.fail(appended.failure)
-      : Result.succeed(appended.success.value)
+    return appended
   })

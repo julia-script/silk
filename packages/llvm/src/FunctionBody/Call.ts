@@ -265,7 +265,7 @@ const callTransition = (
       makeInstruction,
     )
     if (Result.isFailure(appended)) return Result.fail(appended.failure)
-    value = appended.success.value
+    value = appended.success
   }
   if (normal !== undefined && unwind !== undefined && predecessor !== undefined) {
     const addedNormal = FunctionBodyState.addPredecessor(draft, normal, predecessor)

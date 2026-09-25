@@ -170,8 +170,6 @@ export const cast = (
           name: finalName,
         }),
       )
-      return Result.isFailure(appended)
-        ? Result.fail(appended.failure)
-        : Result.succeed(appended.success.value)
+      return appended
     },
   )

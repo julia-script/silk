@@ -36,7 +36,7 @@ export const unary = Effect.fnUntraced(function* (
           }),
         )
       }
-      return (yield* FunctionBodyState.appendResult(
+      return yield* FunctionBodyState.appendResult(
         draft,
         resolved.type,
         name,
@@ -48,7 +48,7 @@ export const unary = Effect.fnUntraced(function* (
           result,
           name: finalName,
         }),
-      )).value
+      )
     }),
   )
 })
@@ -75,7 +75,7 @@ export const freeze = Effect.fnUntraced(function* (
         operand,
         'FunctionBody.freeze',
       )
-      return (yield* FunctionBodyState.appendResult(
+      return yield* FunctionBodyState.appendResult(
         draft,
         resolved.type,
         name,
@@ -85,7 +85,7 @@ export const freeze = Effect.fnUntraced(function* (
           result,
           name: finalName,
         }),
-      )).value
+      )
     }),
   )
 })

@@ -99,9 +99,7 @@ export const extractValue = (
         name: finalName,
       }),
     )
-    return Result.isFailure(appended)
-      ? Result.fail(appended.failure)
-      : Result.succeed(appended.success.value)
+    return appended
   })
 
 /**
@@ -149,9 +147,7 @@ export const insertValue = (
         name: finalName,
       }),
     )
-    return Result.isFailure(appended)
-      ? Result.fail(appended.failure)
-      : Result.succeed(appended.success.value)
+    return appended
   })
 
 /**
@@ -239,7 +235,7 @@ export const extractElement = Effect.fnUntraced(function* (
             }),
           )
         }
-        return (yield* FunctionBodyState.appendResult(
+        return yield* FunctionBodyState.appendResult(
           draft,
           sourceType.child,
           name,
@@ -250,7 +246,7 @@ export const extractElement = Effect.fnUntraced(function* (
             result,
             name: finalName,
           }),
-        )).value
+        )
       }),
   )
 })
@@ -314,7 +310,7 @@ export const insertElement = Effect.fnUntraced(function* (
             }),
           )
         }
-        return (yield* FunctionBodyState.appendResult(
+        return yield* FunctionBodyState.appendResult(
           draft,
           source.type,
           name,
@@ -326,7 +322,7 @@ export const insertElement = Effect.fnUntraced(function* (
             result,
             name: finalName,
           }),
-        )).value
+        )
       }),
   )
 })
@@ -417,7 +413,7 @@ export const shuffleVector = Effect.fnUntraced(function* (
         'Type',
         'FunctionBody.shuffleVector',
       )
-      return (yield* FunctionBodyState.appendResult(
+      return yield* FunctionBodyState.appendResult(
         draft,
         resultTypeIndex,
         name,
@@ -429,7 +425,7 @@ export const shuffleVector = Effect.fnUntraced(function* (
           result,
           name: finalName,
         }),
-      )).value
+      )
     }),
   )
 })

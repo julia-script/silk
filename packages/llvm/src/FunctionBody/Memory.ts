@@ -190,7 +190,7 @@ export const alloca = (
         index,
       )
     }
-    return Result.succeed(allocated.success.value)
+    return Result.succeed(allocated.success)
   })
 
 /**
@@ -239,9 +239,7 @@ export const load = (
         name: finalName,
       }),
     )
-    return Result.isFailure(appended)
-      ? Result.fail(appended.failure)
-      : Result.succeed(appended.success.value)
+    return appended
   })
 }
 
@@ -454,9 +452,7 @@ export const getElementPtr = (
         name: finalName,
       }),
     )
-    return Result.isFailure(appended)
-      ? Result.fail(appended.failure)
-      : Result.succeed(appended.success.value)
+    return appended
   })
 
 /**
@@ -609,7 +605,7 @@ export const compareExchange = Effect.fnUntraced(function* (
           'Type',
           'FunctionBody.compareExchange',
         )
-        return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) => ({
+        return yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) => ({
           _tag: 'CompareExchange',
           pointer: address.operand,
           comparison: expected.operand,
@@ -619,7 +615,7 @@ export const compareExchange = Effect.fnUntraced(function* (
           weak: options.weak ?? false,
           result,
           name: finalName,
-        }))).value
+        }))
       }),
   )
 })
@@ -688,7 +684,7 @@ export const atomicRmw = Effect.fnUntraced(function* (
           }),
         )
       }
-      return (yield* FunctionBodyState.appendResult(
+      return yield* FunctionBodyState.appendResult(
         draft,
         operand.type,
         name,
@@ -701,7 +697,7 @@ export const atomicRmw = Effect.fnUntraced(function* (
           result,
           name: finalName,
         }),
-      )).value
+      )
     }),
   )
 })
@@ -742,13 +738,13 @@ export const vaArg = Effect.fnUntraced(function* (
         'Type',
         'FunctionBody.vaArg',
       )
-      return (yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) => ({
+      return yield* FunctionBodyState.appendResult(draft, type, name, (result, finalName) => ({
         _tag: 'VaArg',
         list: source.operand,
         valueType: type,
         result,
         name: finalName,
-      }))).value
+      }))
     }),
   )
 })

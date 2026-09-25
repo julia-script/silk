@@ -68,7 +68,8 @@ export const phi = (
       }),
     )
     if (Result.isFailure(appended)) return Result.fail(appended.failure)
-    return FunctionBodyState.makePhiHandle(draft, appended.success.instruction)
+    // appendResult just pushed the phi as the draft's last instruction.
+    return FunctionBodyState.makePhiHandle(draft, draft.instructions.length - 1)
   })
 
 /**
