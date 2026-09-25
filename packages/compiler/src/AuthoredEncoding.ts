@@ -120,16 +120,18 @@ const isWithinOwner = (value: unknown, parent: unknown): boolean => {
   const parentPath = read(parent, 'path')
   if (!Array.isArray(path) || !Array.isArray(parentPath) || path.length < parentPath.length)
     return false
-  const segmentKey = (part: unknown): string | undefined => {
-    if (part === null || typeof part !== 'object') return undefined
-    return JSON.stringify([
-      read(part, 'kind'),
-      read(part, 'name'),
-      read(part, 'role'),
-      read(part, 'occurrence'),
-    ])
-  }
-  return parentPath.every((part, index) => segmentKey(part) === segmentKey(path[index]))
+  // `encode` has already proven every segment a record of primitive fields.
+  const sameSegment = (left: unknown, right: unknown): boolean =>
+    left === right ||
+    (left !== null &&
+      typeof left === 'object' &&
+      right !== null &&
+      typeof right === 'object' &&
+      read(left, 'kind') === read(right, 'kind') &&
+      read(left, 'name') === read(right, 'name') &&
+      read(left, 'role') === read(right, 'role') &&
+      read(left, 'occurrence') === read(right, 'occurrence'))
+  return parentPath.every((part, index) => sameSegment(part, path[index]))
 }
 
 const binderTags = new Set([
@@ -237,6 +239,9 @@ const encode = Effect.fnUntraced(function* (
 ): Effect.fn.Return<ReadonlyArray<number>, AuthoredEncodingError> {
   const output: number[] = []
   const active = new Set<object>()
+  // Lowering shares subtrees (owner identities above all). Validation is a pure function of a
+  // subtree, and a completed subtree is acyclic, so validation-only walks visit each object once.
+  const validated = emit ? undefined : new Set<object>()
   const work: Work[] = [{ _tag: 'Value', value: root }]
   const length = (value: number) => {
     output.push((value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255)
@@ -255,7 +260,10 @@ const encode = Effect.fnUntraced(function* (
     if (next === undefined) break
     if (next._tag === 'End') {
       active.delete(next.value)
-      if (!emit) continue
+      if (validated !== undefined) {
+        validated.add(next.value)
+        continue
+      }
       const size = output.length - next.lengthOffset - 4
       if (size > 0xffffffff) return yield* invalid('Canonical frame exceeds u32 length')
       output[next.lengthOffset] = (size >>> 24) & 255
@@ -283,6 +291,7 @@ const encode = Effect.fnUntraced(function* (
     } else if (value === null || typeof value !== 'object') {
       return yield* invalid('Unsupported authored value')
     } else {
+      if (validated?.has(value)) continue
       if (active.has(value)) return yield* invalid('Authored artifact contains a cycle')
       const isArray = Array.isArray(value)
       if (!isArray && Object.getPrototypeOf(value) !== Object.prototype) {
