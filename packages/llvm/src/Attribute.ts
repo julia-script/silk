@@ -79,26 +79,25 @@ const descriptionKey = (description: AttributeDescription.Description): string =
   }
 }
 
-/** @internal */
-const intern = Effect.fnUntraced(function* (
+/**
+ * Plain transition rather than a generator: native emission interns on nearly every instruction.
+ *
+ * @internal
+ */
+const intern = (
   builder: Builder.Builder,
   description: AttributeDescription.Description,
-) {
-  return yield* BuilderState.mutate(builder, 'Attribute.intern', (state, owner) =>
-    Result.gen(function* () {
-      const key = descriptionKey(description)
-      const interned = yield* Table.intern(
-        state.attributes,
-        'Attribute.intern',
-        'Attribute',
-        key,
-        description,
-        (index) => Handle.make('Attribute', owner, index),
-      )
-      return interned.handle
-    }),
+): Effect.Effect<Attribute, LlvmError> =>
+  BuilderState.mutate(builder, 'Attribute.intern', (state, owner) =>
+    Table.intern(
+      state.attributes,
+      'Attribute.intern',
+      'Attribute',
+      descriptionKey(description),
+      description,
+      (index) => Handle.make('Attribute', owner, index),
+    ),
   )
-})
 
 /** @internal */
 const validateName = Effect.fnUntraced(function* (
@@ -255,7 +254,7 @@ const internSet = Effect.fnUntraced(function* (
       }
       const values = ordered
       const key = CanonicalKey.sequence(values.map(CanonicalKey.integer))
-      const interned = yield* Table.intern(
+      return yield* Table.intern(
         state.attributeSets,
         'Attribute.set',
         'AttributeSet',
@@ -263,7 +262,6 @@ const internSet = Effect.fnUntraced(function* (
         values,
         (index) => Handle.make('AttributeSet', owner, index),
       )
-      return interned.handle
     }),
   )
 })
@@ -481,7 +479,7 @@ export const functionSet = Effect.fnUntraced(function* (
         CanonicalKey.integer(returnIndex),
         CanonicalKey.sequence(parameterIndices.map(CanonicalKey.integer)),
       ])
-      const interned = yield* Table.intern(
+      return yield* Table.intern(
         state.functionAttributeSets,
         'Attribute.functionSet',
         'FunctionAttributeSet',
@@ -489,7 +487,6 @@ export const functionSet = Effect.fnUntraced(function* (
         description,
         (index) => Handle.make('FunctionAttributeSet', owner, index),
       )
-      return interned.handle
     }),
   )
 })

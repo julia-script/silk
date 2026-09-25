@@ -134,74 +134,97 @@ const descriptionKey = (description: ConstantDescription.Description): string =>
   }
 }
 
-/** @internal */
-const intern = Effect.fnUntraced(function* (
+/**
+ * Plain transition rather than a generator: native emission interns on nearly every instruction.
+ *
+ * @internal
+ */
+const intern = (
   builder: Builder.Builder,
   description: ConstantDescription.Description,
-) {
-  return yield* BuilderState.mutate(builder, 'Constant.intern', (state, owner) =>
-    Result.gen(function* () {
-      const key = descriptionKey(description)
-      const interned = yield* Table.intern(
-        state.constants,
-        'Constant.intern',
-        'Constant',
-        key,
-        description,
-        (index) => Handle.make('Constant', owner, index),
-      )
-      return interned.handle
-    }),
+): Effect.Effect<Constant, LlvmError> =>
+  BuilderState.mutate(builder, 'Constant.intern', (state, owner) =>
+    Table.intern(
+      state.constants,
+      'Constant.intern',
+      'Constant',
+      descriptionKey(description),
+      description,
+      (index) => Handle.make('Constant', owner, index),
+    ),
   )
-})
 
-/** @internal */
-const integerOf = Effect.fnUntraced(function* (
+/**
+ * Native emission requests an integer constant on most instructions, overwhelmingly repeats of a
+ * few values, so validated requests are cached per builder by type, signedness, and input value
+ * in front of the canonical constant table. The transition is plain synchronous code rather than
+ * nested generators for the same reason.
+ *
+ * @internal
+ */
+const integerOf = (
   builder: Builder.Builder,
   type: Type.Type,
   value: bigint,
   signed: boolean,
-): Effect.fn.Return<Constant, LlvmError> {
-  const description = yield* BuilderState.mutate(builder, 'Constant.integer', (state, owner) =>
-    Result.gen(function* () {
-      const typeIndex = yield* Handle.resolve(builder, owner, type, 'Type', 'Constant.integer')
-      const typeValue = yield* Table.descriptionAt(
-        state.types,
-        typeIndex,
-        'Constant.integer',
-        'Type',
+): Effect.Effect<Constant, LlvmError> =>
+  BuilderState.mutate(builder, 'Constant.integer', (state, owner) => {
+    const typeIndex = Handle.resolve(builder, owner, type, 'Type', 'Constant.integer')
+    if (Result.isFailure(typeIndex)) return Result.fail(typeIndex.failure)
+    const cacheKey = typeIndex.success * 2 + (signed ? 1 : 0)
+    const cached = state.integerConstants.get(cacheKey)?.get(value)
+    if (cached !== undefined) return Result.succeed(cached)
+    const typeValue = Table.descriptionAt(
+      state.types,
+      typeIndex.success,
+      'Constant.integer',
+      'Type',
+    )
+    if (Result.isFailure(typeValue)) return Result.fail(typeValue.failure)
+    const bitWidth = typeValue.success._tag === 'Integer' ? typeValue.success.bitWidth : undefined
+    if (bitWidth === undefined) {
+      return Result.fail(
+        invalidInput({
+          operation: 'Constant.integer',
+          message: 'Integer constants require an integer type',
+          input: type,
+        }),
       )
-      if (typeValue._tag !== 'Integer') {
-        return yield* Result.fail(
-          invalidInput({
-            operation: 'Constant.integer',
-            message: 'Integer constants require an integer type',
-            input: type,
-          }),
-        )
-      }
-      const modulus = 1n << BigInt(typeValue.bitWidth)
-      const minimum = signed ? -(1n << BigInt(typeValue.bitWidth - 1)) : 0n
-      const maximum = signed ? (1n << BigInt(typeValue.bitWidth - 1)) - 1n : modulus - 1n
-      if (value < minimum || value > maximum) {
-        return yield* Result.fail(
-          invalidInput({
-            operation: 'Constant.integer',
-            message: `Integer value does not fit i${typeValue.bitWidth}`,
-            input: value,
-          }),
-        )
-      }
-      return {
-        _tag: 'Integer' as const,
-        type: typeIndex,
-        bitPattern: value < 0n ? modulus + value : value,
-        signed,
-      }
-    }),
-  )
-  return yield* intern(builder, description)
-})
+    }
+    const modulus = 1n << BigInt(bitWidth)
+    const minimum = signed ? -(1n << BigInt(bitWidth - 1)) : 0n
+    const maximum = signed ? (1n << BigInt(bitWidth - 1)) - 1n : modulus - 1n
+    if (value < minimum || value > maximum) {
+      return Result.fail(
+        invalidInput({
+          operation: 'Constant.integer',
+          message: `Integer value does not fit i${bitWidth}`,
+          input: value,
+        }),
+      )
+    }
+    const description: ConstantDescription.Description = {
+      _tag: 'Integer',
+      type: typeIndex.success,
+      bitPattern: value < 0n ? modulus + value : value,
+      signed,
+    }
+    const interned = Table.intern(
+      state.constants,
+      'Constant.intern',
+      'Constant',
+      descriptionKey(description),
+      description,
+      (index) => Handle.make('Constant', owner, index),
+    )
+    if (Result.isSuccess(interned)) {
+      const values = state.integerConstants.get(cacheKey)
+      if (values === undefined)
+        state.integerConstants.set(cacheKey, new Map([[value, interned.success]]))
+      else values.set(value, interned.success)
+    }
+    return interned
+  })
 
 /**
  * Interns a non-negative arbitrary-width integer after checking it fits the declared integer type.
@@ -229,19 +252,19 @@ const integerOf = Effect.fnUntraced(function* (
  * @category constants
  * @since 0.0.0
  */
-export const integerUnsigned = Effect.fnUntraced(function* (
+export const integerUnsigned = (
   builder: Builder.Builder,
   type: Type.Type,
   value: number | bigint,
-): Effect.fn.Return<Constant, LlvmError> {
-  const exact = yield* Effect.fromResult(
-    IntegerInput.normalize(value, {
-      operation: 'Constant.integerUnsigned',
-      message: 'LLVM integer constants require finite safe integers or bigints',
-    }),
-  )
-  return yield* integerOf(builder, type, exact, false)
-})
+): Effect.Effect<Constant, LlvmError> => {
+  const exact = IntegerInput.normalize(value, {
+    operation: 'Constant.integerUnsigned',
+    message: 'LLVM integer constants require finite safe integers or bigints',
+  })
+  return Result.isFailure(exact)
+    ? Effect.fail(exact.failure)
+    : integerOf(builder, type, exact.success, false)
+}
 
 /**
  * Interns the opaque pointer constant that refers to a module global.
@@ -275,19 +298,19 @@ export const fromGlobal = Effect.fnUntraced(function* (
  * @category constants
  * @since 0.0.0
  */
-export const integerSigned = Effect.fnUntraced(function* (
+export const integerSigned = (
   builder: Builder.Builder,
   type: Type.Type,
   value: number | bigint,
-): Effect.fn.Return<Constant, LlvmError> {
-  const exact = yield* Effect.fromResult(
-    IntegerInput.normalize(value, {
-      operation: 'Constant.integerSigned',
-      message: 'LLVM integer constants require finite safe integers or bigints',
-    }),
-  )
-  return yield* integerOf(builder, type, exact, true)
-})
+): Effect.Effect<Constant, LlvmError> => {
+  const exact = IntegerInput.normalize(value, {
+    operation: 'Constant.integerSigned',
+    message: 'LLVM integer constants require finite safe integers or bigints',
+  })
+  return Result.isFailure(exact)
+    ? Effect.fail(exact.failure)
+    : integerOf(builder, type, exact.success, true)
+}
 
 const formatTypeTag: Record<FloatFormat, TypeDescription.SimpleTag> = {
   half: 'Half',

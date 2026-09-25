@@ -40,6 +40,8 @@ export interface MutableState {
     Attribute.FunctionSet
   >
   constants: Table.Table<ConstantDescription.Description, Constant.Constant>
+  /** Integer constants keyed by `type * 2 + signed`, then by the validated input value. */
+  integerConstants: Map<number, Map<bigint, Constant.Constant>>
   globals: GlobalTable.GlobalTable
   buildingFunctions: Set<number>
   /** Default intrinsic resolutions keyed by intrinsic id and overload type indices. */

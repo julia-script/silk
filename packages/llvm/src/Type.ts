@@ -97,26 +97,25 @@ const keyForDescription = (description: TypeDescription.Description): string => 
   }
 }
 
-/** @internal */
-const intern = Effect.fnUntraced(function* (
+/**
+ * Plain transition rather than a generator: native emission interns on nearly every instruction.
+ *
+ * @internal
+ */
+const intern = (
   builder: Builder.Builder,
   description: TypeDescription.Description,
-) {
-  return yield* BuilderState.mutate(builder, 'Type.intern', (state, owner) =>
-    Result.gen(function* () {
-      const key = keyForDescription(description)
-      const interned = yield* Table.intern(
-        state.types,
-        'Type.intern',
-        'Type',
-        key,
-        description,
-        (index) => Handle.make('Type', owner, index),
-      )
-      return interned.handle
-    }),
+): Effect.Effect<Type, LlvmError> =>
+  BuilderState.mutate(builder, 'Type.intern', (state, owner) =>
+    Table.intern(
+      state.types,
+      'Type.intern',
+      'Type',
+      keyForDescription(description),
+      description,
+      (index) => Handle.make('Type', owner, index),
+    ),
   )
-})
 
 /** @internal */
 const simple = (builder: Builder.Builder, tag: TypeDescription.SimpleTag) =>
@@ -271,19 +270,19 @@ export const token = Effect.fnUntraced(function* (builder: Builder.Builder) {
  * @category types
  * @since 0.0.0
  */
-export const integer = Effect.fnUntraced(function* (
+export const integer = (
   builder: Builder.Builder,
   bitWidth: number,
-): Effect.fn.Return<Type, LlvmError> {
-  if (!Number.isSafeInteger(bitWidth) || bitWidth < 1 || bitWidth > 0xff_ffff) {
-    return yield* invalidInput({
-      operation: 'Type.integer',
-      message: 'LLVM integer width must be from 1 through 16777215 bits',
-      input: bitWidth,
-    })
-  }
-  return yield* intern(builder, { _tag: 'Integer', bitWidth })
-})
+): Effect.Effect<Type, LlvmError> =>
+  !Number.isSafeInteger(bitWidth) || bitWidth < 1 || bitWidth > 0xff_ffff
+    ? Effect.fail(
+        invalidInput({
+          operation: 'Type.integer',
+          message: 'LLVM integer width must be from 1 through 16777215 bits',
+          input: bitWidth,
+        }),
+      )
+    : intern(builder, { _tag: 'Integer', bitWidth })
 
 /**
  * Returns the canonical opaque pointer type for an address space.
@@ -291,12 +290,10 @@ export const integer = Effect.fnUntraced(function* (
  * @category types
  * @since 0.0.0
  */
-export const pointer = Effect.fnUntraced(function* (
+export const pointer = (
   builder: Builder.Builder,
   addressSpace: AddrSpace.AddrSpace = AddrSpace.defaultAddrSpace,
-) {
-  return yield* intern(builder, { _tag: 'Pointer', addressSpace })
-})
+): Effect.Effect<Type, LlvmError> => intern(builder, { _tag: 'Pointer', addressSpace })
 
 /** @internal */
 const indices = (
