@@ -1579,17 +1579,29 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
 
 /** One expression and all of its semantic children in deterministic preorder. */
 export const expressionTree = (expression: Expression): ReadonlyArray<Expression> => {
-  const children = expressionChildren(expression)
-  return [expression, ...children.flatMap(expressionTree)]
+  // One output array: nested flatMap/spread copied every subtree once per ancestor.
+  const tree: Array<Expression> = []
+  const collect = (node: Expression): void => {
+    tree.push(node)
+    for (const child of expressionChildren(node)) collect(child)
+  }
+  collect(expression)
+  return tree
 }
 
 /** Runtime-bearing expression children; sealed assembly metadata never acquires data storage. */
 export const runtimeExpressionTree = (expression: Expression): ReadonlyArray<Expression> => {
-  const children =
-    expression._tag === 'BuiltinCall' && expression.operation === 'NativeAssembly'
-      ? expression.arguments.slice(6)
-      : expressionChildren(expression)
-  return [expression, ...children.flatMap(runtimeExpressionTree)]
+  const tree: Array<Expression> = []
+  const collect = (node: Expression): void => {
+    tree.push(node)
+    const children =
+      node._tag === 'BuiltinCall' && node.operation === 'NativeAssembly'
+        ? node.arguments.slice(6)
+        : expressionChildren(node)
+    for (const child of children) collect(child)
+  }
+  collect(expression)
+  return tree
 }
 
 /** Reachable return operands in this execution boundary, including eager ordinary arms. */
