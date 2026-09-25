@@ -560,7 +560,13 @@ export const buildBody = Effect.fn('Function.buildBody')(function* <A, E, R>(
           )
         }
         state.buildingFunctions.add(functionIndex)
-        return { functionIndex, type: description.type, signature, owner }
+        return {
+          functionIndex,
+          type: description.type,
+          signature,
+          owner,
+          localNames: state.localNames,
+        }
       }),
     ),
     (acquired) => {
@@ -571,6 +577,7 @@ export const buildBody = Effect.fn('Function.buildBody')(function* <A, E, R>(
         acquired.type,
         acquired.signature,
         fiber,
+        acquired.localNames,
       )
       return Effect.onExit(
         Effect.gen(function* () {

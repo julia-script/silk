@@ -1,7 +1,7 @@
 import * as Result from 'effect/Result'
 import type * as BlockActor from '../../Block.js'
 import type * as Builder from '../../Builder.js'
-import type * as ByteString from '../../ByteString.js'
+import * as ByteString from '../../ByteString.js'
 import type * as Constant from '../../Constant.js'
 import type * as FunctionBodyActor from '../../FunctionBody.js'
 import { invalidInput, type LlvmError } from '../../LlvmError.js'
@@ -56,6 +56,8 @@ export interface Draft {
   readonly switchBlocks: Map<number, number>
   /** One shared operand per local value; instruction descriptions retain operands. */
   readonly localOperands: Array<FunctionBodyDescription.Operand | undefined>
+  /** The module's shared local-name encodings. */
+  readonly localNames: Map<string, ByteString.ByteString>
   readonly values: Array<MutableValue>
   readonly valueHandles: Array<ValueActor.Value>
   readonly metadata: Array<ReadonlyArray<MetadataDescription.Attachment>>
@@ -66,6 +68,25 @@ export interface Draft {
 export const noAttachments: ReadonlyArray<MetadataDescription.Attachment> = []
 
 export const drafts = new WeakMap<FunctionBodyActor.FunctionBody, Draft>()
+
+/**
+ * Encodes a local value or block name, sharing one encoding per distinct string: emitted names
+ * repeat across functions, and every body retains its names until bitcode encoding.
+ *
+ * @internal
+ */
+export const localName = (
+  draft: Draft,
+  name: ByteString.ByteString | Uint8Array | string | undefined,
+): ByteString.ByteString => {
+  if (typeof name !== 'string') return ByteString.coerceOrEmpty(name)
+  let encoded = draft.localNames.get(name)
+  if (encoded === undefined) {
+    encoded = ByteString.fromString(name)
+    draft.localNames.set(name, encoded)
+  }
+  return encoded
+}
 
 /** @internal */
 export const fail = (

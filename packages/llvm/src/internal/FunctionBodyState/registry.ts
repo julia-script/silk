@@ -19,6 +19,7 @@ import {
   drafts,
   fail,
   localIndex,
+  localName,
   lookup,
   type OperandInput,
 } from './primitives.js'
@@ -31,6 +32,7 @@ export const create = (
   functionType: number,
   signature: Extract<TypeDescription.Description, { readonly _tag: 'Function' }>,
   creatorFiber: number,
+  localNames: Map<string, ByteString.ByteString>,
 ): FunctionBodyActor.FunctionBody => {
   const owner: OwnedHandle.Owner = { token: Symbol('llvm-function-body-owner') }
   const self = Handle.make('FunctionBody', owner, 0)
@@ -52,6 +54,7 @@ export const create = (
     instructionHandles: [],
     switchBlocks: new Map(),
     localOperands: [],
+    localNames,
     values: [],
     valueHandles: [],
     metadata: [],
@@ -339,7 +342,7 @@ export const makeBlock = (
   const index = draft.blocks.length
   const handle = Handle.make('Block', draft.owner, index)
   draft.blocks.push({
-    name: ByteString.coerceOrEmpty(name),
+    name: localName(draft, name),
     instructions: [],
     predecessors: new Set(),
   })
@@ -404,7 +407,7 @@ export const forward = (
   const handle = Handle.make('Value', draft.owner, index)
   draft.values.push({
     type,
-    name: ByteString.coerceOrEmpty(name),
+    name: localName(draft, name),
     source: { _tag: 'Forward', resolved: undefined },
   })
   draft.valueHandles.push(handle)
@@ -481,7 +484,7 @@ export const setValueName = (
         }),
       )
     }
-    description.name = ByteString.coerceOrEmpty(name)
+    description.name = localName(draft, name)
     if (description.source._tag === 'Instruction') {
       const instruction = draft.instructions[description.source.instruction]
       if (instruction !== undefined) {
