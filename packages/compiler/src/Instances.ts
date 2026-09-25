@@ -443,6 +443,56 @@ const carriedSectionArgument = (argument: Type.GenericArgument): Type.GenericArg
   return Type.isRuntimeConcrete(closed) ? closed : argument
 }
 
+// Discovery and every suspension-graph rebuild key the same target applications repeatedly. The
+// contract row is a function of the contract, its declared parameters, and the exact visible
+// arguments, so it is derived once per distinct application.
+const contractRows = new WeakMap<Tir.ContractFact, Map<string, ReadonlyArray<string> | undefined>>()
+
+const contractRowOf = (
+  contract: Tir.ContractFact,
+  typeParameters: ReadonlyArray<Type.Parameter>,
+  visibleArguments: ReadonlyArray<Type.GenericArgument>,
+): ReadonlyArray<string> | undefined => {
+  let rows = contractRows.get(contract)
+  if (rows === undefined) {
+    rows = new Map()
+    contractRows.set(contract, rows)
+  }
+  const application = `${typeParameters.map(Type.key).join('\u0001')}\u0002${visibleArguments
+    .map(Type.genericArgumentKey)
+    .join('\u0001')}`
+  if (rows.has(application)) return rows.get(application)
+  const selected = TypeInference.selectedSubstitution(typeParameters, visibleArguments)
+  let row: ReadonlyArray<string> | undefined
+  if (selected === undefined) row = undefined
+  else if (contract._tag !== 'Contract') row = []
+  else {
+    const { substitution, compatibility } = selected
+    row = [
+      ...contract.parameters.map((type) =>
+        Type.runtimeKey(Type.substitute(type, substitution, compatibility)),
+      ),
+      `result:${Type.runtimeKey(Type.substitute(contract.result, substitution))}`,
+      ...(contract.failureRow === undefined
+        ? []
+        : [
+            `failures:${Type.runtimeFailureRowKey(Type.substituteFailureRow(contract.failureRow, substitution))}`,
+          ]),
+      ...(contract.requirementRow === undefined
+        ? []
+        : [
+            `requirements:${Type.runtimeRequirementsRowKey(Type.substituteRequirementsRow(contract.requirementRow, substitution))}`,
+          ]),
+      ...contract.constraints.map(
+        (constraint) =>
+          `constraint:${Type.runtimeConstraintKey(Constraint.substitute(constraint, substitution))}`,
+      ),
+    ]
+  }
+  rows.set(application, row)
+  return row
+}
+
 const keyOf = (
   declaration: DeclarationFacts.CanonicalId,
   contract: Tir.ContractFact,
@@ -450,48 +500,24 @@ const keyOf = (
   rawTypeArguments: ReadonlyArray<Type.GenericArgument> = [],
   staticArguments: ReadonlyArray<StaticValue.Value> = [],
   evidence: ReadonlyArray<string> = [],
-): InstanceKey =>
-  (() => {
-    const typeArguments = rawTypeArguments.map(carriedSectionArgument)
-    const selected = TypeInference.selectedSubstitution(
-      typeParameters,
-      typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
-    )
-    if (selected === undefined) {
-      throw new RangeError('Instance key type arguments do not match declaration parameters')
-    }
-    const { substitution, compatibility } = selected
-    return {
-      _tag: 'InstanceKey',
-      declaration,
-      typeArguments: Array.from(typeArguments),
-      evidence: [...evidence],
-      staticArguments: [...staticArguments],
-      contractRow:
-        contract._tag === 'Contract'
-          ? [
-              ...contract.parameters.map((type) =>
-                Type.runtimeKey(Type.substitute(type, substitution, compatibility)),
-              ),
-              `result:${Type.runtimeKey(Type.substitute(contract.result, substitution))}`,
-              ...(contract.failureRow === undefined
-                ? []
-                : [
-                    `failures:${Type.runtimeFailureRowKey(Type.substituteFailureRow(contract.failureRow, substitution))}`,
-                  ]),
-              ...(contract.requirementRow === undefined
-                ? []
-                : [
-                    `requirements:${Type.runtimeRequirementsRowKey(Type.substituteRequirementsRow(contract.requirementRow, substitution))}`,
-                  ]),
-              ...contract.constraints.map(
-                (constraint) =>
-                  `constraint:${Type.runtimeConstraintKey(Constraint.substitute(constraint, substitution))}`,
-              ),
-            ]
-          : [],
-    }
-  })()
+): InstanceKey => {
+  const typeArguments = rawTypeArguments.map(carriedSectionArgument)
+  const contractRow = contractRowOf(
+    contract,
+    typeParameters,
+    typeArguments.filter((argument) => !Type.isHiddenExecutableArgument(argument)),
+  )
+  if (contractRow === undefined)
+    throw new RangeError('Instance key type arguments do not match declaration parameters')
+  return {
+    _tag: 'InstanceKey',
+    declaration,
+    typeArguments,
+    evidence: [...evidence],
+    staticArguments: [...staticArguments],
+    contractRow,
+  }
+}
 
 const keyTextCache = new WeakMap<InstanceKey, string>()
 
