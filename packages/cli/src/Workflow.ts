@@ -18,6 +18,7 @@ import type * as TestExecution from '@silklang/compiler/TestExecution'
 import type * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
 import * as Console from 'effect/Console'
 import type * as Crypto from 'effect/Crypto'
+import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
@@ -130,9 +131,13 @@ const outcomeStatus = (outcome: Exclude<Driver.Outcome, { readonly _tag: 'Compil
  * The effect-inspect trace exporter, loaded only when tracing is requested: the package also ships
  * an inspector web application, so the CLI declares it as an optional peer.
  */
+class TraceUnavailable extends Data.TaggedError('TraceUnavailable')<{
+  readonly cause: unknown
+}> {}
+
 const inspectLayer = Effect.tryPromise({
   try: () => import('effect-inspect'),
-  catch: (cause) => cause,
+  catch: (cause) => new TraceUnavailable({ cause }),
 }).pipe(Effect.map((module) => module.Inspect.layer()))
 
 /** Compiles one selected entry and classifies source versus operational failures. */
