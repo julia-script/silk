@@ -19,13 +19,22 @@ const sameRequirement = (left: Type.Requirement, right: Type.Requirement): boole
   left.access === right.access &&
   Type.equals(left.capability, right.capability)
 
+// Runner keys are rebuilt for every lowered Effect site over the same immutable contract types.
+const keys = new WeakMap<Type.Effect, string>()
+
 /** Semantic machine identity after erasing only outer access and executable lifetime proofs. */
-export const key = (self: Type.Effect): string =>
-  JSON.stringify([
-    Type.key(self.success),
-    RowAlgebra.key(Type.failureRowPolicy(), self.failureRow),
-    RowAlgebra.key(Type.requirementRowPolicy(), self.requirementRow),
-  ])
+export const key = (self: Type.Effect): string => {
+  let cached = keys.get(self)
+  if (cached === undefined) {
+    cached = JSON.stringify([
+      Type.key(self.success),
+      RowAlgebra.key(Type.failureRowPolicy(), self.failureRow),
+      RowAlgebra.key(Type.requirementRowPolicy(), self.requirementRow),
+    ])
+    keys.set(self, cached)
+  }
+  return cached
+}
 
 /** Exact executable channels; outer access and executable lifetime proofs are non-runtime facts. */
 export const equals = (left: Type.Effect, right: Type.Effect): boolean =>
