@@ -146,7 +146,7 @@ it('canonicalizes lifetime binders without erasing declaration, scope or assumpt
 it('reuses lifetime proof keys across repeated comparisons and enclosing intersections', () => {
   let ownerReads = 0
   const owner = Object.freeze({ module: 'lifetimes', name: 'cached' })
-  const lifetime: Lifetime.Local = Object.freeze({
+  const lifetime: Lifetime.Local = {
     _tag: 'LocalLifetime',
     get owner() {
       ownerReads += 1
@@ -154,7 +154,7 @@ it('reuses lifetime proof keys across repeated comparisons and enclosing interse
     },
     context: 'Borrow:0',
     ordinal: 0,
-  })
+  }
   const first = Lifetime.key(lifetime)
   const readsAfterFirst = ownerReads
   assert.isAbove(readsAfterFirst, 0)

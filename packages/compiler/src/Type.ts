@@ -1732,7 +1732,8 @@ export const genericArgumentKey = (self: GenericArgument): string => {
   const cached: unknown = Reflect.get(self, cachedGenericArgumentKey)
   if (typeof cached === 'string') return cached
   const computed = computeGenericArgumentKey(self)
-  Object.defineProperty(self, cachedGenericArgumentKey, { value: computed })
+  if (Object.isExtensible(self))
+    Object.defineProperty(self, cachedGenericArgumentKey, { value: computed })
   return computed
 }
 
@@ -1976,7 +1977,7 @@ export const key = (self: Type): string => {
   const cached: unknown = Reflect.get(self, cachedKey)
   if (typeof cached === 'string') return cached
   const computed = computeKey(self)
-  Object.defineProperty(self, cachedKey, { value: computed })
+  if (Object.isExtensible(self)) Object.defineProperty(self, cachedKey, { value: computed })
   return computed
 }
 
