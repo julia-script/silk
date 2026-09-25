@@ -1454,6 +1454,22 @@ export const discover = (
   }
   const declarationText = (key: InstanceKey): string =>
     `${key.declaration.module}\u0000${key.declaration.name}`
+  const familiesByDeclaration = new Map<string, Set<string>>()
+  /** A provider's finite callable target selects which body can continue a generic call cycle. */
+  const recursionFamily = (key: InstanceKey): string => {
+    const declaration = declarationText(key)
+    const targets = key.typeArguments
+      .filter(Type.isCallableIdentityArgument)
+      .map((argument) => argument.target)
+    const family = targets.length === 0 ? declaration : JSON.stringify([declaration, targets])
+    let families = familiesByDeclaration.get(declaration)
+    if (families === undefined) {
+      families = new Set()
+      familiesByDeclaration.set(declaration, families)
+    }
+    families.add(family)
+    return family
+  }
   const variableArguments = new Map<string, boolean>()
   const emptySubstitution: Type.Substitution = new Map()
   /**
@@ -1478,31 +1494,31 @@ export const discover = (
     return needed
   }
   /**
-   * Instance keys seen for one declaration, which is what its ancestry can ever distinguish.
+   * Instance keys seen for one finite declaration/provider-target family.
    *
    * `needsAncestor` admits a declaration whose arguments *may* vary. Whether they do is a fact
-   * about the program: a declaration discovery only ever realizes at one instance key has one
+   * about the program: a family discovery only ever realizes at one instance key has one
    * possible ancestor, equal to every target of it, so every guard below it is admitted and its
    * correlation with the rest of the history decides nothing. Recording it anyway is what made the
    * exact history of a few hundred mutually recursive walkers grow past what a process can hold,
    * because one strongly connected component projects onto itself and nothing else removes it.
-   * A declaration therefore enters the ancestry only once a second instance key proves it
+   * A family therefore enters the ancestry only once a second instance key proves it
    * discriminating, and discovery restarts so the histories built without it are rebuilt with it.
    */
   const realizedKeys = new Map<string, Set<string>>()
   const discriminating = new Set<string>()
   let discriminatingGrew = false
   const isDiscriminating = (key: InstanceKey): boolean => {
-    const declaration = declarationText(key)
-    if (discriminating.has(declaration)) return true
-    let keys = realizedKeys.get(declaration)
+    const family = recursionFamily(key)
+    if (discriminating.has(family)) return true
+    let keys = realizedKeys.get(family)
     if (keys === undefined) {
       keys = new Set()
-      realizedKeys.set(declaration, keys)
+      realizedKeys.set(family, keys)
     }
     keys.add(keyText(key))
     if (keys.size < 2) return false
-    discriminating.add(declaration)
+    discriminating.add(family)
     discriminatingGrew = true
     return true
   }
@@ -1517,7 +1533,7 @@ export const discover = (
       ancestor.structuralProvider === undefined ? null : Type.key(ancestor.structuralProvider),
     ])
     ancestorValues.set(value, ancestor)
-    return AncestorHistory.set(histories, history, declarationText(ancestor.key), value)
+    return AncestorHistory.set(histories, history, recursionFamily(ancestor.key), value)
   }
   /**
    * A guard below a call to `T` consults only the ancestors of declarations called beneath `T`.
@@ -1594,9 +1610,13 @@ export const discover = (
     ancestor: Ancestor,
   ): AncestorHistory.History => {
     const declaration = declarationText(ancestor.key)
+    recursionFamily(ancestor.key)
     const cycle = cycleOf(declaration)
     if (!projectedCycleSizes.has(declaration)) projectedCycleSizes.set(declaration, cycle.size)
-    return withAncestor(AncestorHistory.project(histories, history, cycle), ancestor)
+    const families = new Set(
+      [...cycle].flatMap((member) => [...(familiesByDeclaration.get(member) ?? [])]),
+    )
+    return withAncestor(AncestorHistory.project(histories, history, families), ancestor)
   }
   const cycleGrewAfterProjection = (): boolean => {
     for (const [declaration, size] of projectedCycleSizes)
@@ -2331,7 +2351,7 @@ export const discover = (
           for (const [value, branchHistory] of AncestorHistory.partition(
             histories,
             item.ancestors,
-            declarationText(targetKey),
+            recursionFamily(targetKey),
           )) {
             const ancestor = value === undefined ? undefined : ancestorValues.get(value)
             const structurallyDescending =
@@ -2435,11 +2455,10 @@ export const discover = (
         )
         for (const ownerContext of recordedContexts.get(keyText(provided.owner))?.values() ?? []) {
           addCallEdge(provided.owner, provided.target)
-          const declaration = declarationText(provided.target)
           for (const [value, branchHistory] of AncestorHistory.partition(
             histories,
             ownerContext.ancestors,
-            declaration,
+            recursionFamily(provided.target),
           )) {
             const ancestor = value === undefined ? undefined : ancestorValues.get(value)
             // A cleanup implementation can select another specialization of the same lexical service
