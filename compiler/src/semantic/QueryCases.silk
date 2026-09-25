@@ -1,0 +1,297 @@
+//! Focused source tests for typed query ownership and scoped reservations.
+
+import semantic.Query {Cycle, Query}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.effect {Effect}
+import silk.execution {Execution}
+import silk.hash {Hash, Word}
+import silk.result {Result}
+import silk.shared {Shared}
+import silk.testing {AssertionError, Testing}
+import silk.vector {Vector}
+
+struct Rejection {
+  code: i32
+}
+
+struct ProviderError {
+  code: i32
+}
+
+effect fn accepted(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i32, Rejection> {
+  return Result.succeed<i32, Rejection>(41)
+}
+
+effect fn rejected(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i32, Rejection> {
+  return Result.failResult<i32, Rejection>(Rejection {code: 7})
+}
+
+effect fn mustNotRun(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i32, Rejection> {
+  let stopped = 1 / 0
+  return Result.succeed<i32, Rejection>(stopped)
+}
+
+effect fn failed(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i32, Rejection>
+! ProviderError {
+  fail ProviderError {code: 19}
+}
+
+effect fn recursive(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i32, Rejection>
+! Cycle | OutOfMemoryError
+? &mut Allocator {
+  let ignored = run Query.demand(move owner, key, recursive)
+  drop ignored
+  return Result.succeed<i32, Rejection>(0)
+}
+
+effect fn nested(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i32, Rejection>
+! Cycle | OutOfMemoryError
+? &mut Allocator {
+  if key.value == 5 {
+    let inner = run Query.demand(move owner, Hash.word(6), nested)
+    drop inner
+  }
+  return Result.succeed<i32, Rejection>(41)
+}
+
+effect fn ownedBytes(owner: &mut Query<Word, Vector<u8>, Rejection>, key: Word) -> Result<
+  Vector<u8>,
+  Rejection,
+> ! OutOfMemoryError ? &mut Allocator {
+  let mut bytes = Vector.make<u8>()
+  run Vector.append<u8>(&mut bytes, 42)
+  return Result.succeed<Vector<u8>, Rejection>(move bytes)
+}
+
+fn acceptedValue(value: &Result<i32, Rejection>) -> bool {
+  return match & value.* {
+    Result<i32, Rejection>.Success {value: answer} => answer == 41
+    Result<i32, Rejection>.Failure {error: _} => false
+  }
+}
+
+fn rejectedValue(value: &Result<i32, Rejection>) -> bool {
+  return match & value.* {
+    Result<i32, Rejection>.Success {value: _} => false
+    Result<i32, Rejection>.Failure {error} => error.code == 7
+  }
+}
+
+fn unexpectedAnswer(value: Shared<Result<i32, Rejection>>) -> bool {
+  drop value
+  return false
+}
+
+effect fn completedAnswers() -> ()
+! OutOfMemoryError | Cycle | AssertionError<'static>
+? &mut Allocator {
+  let mut query = Query.make<Word, i32, Rejection>()
+  let first = run Query.demand(&mut query, Hash.word(1), accepted)
+  let second = run Query.demand(&mut query, Hash.word(1), mustNotRun)
+  let rejection = run Query.demand(&mut query, Hash.word(2), rejected)
+  let repeated = run Query.demand(&mut query, Hash.word(2), mustNotRun)
+  run Testing.expect(
+    Shared.with<Result<i32, Rejection>, bool>(&first, acceptedValue),
+    "first answer",
+  )
+  run Testing.expect(
+    Shared.with<Result<i32, Rejection>, bool>(&second, acceptedValue),
+    "cached answer",
+  )
+  run Testing.expect(
+    Shared.with<Result<i32, Rejection>, bool>(&rejection, rejectedValue),
+    "rejection",
+  )
+  run Testing.expect(
+    Shared.with<Result<i32, Rejection>, bool>(&repeated, rejectedValue),
+    "cached rejection",
+  )
+  run Testing.expect(Query.length(&query) == 2, "completed entries")
+  return ()
+}
+
+test effect fn cachesTypedOutcomes() -> () ! OutOfMemoryError | Cycle | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run completedAnswers()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn failedDemandReleases() -> ()
+! OutOfMemoryError | Cycle | AssertionError<'static>
+? &mut Allocator {
+  let mut query = Query.make<Word, i32, Rejection>()
+  let attempted = run Effect.result(Query.demand(&mut query, Hash.word(3), failed))
+  let providerFailed = match move attempted {
+    Result<Shared<Result<i32, Rejection>>, Cycle | ProviderError | OutOfMemoryError>.Success {value} => unexpectedAnswer(
+      move value,
+    )
+    Result<Shared<Result<i32, Rejection>>, Cycle | ProviderError | OutOfMemoryError>.Failure {error} => match move error {
+      ProviderError {code} => code == 19
+      Cycle {} => false
+      OutOfMemoryError {} => false
+    }
+  }
+  run Testing.expect(providerFailed, "typed provider failure is distinct")
+  run Testing.expect(Query.length(&query) == 0, "failed key is released")
+  let retried = run Query.demand(&mut query, Hash.word(3), accepted)
+  run Testing.expect(
+    Shared.with<Result<i32, Rejection>, bool>(&retried, acceptedValue),
+    "retry completes",
+  )
+  return ()
+}
+
+test effect fn retriesAfterTypedFailure() -> () ! OutOfMemoryError | Cycle | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run failedDemandReleases()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn cycleAndNestedDemand() -> ()
+! OutOfMemoryError | Cycle | AssertionError<'static>
+? &mut Allocator {
+  let mut query = Query.make<Word, i32, Rejection>()
+  let attempted = run Effect.result(Query.demand(&mut query, Hash.word(4), recursive))
+  let cycled = match move attempted {
+    Result<Shared<Result<i32, Rejection>>, Cycle | OutOfMemoryError>.Success {value} => unexpectedAnswer(
+      move value,
+    )
+    Result<Shared<Result<i32, Rejection>>, Cycle | OutOfMemoryError>.Failure {error} => match move error {
+      Cycle {} => true
+      OutOfMemoryError {} => false
+    }
+  }
+  run Testing.expect(cycled, "recursive key reports a cycle")
+  run Testing.expect(Query.length(&query) == 0, "cycle releases the outer key")
+  let outer = run Query.demand(&mut query, Hash.word(5), nested)
+  run Testing.expect(
+    Shared.with<Result<i32, Rejection>, bool>(&outer, acceptedValue),
+    "nested answer",
+  )
+  run Testing.expect(Query.length(&query) == 2, "both nested keys complete")
+  return ()
+}
+
+test effect fn recognizesCyclesAndAllowsNestedKeys() -> ()
+! OutOfMemoryError | Cycle | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run cycleAndNestedDemand()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+fn oneOwnedByte(value: &Result<Vector<u8>, Rejection>) -> bool {
+  return match & value.* {
+    Result<Vector<u8>, Rejection>.Success {value: bytes} => Vector.length<u8>(&bytes) == 1 && Vector.get<
+      u8,
+    >(&bytes, 0) == 42
+    Result<Vector<u8>, Rejection>.Failure {error: _} => false
+  }
+}
+
+effect fn moveOnlyAnswer() -> ()
+! OutOfMemoryError | Cycle | AssertionError<'static>
+? &mut Allocator {
+  let mut query = Query.make<Word, Vector<u8>, Rejection>()
+  let answer = run Query.demand(&mut query, Hash.word(7), ownedBytes)
+  run Testing.expect(
+    Shared.with<Result<Vector<u8>, Rejection>, bool>(&answer, oneOwnedByte),
+    "move-only answer stays owned",
+  )
+  return ()
+}
+
+test effect fn storesMoveOnlyAnswers() -> () ! OutOfMemoryError | Cycle | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run moveOnlyAnswer()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+struct CancellationMark {
+  released: bool
+}
+
+struct TrackedQuery {
+  query: Query<Word, i32, Rejection>
+  mark: Shared<CancellationMark>
+}
+
+impl Drop for TrackedQuery {
+  fn drop(self: &mut TrackedQuery) -> () {
+    let released = Query.length(&self.query) == 0
+    Shared.withMut<CancellationMark, ()>(
+      &self.mark,
+      fn(mark: &mut CancellationMark) -> () {
+        mark.released = released
+        return ()
+      },
+    )
+    return ()
+  }
+}
+
+fn register(wake: Intrinsic.Wake) -> () {
+  drop wake
+  return ()
+}
+
+effect fn parked(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i32, Rejection> {
+  run Execution.park(register)
+  return Result.succeed<i32, Rejection>(0)
+}
+
+effect fn cancelledWork(mark: Shared<CancellationMark>) -> ()
+! OutOfMemoryError | Cycle
+? &mut Allocator {
+  let mut tracked = TrackedQuery {query: Query.make<Word, i32, Rejection>(), mark: move mark}
+  let answer = run Query.demand(&mut tracked.query, Hash.word(8), parked)
+  drop answer
+  return ()
+}
+
+effect fn ignoreCancellationError(error: OutOfMemoryError | Cycle) -> () {
+  drop error
+  return ()
+}
+
+effect fn cancelledBody(mark: Shared<CancellationMark>) -> () {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let work = cancelledWork(move mark)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  return run Effect.catchAll(move work, ignoreCancellationError)
+}
+
+fn ready(state: &()) -> () {
+  return ()
+}
+
+fn completed(state: Shared<CancellationMark>, answer: ()) -> () {
+  drop state
+  return ()
+}
+
+fn suspended(state: Shared<CancellationMark>, execution: Intrinsic.Execution<()>) -> () {
+  drop execution
+  drop state
+  return ()
+}
+
+fn wasReleased(mark: &CancellationMark) -> bool {
+  return mark.released
+}
+
+effect fn cancellationReleases() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let mark = run Shared.make<CancellationMark>(CancellationMark {released: false})
+  let execution = run Execution.make(cancelledBody(Shared.clone(&mark)), (), ready)
+  run Execution.drive(move execution, Shared.clone(&mark), completed, suspended)
+  run Testing.expect(
+    Shared.with<CancellationMark, bool>(&mark, wasReleased),
+    "cancellation releases active key",
+  )
+  return ()
+}
+
+test effect fn cancelsActiveReservation() -> () ! OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run cancellationReleases()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}

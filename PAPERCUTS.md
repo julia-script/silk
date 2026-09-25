@@ -2,6 +2,10 @@
 
 Format: date · symptom · fix · project. Check here first when tooling is slow or fails mysteriously.
 
+- 2026-09-25 · A focused source-written query test used `--file`, but the CLI still compiled the
+  manifest root and its full import graph for over two minutes · Use `--root
+  src/semantic/QueryCases.silk` to compile only the test module's import graph · self-hosted compiler
+
 - 2026-09-23 · A fresh task checkout had no `node_modules`; offline pnpm install missed cached
   tarballs and sandboxed registry requests failed DNS resolution, then focused Vitest could not
   import `ToolchainIntegrity.generated.js` · Run the lockfile install with approved network access
