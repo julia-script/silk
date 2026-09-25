@@ -562,6 +562,8 @@ export interface ParameterFact {
   readonly phase: 'Runtime' | 'Static'
   readonly bindingMutability: 'Immutable' | 'Mutable'
   readonly declaredType: DeclaredTypeFact
+  /** Access to the enclosing value when this is an anonymous callable's capture parameter. */
+  readonly captureAccess?: Type.CaptureAccess
   readonly anchor: AuthoredHir.Anchor
 }
 

@@ -124,6 +124,52 @@ const finalizeSuspension = (
   )
 }
 
+it.effect('retains borrowed anonymous effect captures as loans', () =>
+  Effect.gen(function* () {
+    const { snapshot, layout } = yield* lowerStored(
+      'stored-effect-mir/borrowed-provider',
+      `import silk.effect {Effect}
+struct Marker { value: i32 }
+impl Drop for Marker { fn drop(self: &mut Marker) -> () { return () } }
+effect fn discard<'env>(provide: once fn<'env>() -> once Effect<'env; i32>) -> i32 {
+  if true {
+    drop move provide
+    return 1
+  }
+  return run provide()
+}
+pub fn main() -> i32 {
+  let marker = Marker { value: 7 }
+  return run discard(effect fn() -> i32 { return marker.value })
+}`,
+      new Map(),
+      Target.aarch64AppleDarwin.id,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const markerFields = (
+      fields: ReadonlyArray<Layout.CallableEnvironmentField | Layout.EffectEnvironmentField>,
+    ) =>
+      fields
+        .filter((field) => Type.encode(field.type).endsWith('.Marker'))
+        .map((field) => ({ access: field.access, representation: field.representation }))
+    assert.deepEqual(
+      layout.callableEnvironments
+        .filter((environment) => environment._tag === 'CallableEnvironment')
+        .flatMap((environment) => markerFields(environment.fields)),
+      [{ access: 'Shared', representation: 'Borrow' }],
+    )
+    assert.deepEqual(
+      layout.effectEnvironments
+        .filter((environment) => environment._tag === 'EffectEnvironment')
+        .flatMap((environment) => markerFields(environment.fields)),
+      [{ access: 'Shared', representation: 'Borrow' }],
+    )
+  }),
+)
+
 const replaceDrop = (
   module: Mir.Module,
   target: Extract<Mir.Operation, { readonly _tag: 'Drop' }>,

@@ -9594,6 +9594,7 @@ const analyzeAnonymousCallable = (
       name,
       phase: 'Runtime',
       bindingMutability: capture.access === 'Exclusive' ? 'Mutable' : 'Immutable',
+      captureAccess: capture.access,
       declaredType: {
         _tag: 'Resolved',
         type,
