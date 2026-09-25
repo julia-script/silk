@@ -30,14 +30,13 @@ export type Input = Value | Constant.Constant
  * @category values
  * @since 0.0.0
  */
-export const argument = Effect.fnUntraced(function* (
+export const argument = (
   body: FunctionBody.FunctionBody,
   index: number,
-): Effect.fn.Return<Value, LlvmError> {
-  return yield* FunctionBodyState.mutate(body, 'Value.argument', (draft) =>
+): Effect.Effect<Value, LlvmError> =>
+  FunctionBodyState.mutate(body, 'Value.argument', (draft) =>
     FunctionBodyState.argument(draft, index),
   )
-})
 
 /**
  * Allocates a typed forward value for loop-carried or otherwise not-yet-built SSA references.

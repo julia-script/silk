@@ -380,21 +380,19 @@ export const setCursor = (
 }
 
 /** @internal */
-export const argument = (draft: Draft, index: number): Result.Result<ValueActor.Value, LlvmError> =>
-  Result.gen(function* () {
-    if (!Number.isSafeInteger(index) || index < 0) {
-      return yield* fail('Value.argument', 'Argument index must be a non-negative integer', index)
-    }
-    const value = draft.arguments[index]
-    if (value === undefined) {
-      return yield* fail(
-        'Value.argument',
-        'Argument index is outside the function signature',
-        index,
-      )
-    }
-    return yield* valueHandle(draft, value, 'Value.argument')
-  })
+export const argument = (
+  draft: Draft,
+  index: number,
+): Result.Result<ValueActor.Value, LlvmError> => {
+  if (!Number.isSafeInteger(index) || index < 0) {
+    return fail('Value.argument', 'Argument index must be a non-negative integer', index)
+  }
+  const value = draft.arguments[index]
+  if (value === undefined) {
+    return fail('Value.argument', 'Argument index is outside the function signature', index)
+  }
+  return valueHandle(draft, value, 'Value.argument')
+}
 
 /** @internal */
 export const forward = (
