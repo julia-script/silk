@@ -93,8 +93,8 @@ it('keeps requirement rows out of stored generic lifetime obligations', () => {
 
 it('reuses the runtime identity of an immutable type across nested layout queries', () => {
   let argumentReads = 0
-  const arguments_ = Object.freeze(['i32'] as const)
-  const nominal: Type.Nominal = Object.freeze({
+  const arguments_ = ['i32'] as const
+  const nominal: Type.Nominal = {
     _tag: 'NominalType',
     module: 'runtime-key',
     name: 'Box',
@@ -102,7 +102,7 @@ it('reuses the runtime identity of an immutable type across nested layout querie
       argumentReads += 1
       return arguments_
     },
-  })
+  }
   const first = Type.runtimeKey(nominal)
   const readsAfterFirst = argumentReads
   assert.isAbove(readsAfterFirst, 0)

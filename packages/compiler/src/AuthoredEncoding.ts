@@ -203,7 +203,9 @@ const validateOwnership = (
       (read(value, 'namespace') !== self.owner.namespace ||
         read(value, 'module') !== self.owner.module)
     )
-      return Result.fail(invalid('Authored identities and local references must belong to their module'))
+      return Result.fail(
+        invalid('Authored identities and local references must belong to their module'),
+      )
     if (typeof tag === 'string' && binderTags.has(tag)) {
       const key = localKey(read(value, 'anchor'))
       if (key === undefined || binders.has(key))
@@ -285,7 +287,9 @@ const encode = (
       if (emit) frame(5, encoder.encode(value.toString()))
     } else if (typeof value === 'number') {
       if (!Number.isSafeInteger(value) || Object.is(value, -0)) {
-        return Result.fail(invalid('Numbers must be exact safe integers; exact literals use bigint'))
+        return Result.fail(
+          invalid('Numbers must be exact safe integers; exact literals use bigint'),
+        )
       }
       if (emit) frame(6, encoder.encode(String(value)))
     } else if (typeof value === 'boolean') {
@@ -365,7 +369,9 @@ const encode = (
           namespace.startsWith('/') ||
           module.split('/').some((part) => part === '' || part === '.' || part === '..')
         ) {
-          return Result.fail(invalid('Owner identity must use a logical namespace and canonical module'))
+          return Result.fail(
+            invalid('Owner identity must use a logical namespace and canonical module'),
+          )
         }
       }
       if (tag === 'PoolText') {

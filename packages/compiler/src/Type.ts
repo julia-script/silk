@@ -4151,7 +4151,7 @@ export const runtimeKey = (self: Type): string => {
   const cached: unknown = Reflect.get(self, cachedRuntimeKey)
   if (typeof cached === 'string') return cached
   const computed = computeRuntimeKey(self)
-  Object.defineProperty(self, cachedRuntimeKey, { value: computed })
+  if (Object.isExtensible(self)) Object.defineProperty(self, cachedRuntimeKey, { value: computed })
   return computed
 }
 

@@ -32,7 +32,7 @@ export const key = (self: Type.Effect): string => {
     RowAlgebra.key(Type.failureRowPolicy(), self.failureRow),
     RowAlgebra.key(Type.requirementRowPolicy(), self.requirementRow),
   ])
-  Object.defineProperty(self, cachedKey, { value: computed })
+  if (Object.isExtensible(self)) Object.defineProperty(self, cachedKey, { value: computed })
   return computed
 }
 

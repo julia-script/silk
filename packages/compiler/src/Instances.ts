@@ -532,7 +532,7 @@ export const keyText = (key: InstanceKey): string => {
       ? ''
       : `\u0001${key.staticArguments.map(StaticValue.key).join('\u0000')}`
   }\u0002${key.contractRow.join('\u0000')}`
-  Object.defineProperty(key, cachedKeyText, { value: computed })
+  if (Object.isExtensible(key)) Object.defineProperty(key, cachedKeyText, { value: computed })
   return computed
 }
 

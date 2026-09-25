@@ -41,7 +41,7 @@ export const runtimeKey = (self: Specialization): string => {
   const cached: unknown = Reflect.get(self, cachedRuntimeKey)
   if (typeof cached === 'string') return cached
   const computed = `${self.declaration.module}\u0000${self.declaration.name}\u0000${Type.runtimeArgumentKeys(self.typeArguments).join('\u0000')}${self.evidence === undefined || self.evidence.length === 0 ? '' : `\u0004${self.evidence.join('\u0000')}`}${self.staticArguments === undefined || self.staticArguments.length === 0 ? '' : `\u0001${self.staticArguments.map(StaticValue.key).join('\u0000')}`}`
-  Object.defineProperty(self, cachedRuntimeKey, { value: computed })
+  if (Object.isExtensible(self)) Object.defineProperty(self, cachedRuntimeKey, { value: computed })
   return computed
 }
 

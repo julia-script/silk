@@ -864,12 +864,7 @@ const configureProjectSelection = Effect.fn('Frontend.configureProjectSelection'
     )
     profile = configured.completion?.profile
     if (configured.completion !== undefined && ModuleSelection.required(closure)) {
-      const selected = yield* ModuleSelection.select(
-        request,
-        closure,
-        configured.completion,
-        base,
-      )
+      const selected = yield* ModuleSelection.select(request, closure, configured.completion, base)
       closure = selected.closure
       selection = selected.selection
     } else if (configured.completion === undefined) {
