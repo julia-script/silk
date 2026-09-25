@@ -257,8 +257,10 @@ them back to a local owner, as required by Silk's ownership rules.
 Build this checkout's bootstrap CLI, then run the M1 source-written cases. The M1 discovery root
 imports the existing query, source-index, and semantic cases. The focused HIR run checks exact
 integer magnitudes and fingerprints without pulling the full HIR suite into the semantic binary.
-`--no-cache` executes assertions even if a previous run stored passing results. These commands are
-also the focused M1 CI path.
+`--no-cache` executes assertions even if a previous run stored passing results. The self-hosted M1
+CI job runs these commands for pull requests targeting the exact `selfhost` branch. The workflow's
+push trigger remains limited to `main`; use these commands locally to validate M1 on a pull request
+targeting `main`.
 
 ```sh
 CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...

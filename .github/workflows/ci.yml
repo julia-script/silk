@@ -139,7 +139,11 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=6144
 
   self-hosted-m1:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    if: >-
+      github.event_name != 'schedule' &&
+      github.event_name != 'workflow_dispatch' &&
+      ((github.event_name == 'pull_request' && github.base_ref == 'selfhost') ||
+       (github.event_name == 'push' && github.ref == 'refs/heads/selfhost'))
     name: Self-hosted M1 semantics
     runs-on: ubuntu-latest
     timeout-minutes: 30
