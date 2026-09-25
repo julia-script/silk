@@ -1589,10 +1589,14 @@ export const validateCleanup = (
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly work?: Lifetime.Work
 } => {
+  // Fresh destructor points stay out of every availability set: a region is available at one
+  // exactly when it is available at its exit's source point and its root is not yet released
+  // there, so the solver's violations at fresh points are filtered by that rule instead of
+  // copying every region's points and adding each release point to each available region.
   const regions = new Map(
     self.input.regions.map((region) => [
       Lifetime.key(region.lifetime),
-      { ...region, available: new Set(region.available), required: new Set(region.required) },
+      { ...region, required: new Set(region.required) },
     ]),
   )
   const activatedConstraints = (self.input.activatedConstraints ?? []).map((bound) => ({
@@ -1600,11 +1604,18 @@ export const validateCleanup = (
     points: new Set(bound.points),
   }))
   const spans = new Map(self.spans)
-  const regionRoots = [...regions.values()].map((region) => {
-    const origin = self.origins.get(Lifetime.key(region.lifetime))
-    return { region, root: origin?.root === undefined ? undefined : Ownership.siteKey(origin.root) }
-  })
-  let pointCount = self.input.pointCount
+  const roots = new Map<string, string | undefined>()
+  for (const key of regions.keys()) {
+    const root = self.origins.get(key)?.root
+    roots.set(key, root === undefined ? undefined : Ownership.siteKey(root))
+  }
+  const firstPoint = self.input.pointCount
+  const fresh: Array<{
+    readonly sourcePoint: number | undefined
+    readonly releases: ReadonlyMap<string, number>
+    readonly release: number
+  }> = []
+  let pointCount = firstPoint
   for (const exit of ownership.exits) {
     const sourcePoint = cleanupSourcePoint(self, exit.span)
     // Fresh destructor points never equal the source point, so membership tests against it
@@ -1613,31 +1624,46 @@ export const validateCleanup = (
       sourcePoint === undefined
         ? []
         : activatedConstraints.filter((bound) => bound.points.has(sourcePoint))
-    const availableRegions = regionRoots.filter(
-      ({ region }) =>
-        region.lifetime._tag === 'StaticLifetime' ||
-        (sourcePoint !== undefined && region.available.has(sourcePoint)),
-    )
-    const released = new Set<string>()
-    for (const release of exit.releases) {
+    // The first release ordinal of each root within this exit.
+    const releases = new Map<string, number>()
+    for (const [ordinal, release] of exit.releases.entries()) {
       const point = pointCount++
       spans.set(point, exit.span)
+      fresh.push({ sourcePoint, releases, release: ordinal })
       // Ordered destructor points inherit the bounds active at this exit, including
       // dependencies installed after the holder's original acquisition.
       for (const bound of activeBounds) bound.points.add(point)
-      for (const { region, root } of availableRegions)
-        if (root === undefined || !released.has(root)) region.available.add(point)
       for (const lifetime of cleanupLifetimes(release.cleanup, release.initialization))
         regions.get(Lifetime.key(lifetime))?.required.add(point)
-      released.add(Ownership.siteKey(release.binding.site))
+      const root = Ownership.siteKey(release.binding.site)
+      if (!releases.has(root)) releases.set(root, ordinal)
     }
   }
-  const solution = Lifetime.solve({
+  const availableAtFresh = (lifetime: Lifetime.Lifetime, point: number): boolean => {
+    const at = fresh[point - firstPoint]
+    const key = Lifetime.key(lifetime)
+    const region = regions.get(key)
+    if (at === undefined || region === undefined) return false
+    if (at.sourcePoint === undefined || !region.available.has(at.sourcePoint)) return false
+    const root = roots.get(key)
+    const released = root === undefined ? undefined : at.releases.get(root)
+    return released === undefined || released >= at.release
+  }
+  const solved = Lifetime.solve({
     ...self.input,
     pointCount,
     regions: [...regions.values()],
     activatedConstraints,
   })
+  const solution: Lifetime.Solution =
+    solved._tag === 'Solved'
+      ? {
+          ...solved,
+          violations: solved.violations.filter(
+            ({ lifetime, point }) => point < firstPoint || !availableAtFresh(lifetime, point),
+          ),
+        }
+      : solved
   return {
     diagnostics: diagnosticsOf(
       solution,
