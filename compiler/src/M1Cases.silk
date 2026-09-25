@@ -1,0 +1,5 @@
+//! Source-written M1 checks for lazy semantic queries and source revisions.
+
+import semantic.QueryCases
+import semantic.SourceIndexCases
+import semantic.SemanticCases

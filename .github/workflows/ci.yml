@@ -138,6 +138,33 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
+  self-hosted-m1:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    name: Self-hosted M1 semantics
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: ./.github/actions/setup-linux-llvm
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}-self-hosted-m1
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
+            turbo-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
+      - run: node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/M1Cases.silk --no-cache
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+      - run: node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/hir/LoweringCases.silk --filter integer --no-cache
+
   # Pull requests run a representative compile/link/execute smoke set. The bounded TLS witnesses
   # use separate processes so their realized compiler graphs do not accumulate in one V8 heap.
   # Main keeps the complete corpus, split by SILK_NATIVE_SHARD because every case lives in one

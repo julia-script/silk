@@ -1,10 +1,9 @@
 # Self-hosted Silk frontend
 
-This directory contains the self-hosted lexer, parser, and HIR lowering. The current executable
-reads one Silk file and prints either its flat AST and syntax diagnostics or, in `hir` mode, its
-lowered module and declaration fingerprints. It does not yet perform name resolution, type
-checking, or code generation on that input. The TypeScript bootstrap compiler still builds this
-executable.
+This directory contains the self-hosted lexer, parser, HIR lowering, and M1 semantic query library.
+The current executable reads one Silk file and prints its flat AST and syntax diagnostics, or its
+lowered module and declaration fingerprints in `hir` mode. It does not yet perform name resolution,
+type checking, or code generation on that input. The TypeScript bootstrap compiler still builds it.
 
 ## In-memory semantic queries
 
@@ -14,15 +13,18 @@ a fresh ledger starts with no roots or discoveries, even when the store reuses a
 The source index parses the complete names in a requested module, but it opens an imported module
 only when a demanded name needs that import. A completed answer retains direct nested dependencies,
 transitive demand evidence, and exact present or absent source observations. A cache hit supplies those
-facts to the new request without rerunning its nested providers.
+facts to the new request without rerunning its nested providers. Replayed discovery appears in the
+new request ledger; the event log records only queries actually started or hit. Source bytes belong
+to the held revision, with no host file snapshot or mutable filesystem provider in this API.
 
 `Semantic.revise` selects another immutable revision. The next demand validates retained source
 bytes and absent paths before reuse, so changed imported headers or newly present paths recompute
 affected facts and diagnostics against the new source. Unrelated source changes leave completed
 facts reusable. `Semantic.eventLog` records queries actually run or hit; replaying a completed
 answer's evidence does not create synthetic nested hit events. `Semantic.sourceEvents` records source
-reads and name observations for the focused query harness. This API is not wired into the
-inspection executable above.
+reads and name observations. The focused source-written M1 checks use these records to prove
+avoided provider reads and semantic demands; they do not measure speed. This API is not wired into
+the inspection executable above.
 
 The current semantic subset resolves local names, ordinary namespace imports, selective imports,
 explicit aliases, and a hybrid namespace alias with selected members. Qualified type names have
@@ -42,7 +44,12 @@ failure or requirement rows, constraints, and nonstandard callable header modifi
 return `Unsupported` rather than a provisional type. Unused declarations with these forms are
 still indexed as written names and do not require semantic resolution. This M1 slice does not
 check bodies, evaluate static expressions, discover tests, perform conformance or layout checks,
-or emit code.
+or emit code. The authored HIR keeps integer sign, radix, and exact decimal magnitude beyond
+`u64`; semantic integer typing is outside this slice. Structured typed failures and cancellation
+release incomplete query reservations and publication frames, so a later demand can retry the same
+store. A fatal runtime trap ends the process and has no such recovery guarantee. General compiler
+CLI integration, host-backed snapshots, and later semantic and backend milestones remain future
+work.
 
 ## Inspect a source file
 
@@ -247,7 +254,27 @@ them back to a local owner, as required by Silk's ownership rules.
 
 ## Verification
 
-Check the self-hosted program with the bootstrap compiler:
+Build this checkout's bootstrap CLI, then run the M1 source-written cases. The M1 discovery root
+imports the existing query, source-index, and semantic cases. The focused HIR run checks exact
+integer magnitudes and fingerprints without pulling the full HIR suite into the semantic binary.
+`--no-cache` executes assertions even if a previous run stored passing results. These commands are
+also the focused M1 CI path.
+
+```sh
+CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
+NODE_OPTIONS=--max-old-space-size=6144 node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/M1Cases.silk --no-cache
+node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/hir/LoweringCases.silk --filter integer --no-cache
+```
+
+The cases inspect query and source events, retained request evidence, and rejection codes and byte
+spans. They cover an unused missing import and invalid declaration, demanded import and written
+signature, memoized reuse, relevant and unrelated revisions, negative observations, exact integer
+HIR, typed-failure retry, nested query cancellation with same-store retry, and source-publication
+rollback. The cancellation proof combines the executed nested query case with reviewed semantic
+publication boundaries; it does not claim an executed full-semantic cancellation fixture.
+
+Check the self-hosted program with the bootstrap compiler when changing source outside that
+focused entry:
 
 ```sh
 pnpm exec silk check --manifest-path compiler/silk.toml
@@ -261,8 +288,7 @@ pnpm exec silk test --manifest-path compiler/silk.toml
 
 These tests parse source strings, including malformed syntax, and assert self-hosted parser
 behavior. `src/main.silk` imports them for test discovery; normal builds do not execute tests.
-They are not invoked by CI. The JavaScript harness below remains the
-TypeScript-versus-self-hosted comparison.
+The JavaScript harness below remains the TypeScript-versus-self-hosted comparison.
 
 After building the executable, run the parser corpus with its path:
 
