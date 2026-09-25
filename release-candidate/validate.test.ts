@@ -1047,6 +1047,7 @@ test('the CLI release candidate installs with its project-first command surface'
       '@silklang/docgen',
       '@silklang/formatter',
       'effect',
+      'effect-inspect',
     ])
     expect(Object.keys(manifest.exports).sort()).toEqual([
       '.',
