@@ -238,10 +238,10 @@ const encode = Effect.fnUntraced(function* (
   emit = true,
 ): Effect.fn.Return<ReadonlyArray<number>, AuthoredEncodingError> {
   const output: number[] = []
-  const active = new Set<object>()
-  // Lowering shares subtrees (owner identities above all). Validation is a pure function of a
-  // subtree, and a completed subtree is acyclic, so validation-only walks visit each object once.
-  const validated = emit ? undefined : new Set<object>()
+  // Objects on the current path are active. Lowering shares subtrees (owner identities above all);
+  // validation is a pure function of a subtree and a completed subtree is acyclic, so
+  // validation-only walks mark finished objects done and visit each object once.
+  const states = new Map<object, 'Active' | 'Done'>()
   const work: Work[] = [{ _tag: 'Value', value: root }]
   const length = (value: number) => {
     output.push((value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, value & 255)
@@ -259,11 +259,11 @@ const encode = Effect.fnUntraced(function* (
     const next = work.pop()
     if (next === undefined) break
     if (next._tag === 'End') {
-      active.delete(next.value)
-      if (validated !== undefined) {
-        validated.add(next.value)
+      if (!emit) {
+        states.set(next.value, 'Done')
         continue
       }
+      states.delete(next.value)
       const size = output.length - next.lengthOffset - 4
       if (size > 0xffffffff) return yield* invalid('Canonical frame exceeds u32 length')
       output[next.lengthOffset] = (size >>> 24) & 255
@@ -291,8 +291,9 @@ const encode = Effect.fnUntraced(function* (
     } else if (value === null || typeof value !== 'object') {
       return yield* invalid('Unsupported authored value')
     } else {
-      if (validated?.has(value)) continue
-      if (active.has(value)) return yield* invalid('Authored artifact contains a cycle')
+      const state = states.get(value)
+      if (state === 'Done') continue
+      if (state === 'Active') return yield* invalid('Authored artifact contains a cycle')
       const isArray = Array.isArray(value)
       if (!isArray && Object.getPrototypeOf(value) !== Object.prototype) {
         return yield* invalid('Authored records must be plain data')
@@ -304,7 +305,7 @@ const encode = Effect.fnUntraced(function* (
         if (Object.keys(value).length !== items.length) {
           return yield* invalid('Authored sequences cannot contain holes or extra fields')
         }
-        active.add(value)
+        states.set(value, 'Active')
         const lengthOffset = output.length + 1
         if (emit) {
           output.push(8)
@@ -434,7 +435,7 @@ const encode = Effect.fnUntraced(function* (
           return yield* invalid('Reference is outside its module pool')
         }
       }
-      active.add(value)
+      states.set(value, 'Active')
       const lengthOffset = output.length + 1
       if (emit) {
         output.push(9)
