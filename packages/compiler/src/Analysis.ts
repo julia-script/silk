@@ -1399,10 +1399,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
     sources:
       request.sources ??
       new Map(
-        self.closure.modules.map((module) => [
-          module.name,
-          Uint8Array.from(module.syntax.source.bytes),
-        ]),
+        self.closure.modules.map((module) => [module.name, module.syntax.source.bytes.slice()]),
       ),
   })
 })

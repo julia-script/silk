@@ -311,7 +311,7 @@ const authored: AuthoredHir.Origin = { _tag: 'Authored' }
 const noCauses: ReadonlyArray<AuthoredHir.Cause> = []
 
 const slice = (draft: Draft, span: SourceSpan.SourceSpan): Uint8Array =>
-  Uint8Array.from(draft.source.bytes.slice(span.start, span.end))
+  draft.source.bytes.slice(span.start, span.end)
 
 const spellingOf = (draft: Draft, span: SourceSpan.SourceSpan): string =>
   decoder.decode(slice(draft, span))
