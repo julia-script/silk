@@ -353,10 +353,14 @@ const proveOutlives = (self: Assumptions, longer: Lifetime, shorter: Lifetime): 
   return false
 }
 
-/** A finite local region's permitted points and the uses which demand its validity. */
+/**
+ * A finite local region's forbidden points and the uses which demand its validity. A region is
+ * available at every point of the domain outside `unavailable`: most regions stay available
+ * almost everywhere, so the complement is the small set.
+ */
 export interface Region {
   readonly lifetime: Lifetime
-  readonly available: ReadonlySet<number>
+  readonly unavailable: ReadonlySet<number>
   readonly required: ReadonlySet<number>
 }
 
@@ -415,14 +419,14 @@ export const solve = (input: Input): Solution => {
         dimension: 'DuplicateRegion',
         lifetime: region.lifetime,
       }
-    for (const point of [...region.available, ...region.required]) {
-      if (!Number.isSafeInteger(point) || point < 0 || point >= input.pointCount)
-        return {
-          _tag: 'InvalidDomain',
-          dimension: 'Point',
-          lifetime: region.lifetime,
-        }
-    }
+    for (const points of [region.unavailable, region.required])
+      for (const point of points)
+        if (!Number.isSafeInteger(point) || point < 0 || point >= input.pointCount)
+          return {
+            _tag: 'InvalidDomain',
+            dimension: 'Point',
+            lifetime: region.lifetime,
+          }
     regions.set(identity, region)
     required.set(identity, new Set(region.required))
     for (const point of [...region.required].sort((left, right) => left - right))
@@ -484,7 +488,7 @@ export const solve = (input: Input): Solution => {
   for (const [identity, region] of regions) {
     if (region.lifetime._tag === 'StaticLifetime') continue
     for (const point of [...(required.get(identity) ?? [])].sort((left, right) => left - right)) {
-      if (!region.available.has(point)) violations.push({ lifetime: region.lifetime, point })
+      if (region.unavailable.has(point)) violations.push({ lifetime: region.lifetime, point })
     }
   }
   return {

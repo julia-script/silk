@@ -49,7 +49,7 @@ export interface LifetimeFlow {
 
 interface Region {
   readonly lifetime: Lifetime.Lifetime
-  readonly available: Set<number>
+  readonly unavailable: Set<number>
   readonly required: Set<number>
 }
 
@@ -413,7 +413,7 @@ export const analyze = (
     const key = Lifetime.key(lifetime)
     const previous = regions.get(key)
     if (previous !== undefined) return previous
-    const region: Region = { lifetime, available: new Set(allPoints), required: new Set() }
+    const region: Region = { lifetime, unavailable: new Set(), required: new Set() }
     regions.set(key, region)
     if (lifetime._tag === 'IntersectionLifetime')
       for (const member of lifetime.members) {
@@ -439,7 +439,7 @@ export const analyze = (
   ): void => {
     const region = ensure(lifetime)
     const allowed = new Set(available)
-    for (const point of region.available) if (!allowed.has(point)) region.available.delete(point)
+    for (const point of allPoints) if (!allowed.has(point)) region.unavailable.add(point)
     origins.set(Lifetime.key(lifetime), origin)
   }
   const anchor = (
@@ -985,7 +985,7 @@ export const analyze = (
           use !== undefined &&
           BodyControlFlow.reaches(controlFlow, invalidated.after, use.after, created.before)
         )
-          region.available.delete(point)
+          region.unavailable.add(point)
       }
     }
   }
@@ -1161,7 +1161,7 @@ export const analyze = (
           paths.every((entry) => retiredPath([...carrier.path, ...entry.path], entry.type))
         if (retiredEveryPath) {
           retired.add(point)
-          ensure(origin.lifetime).available.add(point)
+          ensure(origin.lifetime).unavailable.delete(point)
         }
       }
       retiredUses.set(identity, retired)
@@ -1589,10 +1589,11 @@ export const validateCleanup = (
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly work?: Lifetime.Work
 } => {
-  // Fresh destructor points stay out of every availability set: a region is available at one
-  // exactly when it is available at its exit's source point and its root is not yet released
-  // there, so the solver's violations at fresh points are filtered by that rule instead of
-  // copying every region's points and adding each release point to each available region.
+  // Fresh destructor points are outside the analyzed domain, so the solver treats every region as
+  // available there. A region is actually available at one exactly when it is available at its
+  // exit's source point and its root is not released earlier in that exit; violations at fresh
+  // points are derived from the solved requirements by that rule instead of inserting each
+  // release point into each region's availability.
   const regions = new Map(
     self.input.regions.map((region) => [
       Lifetime.key(region.lifetime),
@@ -1639,12 +1640,10 @@ export const validateCleanup = (
       if (!releases.has(root)) releases.set(root, ordinal)
     }
   }
-  const availableAtFresh = (lifetime: Lifetime.Lifetime, point: number): boolean => {
+  const availableAtFresh = (key: string, region: Lifetime.Region, point: number): boolean => {
     const at = fresh[point - firstPoint]
-    const key = Lifetime.key(lifetime)
-    const region = regions.get(key)
-    if (at === undefined || region === undefined) return false
-    if (at.sourcePoint === undefined || !region.available.has(at.sourcePoint)) return false
+    if (at === undefined || at.sourcePoint === undefined) return false
+    if (region.unavailable.has(at.sourcePoint)) return false
     const root = roots.get(key)
     const released = root === undefined ? undefined : at.releases.get(root)
     return released === undefined || released >= at.release
@@ -1655,15 +1654,29 @@ export const validateCleanup = (
     regions: [...regions.values()],
     activatedConstraints,
   })
-  const solution: Lifetime.Solution =
-    solved._tag === 'Solved'
-      ? {
-          ...solved,
-          violations: solved.violations.filter(
-            ({ lifetime, point }) => point < firstPoint || !availableAtFresh(lifetime, point),
-          ),
-        }
-      : solved
+  let solution: Lifetime.Solution = solved
+  if (solved._tag === 'Solved') {
+    // Keep the solver's order: regions in input order, each region's points ascending.
+    const analyzed = new Map<string, Array<(typeof solved.violations)[number]>>()
+    for (const violation of solved.violations) {
+      const key = Lifetime.key(violation.lifetime)
+      const entries = analyzed.get(key)
+      if (entries === undefined) analyzed.set(key, [violation])
+      else entries.push(violation)
+    }
+    const violations: Array<(typeof solved.violations)[number]> = []
+    for (const [key, region] of regions) {
+      violations.push(...(analyzed.get(key) ?? []))
+      if (region.lifetime._tag === 'StaticLifetime') continue
+      const late = [...(solved.required.get(key) ?? [])]
+        .filter((point) => point >= firstPoint)
+        .sort((left, right) => left - right)
+      for (const point of late)
+        if (!availableAtFresh(key, region, point))
+          violations.push({ lifetime: region.lifetime, point })
+    }
+    solution = { ...solved, violations }
+  }
   return {
     diagnostics: diagnosticsOf(
       solution,

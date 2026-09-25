@@ -289,9 +289,9 @@ it('propagates later lifetime requirements through finite cycles and reports exp
   const solution = Lifetime.solve({
     pointCount: 4,
     regions: [
-      { lifetime: source, available: new Set([0, 1]), required: new Set([0]) },
-      { lifetime: holder, available: new Set([0, 1, 2, 3]), required: new Set([1]) },
-      { lifetime: copied, available: new Set([0, 1, 2, 3]), required: new Set([3]) },
+      { lifetime: source, unavailable: new Set([2, 3]), required: new Set([0]) },
+      { lifetime: holder, unavailable: new Set(), required: new Set([1]) },
+      { lifetime: copied, unavailable: new Set(), required: new Set([3]) },
     ],
     constraints: [
       { longer: source, shorter: holder },
@@ -313,9 +313,9 @@ it('requires every intersection constituent at concrete loan use points', () => 
   const solution = Lifetime.solve({
     pointCount: 3,
     regions: [
-      { lifetime: a, available: new Set([0, 1]), required: new Set() },
-      { lifetime: b, available: new Set([0, 1, 2]), required: new Set() },
-      { lifetime: meet, available: new Set([0, 1, 2]), required: new Set([2]) },
+      { lifetime: a, unavailable: new Set([2]), required: new Set() },
+      { lifetime: b, unavailable: new Set(), required: new Set() },
+      { lifetime: meet, unavailable: new Set(), required: new Set([2]) },
     ],
     constraints: [],
   })
