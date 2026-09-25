@@ -2202,6 +2202,8 @@ export const discover = (
     readonly ordinaryIdentities: ReadonlySet<string>
     readonly witnessTargets: ReadonlyArray<CallTarget>
     readonly cleanupRoots: ReadonlyMap<string, ReadonlyArray<Type.Type>>
+    /** Each call's concrete target, resolved once for every ancestry context of this key. */
+    readonly targetKeys: Map<CallTarget, InstanceKey | undefined>
   }
   const analyzedKeys = new Map<string, Analyzed | undefined>()
   const analyze = (key: InstanceKey): Analyzed | undefined => {
@@ -2426,6 +2428,7 @@ export const discover = (
       ordinaryIdentities,
       witnessTargets,
       cleanupRoots,
+      targetKeys: new Map(),
     }
   }
   const restartDiscovery = (): void => {
@@ -2475,22 +2478,28 @@ export const discover = (
         for (const call of calls.values()) {
           const identity = identityOfCall(call)
           const target = call.declaration
-          const targetFunction = FunctionIndex.tirByName(
-            results.get(target.module)?.tir,
-            target.name,
-          )
-          if (targetFunction === undefined) continue
-          const targetArguments = call.typeArguments.map((argument) =>
-            Type.substituteGenericArgument(argument, substitution),
-          )
-          const targetKey = keyOf(
-            target,
-            targetFunction.contract,
-            targetFunction.declaration.typeParameters.map((parameter) => parameter.type),
-            targetArguments,
-            call.staticArguments ?? [],
-            call.evidence ?? [],
-          )
+          let targetKey = analyzed.targetKeys.get(call)
+          if (targetKey === undefined && !analyzed.targetKeys.has(call)) {
+            const targetFunction = FunctionIndex.tirByName(
+              results.get(target.module)?.tir,
+              target.name,
+            )
+            targetKey =
+              targetFunction === undefined
+                ? undefined
+                : keyOf(
+                    target,
+                    targetFunction.contract,
+                    targetFunction.declaration.typeParameters.map((parameter) => parameter.type),
+                    call.typeArguments.map((argument) =>
+                      Type.substituteGenericArgument(argument, substitution),
+                    ),
+                    call.staticArguments ?? [],
+                    call.evidence ?? [],
+                  )
+            analyzed.targetKeys.set(call, targetKey)
+          }
+          if (targetKey === undefined) continue
           const edgeKind = ordinaryIdentities.has(identity) ? 'Runtime' : 'Cleanup'
           executionEdges.set(`${keyText(key)}\u0005${edgeKind}\u0005${keyText(targetKey)}`, {
             _tag: 'ExecutionEdge',
