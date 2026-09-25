@@ -1724,16 +1724,16 @@ const callableIdentityKey = (self: CallableIdentityArgument): string =>
     self.environment === undefined ? '' : callableEnvironmentKey(self.environment),
   ].join('')
 
-const genericArgumentKeyCache = new WeakMap<Exclude<GenericArgument, string>, string>()
+/** Memoized on the argument object itself, like `key`. */
+const cachedGenericArgumentKey: unique symbol = Symbol('Type.genericArgumentKey')
 
 export const genericArgumentKey = (self: GenericArgument): string => {
   if (typeof self === 'string') return computeGenericArgumentKey(self)
-  let cached = genericArgumentKeyCache.get(self)
-  if (cached === undefined) {
-    cached = computeGenericArgumentKey(self)
-    genericArgumentKeyCache.set(self, cached)
-  }
-  return cached
+  const cached: unknown = Reflect.get(self, cachedGenericArgumentKey)
+  if (typeof cached === 'string') return cached
+  const computed = computeGenericArgumentKey(self)
+  Object.defineProperty(self, cachedGenericArgumentKey, { value: computed })
+  return computed
 }
 
 const computeGenericArgumentKey = (self: GenericArgument): string => {
@@ -1962,17 +1962,22 @@ const hasTypeDiscriminant = (self: unknown): self is Type =>
     typeof self._tag === 'string' &&
     semanticTypeTags.has(self._tag))
 
-const keyCache = new WeakMap<Exclude<Type, string>, string>()
+/**
+ * Each immutable type object carries its canonical key once computed, in a non-enumerable
+ * property that spreads, clones and structural comparisons never see. Most keyed types are
+ * fresh substitution results keyed once: a weak map paid an ephemeron insertion per type and
+ * made every major collection trace the table.
+ */
+const cachedKey: unique symbol = Symbol('Type.key')
 
 /** Returns the canonical deterministic key used for equality and ordering. */
 export const key = (self: Type): string => {
   if (typeof self === 'string') return computeKey(self)
-  let cached = keyCache.get(self)
-  if (cached === undefined) {
-    cached = computeKey(self)
-    keyCache.set(self, cached)
-  }
-  return cached
+  const cached: unknown = Reflect.get(self, cachedKey)
+  if (typeof cached === 'string') return cached
+  const computed = computeKey(self)
+  Object.defineProperty(self, cachedKey, { value: computed })
+  return computed
 }
 
 /**
