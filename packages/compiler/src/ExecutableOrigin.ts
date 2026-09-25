@@ -1977,12 +1977,49 @@ export const make = (operations: Operations) => {
     )
   }
 
+  // Discovery, every suspension-graph rebuild, and provider selection ask for the same result
+  // identities. An unguarded query depends only on the compilation, the body, and the exact
+  // application, so its answer is retained; cycle-guarded queries are recomputed.
+  const resultEffectIdentities = new WeakMap<
+    ReadonlyMap<string, Elaboration.Result>,
+    WeakMap<DeclarationIndex.Index, WeakMap<Tir.TirFunction, Map<string, string | undefined>>>
+  >()
   const resultEffectIdentity = (
     fn: Tir.TirFunction,
     owner: InstanceKey,
     results: ReadonlyMap<string, Elaboration.Result>,
     index: DeclarationIndex.Index,
     resolving: ReadonlySet<string> = new Set(),
+  ): string | undefined => {
+    if (resolving.size > 0) return computeResultEffectIdentity(fn, owner, results, index, resolving)
+    let byIndex = resultEffectIdentities.get(results)
+    if (byIndex === undefined) {
+      byIndex = new WeakMap()
+      resultEffectIdentities.set(results, byIndex)
+    }
+    let byFunction = byIndex.get(index)
+    if (byFunction === undefined) {
+      byFunction = new WeakMap()
+      byIndex.set(index, byFunction)
+    }
+    let byOwner = byFunction.get(fn)
+    if (byOwner === undefined) {
+      byOwner = new Map()
+      byFunction.set(fn, byOwner)
+    }
+    const application = `${keyText(owner)}\u0003${owner.typeArguments.map(Type.genericArgumentKey).join('\u0001')}`
+    if (byOwner.has(application)) return byOwner.get(application)
+    const identity = computeResultEffectIdentity(fn, owner, results, index, resolving)
+    byOwner.set(application, identity)
+    return identity
+  }
+
+  const computeResultEffectIdentity = (
+    fn: Tir.TirFunction,
+    owner: InstanceKey,
+    results: ReadonlyMap<string, Elaboration.Result>,
+    index: DeclarationIndex.Index,
+    resolving: ReadonlySet<string>,
   ): string | undefined => {
     const substitution = instanceSubstitution(fn, owner)
     const expressions = Tir.returnExpressions(fn.statements)
