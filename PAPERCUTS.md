@@ -5,6 +5,10 @@ Format: date · symptom · fix · project. Check here first when tooling is slow
 - 2026-09-25 · A focused source-written query test used `--file`, but the CLI still compiled the
   manifest root and its full import graph for over two minutes · Use `--root
   src/semantic/QueryCases.silk` to compile only the test module's import graph · self-hosted compiler
+- 2026-09-25 · A generic scoped query answer passed `silk check` but native build failed with
+  `SEM0138` for shared allocation provenance, then tried to emit cleanup for a generic payload ·
+  Trace the recorded execution edges through the bracket callback and generate shared cleanup
+  only for concrete runtime payloads · compiler bootstrap
 
 - 2026-09-23 · A fresh task checkout had no `node_modules`; offline pnpm install missed cached
   tarballs and sandboxed registry requests failed DNS resolution, then focused Vitest could not
