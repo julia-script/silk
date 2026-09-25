@@ -211,7 +211,9 @@ export const make = (
     writeAnchors,
     spans,
     writes,
-    edges,
+    // Exact-size copies: each successor list was grown by push (17 slots for one edge), and the
+    // graph lives with its function's lifetime flow.
+    edges: edges.map((successors) => successors.slice()),
     queries: new Map(),
     work: { queries: 0, cacheHits: 0, visitedEdges: 0 },
   }
