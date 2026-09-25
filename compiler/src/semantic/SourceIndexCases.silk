@@ -16,6 +16,7 @@ import semantic.SourceUnit {SourceUnit}
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
 import silk.effect {Effect}
+import silk.layout {Layout}
 import silk.option {Option}
 import silk.result {Result}
 import silk.shared {Shared}
@@ -213,11 +214,47 @@ test effect fn indexesNamesWithoutSemanticWork() -> ()
 fn wasPresent(answer: &Result<SourceResult, NoRejection>) -> bool {
   return match & answer.* {
     Result<SourceResult, NoRejection>.Success {value} => match & value {
-      SourceResult.Present {slot: _} => true
+      SourceResult.Present {slot: _, observation: ignored} => true
       SourceResult.Absent {observation: _} => false
     }
     Result<SourceResult, NoRejection>.Failure {error: _} => false
   }
+}
+
+fn firstSlot(answer: &Result<SourceResult, NoRejection>) -> bool {
+  return match & answer.* {
+    Result<SourceResult, NoRejection>.Success {value} => match & value {
+      SourceResult.Present {slot, observation: _} => slot == usize.ZERO
+      SourceResult.Absent {observation: ignored} => false
+    }
+    Result<SourceResult, NoRejection>.Failure {error: ignored} => false
+  }
+}
+
+struct PublicationAllocator {
+  armed: bool
+  rejected: bool
+}
+
+impl PublicationAllocator {
+  effect fn allocate(self: &mut Self, layout: Layout) -> Allocation ! OutOfMemoryError {
+    if self.armed {
+      self.armed = false
+      self.rejected = true
+      fail OutOfMemoryError {}
+    }
+    let element = Layout.of<IndexedSource>()
+    if layout.bytes == element.bytes * 4 && layout.alignment == element.alignment {
+      self.armed = true
+    }
+    let mut system = Allocator.systemAllocatorProvider()
+    return run Allocator.allocate(move layout)
+      |> Effect.provideMut<Allocator>(&mut system)
+  }
+}
+
+impl Allocator for PublicationAllocator {
+  allocate: PublicationAllocator.allocate
 }
 
 fn bucketSize(observation: &NameObservation) -> usize {
@@ -293,4 +330,104 @@ test effect fn readsOnlyDemandedSources() -> ()
   let mut allocator = Allocator.systemAllocatorProvider()
   return run queryClaims()
     |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn foreignAnswerClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static>
+? &mut Allocator {
+  let entry = run module("entry.silk")
+  let firstBytes = run present("pub fn first() -> i32 { return 1 }\n")
+  let secondBytes = run present("pub fn second() -> i32 { return 2 }\n")
+  let firstRevision = run Revision.publish(&Revision.make(), &entry, &firstBytes)
+  let secondRevision = run Revision.publish(&Revision.make(), &entry, &secondBytes)
+  let mut first = SourceIndex.make(move firstRevision)
+  let mut second = SourceIndex.make(move secondRevision)
+  let answer = run SourceIndex.demand(&mut first, &entry)
+  let own = run SourceIndex.demand(&mut second, &entry)
+  run Testing.expect(
+    SourceIndex.revisionNumber(&first) == SourceIndex.revisionNumber(&second),
+    "independent revisions deliberately share a number",
+  )
+  run Testing.expect(
+    Shared.with<Result<SourceResult, NoRejection>, bool>(&answer, firstSlot) && Shared.with<
+      Result<SourceResult, NoRejection>,
+      bool,
+    >(&own, firstSlot),
+    "independent stores deliberately share a source slot",
+  )
+  let foreignSource = SourceIndex.source(&second, &answer, &entry)
+  run Testing.expect(
+    match move foreignSource {
+      Option<&IndexedSource>.None => true
+      Option<&IndexedSource>.Some {value: ignored} => false
+    },
+    "foreign answer does not borrow different retained bytes",
+  )
+  let foreignName = run Effect.result(
+    SourceIndex.observeName(&mut second, &answer, &entry, b"first"),
+  )
+  run Testing.expect(
+    match move foreignName {
+      Result<Option<Shared<NameObservation>>, RevisionMismatch | OutOfMemoryError>.Failure {error} => match move error {
+        RevisionMismatch {} => true
+        OutOfMemoryError {} => false
+      }
+      Result<Option<Shared<NameObservation>>, RevisionMismatch | OutOfMemoryError>.Success {
+        value: ignored,
+      } => false
+    },
+    "foreign answer cannot observe a different name bucket",
+  )
+  return ()
+}
+
+test effect fn rejectsCrossStorePresentAnswer() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run foreignAnswerClaims()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn publicationFailureClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | AssertionError<'static> {
+  let mut system = Allocator.systemAllocatorProvider()
+  let entry = run module("entry.silk")
+    |> Effect.provideMut<Allocator>(&mut system)
+  let bytes = run present("pub fn entry() -> i32 { return 1 }\n")
+    |> Effect.provideMut<Allocator>(&mut system)
+  let revision = run Revision.publish(&Revision.make(), &entry, &bytes)
+    |> Effect.provideMut<Allocator>(&mut system)
+  let mut index = SourceIndex.make(move revision)
+  let mut allocator = PublicationAllocator {armed: false, rejected: false}
+  let attempted = run Effect.result(SourceIndex.demand(&mut index, &entry))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    match move attempted {
+      Result<Shared<Result<SourceResult, NoRejection>>, Cycle | OutOfMemoryError>.Failure {error} => match move error {
+        OutOfMemoryError {} => true
+        Cycle {} => false
+      }
+      Result<Shared<Result<SourceResult, NoRejection>>, Cycle | OutOfMemoryError>.Success {
+        value: ignored,
+      } => false
+    } && allocator.rejected,
+    "allocation after retained-source append rejects publication",
+  )
+  let retried = run SourceIndex.demand(&mut index, &entry)
+    |> Effect.provideMut<Allocator>(&mut system)
+  run Testing.expect(
+    Shared.with<Result<SourceResult, NoRejection>, bool>(&retried, firstSlot),
+    "retry reuses the first source slot after rollback",
+  )
+  let events = SourceIndex.eventLog(&index)
+  run Testing.expect(
+    events.length == 5 && events[0].kind == EventKind.QueryStart && events[1].kind == EventKind.SourceRead && events[2].kind == EventKind.QueryStart && events[3].kind == EventKind.SourceRead && events[4].kind == EventKind.QueryFinish,
+    "failed publication leaves no completion and retry rereads once",
+  )
+  return ()
+}
+
+test effect fn rollsBackUnpublishedSource() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | AssertionError<'static> {
+  return run publicationFailureClaims()
 }

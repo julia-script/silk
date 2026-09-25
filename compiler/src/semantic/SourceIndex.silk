@@ -16,6 +16,7 @@ import semantic.SourceUnit {SourceUnit}
 import hir.Hir {Module}
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
+import silk.effect {Effect}
 import silk.hash {Hash, Word}
 import silk.option {Option}
 import silk.result {Result}
@@ -30,12 +31,103 @@ pub struct IndexedSource {
   index: ModuleIndex
 }
 
-/// An absent or present source result from the same held revision.
+/// An absent or present source result with its exact held source observation.
 pub union SourceResult {
   /// The module path was absent in the held revision.
   Absent {pub observation: Observation},
-  /// The module path had bytes in the held revision.
-  Present {pub slot: usize},
+  /// The module path had bytes; the observation checks the retained source before borrowing it.
+  Present {pub slot: usize, pub observation: Observation},
+}
+
+/// A source append that is retained only if its query answer becomes complete.
+struct SourcePublication<'a, 'b> {
+  sources: &'a mut Vector<IndexedSource>
+  query: &'b mut Query<Word, SourceResult, NoRejection>
+  key: Word
+  base: usize
+}
+
+effect fn demandSource(
+  query: &mut Query<Word, SourceResult, NoRejection>,
+  sources: &mut Vector<IndexedSource>,
+  events: &mut Vector<Event>,
+  revision: &Revision,
+  id: &ModuleId,
+  number: usize,
+  key: Word,
+) -> Shared<Result<SourceResult, NoRejection>> ! Cycle | OutOfMemoryError ? &mut Allocator {
+  return run Query.demand(
+    move query,
+    key,
+    effect fn(owner: &mut Query<Word, SourceResult, NoRejection>, queryKey: Word) -> Result<
+      SourceResult,
+      NoRejection,
+    > ! OutOfMemoryError ? &mut Allocator {
+      run record(&mut events.*, EventKind.QueryStart, id, number, false)
+      let observed = run Revision.observe(revision, id)
+      let present = Observation.isPresent(&observed)
+      run record(&mut events.*, EventKind.SourceRead, id, number, present)
+      let content = run Observation.copyContent(&observed)
+      if let Option<Bytes>.Some {value} = move content {
+        let unit = run SourceUnit.parse(id, number, move value)
+        let index = run ModuleIndex.build(&unit)
+        let source = IndexedSource {
+          observation: run Observation.copy(&observed),
+          unit: move unit,
+          index: move index,
+        }
+        let slot = Vector.length<IndexedSource>(&sources.*)
+        run Vector.append<IndexedSource>(&mut sources.*, move source)
+        return Result.succeed<SourceResult, NoRejection>(
+          SourceResult.Present {slot: slot, observation: move observed},
+        )
+      }
+      return Result.succeed<SourceResult, NoRejection>(
+        SourceResult.Absent {observation: move observed},
+      )
+    },
+  )
+}
+
+effect fn withPublication<'a, 'b, 'c, 'd, 'e>(
+  sources: &'a mut Vector<IndexedSource>,
+  query: &'b mut Query<Word, SourceResult, NoRejection>,
+  events: &'c mut Vector<Event>,
+  revision: &'d Revision,
+  id: &'e ModuleId,
+  number: usize,
+  key: Word,
+) -> Shared<Result<SourceResult, NoRejection>> ! Cycle | OutOfMemoryError ? &mut Allocator {
+  let base = Vector.length<IndexedSource>(&sources.*)
+  let publication = SourcePublication {
+    sources: move sources,
+    query: move query,
+    key: key,
+    base: base,
+  }
+  let use = effect fn(resource: &mut SourcePublication<'a, 'b>) -> Shared<
+    Result<SourceResult, NoRejection>,
+  > ! Cycle | OutOfMemoryError ? &mut Allocator {
+    let selected = resource.key
+    return run demandSource(
+      &mut resource.query.*,
+      &mut resource.sources.*,
+      move events,
+      revision,
+      id,
+      number,
+      selected,
+    )
+  }
+  let release = effect fn(resource: &mut SourcePublication<'a, 'b>) -> () {
+    let selected = resource.key
+    let original = resource.base
+    if !Query.isComplete(&mut resource.query.*, selected) {
+      Vector.truncate<IndexedSource>(&mut resource.sources.*, original)
+    }
+    return ()
+  }
+  return run Effect.useReleaseNonParking(move publication, move use, move release)
 }
 
 struct NameSelection {
@@ -168,7 +260,7 @@ fn selectName(
 ) -> NameSelection {
   return match & answer.* {
     Result<SourceResult, NoRejection>.Success {value} => match & value {
-      SourceResult.Present {slot} => {
+      SourceResult.Present {slot, observation} => {
         if slot >= sources.length {
           return NameSelection {
             valid: false,
@@ -178,10 +270,10 @@ fn selectName(
           }
         }
         let source = &sources[slot]
-        if !ModuleId.equals(&source.unit.id, id) || source.unit.revision != number || !Observation.matches(
+        if !ModuleId.equals(&source.unit.id, id) || source.unit.revision != number || !Observation.equals(
+          &observation,
           &source.observation,
-          held,
-        ) {
+        ) || !Observation.matches(&observation, held) {
           return NameSelection {
             valid: false,
             present: false,
@@ -281,44 +373,21 @@ impl SourceIndex {
   ///
   /// A miss reads only this module path, then parses and indexes all of its declarations. A hit
   /// returns the completed answer without another source read. Source absence also completes.
-  /// Provider failure removes the active query reservation.
+  /// Provider or publication failure removes the active reservation and any unpublished source.
   pub effect fn demand(self: &mut Self, id: &ModuleId) -> Shared<Result<SourceResult, NoRejection>>
   ! Cycle | OutOfMemoryError
   ? &mut Allocator {
     let key = run keyFor(&mut self.*, id)
     let number = Revision.revisionNumber(&self.revision)
     let hit = Query.isComplete(&mut self.query, key)
-    let revision = &self.revision
-    let sources = &mut self.sources
-    let events = &mut self.events
-    let answer = run Query.demand(
+    let answer = run withPublication(
+      &mut self.sources,
       &mut self.query,
+      &mut self.events,
+      &self.revision,
+      id,
+      number,
       key,
-      effect fn(owner: &mut Query<Word, SourceResult, NoRejection>, queryKey: Word) -> Result<
-        SourceResult,
-        NoRejection,
-      > ! OutOfMemoryError ? &mut Allocator {
-        run record(&mut events.*, EventKind.QueryStart, id, number, false)
-        let observed = run Revision.observe(revision, id)
-        let present = Observation.isPresent(&observed)
-        run record(&mut events.*, EventKind.SourceRead, id, number, present)
-        let content = run Observation.copyContent(&observed)
-        if let Option<Bytes>.Some {value} = move content {
-          let unit = run SourceUnit.parse(id, number, move value)
-          let index = run ModuleIndex.build(&unit)
-          let source = IndexedSource {
-            observation: move observed,
-            unit: move unit,
-            index: move index,
-          }
-          let slot = Vector.length<IndexedSource>(&sources.*)
-          run Vector.append<IndexedSource>(&mut sources.*, move source)
-          return Result.succeed<SourceResult, NoRejection>(SourceResult.Present {slot: slot})
-        }
-        return Result.succeed<SourceResult, NoRejection>(
-          SourceResult.Absent {observation: move observed},
-        )
-      },
     )
     if hit {
       run record(&mut self.events, EventKind.QueryHit, id, number, false)
@@ -337,7 +406,7 @@ impl SourceIndex {
   ///
   /// # Gotchas
   ///
-  /// If `answer` is from another module or held revision, this operation fails with
+  /// If `answer` names another module or source observation, this operation fails with
   /// `RevisionMismatch`.
   pub effect fn observeName(
     self: &mut Self,
@@ -379,7 +448,7 @@ impl SourceIndex {
   ///
   /// # Gotchas
   ///
-  /// An absent answer or an answer from another module or revision returns `None`.
+  /// An absent answer or an answer for another module or source observation returns `None`.
   pub fn source(self: &Self, answer: &Shared<Result<SourceResult, NoRejection>>, id: &ModuleId) -> Option<
     &IndexedSource,
   > {

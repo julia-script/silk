@@ -155,6 +155,29 @@ impl Revision {
 }
 
 impl Observation {
+  /// Copies the captured path and content without consulting a revision again.
+  pub effect fn copy(self: &Self) -> Observation ! OutOfMemoryError ? &mut Allocator {
+    return Observation {id: run ModuleId.copy(&self.id), content: run copyContent(&self.content)}
+  }
+  /// Compares two exact source observations, including present bytes or absence.
+  pub fn equals(self: &Self, other: &Observation) -> bool {
+    if !ModuleId.equals(&self.id, &other.id) {
+      return false
+    }
+    return match & self.content {
+      Option<Bytes>.Some {value} => match & other.content {
+        Option<Bytes>.Some {value: compared} => sameBytes(
+          Bytes.asSlice(&value),
+          Bytes.asSlice(&compared),
+        )
+        Option<Bytes>.None => false
+      }
+      Option<Bytes>.None => match & other.content {
+        Option<Bytes>.Some {value: _} => false
+        Option<Bytes>.None => true
+      }
+    }
+  }
   /// Borrows the canonical module path whose bytes or absence were captured.
   pub fn moduleId(self: &Self) -> &ModuleId {
     return &self.id
