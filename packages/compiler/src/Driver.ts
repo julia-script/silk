@@ -9,6 +9,7 @@ import * as ForeignContract from './ForeignContract.js'
 import * as Data from 'effect/Data'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
+import * as Fiber from 'effect/Fiber'
 import * as Option from 'effect/Option'
 import * as ArtifactKind from './ArtifactKind.js'
 import * as AbiManifest from './AbiManifest.js'
@@ -853,6 +854,31 @@ export const compile = Effect.fn('Driver.compile')(
               report: [...report],
             }
 
+          // Test identities depend only on the analysis, so compute them while the native object
+          // compiler runs in its own process.
+          const testCatalog = frontend.testCatalog
+          const testIdentities =
+            testCatalog === undefined
+              ? undefined
+              : yield* Effect.forkChild(
+                  Effect.all([
+                    TestExecution.runnerIdentity(
+                      preparation.instances,
+                      frontend.results,
+                      testCatalog,
+                    ),
+                    cacheKind === 'NativeExecutable' && bundle.completion !== undefined
+                      ? Effect.asSome(
+                          TestExecution.closures(
+                            testCatalog,
+                            preparation.instances,
+                            frontend.results,
+                          ),
+                        )
+                      : Effect.succeedNone,
+                  ]),
+                )
+
           // 14. Resolve the native toolchain for the profile and turn LLVM bitcode into an object.
           // Track both generated object files and any helper capabilities reported by emission.
           const toolchain = yield* NativeToolchain.resolveToolchain(
@@ -1005,42 +1031,25 @@ export const compile = Effect.fn('Driver.compile')(
                   { heapBytes },
                 )
               : undefined
-          const testRunnerIdentity =
-            frontend.testCatalog === undefined
-              ? undefined
-              : yield* TestExecution.runnerIdentity(
-                  preparation.instances,
-                  frontend.results,
-                  frontend.testCatalog,
-                )
-          const helperPolicyIdentity =
-            frontend.testCatalog === undefined
-              ? undefined
-              : HelperCapability.policyIdentity(preparation.profile)
+          const identities =
+            testIdentities === undefined ? undefined : yield* Fiber.join(testIdentities)
           const testManifest =
-            cacheKind === 'NativeExecutable' &&
-            frontend.testCatalog !== undefined &&
-            bundle.completion !== undefined &&
-            testRunnerIdentity !== undefined &&
-            helperPolicyIdentity !== undefined
-              ? yield* TestExecution.make({
-                  catalog: frontend.testCatalog,
-                  discovery: preparation.instances,
-                  results: frontend.results,
-                  environment: {
-                    profileIdentity: preparation.profile.identity,
-                    bootstrapIdentity: bundle.completion.bootstrapIdentity,
-                    runnerIdentity: testRunnerIdentity.identity,
-                    compilerIdentity: distribution.digest,
-                    runtimeIdentity: TestExecution.runtimeIdentity(distribution),
-                    nativeIdentity: TestExecution.nativeIdentity(
-                      linkPlan,
-                      generatedObjects.map((entry) => entry.path),
-                      bound.success.identity,
-                      helperPolicyIdentity,
-                    ),
-                    complete: testRunnerIdentity.complete,
-                  },
+            identities !== undefined &&
+            Option.isSome(identities[1]) &&
+            bundle.completion !== undefined
+              ? TestExecution.make(identities[1].value, {
+                  profileIdentity: preparation.profile.identity,
+                  bootstrapIdentity: bundle.completion.bootstrapIdentity,
+                  runnerIdentity: identities[0].identity,
+                  compilerIdentity: distribution.digest,
+                  runtimeIdentity: TestExecution.runtimeIdentity(distribution),
+                  nativeIdentity: TestExecution.nativeIdentity(
+                    linkPlan,
+                    generatedObjects.map((entry) => entry.path),
+                    bound.success.identity,
+                    HelperCapability.policyIdentity(preparation.profile),
+                  ),
+                  complete: identities[0].complete,
                 })
               : undefined
           // Return the durable artifact together with linkage provenance, foreign symbols,

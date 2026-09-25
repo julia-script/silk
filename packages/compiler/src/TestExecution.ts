@@ -61,13 +61,6 @@ export interface Environment {
   readonly complete: boolean
 }
 
-export interface Input {
-  readonly catalog: TestDiscovery.Catalog
-  readonly discovery: Instances.Discovery
-  readonly results: ReadonlyMap<string, Elaboration.Result>
-  readonly environment: Environment
-}
-
 const digest = (value: string): string => ToolchainIntegrity.contentDigest(value)
 
 // Test closures share most of their items, and the platform-neutral digest is slow; hash each
@@ -641,31 +634,37 @@ export const runtimeIdentity = (distribution: ToolchainIntegrity.Graph): string 
     ]),
   )
 
-const eligible = Effect.fnUntraced(function* (
-  input: Input,
+/** One test's link-independent execution closure, or why its results can never be reused. */
+export type Closure =
+  | { readonly _tag: 'Closure'; readonly encoding: string }
+  | { readonly _tag: 'Ineligible'; readonly reason: IneligibilityReason }
+
+/** Link-independent closure encodings of a test catalog, in catalog order. */
+export interface Closures {
+  readonly catalog: TestDiscovery.Catalog
+  readonly entries: ReadonlyArray<Closure>
+}
+
+const closureOf = Effect.fnUntraced(function* (
+  discovery: Instances.Discovery,
+  results: ReadonlyMap<string, Elaboration.Result>,
   entry: TestDiscovery.Entry,
-  environment: string,
-): Effect.fn.Return<Eligibility> {
-  if (!input.environment.complete)
-    return {
-      _tag: 'Ineligible',
-      reason: { _tag: 'IncompleteEnvironment', component: 'Runner' },
-    }
+): Effect.fn.Return<Closure> {
   const declaration = entry.declaration.canonical
   if (declaration._tag !== 'Canonical')
     return { _tag: 'Ineligible', reason: { _tag: 'MissingTestRoot' } }
-  const roots = rootOf(input.discovery, declaration.id)
+  const roots = rootOf(discovery, declaration.id)
   if (roots.length === 0) return { _tag: 'Ineligible', reason: { _tag: 'MissingTestRoot' } }
   if (roots.length !== 1) return { _tag: 'Ineligible', reason: { _tag: 'AmbiguousTestRoot' } }
   const root = roots.at(0)
   if (root === undefined) return { _tag: 'Ineligible', reason: { _tag: 'MissingTestRoot' } }
-  const closure = Instances.executionClosure(input.discovery, root.key)
+  const closure = Instances.executionClosure(discovery, root.key)
   if (closure.gaps.length > 0)
     return {
       _tag: 'Ineligible',
       reason: { _tag: 'IncompleteExecutionClosure', gaps: closure.gaps },
     }
-  const closureEncoding = yield* executionEncoding(input.discovery, input.results, closure)
+  const closureEncoding = yield* executionEncoding(discovery, results, closure)
   if (closureEncoding._tag === 'Incomplete')
     return closureEncoding.declaration === undefined
       ? {
@@ -682,35 +681,58 @@ const eligible = Effect.fnUntraced(function* (
             declaration: closureEncoding.declaration,
           },
         }
-  const encoded = Canonical.record('TestExecution.v1', [
-    entry.info.identity,
-    environment,
-    closureEncoding.encoding,
-  ])
-  return { _tag: 'Eligible', identity: digest(encoded) }
+  return { _tag: 'Closure', encoding: closureEncoding.encoding }
+})
+
+/**
+ * Encodes every test's execution closure. Closures do not depend on native code generation or
+ * linking, so the driver computes them while the object compiler runs.
+ */
+export const closures = Effect.fn('TestExecution.closures')(function* (
+  catalog: TestDiscovery.Catalog,
+  discovery: Instances.Discovery,
+  results: ReadonlyMap<string, Elaboration.Result>,
+): Effect.fn.Return<Closures> {
+  const entries: Array<Closure> = []
+  for (const entry of catalog.entries) entries.push(yield* closureOf(discovery, results, entry))
+  return { catalog, entries }
 })
 
 /** Derives canonical-order per-test execution identities, failing closed per entry. */
-export const make = Effect.fn('TestExecution.make')(function* (
-  input: Input,
-): Effect.fn.Return<Manifest> {
-  const environment = environmentIdentity(input.environment)
-  const entries: Array<Entry> = []
-  for (const entry of input.catalog.entries) {
-    entries.push({ test: entry.info, eligibility: yield* eligible(input, entry, environment) })
-  }
+export const make = (self: Closures, environment: Environment): Manifest => {
+  const identity = environmentIdentity(environment)
   return {
     _tag: 'TestExecutionManifest',
     catalogIdentity: digest(
       Canonical.record('TestExecutionCatalog.v1', [
         Canonical.array(
-          input.catalog.entries.map((entry, ordinal) =>
+          self.catalog.entries.map((entry, ordinal) =>
             Canonical.record('Test', [String(ordinal), entry.info.identity]),
           ),
         ),
       ]),
     ),
-    environmentIdentity: environment,
-    entries,
+    environmentIdentity: identity,
+    entries: self.catalog.entries.map((entry, ordinal): Entry => {
+      const closure = self.entries[ordinal]
+      if (!environment.complete || closure === undefined)
+        return {
+          test: entry.info,
+          eligibility: {
+            _tag: 'Ineligible',
+            reason: { _tag: 'IncompleteEnvironment', component: 'Runner' },
+          },
+        }
+      if (closure._tag === 'Ineligible') return { test: entry.info, eligibility: closure }
+      return {
+        test: entry.info,
+        eligibility: {
+          _tag: 'Eligible',
+          identity: digest(
+            Canonical.record('TestExecution.v1', [entry.info.identity, identity, closure.encoding]),
+          ),
+        },
+      }
+    }),
   }
-})
+}
