@@ -3,7 +3,14 @@
 import semantic.DeclarationId {DeclarationId}
 import semantic.ModuleId {ModuleId}
 import semantic.ModuleIndex {ModuleIndex, NameObservation}
-import semantic.SourceIndex {EventKind, NoRejection, RevisionMismatch, SourceIndex, SourceResult}
+import semantic.SourceIndex {
+  EventKind,
+  IndexedSource,
+  NoRejection,
+  RevisionMismatch,
+  SourceIndex,
+  SourceResult,
+}
 import semantic.SourceRevision {Observation, Revision}
 import semantic.SourceUnit {SourceUnit}
 import silk.allocator {Allocator, OutOfMemoryError}
@@ -134,6 +141,22 @@ effect fn indexClaims() -> ()
     NameObservation.listMembers(&imported).length == 1,
     "import alias indexed as syntax",
   )
+  let hybrid = run SourceUnit.parse(
+    &firstId,
+    usize.ONE,
+    run Bytes.copy(b"pub import model.User as Tree { User as Person }\n"),
+  )
+  run Testing.expect(SourceUnit.diagnosticCount(&hybrid) == usize.ZERO, "hybrid import parses")
+  let hybridIndex = run ModuleIndex.build(&hybrid)
+  let namespace = run ModuleIndex.observeName(&hybridIndex, b"Tree")
+  let selected = run ModuleIndex.observeName(&hybridIndex, b"Person")
+  let defaultName = run ModuleIndex.observeName(&hybridIndex, b"User")
+  run Testing.expect(
+    NameObservation.listMembers(&namespace).length == 1 && NameObservation.listMembers(&selected).length == 1 && NameObservation.listMembers(
+      &defaultName,
+    ).length == usize.ZERO,
+    "hybrid import keeps the explicit namespace and selected aliases only",
+  )
   let later = run SourceUnit.parse(
     &firstId,
     2,
@@ -190,7 +213,7 @@ test effect fn indexesNamesWithoutSemanticWork() -> ()
 fn wasPresent(answer: &Result<SourceResult, NoRejection>) -> bool {
   return match & answer.* {
     Result<SourceResult, NoRejection>.Success {value} => match & value {
-      SourceResult.Present {source: _} => true
+      SourceResult.Present {slot: _} => true
       SourceResult.Absent {observation: _} => false
     }
     Result<SourceResult, NoRejection>.Failure {error: _} => false
@@ -218,6 +241,15 @@ effect fn queryClaims() -> ()
     Shared.with<Result<SourceResult, NoRejection>, bool>(&again, wasPresent),
     "completed query reused",
   )
+  let borrowed = SourceIndex.source(&index, &again, &entry)
+  if let Option<&IndexedSource>.Some {value} = move borrowed {
+    run Testing.expect(
+      ModuleIndex.listDeclarations(IndexedSource.moduleIndex(value)).length == 2,
+      "cache hit borrows the one retained syntax index",
+    )
+  } else {
+    run Testing.expect(false, "present cache hit retains an indexed source")
+  }
   let imported = run SourceIndex.observeName(&mut index, &again, &entry, b"Missing")
   let absent = run SourceIndex.observeName(&mut index, &again, &entry, b"Unknown")
   if let Option<Shared<NameObservation>>.Some {value} = move imported {

@@ -6,6 +6,35 @@ lowered module and declaration fingerprints. It does not yet perform name resolu
 checking, or code generation on that input. The TypeScript bootstrap compiler still builds this
 executable.
 
+## In-memory semantic queries
+
+`semantic.Semantic` resolves demanded facts from one immutable, in-memory
+`semantic.SourceRevision.Revision`. Its source index parses and records the complete names in a
+requested module, but it does not open an imported module until a demanded name needs that import.
+Each completed answer retains its direct query dependencies and exact present or absent source
+observations. `Semantic.eventLog` and `Semantic.sourceEvents` expose demand order and source reads
+for the focused query harness. This API is not wired into the inspection executable above.
+
+The current semantic subset resolves local names, ordinary namespace imports, selective imports,
+explicit aliases, and a hybrid namespace alias with selected members. Qualified type names have
+one namespace segment and one public member segment. Import paths map to slash-separated `.silk`
+logical source paths within the importing module's source origin and package. Selected public import
+chains resolve to the canonical declaration. The
+store resolves nongeneric type aliases and nominal type identities without inspecting fields or
+layout. Written nongeneric function signatures accept primitive,
+unit, and named alias or nominal parameter and result types; they do not inspect function bodies.
+The supported primitive spellings are `bool`, `char`, signed and unsigned integers through 64 bits
+and pointer size, `f32`, `f64`, and `string`. A missing result means unit. Public contracts reject
+private nominal types; missing modules, inaccessible members, collisions, and alias or import-name
+cycles produce anchored semantic rejections.
+
+Demanded generic applications, type modifiers, complex type forms, variadic or generic functions,
+failure or requirement rows, constraints, and nonstandard callable header modifiers currently
+return `Unsupported` rather than a provisional type. Unused declarations with these forms are
+still indexed as written names and do not require semantic resolution. This M1 slice does not
+check bodies, evaluate static expressions, discover tests, perform conformance or layout checks,
+or emit code.
+
 ## Inspect a source file
 
 From the repository root:

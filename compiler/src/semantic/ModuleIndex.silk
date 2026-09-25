@@ -235,7 +235,9 @@ effect fn indexImport(index: &mut ModuleIndex, module: &Module, declaration: usi
         }
         ordinal = ordinal + usize.ONE
       }
-      return ()
+      if !alias.present {
+        return ()
+      }
     }
     let mut written = path
     if alias.present {
@@ -258,7 +260,7 @@ effect fn indexImport(index: &mut ModuleIndex, module: &Module, declaration: usi
           kind: CandidateKind.ImportModule,
           ordinal: usize.ZERO,
           local: written,
-          isPublic: isPublic,
+          isPublic: false,
         },
       )
     }
