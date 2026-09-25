@@ -493,6 +493,21 @@ const contractRowOf = (
   return row
 }
 
+const stagedApplications = new WeakMap<Tir.TirFunction, boolean>()
+
+/** Whether a body contains a staged callable application, whose base resolves by context. */
+const stagedApplication = (fn: Tir.TirFunction): boolean => {
+  let staged = stagedApplications.get(fn)
+  if (staged === undefined) {
+    staged = fn.statements
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
+      .some((expression) => expression._tag === 'CallableApply' && expression.staged !== undefined)
+    stagedApplications.set(fn, staged)
+  }
+  return staged
+}
+
 const keyOf = (
   declaration: DeclarationFacts.CanonicalId,
   contract: Tir.ContractFact,
@@ -2232,6 +2247,9 @@ export const discover = (
     readonly targetKeys: Map<CallTarget, InstanceKey | undefined>
   }
   const analyzedKeys = new Map<string, Analyzed | undefined>()
+  // Without a staged application a body's callables never consult recorded callables, so each
+  // key object's realization is shared by every ancestry context that reaches it.
+  const contextFreeCallables = new WeakMap<InstanceKey, ReadonlyArray<CallableInstance>>()
   const analyze = (key: InstanceKey): Analyzed | undefined => {
     const text = keyText(key)
     if (analyzedKeys.has(text)) return analyzedKeys.get(text)
@@ -2491,16 +2509,20 @@ export const discover = (
         if (analyzed === undefined) continue
         const { fn, substitution, calls, identityOfCall, ordinaryIdentities, cleanupRoots } =
           analyzed
-        for (const callable of concreteCallables(
-          fn,
-          key,
-          substitution,
-          results,
-          index,
-          resolveRecordedCallable,
-        )) {
-          recordedCallables.set(callableIdentity(callable), callable)
+        let callables = stagedApplication(fn) ? undefined : contextFreeCallables.get(key)
+        if (callables === undefined) {
+          callables = concreteCallables(
+            fn,
+            key,
+            substitution,
+            results,
+            index,
+            resolveRecordedCallable,
+          )
+          if (!stagedApplication(fn)) contextFreeCallables.set(key, callables)
         }
+        for (const callable of callables)
+          recordedCallables.set(callableIdentity(callable), callable)
         for (const call of calls.values()) {
           const identity = identityOfCall(call)
           const target = call.declaration
