@@ -313,6 +313,8 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     if (expression._tag === 'CallableApply') {
       return undefined
     }
+    // A match shares the target's declaration; most unrecorded calls name one with no instance.
+    if (Instances.instancesOf(discovery.instances, expression.target).length === 0) return undefined
     const typeArguments = expression.typeArguments.map((argument) =>
       Type.substituteGenericArgument(
         argument,
@@ -773,14 +775,45 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   ): boolean =>
     candidate.module === expected.module &&
     (candidate.name === expected.name || candidate.name.startsWith(`${expected.name}$provided$`))
-  const reachesExecutionOwner = (
+  // The parameter and binding references each body runs as an Effect, in body order.
+  const runSources = new Map<string, ReadonlyArray<Tir.Expression>>()
+  const runSourcesOf = (candidate: Instances.Instance): ReadonlyArray<Tir.Expression> => {
+    const identity = ownerKey(candidate)
+    let sources = runSources.get(identity)
+    if (sources === undefined) {
+      sources = candidate.function.statements
+        .flatMap(Tir.statementExpressions)
+        .flatMap(Tir.expressionTree)
+        .flatMap((expression) =>
+          expression._tag === 'Run'
+            ? Tir.expressionTree(expression.subject).filter(
+                (nested) =>
+                  nested._tag === 'ParameterReference' || nested._tag === 'BindingReference',
+              )
+            : [],
+        )
+      runSources.set(identity, sources)
+    }
+    return sources
+  }
+  // Per expected owner: nodes whose complete exploration never reached it, and roots proved to
+  // reach it. A failed search explores every node it visits, so each is proved unreachable; a
+  // successful one proves only its root. Either fact answers later searches exactly.
+  const reachability = new Map<
+    string,
+    { readonly unreachable: Set<string>; readonly reaching: Set<string> }
+  >()
+  const searchExecutionOwner = (
     candidate: Instances.Instance,
     expected: Instances.Instance,
-    seen = new Set<string>(),
+    seen: Set<string>,
+    unreachable: ReadonlySet<string>,
+    reaching: ReadonlySet<string>,
   ): boolean => {
     const identity = ownerKey(candidate)
-    if (seen.has(identity)) return false
+    if (seen.has(identity) || unreachable.has(identity)) return false
     if (
+      reaching.has(identity) ||
       identity === ownerKey(expected) ||
       sameProvidedOwner(candidate.key.declaration, expected.key.declaration)
     )
@@ -793,7 +826,10 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     if (
       (executionTargetsByOwner.get(identity) ?? []).some((targetKey) => {
         const target = instances.get(Instances.keyText(targetKey))
-        return target !== undefined && reachesExecutionOwner(target, expected, seen)
+        return (
+          target !== undefined &&
+          searchExecutionOwner(target, expected, seen, unreachable, reaching)
+        )
       })
     )
       return true
@@ -802,20 +838,33 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
     // its specialized identity rather than recognizing the combinator's declaration spelling.
     // A source wrapper may first store the bound recipe in an immutable local; resolve that
     // binding through the same execution-source graph before following its protected parameter.
-    return candidate.function.statements
-      .flatMap(Tir.statementExpressions)
-      .flatMap(Tir.expressionTree)
-      .some(
-        (expression) =>
-          expression._tag === 'Run' &&
-          Tir.expressionTree(expression.subject).some((nested) => {
-            if (nested._tag !== 'ParameterReference' && nested._tag !== 'BindingReference')
-              return false
-            return executionSources(candidate, nested).some((owner) =>
-              reachesExecutionOwner(owner, expected, seen),
-            )
-          }),
-      )
+    return runSourcesOf(candidate).some((nested) =>
+      executionSources(candidate, nested).some((owner) =>
+        searchExecutionOwner(owner, expected, seen, unreachable, reaching),
+      ),
+    )
+  }
+  const reachesExecutionOwner = (
+    candidate: Instances.Instance,
+    expected: Instances.Instance,
+  ): boolean => {
+    const target = ownerKey(expected)
+    let known = reachability.get(target)
+    if (known === undefined) {
+      known = { unreachable: new Set(), reaching: new Set() }
+      reachability.set(target, known)
+    }
+    const seen = new Set<string>()
+    const reached = searchExecutionOwner(
+      candidate,
+      expected,
+      seen,
+      known.unreachable,
+      known.reaching,
+    )
+    if (reached) known.reaching.add(ownerKey(candidate))
+    else for (const identity of seen) known.unreachable.add(identity)
+    return reached
   }
   const forwardedTo = (owner: Instances.Instance): ReadonlyArray<Provider> => {
     const identity = ownerKey(owner)
