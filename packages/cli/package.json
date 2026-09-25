@@ -142,6 +142,11 @@
     "@silklang/formatter": "workspace:*",
     "effect": "catalog:"
   },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "^24.10.1",
+    "effect-inspect": "catalog:"
+  },
   "peerDependencies": {
     "effect-inspect": "catalog:"
   },
@@ -149,10 +154,5 @@
     "effect-inspect": {
       "optional": true
     }
-  },
-  "devDependencies": {
-    "@effect/vitest": "catalog:",
-    "@types/node": "^24.10.1",
-    "effect-inspect": "catalog:"
   }
 }
