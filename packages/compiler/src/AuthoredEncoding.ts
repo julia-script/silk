@@ -454,7 +454,7 @@ export const header = Effect.fn('AuthoredEncoding.header')(function* (
   pool: AuthoredPool.Pool,
   declaration: AuthoredHir.Declaration,
 ): Effect.fn.Return<ReadonlyArray<number>, AuthoredEncodingError> {
-  yield* encode(pool, pool, 'artifact')
+  yield* validatePool(pool)
   return yield* encode(pool, declaration.header, 'header')
 })
 
@@ -463,8 +463,20 @@ export const body = Effect.fn('AuthoredEncoding.body')(function* (
   pool: AuthoredPool.Pool,
   declaration: AuthoredHir.Declaration,
 ): Effect.fn.Return<ReadonlyArray<number>, AuthoredEncodingError> {
-  yield* encode(pool, pool, 'artifact')
+  yield* validatePool(pool)
   return yield* encode(pool, declaration.body, 'body')
+})
+
+// Published pools are never edited, and every declaration of a module shares its pool: validate
+// each pool object once instead of once per encoded header or body.
+const validatedPools = new WeakSet<AuthoredPool.Pool>()
+
+const validatePool = Effect.fnUntraced(function* (
+  pool: AuthoredPool.Pool,
+): Effect.fn.Return<void, AuthoredEncodingError> {
+  if (validatedPools.has(pool)) return
+  yield* encode(pool, pool, 'artifact', false)
+  validatedPools.add(pool)
 })
 
 /** Validates the closed artifact structure and every reachable pool reference. */

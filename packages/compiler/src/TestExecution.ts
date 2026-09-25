@@ -1,6 +1,7 @@
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import * as AuthoredEncoding from './AuthoredEncoding.js'
+import type * as AuthoredHir from './AuthoredHir.js'
 import type * as AuthoredIdentity from './AuthoredIdentity.js'
 import * as AuthoredLowering from './AuthoredLowering.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
@@ -72,6 +73,9 @@ const digest = (value: string): string => ToolchainIntegrity.contentDigest(value
 const declarationIdentity = (declaration: DeclarationFacts.CanonicalId): string =>
   Canonical.record('Declaration', [declaration.module, declaration.name])
 
+// Every test closure re-reaches the same shared declarations; digest each declaration once.
+const authoredDigests = new WeakMap<AuthoredHir.Declaration, string | undefined>()
+
 const authoredDigest = Effect.fnUntraced(function* (
   results: ReadonlyMap<string, Elaboration.Result>,
   module: string,
@@ -81,6 +85,16 @@ const authoredDigest = Effect.fnUntraced(function* (
   if (result === undefined) return undefined
   const authored = AuthoredLowering.declarationOf(result.authored, owner)
   if (authored === undefined) return undefined
+  if (authoredDigests.has(authored)) return authoredDigests.get(authored)
+  const digest = yield* encodeAuthoredDigest(result, authored)
+  authoredDigests.set(authored, digest)
+  return digest
+})
+
+const encodeAuthoredDigest = Effect.fnUntraced(function* (
+  result: Elaboration.Result,
+  authored: AuthoredHir.Declaration,
+): Effect.fn.Return<string | undefined> {
   const encoded = yield* Effect.result(
     Effect.gen(function* () {
       const header = yield* AuthoredEncoding.header(result.authored.module.pool, authored)
@@ -277,6 +291,31 @@ const typeFactEncoding = (fact: DeclarationFacts.MemberFact): string => {
   return Canonical.record('NominalDeclaration', [fact._tag])
 }
 
+interface ExpressionFacts {
+  readonly types: ReadonlyArray<Type.Type>
+  readonly constants: ReadonlyArray<DeclarationFacts.CanonicalId>
+}
+
+// Every test closure revisits the same shared instances; walk each body's expressions once.
+const expressionFacts = new WeakMap<Instances.Instance, ExpressionFacts>()
+
+const instanceExpressionFacts = (instance: Instances.Instance): ExpressionFacts => {
+  let facts = expressionFacts.get(instance)
+  if (facts === undefined) {
+    const types: Array<Type.Type> = []
+    const constants: Array<DeclarationFacts.CanonicalId> = []
+    for (const statement of instance.function.statements)
+      for (const expression of Tir.statementExpressions(statement).flatMap(Tir.expressionTree)) {
+        if ('type' in expression) types.push(expression.type)
+        if (expression.constant !== undefined) constants.push(expression.constant)
+        if (expression._tag === 'ConstantReference') constants.push(expression.declaration)
+      }
+    facts = { types, constants }
+    expressionFacts.set(instance, facts)
+  }
+  return facts
+}
+
 const executionEncoding = Effect.fnUntraced(function* (
   discovery: Instances.Discovery,
   results: ReadonlyMap<string, Elaboration.Result>,
@@ -321,14 +360,9 @@ const executionEncoding = Effect.fnUntraced(function* (
       addType(instance.function.contract.result)
     }
     for (const local of instance.function.locals ?? []) addType(local.type)
-    for (const statement of instance.function.statements)
-      for (const expression of Tir.statementExpressions(statement).flatMap(Tir.expressionTree)) {
-        if ('type' in expression) addType(expression.type)
-        if (expression.constant !== undefined)
-          constants.set(declarationKey(expression.constant), expression.constant)
-        if (expression._tag === 'ConstantReference')
-          constants.set(declarationKey(expression.declaration), expression.declaration)
-      }
+    const expressions = instanceExpressionFacts(instance)
+    for (const type of expressions.types) addType(type)
+    for (const constant of expressions.constants) constants.set(declarationKey(constant), constant)
   }
   for (const callable of closure.callables) {
     addType(callable.type)

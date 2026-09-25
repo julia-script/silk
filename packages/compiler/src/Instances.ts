@@ -1010,19 +1010,55 @@ export interface ExecutionClosure {
 }
 
 /** Projects the complete execution graph rooted at one discovered specialization. */
+interface ClosureIndex {
+  readonly instances: ReadonlyMap<string, Instance>
+  readonly byOwner: ReadonlyMap<string, ReadonlyArray<ExecutionEdge>>
+  readonly residuals: ReadonlyMap<string, Residualization.Observation>
+}
+
+// Test identity computes one closure per test over the same discovery; index it once.
+const closureIndices = new WeakMap<Discovery, ClosureIndex>()
+
+const closureIndex = (self: Discovery): ClosureIndex => {
+  let index = closureIndices.get(self)
+  if (index === undefined) {
+    const byOwner = new Map<string, Array<ExecutionEdge>>()
+    for (const edge of self.executionEdges) {
+      const key = keyText(edge.owner)
+      const owned = byOwner.get(key)
+      if (owned === undefined) byOwner.set(key, [edge])
+      else owned.push(edge)
+    }
+    index = {
+      instances: new Map(self.instances.map((instance) => [keyText(instance.key), instance])),
+      byOwner,
+      residuals: new Map(self.residualBodies.map((body) => [body.application, body])),
+    }
+    closureIndices.set(self, index)
+  }
+  return index
+}
+
+const expressionSpanKeys = new WeakMap<Instance, ReadonlyArray<string>>()
+
+const instanceExpressionSpanKeys = (instance: Instance): ReadonlyArray<string> => {
+  let keys = expressionSpanKeys.get(instance)
+  if (keys === undefined) {
+    keys = instance.function.statements
+      .flatMap(Tir.statementExpressions)
+      .flatMap(Tir.expressionTree)
+      .map((expression) => SourceSpan.key(expression.span))
+    expressionSpanKeys.set(instance, keys)
+  }
+  return keys
+}
+
 export const executionClosure = (
   self: Discovery,
   root: InstanceKey,
   excludedDeclarations: ReadonlySet<string> = new Set(),
 ): ExecutionClosure => {
-  const instances = new Map(self.instances.map((instance) => [keyText(instance.key), instance]))
-  const byOwner = new Map<string, Array<ExecutionEdge>>()
-  for (const edge of self.executionEdges) {
-    const key = keyText(edge.owner)
-    const owned = byOwner.get(key)
-    if (owned === undefined) byOwner.set(key, [edge])
-    else owned.push(edge)
-  }
+  const { instances, byOwner, residuals } = closureIndex(self)
   const selected = new Map<string, Instance>()
   const selectedEdges = new Map<string, ExecutionEdge>()
   const gaps: Array<ExecutionGap> = []
@@ -1050,7 +1086,6 @@ export const executionClosure = (
   const orderedInstances = [...selected.values()].sort((left, right) =>
     compareInstanceKeys(left.key, right.key),
   )
-  const residuals = new Map(self.residualBodies.map((body) => [body.application, body]))
   const residualBodies: Array<Residualization.Observation> = []
   for (const instance of orderedInstances) {
     const residual = residuals.get(instance.residualApplication)
@@ -1063,14 +1098,7 @@ export const executionClosure = (
       gaps.push({ _tag: 'IncompleteResidualAttribution', instance: instance.key })
   }
   const owners = new Set(orderedInstances.map((instance) => keyText(instance.key)))
-  const spans = new Set(
-    orderedInstances.flatMap((instance) =>
-      instance.function.statements
-        .flatMap(Tir.statementExpressions)
-        .flatMap(Tir.expressionTree)
-        .map((expression) => SourceSpan.key(expression.span)),
-    ),
-  )
+  const spans = new Set(orderedInstances.flatMap(instanceExpressionSpanKeys))
   return {
     _tag: 'ExecutionClosure',
     root,
