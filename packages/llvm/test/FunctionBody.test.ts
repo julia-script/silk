@@ -12,6 +12,7 @@ import * as FunctionActor from '../src/Function.js'
 import * as FunctionBody from '../src/FunctionBody.js'
 import * as IrText from '../src/IrText.js'
 import * as BodyState from '../src/internal/FunctionBodyState/primitives.js'
+import * as Handle from '../src/internal/Handle.js'
 import { invalidInput, LlvmError } from '../src/LlvmError.js'
 import * as Type from '../src/Type.js'
 import * as Value from '../src/Value.js'
@@ -100,18 +101,17 @@ it.effect('local handles retain an owner identity, not the function construction
         const instruction =
           (yield* Value.instruction(body, sum)) ?? raise('expected an instruction')
         const draft = BodyState.drafts.get(body) ?? raise('expected an active draft')
-        // Structural lifetime contract: an escaped local must not retain sibling handles,
-        // the mutable draft, or its builder through a process-wide weak registry.
-        assert.deepStrictEqual(BodyState.blockEntries.get(block), { owner: draft.owner, index: 0 })
-        assert.deepStrictEqual(BodyState.valueEntries.get(argument), {
-          owner: draft.owner,
-          index: 0,
-        })
-        assert.deepStrictEqual(BodyState.valueEntries.get(sum), { owner: draft.owner, index: 1 })
-        assert.deepStrictEqual(BodyState.instructionEntries.get(instruction), {
-          owner: draft.owner,
-          index: 0,
-        })
+        // Structural lifetime contract: an escaped local retains only its owner identity and
+        // index, never sibling handles, the mutable draft, or its builder.
+        for (const [handle, index] of [
+          [block, 0],
+          [argument, 0],
+          [sum, 1],
+          [instruction, 0],
+        ] as const) {
+          assert.strictEqual(Handle.ownerOf(handle), draft.owner)
+          assert.strictEqual(Handle.indexOf(handle), index)
+        }
         yield* FunctionBody.returnValue(body, sum)
       }),
     )

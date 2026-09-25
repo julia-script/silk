@@ -15,18 +15,12 @@ import type * as TypeDescription from '../TypeDescription.js'
 import { validateInstructions } from './InstructionEncoder.js'
 import {
   assertActive,
-  blockEntries,
   type Draft,
   drafts,
   fail,
-  instructionEntries,
-  localEntry,
+  localIndex,
   lookup,
   type OperandInput,
-  phiEntries,
-  switchEntries,
-  type SwitchEntry,
-  valueEntries,
 } from './primitives.js'
 
 /** @internal */
@@ -56,6 +50,7 @@ export const create = (
     instructions: [],
     openPhis: new Map(),
     instructionHandles: [],
+    switchBlocks: new Map(),
     values: [],
     valueHandles: [],
     metadata: [],
@@ -73,7 +68,6 @@ export const create = (
     })
     draft.valueHandles.push(handle)
     draft.arguments.push(valueIndex)
-    valueEntries.set(handle, { owner, index: valueIndex })
   }
   drafts.set(self, draft)
   return self
@@ -149,8 +143,7 @@ export const resolveBlock = (
   draft: Draft,
   block: BlockActor.Block,
   operation: string,
-): Result.Result<number, LlvmError> =>
-  Result.map(localEntry(blockEntries, draft, block, operation, 'block'), (entry) => entry.index)
+): Result.Result<number, LlvmError> => localIndex(draft, block, 'Block', operation, 'block')
 
 /** @internal */
 export const resolveInstruction = (
@@ -158,26 +151,27 @@ export const resolveInstruction = (
   instruction: FunctionBodyActor.Instruction,
   operation: string,
 ): Result.Result<number, LlvmError> =>
-  Result.map(
-    localEntry(instructionEntries, draft, instruction, operation, 'instruction'),
-    (entry) => entry.index,
-  )
+  localIndex(draft, instruction, 'Instruction', operation, 'instruction')
 
 /** @internal */
 export const resolvePhi = (
   draft: Draft,
   phi: FunctionBodyActor.Phi,
   operation: string,
-): Result.Result<number, LlvmError> =>
-  Result.map(localEntry(phiEntries, draft, phi, operation, 'phi'), (entry) => entry.index)
+): Result.Result<number, LlvmError> => localIndex(draft, phi, 'Phi', operation, 'phi')
 
 /** @internal */
 export const resolveSwitch = (
   draft: Draft,
   value: FunctionBodyActor.Switch,
   operation: string,
-): Result.Result<SwitchEntry, LlvmError> =>
-  localEntry(switchEntries, draft, value, operation, 'switch')
+): Result.Result<{ readonly index: number; readonly block: number }, LlvmError> => {
+  const index = localIndex(draft, value, 'Switch', operation, 'switch')
+  if (Result.isFailure(index)) return Result.fail(index.failure)
+  const block = draft.switchBlocks.get(index.success)
+  if (block === undefined) return fail(operation, 'Switch block is missing', value)
+  return Result.succeed({ index: index.success, block })
+}
 
 /** @internal */
 const resolveLocalValue = (
@@ -188,12 +182,12 @@ const resolveLocalValue = (
   { readonly operand: FunctionBodyDescription.Operand; readonly type: number },
   LlvmError
 > => {
-  const entry = localEntry(valueEntries, draft, value, operation, 'value')
-  if (Result.isFailure(entry)) return Result.fail(entry.failure)
-  const description = draft.values[entry.success.index]
+  const index = localIndex(draft, value, 'Value', operation, 'value')
+  if (Result.isFailure(index)) return Result.fail(index.failure)
+  const description = draft.values[index.success]
   if (description === undefined) return fail(operation, 'Local value table entry is missing', value)
   return Result.succeed({
-    operand: { _tag: 'Local', value: entry.success.index },
+    operand: { _tag: 'Local', value: index.success },
     type: description.type,
   })
 }
@@ -373,7 +367,6 @@ export const makeBlock = (
     predecessors: new Set(),
   })
   draft.blockHandles.push(handle)
-  blockEntries.set(handle, { owner: draft.owner, index })
   if (draft.cursor === undefined) draft.cursor = index
   return handle
 }
@@ -435,7 +428,6 @@ export const forward = (
     source: { _tag: 'Forward', resolved: undefined },
   })
   draft.valueHandles.push(handle)
-  valueEntries.set(handle, { owner: draft.owner, index })
   return handle
 }
 
@@ -447,14 +439,8 @@ export const resolveForward = (
   resolved: OperandInput,
 ): Result.Result<void, LlvmError> =>
   Result.gen(function* () {
-    const entry = yield* localEntry(
-      valueEntries,
-      draft,
-      forwardValue,
-      'Value.resolveForward',
-      'value',
-    )
-    const value = draft.values[entry.index]
+    const index = yield* localIndex(draft, forwardValue, 'Value', 'Value.resolveForward', 'value')
+    const value = draft.values[index]
     if (value === undefined || value.source._tag !== 'Forward') {
       return yield* Result.fail(
         invalidInput({
@@ -489,8 +475,8 @@ export const valueType = (
   value: ValueActor.Value,
 ): Result.Result<number, LlvmError> =>
   Result.gen(function* () {
-    const entry = yield* localEntry(valueEntries, draft, value, 'Value.typeOf', 'value')
-    const description = draft.values[entry.index]
+    const index = yield* localIndex(draft, value, 'Value', 'Value.typeOf', 'value')
+    const description = draft.values[index]
     if (description === undefined) {
       return yield* fail('Value.typeOf', 'Value table entry is missing', value)
     }
@@ -504,8 +490,8 @@ export const setValueName = (
   name: ByteString.ByteString | Uint8Array | string,
 ): Result.Result<void, LlvmError> =>
   Result.gen(function* () {
-    const entry = yield* localEntry(valueEntries, draft, value, 'Value.setName', 'value')
-    const description = draft.values[entry.index]
+    const index = yield* localIndex(draft, value, 'Value', 'Value.setName', 'value')
+    const description = draft.values[index]
     if (description === undefined) {
       return yield* Result.fail(
         invalidState({
@@ -533,8 +519,8 @@ export const valueName = (
   value: ValueActor.Value,
 ): Result.Result<ByteString.ByteString, LlvmError> =>
   Result.gen(function* () {
-    const entry = yield* localEntry(valueEntries, draft, value, 'Value.name', 'value')
-    const description = draft.values[entry.index]
+    const index = yield* localIndex(draft, value, 'Value', 'Value.name', 'value')
+    const description = draft.values[index]
     if (description === undefined) {
       return yield* fail('Value.name', 'Value table entry is missing', value)
     }
@@ -547,8 +533,8 @@ export const valueInstruction = (
   value: ValueActor.Value,
 ): Result.Result<FunctionBodyActor.Instruction | undefined, LlvmError> =>
   Result.gen(function* () {
-    const entry = yield* localEntry(valueEntries, draft, value, 'Value.instruction', 'value')
-    const source = draft.values[entry.index]?.source
+    const index = yield* localIndex(draft, value, 'Value', 'Value.instruction', 'value')
+    const source = draft.values[index]?.source
     return source?._tag === 'Instruction'
       ? yield* instructionHandle(draft, source.instruction, 'Value.instruction')
       : undefined
@@ -575,7 +561,6 @@ export const makePhiHandle = (
   Result.gen(function* () {
     const index = yield* resolveInstruction(draft, instruction, 'FunctionBody.phi')
     const handle = Handle.make('Phi', draft.owner, index)
-    phiEntries.set(handle, { owner: draft.owner, index })
     draft.openPhis.set(index, { incoming: [], blocks: new Set() })
     return handle
   })
@@ -589,7 +574,7 @@ export const makeSwitchHandle = (
   Result.gen(function* () {
     const index = yield* resolveInstruction(draft, instruction, 'FunctionBody.switchTerminator')
     const handle = Handle.make('Switch', draft.owner, index)
-    switchEntries.set(handle, { owner: draft.owner, index, block })
+    draft.switchBlocks.set(index, block)
     return handle
   })
 
@@ -660,27 +645,19 @@ export const validate = Effect.fn('FunctionBody.validate')(function* (
     }
     const validated = validateInstructions(draft)
     if (Result.isFailure(validated)) return Result.fail(validated.failure)
+    // The body commits right after validation and the draft is closed, so the snapshot takes
+    // ownership of the draft's tables instead of copying them.
     return Result.succeed({
-      arguments: [...draft.arguments],
+      arguments: draft.arguments,
       blocks: draft.blocks.map((block) => ({
         name: block.name,
-        instructions: [...block.instructions],
+        instructions: block.instructions,
         predecessors: [...block.predecessors].sort((left, right) => left - right),
       })),
-      instructions: [...draft.instructions],
-      values: draft.values.map((value) => ({
-        type: value.type,
-        name: value.name,
-        source:
-          value.source._tag === 'Forward'
-            ? {
-                _tag: 'Forward' as const,
-                resolved: value.source.resolved,
-              }
-            : value.source,
-      })),
-      metadata: draft.metadata.map((attachments) => [...attachments]),
-      debugLocations: [...draft.debugLocations],
+      instructions: draft.instructions,
+      values: draft.values,
+      metadata: draft.metadata,
+      debugLocations: draft.debugLocations,
     })
   })
 })

@@ -7,6 +7,7 @@ import type * as FunctionBodyActor from '../../FunctionBody.js'
 import { invalidInput, type LlvmError } from '../../LlvmError.js'
 import type * as ValueActor from '../../Value.js'
 import type * as FunctionBodyDescription from '../FunctionBodyDescription.js'
+import * as Handle from '../Handle.js'
 import type * as MetadataDescription from '../MetadataDescription.js'
 import type * as OwnedHandle from '../OwnedHandle.js'
 
@@ -51,35 +52,18 @@ export interface Draft {
     }
   >
   readonly instructionHandles: Array<FunctionBodyActor.Instruction>
+  /** Containing block of each switch terminator, keyed by instruction index. */
+  readonly switchBlocks: Map<number, number>
   readonly values: Array<MutableValue>
   readonly valueHandles: Array<ValueActor.Value>
-  readonly metadata: Array<Array<MetadataDescription.Attachment>>
+  readonly metadata: Array<ReadonlyArray<MetadataDescription.Attachment>>
   readonly debugLocations: Array<number | undefined>
 }
 
-export interface LocalEntry {
-  // Never retain the draft here: one escaped value would keep all sibling handles and
-  // their weak-registry entries alive. The construction benchmark exposes the resulting
-  // GC cost; ownership needs only this small identity with no back-reference to the draft.
-  readonly owner: OwnedHandle.Owner
-  readonly index: number
-}
+/** Shared empty attachment list; attaching metadata replaces an instruction's list. */
+export const noAttachments: ReadonlyArray<MetadataDescription.Attachment> = []
 
 export const drafts = new WeakMap<FunctionBodyActor.FunctionBody, Draft>()
-
-export const blockEntries = new WeakMap<BlockActor.Block, LocalEntry>()
-
-export const instructionEntries = new WeakMap<FunctionBodyActor.Instruction, LocalEntry>()
-
-export const valueEntries = new WeakMap<ValueActor.Value, LocalEntry>()
-
-export const phiEntries = new WeakMap<FunctionBodyActor.Phi, LocalEntry>()
-
-export interface SwitchEntry extends LocalEntry {
-  readonly block: number
-}
-
-export const switchEntries = new WeakMap<FunctionBodyActor.Switch, SwitchEntry>()
 
 /** @internal */
 export const fail = (
@@ -117,18 +101,25 @@ export const assertActive = (
   return Result.void
 }
 
-/** @internal */
-export const localEntry = <A extends object, Entry extends LocalEntry>(
-  entries: WeakMap<A, Entry>,
+/**
+ * Resolves a body-local handle (block, instruction, value, phi, or switch) to its draft index.
+ *
+ * @internal
+ */
+export const localIndex = <Tag extends string>(
   draft: Draft,
-  handle: A,
+  handle: Handle.Handle<Tag>,
+  tag: Tag,
   operation: string,
   kind: string,
-): Result.Result<Entry, LlvmError> => {
-  const entry = entries.get(handle)
-  if (entry === undefined) return fail(operation, `Unknown ${kind} handle`, handle)
-  if (entry.owner !== draft.owner) {
+): Result.Result<number, LlvmError> => {
+  const owner = Handle.ownerOf(handle)
+  const index = Handle.indexOf(handle)
+  if (owner === undefined || index === undefined || handle._tag !== tag) {
+    return fail(operation, `Unknown ${kind} handle`, handle)
+  }
+  if (owner !== draft.owner) {
     return fail(operation, `The ${kind} handle belongs to a different function body`, handle)
   }
-  return Result.succeed(entry)
+  return Result.succeed(index)
 }
