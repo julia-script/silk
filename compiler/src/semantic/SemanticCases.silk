@@ -13,6 +13,7 @@ import semantic.Semantic {
   RejectionCode,
   ResolvedType,
   Semantic,
+  Request,
   Value,
 }
 import semantic.SourceIndex {
@@ -25,6 +26,7 @@ import semantic.SourceRevision {Revision}
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
 import silk.effect {Effect}
+import silk.layout {Layout}
 import silk.option {Option}
 import silk.result {Result}
 import silk.shared {Shared}
@@ -37,6 +39,27 @@ struct AnswerView {
   success: bool
   dependencies: usize
   sources: usize
+}
+
+struct NestedFailureAllocator {
+  targetBytes: usize
+  rejected: bool
+}
+
+impl NestedFailureAllocator {
+  effect fn allocate(self: &mut Self, layout: Layout) -> Allocation ! OutOfMemoryError {
+    if layout.bytes == self.targetBytes && layout.alignment == 1 {
+      self.rejected = true
+      fail OutOfMemoryError {}
+    }
+    let mut system = Allocator.systemAllocatorProvider()
+    return run Allocator.allocate(move layout)
+      |> Effect.provideMut<Allocator>(&mut system)
+  }
+}
+
+impl Allocator for NestedFailureAllocator {
+  allocate: NestedFailureAllocator.allocate
 }
 
 fn inspect(answer: &Result<Answer, NoRejection>) -> AnswerView {
@@ -77,6 +100,10 @@ fn isUnknownName(value: &Rejection) -> bool {
   return value.code == RejectionCode.UnknownName
 }
 
+fn isUnknownMember(value: &Rejection) -> bool {
+  return value.code == RejectionCode.UnknownMember
+}
+
 fn isMissingModule(value: &Rejection) -> bool {
   return value.code == RejectionCode.MissingModule && value.span.end > value.span.start
 }
@@ -114,6 +141,20 @@ fn isNominal(resolved: &ResolvedType) -> bool {
     ResolvedType.Nominal {..} => true
     _ => false
   }
+}
+
+fn isBool(resolved: &ResolvedType) -> bool {
+  return match & resolved.* {
+    ResolvedType.Primitive {name} => {
+      let bytes = Bytes.asSlice(&name)
+      return bytes.length == 4 && bytes[0] == 98 && bytes[1] == 111 && bytes[2] == 111 && bytes[3] == 108
+    }
+    _ => false
+  }
+}
+
+fn spanStart(value: &Rejection) -> usize {
+  return value.span.start
 }
 
 fn signatureResult(answer: &Result<Answer, NoRejection>) -> Option<Shared<ResolvedType>> {
@@ -196,6 +237,18 @@ fn starts(events: &[SemanticEvent], family: Family) -> usize {
   return count
 }
 
+fn hits(events: &[SemanticEvent], family: Family) -> usize {
+  let mut count = usize.ZERO
+  let mut at = usize.ZERO
+  while at < events.length {
+    if events[at].kind == EventKind.Hit && events[at].family == family {
+      count = count + usize.ONE
+    }
+    at = at + usize.ONE
+  }
+  return count
+}
+
 effect fn module(path: string) -> ModuleId ! InvalidModulePath | OutOfMemoryError ? &mut Allocator {
   return run ModuleId.make(b"memory", b"example", String.utf8Bytes(path))
 }
@@ -214,7 +267,8 @@ effect fn lazyClaims() -> ()
   )
   let revision = run Revision.publish(&Revision.make(), &entry, &source)
   let mut semantic = Semantic.make(move revision)
-  let signature = run Semantic.demandSignature(&mut semantic, &entry, b"entry")
+  let mut request = Request.make()
+  let signature = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"entry")
   let first = Shared.with<Result<Answer, NoRejection>, AnswerView>(&signature, inspect)
   run Testing.expect(
     first.success && first.sources == 1,
@@ -234,7 +288,7 @@ effect fn lazyClaims() -> ()
     ) == 0,
     "unused import and bad alias stay undemanded",
   )
-  let broken = run Semantic.demandAlias(&mut semantic, &entry, b"Broken")
+  let broken = run Semantic.demandAlias(&mut semantic, &mut request, &entry, b"Broken")
   let rejected = Shared.with<Result<Answer, NoRejection>, AnswerView>(&broken, inspect)
   let diagnostic = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(
     &broken,
@@ -248,13 +302,13 @@ effect fn lazyClaims() -> ()
   } else {
     run Testing.expect(false, "demanded bad alias has a typed rejection")
   }
-  let again = run Semantic.demandSignature(&mut semantic, &entry, b"entry")
+  let again = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"entry")
   let hit = Shared.with<Result<Answer, NoRejection>, AnswerView>(&again, inspect)
   run Testing.expect(
     hit.success && hit.sources == first.sources && reads(Semantic.sourceEvents(&semantic), &entry) == 1,
     "memo hit retains evidence without another source read",
   )
-  let demanded = run Semantic.demandSignature(&mut semantic, &entry, b"missing")
+  let demanded = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"missing")
   let missingDiagnostic = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(
     &demanded,
     rejection,
@@ -295,7 +349,8 @@ effect fn importClaims() -> ()
   )
   let revision = run Revision.publish(&first, &entry, &entrySource)
   let mut semantic = Semantic.make(move revision)
-  let signature = run Semantic.demandSignature(&mut semantic, &entry, b"entry")
+  let mut request = Request.make()
+  let signature = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"entry")
   let result = Shared.with<Result<Answer, NoRejection>, AnswerView>(&signature, inspect)
   run Testing.expect(result.success, "imported alias resolves from written signature")
   run Testing.expect(result.dependencies > 0, "imported alias records nested demands")
@@ -330,7 +385,7 @@ effect fn importClaims() -> ()
     ) == 1 && starts(Semantic.eventLog(&semantic), Family.Identity) == 1,
     "hybrid namespace and selected alias share nominal identity",
   )
-  let again = run Semantic.demandSignature(&mut semantic, &entry, b"entry")
+  let again = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"entry")
   let cached = Shared.with<Result<Answer, NoRejection>, AnswerView>(&again, inspect)
   run Testing.expect(
     cached.success && cached.dependencies == result.dependencies && cached.sources == result.sources,
@@ -342,6 +397,34 @@ effect fn importClaims() -> ()
       &library,
     ) == 1,
     "imported signature memo hit does not reread sources",
+  )
+  let priorSignatureStarts = starts(Semantic.eventLog(&semantic), Family.Signature)
+  let priorSignatureHits = hits(Semantic.eventLog(&semantic), Family.Signature)
+  let mut fresh = Request.make()
+  run Testing.expect(
+    Request.rootCount(&fresh) == 0 && !Request.hasDiscovered(&fresh, &library),
+    "fresh request has no inherited roots or discoveries",
+  )
+  let replayed = run Semantic.demandSignature(&mut semantic, &mut fresh, &entry, b"entry")
+  run Testing.expect(
+    Shared.with<Result<Answer, NoRejection>, AnswerView>(&replayed, inspect).success && Request.rootCount(
+      &fresh,
+    ) == 1 && Request.hasRoot(&fresh, Family.Signature, &entry, b"entry") && Request.hasDiscovered(
+      &fresh,
+      &entry,
+    ) && Request.hasDiscovered(&fresh, &library) && Request.hasDemand(
+      &fresh,
+      Family.Alias,
+      &library,
+    ) && Request.hasDemand(&fresh, Family.Identity, &library),
+    "fresh request replays imported discovery and nested demand evidence",
+  )
+  run Testing.expect(
+    priorSignatureStarts == starts(Semantic.eventLog(&semantic), Family.Signature) && hits(
+      Semantic.eventLog(&semantic),
+      Family.Signature,
+    ) == priorSignatureHits + 1 && reads(Semantic.sourceEvents(&semantic), &library) == 1,
+    "replay emits only the actual root hit and no new provider read",
   )
   return ()
 }
@@ -362,7 +445,8 @@ effect fn cycleClaims() -> ()
   )
   let revision = run Revision.publish(&Revision.make(), &entry, &source)
   let mut semantic = Semantic.make(move revision)
-  let function = run Semantic.demandSignature(&mut semantic, &entry, b"f")
+  let mut request = Request.make()
+  let function = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"f")
   run Testing.expect(
     Shared.with<Result<Answer, NoRejection>, AnswerView>(&function, inspect).success && starts(
       Semantic.eventLog(&semantic),
@@ -370,7 +454,7 @@ effect fn cycleClaims() -> ()
     ) == 1,
     "recursive bodies do not demand another signature",
   )
-  let alias = run Semantic.demandAlias(&mut semantic, &entry, b"A")
+  let alias = run Semantic.demandAlias(&mut semantic, &mut request, &entry, b"A")
   let diagnostic = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(
     &alias,
     rejection,
@@ -410,7 +494,8 @@ effect fn visibilityClaims() -> ()
   )
   let revision = run Revision.publish(&Revision.make(), &entry, &source)
   let mut semantic = Semantic.make(move revision)
-  let revealed = run Semantic.demandSignature(&mut semantic, &entry, b"reveal")
+  let mut request = Request.make()
+  let revealed = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"reveal")
   let privateType = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(
     &revealed,
     rejection,
@@ -423,7 +508,7 @@ effect fn visibilityClaims() -> ()
   } else {
     run Testing.expect(false, "private type exposure has a typed rejection")
   }
-  let clash = run Semantic.demandAlias(&mut semantic, &entry, b"Clash")
+  let clash = run Semantic.demandAlias(&mut semantic, &mut request, &entry, b"Clash")
   let collision = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(
     &clash,
     rejection,
@@ -436,7 +521,7 @@ effect fn visibilityClaims() -> ()
   } else {
     run Testing.expect(false, "colliding name has a typed rejection")
   }
-  let unsupported = run Semantic.demandAlias(&mut semantic, &entry, b"NotReady")
+  let unsupported = run Semantic.demandAlias(&mut semantic, &mut request, &entry, b"NotReady")
   let diagnostic = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(
     &unsupported,
     rejection,
@@ -472,7 +557,8 @@ effect fn importCycleClaims() -> ()
   let entrySource = run present("import first { Alias }\nfn entry() -> Alias { return () }\n")
   let revision = run Revision.publish(&second, &entry, &entrySource)
   let mut semantic = Semantic.make(move revision)
-  let signature = run Semantic.demandSignature(&mut semantic, &entry, b"entry")
+  let mut request = Request.make()
+  let signature = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"entry")
   let diagnostic = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(
     &signature,
     rejection,
@@ -508,4 +594,243 @@ test effect fn rejectsPublicImportNameCycle() -> ()
   let mut allocator = Allocator.systemAllocatorProvider()
   return run importCycleClaims()
     |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn revisionReuseClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static>
+? &mut Allocator {
+  let entry = run module("entry.silk")
+  let library = run module("library.silk")
+  let unrelated = run module("unrelated.silk")
+  let a = run present("import library { Alias }\nfn entry() -> Alias { return () }\n")
+  let b = run present("pub type Alias = i32\n")
+  let first = run Revision.publish(&Revision.make(), &entry, &a)
+  let held = run Revision.publish(&first, &library, &b)
+  let mut semantic = Semantic.make(run Revision.copy(&held))
+  let mut coldRequest = Request.make()
+  let cold = run Semantic.demandSignature(&mut semantic, &mut coldRequest, &entry, b"entry")
+  run Testing.expect(
+    Shared.with<Result<Answer, NoRejection>, AnswerView>(&cold, inspect).success && Request.hasDiscovered(
+      &coldRequest,
+      &library,
+    ),
+    "cold signature discovers its imported alias source",
+  )
+  let startsBefore = starts(Semantic.eventLog(&semantic), Family.Signature)
+  let c = run present("fn changed() -> i32 { return 3 }\n")
+  let irrelevant = run Revision.publish(&held, &unrelated, &c)
+  Semantic.revise(&mut semantic, move irrelevant)
+  let mut fresh = Request.make()
+  let warm = run Semantic.demandSignature(&mut semantic, &mut fresh, &entry, b"entry")
+  run Testing.expect(
+    Shared.with<Result<Answer, NoRejection>, AnswerView>(&warm, inspect).success && Request.hasDiscovered(
+      &fresh,
+      &library,
+    ) && !Request.hasDiscovered(&fresh, &unrelated) && starts(
+      Semantic.eventLog(&semantic),
+      Family.Signature,
+    ) == startsBefore && hits(Semantic.eventLog(&semantic), Family.Signature) == 1,
+    "unrelated revision keeps the completed signature and replays only its discoveries",
+  )
+  let changed = run present("pub type Alias = bool\n")
+  let relevant = run Revision.publish(&held, &library, &changed)
+  Semantic.revise(&mut semantic, move relevant)
+  let mut revised = Request.make()
+  let updated = run Semantic.demandSignature(&mut semantic, &mut revised, &entry, b"entry")
+  let result = Shared.with<Result<Answer, NoRejection>, Option<Shared<ResolvedType>>>(
+    &updated,
+    signatureResult,
+  )
+  if let Option<Shared<ResolvedType>>.Some {value} = move result {
+    run Testing.expect(
+      Shared.with<ResolvedType, bool>(&value, isBool) && starts(
+        Semantic.eventLog(&semantic),
+        Family.Signature,
+      ) == startsBefore + 1,
+      "changed imported alias header recomputes the transitive signature",
+    )
+  } else {
+    run Testing.expect(false, "recomputed signature has a written result")
+  }
+  return ()
+}
+
+test effect fn reusesUnrelatedRevisionAndInvalidatesImportedHeader() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run revisionReuseClaims()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn negativeRevisionClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static>
+? &mut Allocator {
+  let entry = run module("entry.silk")
+  let library = run module("library.silk")
+  let a = run present("import library { Alias }\nfn entry() -> Alias { return () }\n")
+  let held = run Revision.publish(&Revision.make(), &entry, &a)
+  let mut semantic = Semantic.make(run Revision.copy(&held))
+  let mut firstRequest = Request.make()
+  let missing = run Semantic.demandSignature(&mut semantic, &mut firstRequest, &entry, b"entry")
+  let diagnostic = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(
+    &missing,
+    rejection,
+  )
+  if let Option<Shared<Rejection>>.Some {value} = move diagnostic {
+    run Testing.expect(
+      Shared.with<Rejection, bool>(&value, isMissingModule) && !Request.hasDiscovered(
+        &firstRequest,
+        &library,
+      ),
+      "absent imported path records a typed rejection without a present discovery",
+    )
+  } else {
+    run Testing.expect(false, "absent imported path rejects")
+  }
+  let b = run present("pub type Other = i32\n")
+  let appeared = run Revision.publish(&held, &library, &b)
+  Semantic.revise(&mut semantic, move appeared)
+  let mut secondRequest = Request.make()
+  let missingName = run Semantic.demandSignature(
+    &mut semantic,
+    &mut secondRequest,
+    &entry,
+    b"entry",
+  )
+  let nameDiagnostic = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(
+    &missingName,
+    rejection,
+  )
+  if let Option<Shared<Rejection>>.Some {value} = move nameDiagnostic {
+    run Testing.expect(
+      Shared.with<Rejection, bool>(&value, isUnknownMember) && Request.hasDiscovered(
+        &secondRequest,
+        &library,
+      ),
+      "formerly absent path is discovered and its absent-name bucket rejects",
+    )
+  } else {
+    run Testing.expect(false, "present imported module with absent name rejects")
+  }
+  let named = run present("pub type Other = i32\npub type Alias = bool\n")
+  let namedRevision = run Revision.publish(&held, &library, &named)
+  Semantic.revise(&mut semantic, move namedRevision)
+  let mut namedRequest = Request.make()
+  let resolved = run Semantic.demandSignature(&mut semantic, &mut namedRequest, &entry, b"entry")
+  let result = Shared.with<Result<Answer, NoRejection>, Option<Shared<ResolvedType>>>(
+    &resolved,
+    signatureResult,
+  )
+  if let Option<Shared<ResolvedType>>.Some {value} = move result {
+    run Testing.expect(
+      Shared.with<ResolvedType, bool>(&value, isBool) && Request.hasDiscovered(
+        &namedRequest,
+        &library,
+      ),
+      "new imported name invalidates the transitive negative bucket",
+    )
+  } else {
+    run Testing.expect(false, "new imported name resolves")
+  }
+  let shifted = run present(
+    "// prefix\nimport library { Alias }\nfn entry() -> Alias { return () }\n",
+  )
+  let absentAgain = run Revision.publish(&held, &entry, &shifted)
+  Semantic.revise(&mut semantic, move absentAgain)
+  let mut shiftedRequest = Request.make()
+  let newFailure = run Semantic.demandSignature(
+    &mut semantic,
+    &mut shiftedRequest,
+    &entry,
+    b"entry",
+  )
+  let anchored = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(
+    &newFailure,
+    rejection,
+  )
+  if let Option<Shared<Rejection>>.Some {value} = move anchored {
+    let offset = Shared.with<Rejection, usize>(&value, spanStart)
+    run Testing.expect(
+      Shared.with<Rejection, bool>(&value, isMissingModule) && offset == 17 && String.utf8Bytes(
+        "// prefix\nimport library { Alias }\nfn entry() -> Alias { return () }\n",
+      )[offset] == 108,
+      "recomputed rejection span points into exact changed entry bytes",
+    )
+  } else {
+    run Testing.expect(false, "changed entry bytes produce a new anchored rejection")
+  }
+  return ()
+}
+
+test effect fn invalidatesNegativePathAndNameAndReanchorsDiagnostic() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run negativeRevisionClaims()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn nestedFailureRetryClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut system = Allocator.systemAllocatorProvider()
+  let entry = run module("entry.silk")
+    |> Effect.provideMut<Allocator>(&mut system)
+  let library = run module("library.silk")
+    |> Effect.provideMut<Allocator>(&mut system)
+  let entrySource = run present("import library { Alias }\nfn entry() -> Alias { return () }\n")
+    |> Effect.provideMut<Allocator>(&mut system)
+  let libraryText = "pub type Alias = bool\n// This unique source allocation is rejected inside the nested import.\n"
+  let librarySource = run present(libraryText)
+    |> Effect.provideMut<Allocator>(&mut system)
+  let first = run Revision.publish(&Revision.make(), &entry, &entrySource)
+    |> Effect.provideMut<Allocator>(&mut system)
+  let revision = run Revision.publish(&first, &library, &librarySource)
+    |> Effect.provideMut<Allocator>(&mut system)
+  let mut semantic = Semantic.make(move revision)
+  let mut failedRequest = Request.make()
+  let mut fault = NestedFailureAllocator {
+    targetBytes: String.utf8Bytes(libraryText).length,
+    rejected: false,
+  }
+  let attempted = run Effect.result(
+    Semantic.demandSignature(&mut semantic, &mut failedRequest, &entry, b"entry"),
+  )
+    |> Effect.provideMut<Allocator>(&mut fault)
+  let failed = match move attempted {
+    Result<
+      Shared<Result<Answer, NoRejection>>,
+      Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError,
+    >.Failure {error} => match move error {
+      OutOfMemoryError {} => true
+      _ => false
+    }
+    Result<
+      Shared<Result<Answer, NoRejection>>,
+      Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError,
+    >.Success {value: ignored} => false
+  }
+  run Testing.expect(
+    failed && fault.rejected && Request.rootCount(&failedRequest) == 0 && starts(
+      Semantic.eventLog(&semantic),
+      Family.Signature,
+    ) == 1 && starts(Semantic.eventLog(&semantic), Family.Import) > 0,
+    "nested imported-signature provider failure publishes no root",
+  )
+  let mut retriedRequest = Request.make()
+  let retried = run Semantic.demandSignature(&mut semantic, &mut retriedRequest, &entry, b"entry")
+    |> Effect.provideMut<Allocator>(&mut system)
+  run Testing.expect(
+    Shared.with<Result<Answer, NoRejection>, AnswerView>(&retried, inspect).success && Request.rootCount(
+      &retriedRequest,
+    ) == 1 && Request.hasDiscovered(&retriedRequest, &library) && starts(
+      Semantic.eventLog(&semantic),
+      Family.Signature,
+    ) == 2,
+    "retry recomputes the same signature and publishes complete imported evidence",
+  )
+  return ()
+}
+
+test effect fn retriesNestedImportedSignatureAfterTypedFailure() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  return run nestedFailureRetryClaims()
 }

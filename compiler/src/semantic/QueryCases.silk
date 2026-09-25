@@ -5,6 +5,7 @@ import silk.allocator {Allocator, OutOfMemoryError}
 import silk.effect {Effect}
 import silk.execution {Execution}
 import silk.hash {Hash, Word}
+import silk.option {Option}
 import silk.result {Result}
 import silk.shared {Shared}
 import silk.testing {AssertionError, Testing}
@@ -279,6 +280,8 @@ test effect fn reusesAnswerWithCapturedProvider() -> ()
 
 struct CancellationMark {
   released: bool
+  suspended: bool
+  retained: Option<Query<Word, i32, Rejection>>
 }
 
 struct TrackedQuery {
@@ -288,11 +291,13 @@ struct TrackedQuery {
 
 impl Drop for TrackedQuery {
   fn drop(self: &mut TrackedQuery) -> () {
-    let released = Query.length(&self.query) == 0
+    let retained = Intrinsic.replace(self.query, Query.make<Word, i32, Rejection>())
+    let released = Query.length(&retained) == 0
     Shared.withMut<CancellationMark, ()>(
       &self.mark,
       fn(mark: &mut CancellationMark) -> () {
         mark.released = released
+        mark.retained = Option.some<Query<Word, i32, Rejection>>(move retained)
         return ()
       },
     )
@@ -310,11 +315,28 @@ effect fn parked(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i
   return Result.succeed<i32, Rejection>(0)
 }
 
+effect fn nestedParked(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<i32, Rejection>
+! OutOfMemoryError | Cycle
+? &mut Allocator {
+  let inner = run Query.demand(move owner, Hash.word(9), parked)
+  drop inner
+  return Result.succeed<i32, Rejection>(41)
+}
+
+effect fn nestedAfterCancellation(owner: &mut Query<Word, i32, Rejection>, key: Word) -> Result<
+  i32,
+  Rejection,
+> ! OutOfMemoryError | Cycle ? &mut Allocator {
+  let inner = run Query.demand(move owner, Hash.word(9), accepted)
+  drop inner
+  return Result.succeed<i32, Rejection>(41)
+}
+
 effect fn cancelledWork(mark: Shared<CancellationMark>) -> ()
 ! OutOfMemoryError | Cycle
 ? &mut Allocator {
   let mut tracked = TrackedQuery {query: Query.make<Word, i32, Rejection>(), mark: move mark}
-  let answer = run Query.demand(&mut tracked.query, Hash.word(8), parked)
+  let answer = run Query.demand(&mut tracked.query, Hash.word(8), nestedParked)
   drop answer
   return ()
 }
@@ -341,27 +363,61 @@ fn completed(state: Shared<CancellationMark>, answer: ()) -> () {
 }
 
 fn suspended(state: Shared<CancellationMark>, execution: Intrinsic.Execution<()>) -> () {
+  Shared.withMut<CancellationMark, ()>(
+    &state,
+    fn(mark: &mut CancellationMark) -> () {
+      mark.suspended = true
+      return ()
+    },
+  )
   drop execution
   drop state
   return ()
 }
 
-fn wasReleased(mark: &CancellationMark) -> bool {
-  return mark.released
-}
-
-effect fn cancellationReleases() -> () ! OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
-  let mark = run Shared.make<CancellationMark>(CancellationMark {released: false})
+effect fn cancellationReleases() -> ()
+! OutOfMemoryError | Cycle | AssertionError<'static>
+? &mut Allocator {
+  let mark = run Shared.make<CancellationMark>(
+    CancellationMark {
+      released: false,
+      suspended: false,
+      retained: Option.none<Query<Word, i32, Rejection>>(),
+    },
+  )
   let execution = run Execution.make(cancelledBody(Shared.clone(&mark)), (), ready)
   run Execution.drive(move execution, Shared.clone(&mark), completed, suspended)
-  run Testing.expect(
-    Shared.with<CancellationMark, bool>(&mark, wasReleased),
-    "cancellation releases active key",
+  let retained = Shared.withMut<CancellationMark, Option<Query<Word, i32, Rejection>>>(
+    &mark,
+    fn(value: &mut CancellationMark) -> Option<Query<Word, i32, Rejection>> {
+      return Intrinsic.replace(value.retained, Option.none<Query<Word, i32, Rejection>>())
+    },
   )
+  run Testing.expect(
+    Shared.with<CancellationMark, bool>(
+      &mark,
+      fn(value: &CancellationMark) -> bool {
+        return value.suspended && value.released
+      },
+    ),
+    "cancellation releases both nested active keys without partial completion",
+  )
+  if let Option<Query<Word, i32, Rejection>>.Some {value} = move retained {
+    let mut query = move value
+    run Testing.expect(Query.length(&query) == 0, "cancelled store has no active or completed keys")
+    let answer = run Query.demand(&mut query, Hash.word(8), nestedAfterCancellation)
+    run Testing.expect(
+      Shared.with<Result<i32, Rejection>, bool>(&answer, acceptedValue) && Query.length(&query) == 2,
+      "same store retries and publishes both nested answers",
+    )
+  } else {
+    run Testing.expect(false, "cancelled store is retained for retry")
+  }
   return ()
 }
 
-test effect fn cancelsActiveReservation() -> () ! OutOfMemoryError | AssertionError<'static> {
+test effect fn cancelsNestedReservationsAndRetriesSameStore() -> ()
+! OutOfMemoryError | Cycle | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   return run cancellationReleases()
     |> Effect.provideMut<Allocator>(&mut allocator)

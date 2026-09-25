@@ -8,12 +8,21 @@ executable.
 
 ## In-memory semantic queries
 
-`semantic.Semantic` resolves demanded facts from one immutable, in-memory
-`semantic.SourceRevision.Revision`. Its source index parses and records the complete names in a
-requested module, but it does not open an imported module until a demanded name needs that import.
-Each completed answer retains its direct query dependencies and exact present or absent source
-observations. `Semantic.eventLog` and `Semantic.sourceEvents` expose demand order and source reads
-for the focused query harness. This API is not wired into the inspection executable above.
+`semantic.Semantic` resolves demanded facts from a held, immutable, in-memory
+`semantic.SourceRevision.Revision`. Each public demand takes a `semantic.Semantic.Request` ledger;
+a fresh ledger starts with no roots or discoveries, even when the store reuses a completed fact.
+The source index parses the complete names in a requested module, but it opens an imported module
+only when a demanded name needs that import. A completed answer retains direct nested dependencies,
+transitive demand evidence, and exact present or absent source observations. A cache hit supplies those
+facts to the new request without rerunning its nested providers.
+
+`Semantic.revise` selects another immutable revision. The next demand validates retained source
+bytes and absent paths before reuse, so changed imported headers or newly present paths recompute
+affected facts and diagnostics against the new source. Unrelated source changes leave completed
+facts reusable. `Semantic.eventLog` records queries actually run or hit; replaying a completed
+answer's evidence does not create synthetic nested hit events. `Semantic.sourceEvents` records source
+reads and name observations for the focused query harness. This API is not wired into the
+inspection executable above.
 
 The current semantic subset resolves local names, ordinary namespace imports, selective imports,
 explicit aliases, and a hybrid namespace alias with selected members. Qualified type names have

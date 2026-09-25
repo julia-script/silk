@@ -128,6 +128,10 @@ pub struct Dependency {
   pub external: bool
 }
 
+struct DemandFootprint {
+  dependency: Dependency
+}
+
 /// A successful fact or anchored semantic rejection.
 pub union Outcome {
   /// A resolved fact.
@@ -142,8 +146,26 @@ pub struct Answer {
   pub outcome: Outcome
   /// Every direct nested query demanded to produce the fact, including memo hits.
   pub dependencies: Vector<Dependency>
-  /// Every directly observed present or absent source path for revision validation.
-  pub sources: Vector<Observation>
+  /// Every transitive present or absent source path for revision validation.
+  pub sources: Vector<Shared<Observation>>
+  footprint: Vector<Shared<DemandFootprint>>
+}
+
+struct Root {
+  family: Family
+  module: ModuleId
+  name: Bytes
+  answer: Shared<Result<Answer, NoRejection>>
+}
+
+/// The roots and discovered facts of one semantic request.
+///
+/// # Details
+///
+/// A request retains only its own roots. A completed answer keeps its transitive demand and source
+/// observations, so a cache hit supplies the same discovery evidence to a new request.
+pub struct Request {
+  roots: Vector<Root>
 }
 
 /// One query event in demand order.
@@ -233,7 +255,8 @@ struct Resolver {
 }
 
 struct SourceFrame {
-  observations: Vector<Observation>
+  observations: Vector<Shared<Observation>>
+  footprint: Vector<Shared<DemandFootprint>>
 }
 
 struct Running<'a, 'b> {
@@ -266,6 +289,209 @@ fn same(left: &[u8], right: &[u8]) -> bool {
     at = at + usize.ONE
   }
   return true
+}
+
+fn validAnswer(answer: &Result<Answer, NoRejection>, source: &SourceIndex) -> bool {
+  return match & answer.* {
+    Result<Answer, NoRejection>.Success {value} => {
+      let observations = Vector.asSlice<Shared<Observation>>(&value.sources)
+      let mut at = usize.ZERO
+      while at < observations.length {
+        if !Shared.with<Observation, bool>(
+          &observations[at],
+          fn(observed: &Observation) -> bool {
+            return SourceIndex.matchesObservation(source, observed)
+          },
+        ) {
+          return false
+        }
+        at = at + usize.ONE
+      }
+      return true
+    }
+    Result<Answer, NoRejection>.Failure {error: _} => false
+  }
+}
+
+fn discoveredBy(answer: &Result<Answer, NoRejection>, module: &ModuleId) -> bool {
+  return match & answer.* {
+    Result<Answer, NoRejection>.Success {value} => {
+      let observations = Vector.asSlice<Shared<Observation>>(&value.sources)
+      let mut at = usize.ZERO
+      while at < observations.length {
+        if Shared.with<Observation, bool>(
+          &observations[at],
+          fn(observed: &Observation) -> bool {
+            return Observation.isPresent(observed) && ModuleId.equals(
+              Observation.moduleId(observed),
+              module,
+            )
+          },
+        ) {
+          return true
+        }
+        at = at + usize.ONE
+      }
+      return false
+    }
+    Result<Answer, NoRejection>.Failure {error: _} => false
+  }
+}
+
+fn demandedBy(answer: &Result<Answer, NoRejection>, family: Family, module: &ModuleId) -> bool {
+  return match & answer.* {
+    Result<Answer, NoRejection>.Success {value} => {
+      let demands = Vector.asSlice<Shared<DemandFootprint>>(&value.footprint)
+      let mut at = usize.ZERO
+      while at < demands.length {
+        if Shared.with<DemandFootprint, bool>(
+          &demands[at],
+          fn(demanded: &DemandFootprint) -> bool {
+            return demanded.dependency.family == family && ModuleId.equals(
+              &demanded.dependency.module,
+              module,
+            )
+          },
+        ) {
+          return true
+        }
+        at = at + usize.ONE
+      }
+      return false
+    }
+    Result<Answer, NoRejection>.Failure {error: _} => false
+  }
+}
+
+fn footprintCount(answer: &Result<Answer, NoRejection>) -> usize {
+  return match & answer.* {
+    Result<Answer, NoRejection>.Success {value} => Vector.length<Shared<DemandFootprint>>(
+      &value.footprint,
+    )
+    Result<Answer, NoRejection>.Failure {error: _} => usize.ZERO
+  }
+}
+
+fn footprintAt(answer: &Result<Answer, NoRejection>, at: usize) -> Option<Shared<DemandFootprint>> {
+  return match & answer.* {
+    Result<Answer, NoRejection>.Success {value} => {
+      let demands = Vector.asSlice<Shared<DemandFootprint>>(&value.footprint)
+      if at < demands.length {
+        return Option.some<Shared<DemandFootprint>>(Shared.clone<DemandFootprint>(&demands[at]))
+      }
+      return Option.none<Shared<DemandFootprint>>()
+    }
+    Result<Answer, NoRejection>.Failure {error: _} => Option.none<Shared<DemandFootprint>>()
+  }
+}
+
+fn observationCount(answer: &Result<Answer, NoRejection>) -> usize {
+  return match & answer.* {
+    Result<Answer, NoRejection>.Success {value} => Vector.length<Shared<Observation>>(
+      &value.sources,
+    )
+    Result<Answer, NoRejection>.Failure {error: _} => usize.ZERO
+  }
+}
+
+fn observationAt(answer: &Result<Answer, NoRejection>, at: usize) -> Option<Shared<Observation>> {
+  return match & answer.* {
+    Result<Answer, NoRejection>.Success {value} => {
+      let observations = Vector.asSlice<Shared<Observation>>(&value.sources)
+      if at < observations.length {
+        return Option.some<Shared<Observation>>(Shared.clone<Observation>(&observations[at]))
+      }
+      return Option.none<Shared<Observation>>()
+    }
+    Result<Answer, NoRejection>.Failure {error: _} => Option.none<Shared<Observation>>()
+  }
+}
+
+effect fn recordRoot(
+  request: &mut Request,
+  family: Family,
+  module: &ModuleId,
+  name: &[u8],
+  answer: &Shared<Result<Answer, NoRejection>>,
+) -> () ! OutOfMemoryError ? &mut Allocator {
+  run Vector.append<Root>(
+    &mut request.roots,
+    Root {
+      family: family,
+      module: run ModuleId.copy(module),
+      name: run Bytes.copy(name),
+      answer: Shared.clone<Result<Answer, NoRejection>>(answer),
+    },
+  )
+  return ()
+}
+
+impl Request {
+  /// Creates an empty ledger for one independent semantic request.
+  pub fn make() -> Request {
+    return Request {roots: Vector.make<Root>()}
+  }
+  /// Returns the number of roots demanded through this request.
+  pub fn rootCount(self: &Self) -> usize {
+    return Vector.length<Root>(&self.roots)
+  }
+  /// Reports whether this request demanded the named root.
+  pub fn hasRoot(self: &Self, family: Family, module: &ModuleId, name: &[u8]) -> bool {
+    let roots = Vector.asSlice<Root>(&self.roots)
+    let mut at = usize.ZERO
+    while at < roots.length {
+      if roots[at].family == family && ModuleId.equals(&roots[at].module, module) && same(
+        Bytes.asSlice(&roots[at].name),
+        name,
+      ) {
+        return true
+      }
+      at = at + usize.ONE
+    }
+    return false
+  }
+  /// Reports whether a completed root in this request discovered a present module.
+  ///
+  /// # Details
+  ///
+  /// A memoized root replays its nested source observations into this request. An absent module
+  /// is evidence for validation, but it is not a discovered present module.
+  pub fn hasDiscovered(self: &Self, module: &ModuleId) -> bool {
+    let roots = Vector.asSlice<Root>(&self.roots)
+    let mut at = usize.ZERO
+    while at < roots.length {
+      if Shared.with<Result<Answer, NoRejection>, bool>(
+        &roots[at].answer,
+        fn(answer: &Result<Answer, NoRejection>) -> bool {
+          return discoveredBy(answer, module)
+        },
+      ) {
+        return true
+      }
+      at = at + usize.ONE
+    }
+    return false
+  }
+  /// Reports whether a completed root demanded a nested fact in this request.
+  pub fn hasDemand(self: &Self, family: Family, module: &ModuleId) -> bool {
+    let roots = Vector.asSlice<Root>(&self.roots)
+    let mut at = usize.ZERO
+    while at < roots.length {
+      if roots[at].family == family && ModuleId.equals(&roots[at].module, module) {
+        return true
+      }
+      if Shared.with<Result<Answer, NoRejection>, bool>(
+        &roots[at].answer,
+        fn(answer: &Result<Answer, NoRejection>) -> bool {
+          return demandedBy(answer, family, module)
+        },
+      ) {
+        return true
+      }
+      at = at + usize.ONE
+    }
+    return false
+  }
 }
 
 fn primitive(name: &[u8]) -> bool {
@@ -352,6 +578,75 @@ effect fn emit(resolver: &mut Resolver, kind: EventKind, key: Word) -> ()
   return ()
 }
 
+fn containsObservation(frame: &SourceFrame, observed: &Observation) -> bool {
+  let known = Vector.asSlice<Shared<Observation>>(&frame.observations)
+  let mut at = usize.ZERO
+  while at < known.length {
+    if Shared.with<Observation, bool>(
+      &known[at],
+      fn(existing: &Observation) -> bool {
+        return Observation.equals(existing, observed)
+      },
+    ) {
+      return true
+    }
+    at = at + usize.ONE
+  }
+  return false
+}
+
+effect fn appendObservation(frame: &mut SourceFrame, observed: &Shared<Observation>) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if Shared.with<Observation, bool>(
+    observed,
+    fn(value: &Observation) -> bool {
+      return containsObservation(&frame.*, value)
+    },
+  ) {
+    return ()
+  }
+  run Vector.append<Shared<Observation>>(
+    &mut frame.observations,
+    Shared.clone<Observation>(observed),
+  )
+  return ()
+}
+
+effect fn mergeEvidence(frame: &mut SourceFrame, answer: &Shared<Result<Answer, NoRejection>>) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let sources = Shared.with<Result<Answer, NoRejection>, usize>(answer, observationCount)
+  let mut at = usize.ZERO
+  while at < sources {
+    let observed = Shared.with<Result<Answer, NoRejection>, Option<Shared<Observation>>>(
+      answer,
+      fn(value: &Result<Answer, NoRejection>) -> Option<Shared<Observation>> {
+        return observationAt(value, at)
+      },
+    )
+    if let Option<Shared<Observation>>.Some {value} = move observed {
+      run appendObservation(&mut frame.*, &value)
+    }
+    at = at + usize.ONE
+  }
+  let demands = Shared.with<Result<Answer, NoRejection>, usize>(answer, footprintCount)
+  at = usize.ZERO
+  while at < demands {
+    let nested = Shared.with<Result<Answer, NoRejection>, Option<Shared<DemandFootprint>>>(
+      answer,
+      fn(value: &Result<Answer, NoRejection>) -> Option<Shared<DemandFootprint>> {
+        return footprintAt(value, at)
+      },
+    )
+    if let Option<Shared<DemandFootprint>>.Some {value} = move nested {
+      run Vector.append<Shared<DemandFootprint>>(&mut frame.footprint, move value)
+    }
+    at = at + usize.ONE
+  }
+  return ()
+}
+
 fn sourceOf<'a>(
   resolver: &'a Resolver,
   answer: &Shared<Result<SourceResult, NoRejection>>,
@@ -367,19 +662,26 @@ effect fn source(resolver: &mut Resolver, module: &ModuleId) -> Shared<
   let count = Vector.length<SourceFrame>(&resolver.frames)
   if count > usize.ZERO {
     let frames = Vector.asSlice<SourceFrame>(&resolver.frames)
-    let observed = Vector.asSlice<Observation>(&frames[count - usize.ONE].observations)
+    let observed = Vector.asSlice<Shared<Observation>>(&frames[count - usize.ONE].observations)
     let mut found = false
     let mut at = usize.ZERO
     while at < observed.length {
-      if ModuleId.equals(Observation.moduleId(&observed[at]), module) {
+      if Shared.with<Observation, bool>(
+        &observed[at],
+        fn(value: &Observation) -> bool {
+          return ModuleId.equals(Observation.moduleId(value), module)
+        },
+      ) {
         found = true
       }
       at = at + usize.ONE
     }
     if !found {
-      let evidence = run SourceIndex.captureObservation(&resolver.source, module)
+      let evidence = run Shared.make<Observation>(
+        run SourceIndex.captureObservation(&resolver.source, module),
+      )
       let mut frames = Vector.asMutSlice<SourceFrame>(&mut resolver.frames)
-      run Vector.append<Observation>(&mut frames[count - usize.ONE].observations, move evidence)
+      run appendObservation(&mut frames[count - usize.ONE], &evidence)
     }
   }
   return move answer
@@ -714,7 +1016,8 @@ effect fn cycleAnswer(resolver: &mut Resolver, key: Key, span: Span) -> Shared<
       Answer {
         outcome: Outcome.Rejected {diagnostic: move rejection},
         dependencies: Vector.make<Dependency>(),
-        sources: Vector.make<Observation>(),
+        sources: Vector.make<Shared<Observation>>(),
+        footprint: Vector.make<Shared<DemandFootprint>>(),
       },
     ),
   )
@@ -747,12 +1050,16 @@ effect fn withRunning<'a, 'b>(
     run Vector.append<Word>(&mut resource.resolver.*.active, resource.key)
     run Vector.append<SourceFrame>(
       &mut resource.resolver.*.frames,
-      SourceFrame {observations: Vector.make<Observation>()},
+      SourceFrame {
+        observations: Vector.make<Shared<Observation>>(),
+        footprint: Vector.make<Shared<DemandFootprint>>(),
+      },
     )
     let selected = Vector.get<Key>(&resource.resolver.keys, u64.toUsize(resource.key.value))
     let mut value = run resolve(&mut resource.resolver.*, &mut resource.query.*, selected)
     let frame = Vector.remove<SourceFrame>(&mut resource.resolver.*.frames, resource.base)
     value.sources = move frame.observations
+    value.footprint = move frame.footprint
     return Result.succeed<Answer, NoRejection>(move value)
   }
   let release = effect fn(resource: &mut Running<'a, 'b>) -> () {
@@ -780,7 +1087,20 @@ effect fn demandRaw(
     }
     at = at + usize.ONE
   }
-  let hit = Query.isComplete(&mut owner.*, word)
+  let cached = Query.completed(&mut owner.*, word)
+  let mut hit = false
+  if let Option<Shared<Result<Answer, NoRejection>>>.Some {value} = move cached {
+    if Shared.with<Result<Answer, NoRejection>, bool>(
+      &value,
+      fn(completed: &Result<Answer, NoRejection>) -> bool {
+        return validAnswer(completed, &resolver.source)
+      },
+    ) {
+      hit = true
+    } else {
+      Query.forget(&mut owner.*, word)
+    }
+  }
   let answer = run Query.demand(
     &mut owner.*,
     word,
@@ -810,7 +1130,18 @@ effect fn demandChild(
 ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError
 ? &mut Allocator {
   let answer = run demandRaw(&mut resolver.*, &mut owner.*, key, span)
-  run Vector.append<Dependency>(&mut dependencies.*, run dependency(&mut resolver.*, key))
+  let edge = run dependency(&mut resolver.*, key)
+  let footprint = run Shared.make<DemandFootprint>(
+    DemandFootprint {dependency: run dependency(&mut resolver.*, key)},
+  )
+  run Vector.append<Dependency>(&mut dependencies.*, move edge)
+  let count = Vector.length<SourceFrame>(&resolver.frames)
+  let mut frames = Vector.asMutSlice<SourceFrame>(&mut resolver.frames)
+  run Vector.append<Shared<DemandFootprint>>(
+    &mut frames[count - usize.ONE].footprint,
+    move footprint,
+  )
+  run mergeEvidence(&mut frames[count - usize.ONE], &answer)
   return move answer
 }
 
@@ -846,7 +1177,8 @@ effect fn resolveBucket(
     return Answer {
       outcome: Outcome.Success {value: Value.Name {bucket: move value}},
       dependencies: Vector.make<Dependency>(),
-      sources: Vector.make<Observation>(),
+      sources: Vector.make<Shared<Observation>>(),
+      footprint: Vector.make<Shared<DemandFootprint>>(),
     }
   }
   let diagnostic = run reject(
@@ -858,7 +1190,8 @@ effect fn resolveBucket(
   return Answer {
     outcome: Outcome.Rejected {diagnostic: move diagnostic},
     dependencies: Vector.make<Dependency>(),
-    sources: Vector.make<Observation>(),
+    sources: Vector.make<Shared<Observation>>(),
+    footprint: Vector.make<Shared<DemandFootprint>>(),
   }
 }
 
@@ -926,7 +1259,8 @@ effect fn resolveImport(
         return Answer {
           outcome: Outcome.Rejected {diagnostic: move diagnostic},
           dependencies: move dependencies,
-          sources: Vector.make<Observation>(),
+          sources: Vector.make<Shared<Observation>>(),
+          footprint: Vector.make<Shared<DemandFootprint>>(),
         }
       }
       let targetPath = run path(&mut resolver.*, &module, importPath)
@@ -940,7 +1274,8 @@ effect fn resolveImport(
         return Answer {
           outcome: Outcome.Rejected {diagnostic: move diagnostic},
           dependencies: move dependencies,
-          sources: Vector.make<Observation>(),
+          sources: Vector.make<Shared<Observation>>(),
+          footprint: Vector.make<Shared<DemandFootprint>>(),
         }
       }
       let targetText = run modulePath(&targetPath)
@@ -960,7 +1295,8 @@ effect fn resolveImport(
         return Answer {
           outcome: Outcome.Rejected {diagnostic: move diagnostic},
           dependencies: move dependencies,
-          sources: Vector.make<Observation>(),
+          sources: Vector.make<Shared<Observation>>(),
+          footprint: Vector.make<Shared<DemandFootprint>>(),
         }
       }
       let targetOrdinal = run internModule(&mut resolver.*, &target)
@@ -970,7 +1306,8 @@ effect fn resolveImport(
             value: Value.Namespace {module: move target, ordinal: targetOrdinal},
           },
           dependencies: move dependencies,
-          sources: Vector.make<Observation>(),
+          sources: Vector.make<Shared<Observation>>(),
+          footprint: Vector.make<Shared<DemandFootprint>>(),
         }
       }
       let selected = run importedMember(&mut resolver.*, &module, key.declaration, key.member)
@@ -980,7 +1317,8 @@ effect fn resolveImport(
           return Answer {
             outcome: Outcome.Rejected {diagnostic: move diagnostic},
             dependencies: move dependencies,
-            sources: Vector.make<Observation>(),
+            sources: Vector.make<Shared<Observation>>(),
+            footprint: Vector.make<Shared<DemandFootprint>>(),
           }
         }
         let names = Vector.asSlice<Bytes>(&member.segments)
@@ -1014,7 +1352,8 @@ effect fn resolveImport(
           return Answer {
             outcome: Outcome.Rejected {diagnostic: move diagnostic},
             dependencies: move dependencies,
-            sources: Vector.make<Observation>(),
+            sources: Vector.make<Shared<Observation>>(),
+            footprint: Vector.make<Shared<DemandFootprint>>(),
           }
         }
         if candidate.kind == CandidateKind.ImportMember {
@@ -1041,7 +1380,8 @@ effect fn resolveImport(
             return Answer {
               outcome: Outcome.Rejected {diagnostic: move diagnostic},
               dependencies: move dependencies,
-              sources: Vector.make<Observation>(),
+              sources: Vector.make<Shared<Observation>>(),
+              footprint: Vector.make<Shared<DemandFootprint>>(),
             }
           }
           if let Option<usize>.Some {value: targetModuleOrdinal} = move binding.module {
@@ -1058,7 +1398,8 @@ effect fn resolveImport(
                     },
                   },
                   dependencies: move dependencies,
-                  sources: Vector.make<Observation>(),
+                  sources: Vector.make<Shared<Observation>>(),
+                  footprint: Vector.make<Shared<DemandFootprint>>(),
                 }
               }
             }
@@ -1069,7 +1410,8 @@ effect fn resolveImport(
           return Answer {
             outcome: Outcome.Rejected {diagnostic: move diagnostic},
             dependencies: move dependencies,
-            sources: Vector.make<Observation>(),
+            sources: Vector.make<Shared<Observation>>(),
+            footprint: Vector.make<Shared<DemandFootprint>>(),
           }
         }
         let declaration = run declarationAt(&mut resolver.*, &target, candidate.declaration)
@@ -1083,7 +1425,8 @@ effect fn resolveImport(
               },
             },
             dependencies: move dependencies,
-            sources: Vector.make<Observation>(),
+            sources: Vector.make<Shared<Observation>>(),
+            footprint: Vector.make<Shared<DemandFootprint>>(),
           }
         }
       }
@@ -1092,7 +1435,8 @@ effect fn resolveImport(
     return Answer {
       outcome: Outcome.Rejected {diagnostic: move diagnostic},
       dependencies: move dependencies,
-      sources: Vector.make<Observation>(),
+      sources: Vector.make<Shared<Observation>>(),
+      footprint: Vector.make<Shared<DemandFootprint>>(),
     }
   }
   let diagnostic = run reject(
@@ -1104,7 +1448,8 @@ effect fn resolveImport(
   return Answer {
     outcome: Outcome.Rejected {diagnostic: move diagnostic},
     dependencies: move dependencies,
-    sources: Vector.make<Observation>(),
+    sources: Vector.make<Shared<Observation>>(),
+    footprint: Vector.make<Shared<DemandFootprint>>(),
   }
 }
 
@@ -1460,20 +1805,23 @@ effect fn resolveAlias(
               return Answer {
                 outcome: Outcome.Rejected {diagnostic: move diagnostic},
                 dependencies: move dependencies,
-                sources: Vector.make<Observation>(),
+                sources: Vector.make<Shared<Observation>>(),
+                footprint: Vector.make<Shared<DemandFootprint>>(),
               }
             }
             return Answer {
               outcome: Outcome.Success {value: Value.Type {resolved: move ty}},
               dependencies: move dependencies,
-              sources: Vector.make<Observation>(),
+              sources: Vector.make<Shared<Observation>>(),
+              footprint: Vector.make<Shared<DemandFootprint>>(),
             }
           }
           Result<Shared<ResolvedType>, Shared<Rejection>>.Failure {error} => {
             return Answer {
               outcome: Outcome.Rejected {diagnostic: move error},
               dependencies: move dependencies,
-              sources: Vector.make<Observation>(),
+              sources: Vector.make<Shared<Observation>>(),
+              footprint: Vector.make<Shared<DemandFootprint>>(),
             }
           }
         }
@@ -1483,7 +1831,8 @@ effect fn resolveAlias(
     return Answer {
       outcome: Outcome.Rejected {diagnostic: move diagnostic},
       dependencies: move dependencies,
-      sources: Vector.make<Observation>(),
+      sources: Vector.make<Shared<Observation>>(),
+      footprint: Vector.make<Shared<DemandFootprint>>(),
     }
   }
   let diagnostic = run reject(
@@ -1495,7 +1844,8 @@ effect fn resolveAlias(
   return Answer {
     outcome: Outcome.Rejected {diagnostic: move diagnostic},
     dependencies: move dependencies,
-    sources: Vector.make<Observation>(),
+    sources: Vector.make<Shared<Observation>>(),
+    footprint: Vector.make<Shared<DemandFootprint>>(),
   }
 }
 
@@ -1539,7 +1889,8 @@ effect fn resolveIdentity(
             },
           },
           dependencies: Vector.make<Dependency>(),
-          sources: Vector.make<Observation>(),
+          sources: Vector.make<Shared<Observation>>(),
+          footprint: Vector.make<Shared<DemandFootprint>>(),
         }
       }
     }
@@ -1547,7 +1898,8 @@ effect fn resolveIdentity(
     return Answer {
       outcome: Outcome.Rejected {diagnostic: move diagnostic},
       dependencies: Vector.make<Dependency>(),
-      sources: Vector.make<Observation>(),
+      sources: Vector.make<Shared<Observation>>(),
+      footprint: Vector.make<Shared<DemandFootprint>>(),
     }
   }
   let diagnostic = run reject(
@@ -1559,7 +1911,8 @@ effect fn resolveIdentity(
   return Answer {
     outcome: Outcome.Rejected {diagnostic: move diagnostic},
     dependencies: Vector.make<Dependency>(),
-    sources: Vector.make<Observation>(),
+    sources: Vector.make<Shared<Observation>>(),
+    footprint: Vector.make<Shared<DemandFootprint>>(),
   }
 }
 
@@ -1577,7 +1930,8 @@ effect fn resolveSignature(
       return Answer {
         outcome: Outcome.Rejected {diagnostic: move diagnostic},
         dependencies: move dependencies,
-        sources: Vector.make<Observation>(),
+        sources: Vector.make<Shared<Observation>>(),
+        footprint: Vector.make<Shared<DemandFootprint>>(),
       }
     }
     let mut parameters = Vector.make<Shared<ResolvedType>>()
@@ -1604,7 +1958,8 @@ effect fn resolveSignature(
             return Answer {
               outcome: Outcome.Rejected {diagnostic: move diagnostic},
               dependencies: move dependencies,
-              sources: Vector.make<Observation>(),
+              sources: Vector.make<Shared<Observation>>(),
+              footprint: Vector.make<Shared<DemandFootprint>>(),
             }
           }
           run Vector.append<Shared<ResolvedType>>(&mut parameters, move ty)
@@ -1613,7 +1968,8 @@ effect fn resolveSignature(
           return Answer {
             outcome: Outcome.Rejected {diagnostic: move error},
             dependencies: move dependencies,
-            sources: Vector.make<Observation>(),
+            sources: Vector.make<Shared<Observation>>(),
+            footprint: Vector.make<Shared<DemandFootprint>>(),
           }
         }
       }
@@ -1635,7 +1991,8 @@ effect fn resolveSignature(
             return Answer {
               outcome: Outcome.Rejected {diagnostic: move diagnostic},
               dependencies: move dependencies,
-              sources: Vector.make<Observation>(),
+              sources: Vector.make<Shared<Observation>>(),
+              footprint: Vector.make<Shared<DemandFootprint>>(),
             }
           }
           result = move ty
@@ -1644,7 +2001,8 @@ effect fn resolveSignature(
           return Answer {
             outcome: Outcome.Rejected {diagnostic: move error},
             dependencies: move dependencies,
-            sources: Vector.make<Observation>(),
+            sources: Vector.make<Shared<Observation>>(),
+            footprint: Vector.make<Shared<DemandFootprint>>(),
           }
         }
       }
@@ -1660,7 +2018,8 @@ effect fn resolveSignature(
         },
       },
       dependencies: move dependencies,
-      sources: Vector.make<Observation>(),
+      sources: Vector.make<Shared<Observation>>(),
+      footprint: Vector.make<Shared<DemandFootprint>>(),
     }
   }
   let diagnostic = run reject(
@@ -1672,7 +2031,8 @@ effect fn resolveSignature(
   return Answer {
     outcome: Outcome.Rejected {diagnostic: move diagnostic},
     dependencies: move dependencies,
-    sources: Vector.make<Observation>(),
+    sources: Vector.make<Shared<Observation>>(),
+    footprint: Vector.make<Shared<DemandFootprint>>(),
   }
 }
 
@@ -1695,10 +2055,10 @@ effect fn rejectRoot(
 ) -> Shared<Result<Answer, NoRejection>> ! Cycle | OutOfMemoryError ? &mut Allocator {
   let mut dependencies = Vector.make<Dependency>()
   run Vector.append<Dependency>(&mut dependencies, run dependency(&mut resolver.*, bucket))
-  let mut sources = Vector.make<Observation>()
-  run Vector.append<Observation>(
+  let mut sources = Vector.make<Shared<Observation>>()
+  run Vector.append<Shared<Observation>>(
     &mut sources,
-    run SourceIndex.captureObservation(&resolver.source, module),
+    run Shared.make<Observation>(run SourceIndex.captureObservation(&resolver.source, module)),
   )
   let diagnostic = run reject(&resolver.*, module, code, span)
   return run Shared.make<Result<Answer, NoRejection>>(
@@ -1707,6 +2067,7 @@ effect fn rejectRoot(
         outcome: Outcome.Rejected {diagnostic: move diagnostic},
         dependencies: move dependencies,
         sources: move sources,
+        footprint: Vector.make<Shared<DemandFootprint>>(),
       },
     ),
   )
@@ -1785,6 +2146,16 @@ impl Semantic {
       query: Query.make<Word, Answer, NoRejection>(),
     }
   }
+  /// Selects a new immutable source revision and validates completed facts on their next demand.
+  ///
+  /// # Details
+  ///
+  /// Exact source and nested query observations keep unaffected facts reusable. Changed source
+  /// bytes or path presence invalidate dependent facts before their diagnostic spans are returned.
+  pub fn revise(self: &mut Self, revision: Revision) -> () {
+    SourceIndex.revise(&mut self.resolver.source, move revision)
+    return ()
+  }
   /// Borrows the semantic query lifecycle events in demand order.
   pub fn eventLog(self: &Self) -> &[Event] {
     return Vector.asSlice<Event>(&self.resolver.events)
@@ -1795,7 +2166,7 @@ impl Semantic {
   }
   /// Returns a complete name bucket, including an empty bucket, without resolving imports or types.
   /// Returns an anchored `MissingModule` rejection if the source path is absent.
-  pub effect fn demandName(self: &mut Self, module: &ModuleId, name: &[u8]) -> Shared<
+  pub effect fn demandName(self: &mut Self, request: &mut Request, module: &ModuleId, name: &[u8]) -> Shared<
     Result<Answer, NoRejection>,
   > ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
     let moduleOrdinal = run internModule(&mut self.resolver, module)
@@ -1808,32 +2179,56 @@ impl Semantic {
       member: usize.ZERO,
       external: false,
     }
-    return run demandRaw(
+    let answer = run demandRaw(
       &mut self.resolver,
       &mut self.query,
       key,
       Span.make(usize.ZERO, usize.ZERO),
     )
+    run recordRoot(&mut request.*, Family.Name, module, name, &answer)
+    return move answer
   }
   /// Resolves a nongeneric type alias only when the caller requests its target.
   /// Returns an anchored rejection for an absent name, unsupported target, or alias cycle.
-  pub effect fn demandAlias(self: &mut Self, module: &ModuleId, name: &[u8]) -> Shared<
+  pub effect fn demandAlias(self: &mut Self, request: &mut Request, module: &ModuleId, name: &[u8]) -> Shared<
     Result<Answer, NoRejection>,
   > ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
-    return run demandNamed(&mut self.resolver, &mut self.query, module, name, Family.Alias)
+    let answer = run demandNamed(&mut self.resolver, &mut self.query, module, name, Family.Alias)
+    run recordRoot(&mut request.*, Family.Alias, module, name, &answer)
+    return move answer
   }
   /// Returns a nongeneric nominal identity without resolving fields, members, or layout.
   /// Returns an anchored rejection if the name does not identify a supported nominal declaration.
-  pub effect fn demandIdentity(self: &mut Self, module: &ModuleId, name: &[u8]) -> Shared<
-    Result<Answer, NoRejection>,
-  > ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
-    return run demandNamed(&mut self.resolver, &mut self.query, module, name, Family.Identity)
+  pub effect fn demandIdentity(
+    self: &mut Self,
+    request: &mut Request,
+    module: &ModuleId,
+    name: &[u8],
+  ) -> Shared<Result<Answer, NoRejection>>
+  ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError
+  ? &mut Allocator {
+    let answer = run demandNamed(&mut self.resolver, &mut self.query, module, name, Family.Identity)
+    run recordRoot(&mut request.*, Family.Identity, module, name, &answer)
+    return move answer
   }
   /// Resolves a function's written parameter and result types without reading its body.
   /// Returns an anchored rejection for an unsupported header or referenced type.
-  pub effect fn demandSignature(self: &mut Self, module: &ModuleId, name: &[u8]) -> Shared<
-    Result<Answer, NoRejection>,
-  > ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
-    return run demandNamed(&mut self.resolver, &mut self.query, module, name, Family.Signature)
+  pub effect fn demandSignature(
+    self: &mut Self,
+    request: &mut Request,
+    module: &ModuleId,
+    name: &[u8],
+  ) -> Shared<Result<Answer, NoRejection>>
+  ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError
+  ? &mut Allocator {
+    let answer = run demandNamed(
+      &mut self.resolver,
+      &mut self.query,
+      module,
+      name,
+      Family.Signature,
+    )
+    run recordRoot(&mut request.*, Family.Signature, module, name, &answer)
+    return move answer
   }
 }

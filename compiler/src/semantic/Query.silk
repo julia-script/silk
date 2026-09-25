@@ -70,6 +70,30 @@ impl<K, A, R> Query<K, A, R> {
     )
     return found && complete
   }
+  /// Returns a completed answer without running its provider, or `None` for an absent or active key.
+  pub fn completed<K: HashKey + Copy>(self: &mut Self, key: K) -> Option<Shared<Result<A, R>>> {
+    let mut answer = Option.none<Shared<Result<A, R>>>()
+    let found = HashMap.withMut(
+      &mut self.entries,
+      key,
+      fn(entry: &mut Entry<A, R>) -> () {
+        if let Entry<A, R>.Complete {answer: value} = &entry.* {
+          answer = Option.some<Shared<Result<A, R>>>(Shared.clone<Result<A, R>>(&value))
+        }
+        return ()
+      },
+    )
+    return move answer
+  }
+  /// Removes one completed key so its provider can run against a later revision.
+  pub fn forget<K: HashKey + Copy>(self: &mut Self, key: K) -> () {
+    if !Query.isComplete(&mut self.*, key) {
+      return ()
+    }
+    let removed = HashMap.remove<K, Entry<A, R>>(&mut self.entries, key)
+    drop removed
+    return ()
+  }
   /// Runs the provider for an absent key and returns an owned handle to its completed answer.
   ///
   /// # Details

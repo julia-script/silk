@@ -344,6 +344,24 @@ impl SourceIndex {
       events: Vector.make<Event>(),
     }
   }
+  /// Selects another immutable revision and releases the previous parsed source units.
+  ///
+  /// # Details
+  ///
+  /// Semantic answers can be validated separately against this revision. A source demand in
+  /// the new revision parses its own retained bytes; no old source slot crosses the boundary.
+  pub fn revise(self: &mut Self, revision: Revision) -> () {
+    self.revision = move revision
+    self.keys = Vector.make<ModuleId>()
+    self.sources = Vector.make<IndexedSource>()
+    self.query = Query.make<Word, SourceResult, NoRejection>()
+    self.events = Vector.make<Event>()
+    return ()
+  }
+  /// Checks exact present bytes or absence against this store's held revision.
+  pub fn matchesObservation(self: &Self, observed: &Observation) -> bool {
+    return Observation.matches(observed, &self.revision)
+  }
   /// Returns the fixed Final environment selected for this M1 store.
   pub fn queryEnvironment(self: &Self) -> Environment {
     return self.environment
