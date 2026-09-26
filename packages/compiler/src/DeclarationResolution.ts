@@ -1473,6 +1473,31 @@ export const interfaceWitnessCompatibility = (
     }),
   )
   if (lifetimeCompatibility._tag === 'Incompatible') return lifetimeCompatibility
+  if (contract.functionKind === 'Effect' && implementation.functionKind === 'Effect') {
+    // An owned operand lent to the witness stays with the adapter for the whole invocation, so
+    // its rigid temporary borrow does not shorten the promised environment.
+    const witnessEnvironment = Lifetime.intersection(
+      Lifetime.atoms(
+        Type.substituteLifetime(executableLifetimes(implementation).environment, substitution),
+      ).filter((atom) => atom._tag !== 'PlaceholderLifetime'),
+    )
+    const environmentCompatibility = InterfaceWitnessCompatibility.environment(
+      contract.lifetimes.environment,
+      witnessEnvironment,
+      // The promised retained bounds (each captured region outlives the environment) hold here.
+      TypeCompatibility.context({
+        assumptions: Lifetime.assumptions([
+          ...(conformanceLifetimes.lifetimeBounds ?? []),
+          ...(expectedLifetimes.lifetimeBounds ?? []),
+        ]),
+        typeBounds: [
+          ...(conformanceLifetimes.typeOutlives ?? []),
+          ...(expectedLifetimes.typeOutlives ?? []),
+        ],
+      }),
+    )
+    if (environmentCompatibility._tag === 'Incompatible') return environmentCompatibility
+  }
   const contractOperands = contract.operands.flatMap((operand) =>
     operand.type._tag === 'Resolved'
       ? [compatibilityOperand(operand.parameter, operand.type.type, contract.provider)]

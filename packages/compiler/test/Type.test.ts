@@ -2530,6 +2530,48 @@ it('checks fixed generic arguments under callable variance without reinferring t
   assert.deepEqual(inferred.get(Type.key(parameter)), fixed)
 })
 
+it.effect('enforces retained generic storage at inherent and interface operation calls', () =>
+  Effect.gen(function* () {
+    const source = `struct Wrap<T> { value: T }
+impl<T> Wrap<T> { effect<'env> fn put<'env>(value: T) -> i32 { drop value return 1 } }
+interface Consume<T> { effect<'env> fn consume<'env>(self: &Self, value: T) -> i32 }
+struct Counter {}
+impl<T> Consume<T> for Counter {
+  effect<'env> fn consume<'env>(self: &Self, value: T) -> i32 { drop value return 1 }
+}
+fn shortPut<'a>(value: &'a i32) -> once Effect<'static; i32> { return Wrap<&'a i32>.put(value) }
+fn shortConcrete<'a>(consumer: &'static Counter, value: &'a i32) -> once Effect<'static; i32> {
+  return Consume<&'a i32>.consume(consumer, value)
+}
+fn shortBound<'a, C: Consume<&'a i32>>(consumer: &'static C, value: &'a i32) -> once Effect<'static; i32> {
+  return Consume<&'a i32>.consume(consumer, value)
+}
+fn okPut<'a>(value: &'a i32) -> once Effect<'a; i32> { return Wrap<&'a i32>.put(value) }
+fn okBound<'a, C: Consume<&'a i32>>(consumer: &'a C, value: &'a i32) -> once Effect<'a; i32> {
+  return Consume<&'a i32>.consume(consumer, value)
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/retained-generic-calls',
+      Uint8Array.from(source, (c) => c.charCodeAt(0)),
+    )
+    const within = (name: string) => {
+      const start = source.indexOf(`fn ${name}<`)
+      const end = source.indexOf('\nfn ', start + 1)
+      return (span: { readonly start: number }) =>
+        span.start >= start && (end < 0 || span.start < end)
+    }
+    const failures = Analysis.diagnostics(snapshot)
+    for (const name of ['shortPut', 'shortConcrete', 'shortBound'])
+      assert.isTrue(
+        failures.some(
+          (d) => d.code === Diagnostic.unsatisfiedLifetimeBoundCode && within(name)(d.span),
+        ),
+        name,
+      )
+    assert.strictEqual(failures.length, 3)
+  }),
+)
+
 it.effect('derives nominal well-formedness assumptions from requirement and impl headers', () =>
   Effect.gen(function* () {
     const source = `struct Holder<'a, T: 'a> { value: T }

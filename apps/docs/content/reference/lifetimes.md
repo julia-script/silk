@@ -159,7 +159,10 @@ requirement types of a callable or Effect input are not stored, so
 `effect fn keep<A>(pending: once Effect<A>) -> A` retains the pending Effect's region. An input
 whose stored contents involve a type parameter, such as `value: T` or `Box<T>`, has no nameable
 region. The omitted environment is then ambiguous (SEM0210) at that input, and the declaration
-writes `effect<'env> fn` with the matching `T: 'env` bounds.
+writes `effect<'env> fn`. A written environment retains the obligation that every captured value
+outlives it, and each call must satisfy it. A declaration writes the matching `T: 'env` bound for
+each type parameter it binds itself. A parameter of an enclosing `impl`, interface, or service
+carries the obligation from the written environment alone.
 
 An ordinary named function whose result is an `Effect` with an omitted environment elides it from
 the header under LIFE-003. A single borrowed input supplies the environment, and several borrowed

@@ -2532,7 +2532,10 @@ fn twoLater(left: &i32, right: &i32) -> Effect<i32> { return effect { return 1 }
 effect fn nested() -> Effect<i32> { return owned(1) }
 fn borrowedLater(value: &i32) -> Effect<i32> { return effect { return value.* } }
 fn heldBorrowedLater<'a>(value: &i32, held: Held<'a>) -> Effect<i32> { return effect { return value.* } }
-effect fn borrowedSuccess(value: &i32) -> Effect<i32> { return owned(value.*) }`
+effect fn borrowedSuccess(value: &i32) -> Effect<i32> { return owned(value.*) }
+effect fn callback<F: fn(i32) -> i32>(f: F) -> i32 { return f(1) }
+effect fn staticCallback<F: fn<'static>(i32) -> i32 + Intrinsic.Detached>(f: F) -> i32 { return f(1) }
+effect fn detached<T: Intrinsic.Detached>(value: T) -> i32 { drop value return 0 }`
     const index = yield* collect('root', [['root', source]])
     const declarations = index.modules.at(0)?.declarations ?? []
     const named = (name: string) =>
@@ -2577,6 +2580,10 @@ effect fn borrowedSuccess(value: &i32) -> Effect<i32> { return owned(value.*) }`
     assert.strictEqual(resultEnvironment('borrowedLater'), borrowedRegion('borrowedLater'))
     assert.strictEqual(resultEnvironment('heldBorrowedLater'), borrowedRegion('heldBorrowedLater'))
     assert.strictEqual(resultEnvironment('borrowedSuccess'), borrowedRegion('borrowedSuccess'))
+    // A representation parameter retains its contract's environment, nothing when detached. A
+    // plain detached value parameter still has unknown contents, as the reference states.
+    assert.notStrictEqual(environment('callback'), "'static")
+    assert.strictEqual(environment('staticCallback'), "'static")
     assert.deepEqual(
       index.published.map((diagnostic) => [
         diagnostic.code,
@@ -2588,6 +2595,7 @@ effect fn borrowedSuccess(value: &i32) -> Effect<i32> { return owned(value.*) }`
         ['SEM0210', 'Effect<i32>', 11],
         ['SEM0210', 'Effect<i32>', 12],
         ['SEM0210', 'Effect<i32>', 13],
+        ['SEM0210', 'T', 19],
       ],
     )
   }),
@@ -2603,7 +2611,12 @@ impl<T> Consume<T> for Counter {
 struct Split {}
 impl<T> Consume<T> for Split {
   effect<'a & 'b> fn consume<'a, 'b>(self: &Self, value: T) -> i32 { drop value return 1 }
-}`
+}
+struct Held<'a> { value: &'a i32 }
+interface Tick { effect<'static> fn tick(self: Self) -> i32 }
+impl<'a> Tick for Held<'a> { effect<'a> fn tick(self: Self) -> i32 { return self.value.* } }
+struct Plain {}
+impl Tick for Plain { effect fn tick(self: Self) -> i32 { drop self return 0 } }`
     const index = yield* collect('root', [['root', source]])
     // One promised region cannot choose between two otherwise unconstrained witness binders.
     assert.deepEqual(
@@ -2611,7 +2624,11 @@ impl<T> Consume<T> for Split {
         diagnostic.code,
         source.slice(diagnostic.span.start, diagnostic.span.end).split('(')[0],
       ]),
-      [['SEM0083', "effect<'a & 'b> fn consume<'a, 'b>"]],
+      [
+        ['SEM0083', "effect<'a & 'b> fn consume<'a, 'b>"],
+        // A witness environment shorter than the promised one is rejected.
+        ['SEM0083', "effect<'a> fn tick"],
+      ],
     )
   }),
 )
