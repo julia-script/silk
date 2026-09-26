@@ -62,7 +62,10 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       const first = yield* SyntaxFormatter.format(syntax)
       const text = decoder.decode(FormattedDocument.toUint8Array(first))
       assert.include(text, 'pub interface Decoder<Arguments, A, E, ?R>')
-      assert.include(text, "effect<'env> fn decode<'env>(self: &Self, encoded: Arguments) -> A ! E ? R")
+      assert.include(
+        text,
+        "effect<'env> fn decode<'env>(self: &Self, encoded: Arguments) -> A ! E ? R",
+      )
       const second = yield* SyntaxFormatter.format(
         Parser.parse(
           Lexer.lex(
