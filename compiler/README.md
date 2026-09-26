@@ -59,19 +59,156 @@ The current semantic subset resolves local names, ordinary namespace imports, se
 explicit aliases, and a hybrid namespace alias with selected members. Qualified type names have
 one namespace segment and one public member segment. Import paths map to slash-separated `.silk`
 logical source paths within the importing module's source origin and package. Selected public import
-chains resolve to the canonical declaration. The
-store resolves nongeneric type aliases and nominal type identities without inspecting fields or
-layout. Written nongeneric function signatures accept primitive,
-unit, and named alias or nominal parameter and result types; they do not inspect function bodies.
-The supported primitive spellings are `bool`, `char`, signed and unsigned integers through 64 bits
-and pointer size, `f32`, `f64`, and `string`. A missing result means unit. Public contracts reject
-private nominal types; missing modules, inaccessible members, collisions, and alias or import-name
-cycles produce anchored semantic rejections.
+chains resolve to the canonical declaration. The store resolves type aliases and nominal type
+identities without inspecting fields or layout. Separate `demandMembers` and `demandMemberShape`
+queries enumerate a struct's fields, tuple positions, enum cases, or union variants, then resolve
+only a selected member's written types under a canonical nominal application. The member ordinal
+comes from the ordered enumeration; a unit variant or scalar enum case has no payload types.
+Neither query computes inline storage or target layout. For example, the identity and written
+`next` field type below terminate even though a later layout request must reject its infinite
+by-value representation:
 
-Demanded generic applications, type modifiers, complex type forms, variadic or generic functions,
-failure or requirement rows, constraints, and nonstandard callable header modifiers currently
-return `Unsupported` rather than a provisional type. Unused declarations with these forms are
-still indexed as written names and do not require semantic resolution. `Semantic.demandBody`
+```silk,ignore
+struct Node { next: Node }
+```
+
+A generic member query substitutes the application's explicit type and lifetime arguments without
+checking another member. In `Box<bool>`, requesting `value` yields `bool` even if `deferred` has an
+invalid written type; requesting `deferred` then rejects at its written type:
+
+```silk,ignore
+struct Box<T> {
+  value: T
+  deferred: Missing
+}
+fn boxed() -> Box<bool> { return () }
+```
+
+Ordinary type and lifetime binders belong to their declarations. Written function signatures
+resolve those binders and explicit nominal or alias arguments, including substitution through
+alias targets. Each omitted input lifetime gets a distinct declaration-owned identity; an omitted
+result lifetime uses the sole outer borrowed input when there is exactly one. An alias with an
+omitted lifetime is expanded in the caller's header, so its uses remain independent. For example,
+demanding the signature of `use` resolves `Same<bool>` to `Pair<bool, bool>`:
+
+```silk,ignore
+struct Pair<A, B> {}
+type Same<T> = Pair<T, T>
+fn use(value: Same<bool>) -> Same<bool> { return move value }
+```
+
+The supported primitive spellings are `bool`, `char`, signed and unsigned integers through 64 bits
+and pointer size, `f32`, and `f64`. A missing result means unit. Signature facts also preserve
+`string<'life>`, shared and exclusive references, borrowed slices, and raw pointer access,
+nullability, extent, and written alignment. The only supported raw pointer address space is zero;
+no target layout or host pointer width is inferred. The following header gives its parameter and
+result the same declared lifetime identity:
+
+```silk,ignore
+fn view<'data>(value: &'data [i32]) -> &'data [i32] { return value }
+```
+
+These are type relationships, not a borrow-safety proof or a checked generic body. Public
+contracts reject private nominal types; missing modules, inaccessible members, collisions, and
+alias or import-name cycles produce anchored semantic rejections.
+
+Signatures also describe callable and Effect contracts. `fn(A) -> B`, `mut fn(A) -> B`, and
+`once fn(A) -> B` keep their invocation mode, `unsafe`, retained environment, ordered parameters,
+and result. The builtin `Effect<'env; A ! E ? R>` needs no import and keeps its run mode (`once
+Effect<...>`), environment, success type, failure type, and requirement row. An `effect fn` records
+its written `! E` and `? R` channels; omitting them means `never` and the empty row, not inference.
+`never` is the empty structural union. `A | B` flattens nested unions and drops repeated members, so
+member order does not matter. A row keeps one entry per service and `at` role, with the strongest
+written access, plus any `?R` row parameters. Bounds such as `T: Hash + Clock + 'a` and
+`'long: 'short` are recorded in written order. A callable or Effect bound such as
+`F: fn(i32) -> i32` records a representation parameter rather than an interface requirement. For
+example, both headers below have the same channels, and `copy` retains both bounds:
+
+```silk,ignore
+service Clock {}
+role Primary
+struct Missing {}
+struct Offline {}
+effect fn first() -> i32 ! Missing | Offline ? &Clock at Primary | &mut Clock at Primary { return 0 }
+effect fn second() -> i32 ! Offline | Missing ? &mut Clock at Primary { return 0 }
+interface Hash {}
+fn copy<'data, T: Hash + 'data>(value: &'data T) -> i32 { return 0 }
+```
+
+A callable contract can quantify invocation lifetimes:
+`for<'call> fn<'env>(&'call i32) -> &'call i32` names them. An omitted lifetime in a callable
+parameter is a fresh invocation lifetime, so `fn<'env>(&i32) -> &i32` is the same contract; an
+omitted result lifetime inside the contract uses its sole borrowed parameter. Two contracts are
+equal when some renaming of their used invocation lifetimes makes them equal. Binder names, binder
+order, an unused binder, and member order in unions, rows, and environments are therefore not
+identity, while written bounds such as `for<'a: 'b, 'b>` remain part of the contract. A quantified
+contract inside another quantified contract is rejected, including one quantified only by an
+omitted lifetime. An environment such as `Effect<'a & 'b; A>` is an order-independent
+intersection in which `'static` and repeats disappear, so `'b & 'static & 'a` is the same
+environment and `'a & 'a` is `'a`. A written `effect<'env> fn` or `effect<'a & 'b> fn` environment
+is recorded with the signature:
+
+```silk,ignore
+fn apply(transform: fn<'static>(&i32) -> &i32) -> i32 { return 0 }
+effect<'env> fn retain<T: 'env, 'env>(value: T) -> i32 { return 0 }
+fn both<'a, 'b>(pending: Effect<'a & 'b; i32>) -> i32 { return 0 }
+```
+
+`Semantic.demandContract` returns the binders and bounds of a type, alias, interface, or service
+declaration without demanding its identity or members. A `?R` binder of such a declaration takes
+its row from the `? Row` suffix of an application, and the row is spliced wherever the binder is
+used. A bound is recorded, not proved. An application of a declaration with an interface, service,
+or representation bound is `Unsupported` until conformance solving exists; lifetime bounds such as
+`T: 'a` are recorded without blocking applications. For example, `Sorted` has a contract,
+`Sorted<i32>` is `Unsupported`, and `Loaded<? &Clock>` resolves to an Effect requiring both
+`&Logger` and `&Clock`:
+
+```silk,ignore
+struct Sorted<T: Hash> { value: T }
+interface Load<E, ?R> {}
+type Loaded<?R> = Effect<'static; i32 ? &Logger | R>
+fn loadable<T: Load<Missing ? &Clock>>(source: &T) -> i32 { return 0 }
+```
+
+Only services may appear in a requirement row, and an `at` path must name a role. Interfaces and
+services are both valid bounds; a bound records the requirement and proves no conformance.
+Requirement and bound errors, a failure or requirement channel on an ordinary function, a `?R`
+binder used as an ordinary type, an ambiguous or nested callable quantifier, and a borrow or bare
+callable or Effect inside a structural union have anchored rejections. These contracts do not
+solve conformances, select providers, check captures, or run Effects. The scalar body checker still
+rejects effect bodies, generic bodies, and calls to effect or `unsafe` functions as `Unsupported`,
+even when their signatures resolve.
+
+Generic calls and demanded generic bodies, type inference, applications of declarations with
+interface or representation bounds, a declaration with more than one `?R` binder when applied, a
+lifetime omitted inside a type declaration's bound, row subtraction such as `Without<R, K>` (which
+belongs to the later provision and requirement-algebra work), requirements on type parameters,
+variadic functions, static parameters, and other nonstandard callable header modifiers currently
+return `Unsupported` rather than a provisional type. A `where` clause is different: the first
+stable language has no `where` clauses, so a written one is rejected as invalid syntax, not a
+pending feature, even though the rejection currently uses the `Unsupported` code.
+
+An omitted callable or Effect environment elides like a borrow. An input retains the regions of its
+borrows, non-`'static` nominal lifetime arguments, and callable or Effect environments; the
+parameter and channel types of a callable or Effect are not stored. An input whose stored contents
+involve a type parameter has no nameable region. For an `Effect` result, inputs that retain nothing
+leave the omitted environment `'static`, so `fn closed() -> Effect<i32>` and
+`fn later(value: i32) -> Effect<i32>` have results of the form `Effect<'static; i32>`. Otherwise a
+single borrowed input supplies it as before, and any other case is rejected as `AmbiguousLifetime`
+at the result. An `effect fn` captures every input, so its omitted environment is the intersection
+of the regions its inputs retain: `'static` for none, `'a & 'b` for two borrows, the pending
+Effect's region for `once Effect<A>`. Generic stored contents such as `value: T` are rejected as
+`AmbiguousLifetime` at that input, so the declaration writes `effect<'env> fn`. These defaults cover
+only the result's own environment.
+`fn nested() -> Effect<'static; Effect<i32>>` leaves the inner environment without a default, and
+callables and Effects nested inside callables need their environments written. Invalid or unknown
+lifetimes and pointer qualifiers have anchored rejections. Written `[T; N]` arrays
+retain the exact non-negative decimal literal extent and element type, including at zero length;
+extents needing static execution remain `Unsupported` at their source span. Member type requests
+with omitted field lifetimes are likewise `Unsupported` until those generated lifetimes can be
+represented by the nominal application. No machine layout fact is inspected. Unused declarations
+with these forms are still indexed as written
+names and do not require semantic resolution. `Semantic.demandBody`
 checks one requested ordinary function body with fixed-width integer, `bool`, or unit parameters
 and result. It accepts exact integer, Boolean, and unit literals, parameter reads, immutable scalar
 and unit locals, explicit returns, and unit fallthrough. An immediate return or local annotation
@@ -351,9 +488,10 @@ them back to a local owner, as required by Silk's ownership rules.
 
 ## Verification
 
-Build this checkout's bootstrap CLI, then run the M1 source-written cases. The M1 discovery root
-imports the existing query, source-index, and semantic cases. The focused HIR run checks exact
-integer magnitudes and fingerprints without pulling the full HIR suite into the semantic binary.
+Build this checkout's bootstrap CLI, then run the M1 source-written cases. The M1 query root
+imports query and source-index cases; the semantic cases use their own root to keep each native
+compilation within the CI heap limit. The focused HIR run checks exact integer magnitudes and
+fingerprints without pulling the full HIR suite into the semantic binary.
 `--no-cache` executes assertions even if a previous run stored passing results. The focused Linux
 workflow runs these commands for pull requests targeting `selfhost` and pushes to `selfhost`.
 Other pull-request targets and main pushes keep their existing broad CI. Native work branches are
@@ -362,6 +500,7 @@ named `selfhost-*`; pushing one does not start a second CI run before its pull r
 ```sh
 CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
 NODE_OPTIONS=--max-old-space-size=6144 node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/M1Cases.silk --no-cache
+NODE_OPTIONS=--max-old-space-size=6144 node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/semantic/SemanticCases.silk --no-cache
 node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/hir/LoweringCases.silk --filter integer --no-cache
 ```
 
