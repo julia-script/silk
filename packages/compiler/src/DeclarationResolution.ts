@@ -1291,6 +1291,26 @@ export const witnessBinding = (
 }
 
 /** Infers an interface witness declaration's own binders without assuming header position. */
+/**
+ * The rigid region of one owned operand lent to a source witness for a single invocation. The
+ * adapter owns the operand for that whole invocation.
+ */
+const witnessBorrow = (implementation: DeclarationFact): Lifetime.Lifetime =>
+  Lifetime.placeholder(
+    Lifetime.bound(
+      {
+        module: implementation.id.sourceId,
+        name:
+          implementation.name._tag === 'Present'
+            ? implementation.name.spelling
+            : `witness@${implementation.id.ordinal}`,
+      },
+      0,
+      'witnessBorrow',
+    ),
+    'owned witness invocation',
+  )
+
 export const inferInterfaceWitnessTarget = (
   implementation: DeclarationFact,
   contract: InterfaceOperationApplicationFact | undefined,
@@ -1318,24 +1338,7 @@ export const inferInterfaceWitnessTarget = (
       Type.isReference(pattern.type) &&
       !Type.isReference(operand.type.type) &&
       !Type.isSlice(operand.type.type)
-        ? Type.reference(
-            pattern.type.access,
-            operand.type.type,
-            Lifetime.placeholder(
-              Lifetime.bound(
-                {
-                  module: implementation.id.sourceId,
-                  name:
-                    implementation.name._tag === 'Present'
-                      ? implementation.name.spelling
-                      : `witness@${implementation.id.ordinal}`,
-                },
-                0,
-                'witnessBorrow',
-              ),
-              'owned witness invocation',
-            ),
-          )
+        ? Type.reference(pattern.type.access, operand.type.type, witnessBorrow(implementation))
         : operand.type.type
     constraints.push({
       label: Type.equals(
@@ -1474,12 +1477,14 @@ export const interfaceWitnessCompatibility = (
   )
   if (lifetimeCompatibility._tag === 'Incompatible') return lifetimeCompatibility
   if (contract.functionKind === 'Effect' && implementation.functionKind === 'Effect') {
-    // An owned operand lent to the witness stays with the adapter for the whole invocation, so
-    // its rigid temporary borrow does not shorten the promised environment.
+    // An owned operand lent to this witness stays with the adapter for the whole invocation, so
+    // exactly that rigid borrow does not shorten the promised environment. It still cannot escape
+    // through the success value, which the operand and success checks below compare as written.
+    const lent = Lifetime.key(witnessBorrow(implementation))
     const witnessEnvironment = Lifetime.intersection(
       Lifetime.atoms(
         Type.substituteLifetime(executableLifetimes(implementation).environment, substitution),
-      ).filter((atom) => atom._tag !== 'PlaceholderLifetime'),
+      ).filter((atom) => Lifetime.key(atom) !== lent),
     )
     const environmentCompatibility = InterfaceWitnessCompatibility.environment(
       contract.lifetimes.environment,

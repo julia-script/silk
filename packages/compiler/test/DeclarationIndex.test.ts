@@ -2633,6 +2633,35 @@ impl Tick for Plain { effect fn tick(self: Self) -> i32 { drop self return 0 } }
   }),
 )
 
+it.effect('keeps an owned operand lent to a witness from escaping through its success', () =>
+  Effect.gen(function* () {
+    const source = `struct Token { value: i32 }
+interface Decode { effect<'env> fn decode<'env>(value: Self) -> i32 }
+effect fn decode(value: &Token) -> i32 { return value.value }
+impl Decode for Token { decode: Token.decode }
+struct Peeked { value: i32 }
+interface Peek { effect<'env> fn peek<'env>(value: Self) -> &'static i32 }
+effect fn peek(value: &Peeked) -> &i32 { return &value.value }
+impl Peek for Peeked { peek: Peeked.peek }
+struct Deferred { value: i32 }
+interface Later { fn later(value: Self) -> Effect<'static; i32> }
+fn later(value: &Deferred) -> Effect<i32> { return effect { return value.value } }
+impl Later for Deferred { later: Deferred.later }`
+    const index = yield* collect('root', [['root', source]])
+    // The lent borrow may stay inside the adapter's Effect, but never in the promised success.
+    assert.deepEqual(
+      index.published.map((diagnostic) => [
+        diagnostic.code,
+        source.slice(0, diagnostic.span.start).split('\n').length,
+      ]),
+      [
+        ['SEM0083', 8],
+        ['SEM0083', 12],
+      ],
+    )
+  }),
+)
+
 it.effect('makes retained Effect environments explicit without strengthening the contract', () =>
   Effect.gen(function* () {
     const source = `struct Held<'a> { value: &'a i32 }
