@@ -1940,6 +1940,22 @@ export const make = (operations: Operations) => {
       )
         return undefined
     }
+    // A witness that writes its retained environment names it after this invocation's one.
+    const written = target.declaration.lifetimeElaboration?.explicitEnvironment
+    if (written !== undefined && serviceOperation !== undefined) {
+      const environment = (lifetime: Lifetime.Lifetime) =>
+        Type.effect(Type.unit, [], { environment: lifetime, lifetimeBinders: [] })
+      TypeInference.infer(
+        environment(written),
+        environment(
+          Type.substituteLifetime(
+            DeclarationFacts.executableLifetimes(serviceOperation).environment,
+            operationSubstitution,
+          ),
+        ),
+        targetSubstitution,
+      )
+    }
     const typeArguments = target.declaration.typeParameters.flatMap((parameter) => {
       const argument = targetSubstitution.get(Type.key(parameter.type))
       return argument === undefined ? [] : [argument]

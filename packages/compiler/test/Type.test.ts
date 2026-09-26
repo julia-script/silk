@@ -2399,7 +2399,7 @@ it('carries executable formation facts without assuming invocation predicates or
 
 it.effect('keeps captured generic Effect storage bounded independently from its result type', () =>
   Effect.gen(function* () {
-    const source = `effect fn retain<T>(value: T) -> i32 { return 0 }
+    const source = `effect<'env> fn retain<T: 'env, 'env>(value: T) -> i32 { return 0 }
 fn invalid<T>(value: T) -> once Effect<'static; i32> { return retain(move value) }
 fn valid<'a, T: 'a>(value: T) -> once Effect<'a; i32> { return retain(move value) }`
     const snapshot = yield* Analysis.ofSource(
@@ -2536,7 +2536,7 @@ it.effect('derives nominal well-formedness assumptions from requirement and impl
 interface Marker {}
 impl<'a, T> Marker for Holder<'a, T> {}
 impl<'a, T> Holder<'a, T> { fn count(self: &Self) -> i32 { return 1 } }
-service Store<'a, T: 'a> { effect fn save(value: T) -> () }
+service Store<'a, T: 'a> { effect<'env> fn save<'env>(value: T) -> () }
 effect fn requiring<'a, T>() -> () ? &Store<'a, T> { return () }`
     const snapshot = yield* Analysis.ofSource(
       'lifetimes/header-obligations',

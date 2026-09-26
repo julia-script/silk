@@ -942,8 +942,21 @@ const invocationLifetimeSubstitution = (
     )
   )
     return undefined
+  // A written operation environment can be the only place an invocation binder appears.
+  const environment = (lifetime: Lifetime.Lifetime, substitution: Type.Substitution) =>
+    Type.effect(Type.unit, [], {
+      environment: Type.substituteLifetime(lifetime, substitution),
+      lifetimeBinders: [],
+    })
+  if (
+    !inferInvocation(
+      environment(contract.lifetimes.environment, headerSubstitution),
+      environment(application.lifetimes.environment, applicationSubstitution),
+    )
+  )
+    return undefined
   const substitution = new Map<string, Type.GenericArgument>()
-  // A synthesized environment proof can be absent from the implementation's arguments. Only
+  // An environment proof can be absent from the implementation's arguments. Only
   // invocation binders forwarded to the selected implementation need a concrete call-site value.
   const forwarded = new Set(
     (mapping.targetArguments ?? []).flatMap(TypeInference.argumentLifetimes).map(Lifetime.key),

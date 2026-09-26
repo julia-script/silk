@@ -1359,6 +1359,23 @@ export const inferInterfaceWitnessTarget = (
       ...Type.freeLifetimes(constraint.pattern).map(Lifetime.key),
     ]),
   )
+  // A witness binder that only names the written retained environment takes the promised one.
+  const environment = implementation.lifetimeElaboration?.explicitEnvironment
+  if (
+    environment !== undefined &&
+    contract.functionKind === 'Effect' &&
+    binders.some((binder) => !covered.has(Type.key(binder)))
+  ) {
+    constraints.push({
+      label: 'environment',
+      pattern: Type.effect(Type.unit, [], { environment, lifetimeBinders: [] }),
+      actual: Type.effect(Type.unit, [], {
+        environment: contract.lifetimes.environment,
+        lifetimeBinders: [],
+      }),
+    })
+    for (const atom of Lifetime.atoms(environment)) covered.add(Lifetime.key(atom))
+  }
   if (binders.some((binder) => !covered.has(Type.key(binder))))
     constraints.push({
       label: 'failure and requirement rows',
