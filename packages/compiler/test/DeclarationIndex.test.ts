@@ -2529,7 +2529,10 @@ fn closed() -> Effect<i32> { return effect { return 42 } }
 fn later(value: i32) -> Effect<i32> { return effect { return value } }
 fn heldLater<'a>(value: Held<'a>) -> Effect<i32> { return effect { return 1 } }
 fn twoLater(left: &i32, right: &i32) -> Effect<i32> { return effect { return 1 } }
-effect fn nested() -> Effect<i32> { return owned(1) }`
+effect fn nested() -> Effect<i32> { return owned(1) }
+fn borrowedLater(value: &i32) -> Effect<i32> { return effect { return value.* } }
+fn heldBorrowedLater<'a>(value: &i32, held: Held<'a>) -> Effect<i32> { return effect { return value.* } }
+effect fn borrowedSuccess(value: &i32) -> Effect<i32> { return owned(value.*) }`
     const index = yield* collect('root', [['root', source]])
     const declarations = index.modules.at(0)?.declarations ?? []
     const named = (name: string) =>
@@ -2564,6 +2567,16 @@ effect fn nested() -> Effect<i32> { return owned(1) }`
     assert.strictEqual(environment('keepNamed'), "'env")
     assert.strictEqual(resultEnvironment('closed'), "'static")
     assert.strictEqual(resultEnvironment('later'), "'static")
+    // LIFE-003 keeps supplying a sole borrowed input's region, also for an effect fn success.
+    const borrowedRegion = (name: string) => {
+      const parameter = named(name).parameters.at(0)?.declaredType
+      return parameter?._tag === 'Resolved' && Type.isReference(parameter.type)
+        ? Lifetime.display(parameter.type.lifetime)
+        : unreachable(`expected a borrowed input of ${name}`)
+    }
+    assert.strictEqual(resultEnvironment('borrowedLater'), borrowedRegion('borrowedLater'))
+    assert.strictEqual(resultEnvironment('heldBorrowedLater'), borrowedRegion('heldBorrowedLater'))
+    assert.strictEqual(resultEnvironment('borrowedSuccess'), borrowedRegion('borrowedSuccess'))
     assert.deepEqual(
       index.published.map((diagnostic) => [
         diagnostic.code,
@@ -2586,9 +2599,20 @@ it.effect('infers a witness binder that names only its written Effect environmen
 struct Counter {}
 impl<T> Consume<T> for Counter {
   effect<'env> fn consume<'env>(self: &Self, value: T) -> i32 { drop value return 1 }
+}
+struct Split {}
+impl<T> Consume<T> for Split {
+  effect<'a & 'b> fn consume<'a, 'b>(self: &Self, value: T) -> i32 { drop value return 1 }
 }`
     const index = yield* collect('root', [['root', source]])
-    assert.deepEqual(index.published, [])
+    // One promised region cannot choose between two otherwise unconstrained witness binders.
+    assert.deepEqual(
+      index.published.map((diagnostic) => [
+        diagnostic.code,
+        source.slice(diagnostic.span.start, diagnostic.span.end).split('(')[0],
+      ]),
+      [['SEM0083', "effect<'a & 'b> fn consume<'a, 'b>"]],
+    )
   }),
 )
 

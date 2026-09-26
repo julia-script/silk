@@ -1359,7 +1359,11 @@ export const inferInterfaceWitnessTarget = (
       ...Type.freeLifetimes(constraint.pattern).map(Lifetime.key),
     ]),
   )
-  // A witness binder that only names the written retained environment takes the promised one.
+  // A witness binder that occurs only in its written retained environment is determined by the
+  // promised environment: structural matching binds it only when the written environment is
+  // exactly that region. Anything else, such as an intersection of several free binders against
+  // one promised region, fails inference and the mapping stays rejected. Compatibility itself is
+  // unchanged; this only names the binder.
   const environment = implementation.lifetimeElaboration?.explicitEnvironment
   if (
     environment !== undefined &&

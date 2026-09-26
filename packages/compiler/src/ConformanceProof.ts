@@ -942,7 +942,8 @@ const invocationLifetimeSubstitution = (
     )
   )
     return undefined
-  // A written operation environment can be the only place an invocation binder appears.
+  // A written operation environment can be the only place an invocation binder appears; the
+  // application's environment then fixes it, as conformance checking already required.
   const environment = (lifetime: Lifetime.Lifetime, substitution: Type.Substitution) =>
     Type.effect(Type.unit, [], {
       environment: Type.substituteLifetime(lifetime, substitution),
