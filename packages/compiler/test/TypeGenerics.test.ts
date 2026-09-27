@@ -3,6 +3,7 @@ import {
   constrainedCallableForwarding,
   constrainedSectionGenericOwner,
   genericItemPipelineInGenericOwner,
+  relayedSection,
 } from './support/corpus.js'
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
@@ -553,6 +554,43 @@ pub fn main() -> i32 {
     assert.isAtLeast(sectionEnvironments(snapshot, 'repeat').length, 1)
     for (const fn of mir.functions)
       assert.isFalse(fn.localTypes.some((type) => leaksSectionBinder(Mir.semanticType(type))))
+  }),
+)
+
+it.effect('lowers relay calls carrying a section environment named before its applications', () =>
+  Effect.gen(function* () {
+    // `select(true)` leaves `U` unapplied; the relay instance is keyed by the section's closed
+    // callable type, and each relay call in `main` must select exactly that instance.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/relayed-section',
+      new TextEncoder().encode(relayedSection),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+    const main = mir.functions.find((fn) => fn.id.name === 'main') ?? unreachable('expected main')
+    assert.isFalse(
+      main.regions.some(
+        (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
+      ),
+    )
+    const relays = main.regions.flatMap((region) =>
+      region._tag === 'OperationRegion'
+        ? region.operations.flatMap((operation) =>
+            operation._tag === 'Call' && operation.target.name === 'forward'
+              ? [operation.typeArguments.map(Type.genericArgumentKey).join()]
+              : [],
+          )
+        : [],
+    )
+    const recorded = Analysis.instancesOf(snapshot)
+      .calls.filter(
+        (call) =>
+          call.owner.declaration.name === 'main' && call.target.declaration.name === 'forward',
+      )
+      .map((call) => call.target.typeArguments.map(Type.genericArgumentKey).join())
+    assert.strictEqual(relays.length, 2)
+    assert.sameMembers(relays, recorded)
   }),
 )
 
