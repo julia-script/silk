@@ -419,6 +419,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
       - name: Compile the full root and capture the selected witness crash
+        id: diagnose
         shell: bash
         env:
           NODE_OPTIONS: --max-old-space-size=6144
@@ -452,12 +453,120 @@ jobs:
             echo 'The native process left no core; inspect core_pattern and the CLI log.' | tee -a "$diagnostic_dir/run.log"
             exit 1
           fi
-          timeout --signal=TERM --kill-after=10s 90s \
-            gdb --batch --quiet \
-              -ex 'set pagination off' \
-              -ex 'thread apply all bt 40' \
-              -ex 'thread apply all bt full 12' \
-              "$binary" "${cores[0]}" > "$diagnostic_dir/backtrace.log" 2>&1
+          if [ "${#cores[@]}" -gt 4 ]; then
+            printf 'Too many cores to inspect within the diagnostic bound: %s\n' "${#cores[@]}" | tee -a "$diagnostic_dir/run.log"
+            exit 1
+          fi
+          binary_path=$(realpath "$binary")
+          matches=()
+          for core in "${cores[@]}"; do
+            probe="$diagnostic_dir/$(basename "$core").probe.log"
+            if ! timeout --signal=TERM --kill-after=10s 30s \
+              gdb --batch --quiet \
+                -ex 'set pagination off' \
+                -ex 'set debuginfod enabled off' \
+                -ex 'info proc' \
+                -ex 'info proc mappings' \
+                -ex 'bt 25' \
+                "$binary_path" "$core" > "$probe" 2>&1; then
+              printf 'Core probe failed: %s\n' "$core" | tee -a "$diagnostic_dir/run.log"
+              continue
+            fi
+            if awk -v path="$binary_path" '$1 ~ /^0x[0-9a-f]+$/ && index($0, path) > 0 {found=1} END {exit !found}' "$probe" && \
+              grep -Fq 'Program terminated with signal SIGABRT' "$probe" && \
+              grep -Fq ' in free ()' "$probe" && \
+              grep -Fq 'witnessClaims_effect' "$probe" && \
+              grep -Fq 'witnessContractCompatibility_effect' "$probe" && \
+              ! grep -Eq 'core file may not match|exec file is newer' "$probe"; then
+              matches+=("$core")
+            fi
+          done
+          if [ "${#matches[@]}" -ne 1 ]; then
+            printf 'Matching witness cores: %s; expected exactly one. Probe logs retain identity evidence.\n' "${#matches[@]}" | tee -a "$diagnostic_dir/run.log"
+            exit 1
+          fi
+          core=${matches[0]}
+          core_bytes=$(stat -c %s "$core")
+          binary_bytes=$(stat -c %s "$binary_path")
+          if [ "$core_bytes" -gt 2147483648 ] || [ "$binary_bytes" -gt 536870912 ]; then
+            printf 'Evidence exceeds cap (core %s/2147483648, ELF %s/536870912 bytes).\n' "$core_bytes" "$binary_bytes" | tee -a "$diagnostic_dir/run.log"
+            exit 1
+          fi
+          evidence_dir="$diagnostic_dir/evidence"
+          mkdir -p "$evidence_dir"
+          cp "$binary_path" "$evidence_dir/silk-compiler"
+          mv "$core" "$evidence_dir/witness.core"
+          {
+            printf 'source_sha=%s\n' "$(git rev-parse HEAD)"
+            printf 'binary_path=%s\n' "$binary_path"
+            printf 'core_file=%s\n' "$(basename "$core")"
+            printf 'core_bytes=%s\nELF_bytes=%s\n' "$core_bytes" "$binary_bytes"
+            printf 'node=%s\n' "$(node --version)"
+            printf 'clang=%s\n' "$(clang --version | sed -n '1p')"
+            printf 'glibc=%s\n' "$(dpkg-query -W -f='${Version}' libc6)"
+            sha256sum "$evidence_dir/silk-compiler" "$evidence_dir/witness.core"
+          } > "$diagnostic_dir/identity.log"
+          readelf -n "$evidence_dir/silk-compiler" > "$diagnostic_dir/elf-notes.log" 2>&1 || true
+          build_id=$(awk '/Build ID:/{print $3; exit}' "$diagnostic_dir/elf-notes.log")
+          printf 'ELF_build_id=%s\n' "${build_id:-unavailable}" >> "$diagnostic_dir/identity.log"
+          printf 'Core identity: exact ELF path in GDB process mappings, SIGABRT/free, and both selected witness frames.\n' >> "$diagnostic_dir/identity.log"
+          cp "$diagnostic_dir/identity.log" "$evidence_dir/identity.log"
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+          cat > "$diagnostic_dir/inspect.gdb" <<'GDB'
+          set pagination off
+          set debuginfod enabled off
+          info files
+          info proc
+          info proc mappings
+          thread apply all bt 40
+          python
+          import gdb
+          wanted = [('free', 'free'), ('Slot.dropValue', 'Slot_dropValue'), ('Vector.releaseBuffer', 'vector_releaseBuffer'), ('Shared payload cleanup', 'local_shared_payloadCleanup')]
+          frame = gdb.newest_frame()
+          while frame is not None:
+              name = frame.name() or ''
+              for label, needle in wanted:
+                  if needle in name:
+                      print('=== ' + label + ' ===')
+                      frame.select()
+                      for command in ('info args', 'info locals', 'info registers', 'x/16gx $rsp', 'disassemble /r $pc-96,$pc+32'):
+                          try:
+                              result = gdb.execute(command, to_string=True)
+                              print(command + ':\n' + result)
+                          except gdb.error as error:
+                              print(command + ': unavailable: ' + str(error))
+                      if label == 'free':
+                          try:
+                              value = gdb.parse_and_eval('mem')
+                              if value.is_optimized_out:
+                                  print('free argument unavailable: optimized out')
+                              else:
+                                  print('free argument mem=' + str(value))
+                                  try:
+                                      print('free argument raw memory:\n' + gdb.execute('x/8gx mem', to_string=True))
+                                  except gdb.error as error:
+                                      print('free argument memory unavailable: ' + str(error))
+                          except gdb.error as error:
+                              print('free argument unavailable: ' + str(error))
+                      if label == 'Slot.dropValue':
+                          try:
+                              print('slot expression=' + str(gdb.parse_and_eval('slot')))
+                              for expression in ('slot', '*(void**)slot'):
+                                  try:
+                                      print('raw memory at ' + expression + ':\n' + gdb.execute('x/12gx ' + expression, to_string=True))
+                                  except gdb.error as error:
+                                      print('raw memory at ' + expression + ' unavailable: ' + str(error))
+                          except gdb.error as error:
+                              print('slot expression unavailable: ' + str(error))
+                          print('Control-block fields and reclaim lanes require a trustworthy slot address; raw registers are not interpreted as those values.')
+              frame = frame.older()
+          end
+          GDB
+          if ! timeout --signal=TERM --kill-after=10s 90s \
+            gdb --batch --quiet -x "$diagnostic_dir/inspect.gdb" \
+              "$evidence_dir/silk-compiler" "$evidence_dir/witness.core" > "$diagnostic_dir/backtrace.log" 2>&1; then
+            echo 'Detailed GDB inspection failed or timed out; matching ELF/core remain in the evidence artifact.' | tee -a "$diagnostic_dir/run.log"
+          fi
           cat "$diagnostic_dir/backtrace.log"
           exit 1
       - uses: actions/upload-artifact@v4
@@ -467,7 +576,18 @@ jobs:
           path: ${{ runner.temp }}/witness-diagnostic/*.log
           if-no-files-found: ignore
           retention-days: 7
-      - name: Restore core settings and remove core files
+      - id: evidence-upload
+        uses: actions/upload-artifact@v4
+        if: always() && steps.diagnose.outputs.ready == 'true'
+        with:
+          name: witness-linux-core-elf-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/witness-diagnostic/evidence/
+            ${{ runner.temp }}/witness-diagnostic/*.log
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 7
+      - name: Restore core settings
         if: always()
         shell: bash
         run: |
@@ -475,7 +595,13 @@ jobs:
           if [ -f "$RUNNER_TEMP/witness-core-pattern.before" ]; then
             sudo sysctl -w "kernel.core_pattern=$(cat "$RUNNER_TEMP/witness-core-pattern.before")"
           fi
+      - name: Remove cores only after evidence upload succeeds
+        if: always() && steps.evidence-upload.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
           rm -f "$RUNNER_TEMP"/silk-core.*
+          rm -f "$RUNNER_TEMP/witness-diagnostic/evidence/witness.core"
 
   full-verification:
     if: github.event_name == 'workflow_dispatch' && inputs.full_verification
