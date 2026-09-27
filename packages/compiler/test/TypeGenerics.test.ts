@@ -1,5 +1,6 @@
 import { records } from './support/records.js'
 import {
+  borrowedCaptureSection,
   constrainedCallableForwarding,
   constrainedSectionGenericOwner,
   genericItemPipelineInGenericOwner,
@@ -586,6 +587,88 @@ it.effect('lowers a constrained section that is relayed but never applied', () =
         .find(Type.isCallableIdentityArgument)
         ?.typeArguments.map(Type.runtimeGenericArgumentKey),
       environment?.typeArguments.map(Type.runtimeGenericArgumentKey),
+    )
+  }),
+)
+
+it.effect('applies a section environment holding a borrowed capture by value', () =>
+  Effect.gen(function* () {
+    // `pick(&mut count, 1)` stores the exclusive borrow itself and a Copy `i32` by value. Each
+    // application passes the stored borrow to the target's `&mut Counter` parameter.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/borrowed-capture-section',
+      new TextEncoder().encode(borrowedCaptureSection),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+    const main = mir.functions.find((fn) => fn.id.name === 'main') ?? unreachable('expected main')
+    assert.isFalse(
+      main.regions.some(
+        (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
+      ),
+    )
+    const applications = main.regions.flatMap((region) =>
+      region._tag === 'OperationRegion'
+        ? region.operations.flatMap((operation) =>
+            operation._tag === 'ApplyCallable' && operation.callable !== undefined
+              ? [operation]
+              : [],
+          )
+        : [],
+    )
+    assert.deepEqual(
+      applications.map((operation) =>
+        operation.typeArguments.filter(Type.isTypeArgument).map(Type.encodeGenericArgument),
+      ),
+      [['i32'], ['bool']],
+    )
+    const application = applications.at(0) ?? unreachable('expected an application')
+    const callable = application.callable ?? unreachable('expected a callable operand')
+    const value = main.localTypes.at(callable.ordinal)
+    if (value?._tag !== 'CallableValue' || value.environment === undefined)
+      return unreachable('expected a section environment')
+    const environment = value.environment
+    assert.deepEqual(
+      environment.fields.map((field) => [
+        field.representation,
+        field.access,
+        Type.isReference(field.type),
+      ]),
+      [
+        ['Value', 'Exclusive', true],
+        ['Value', 'Copy', false],
+      ],
+    )
+    // A by-value field claiming shared or exclusive access to a non-reference is still rejected.
+    const forged = {
+      ...value,
+      environment: {
+        ...environment,
+        fields: environment.fields.map((field) =>
+          field.access === 'Copy' ? { ...field, access: 'Exclusive' as const } : field,
+        ),
+      },
+    }
+    const violations = yield* MirVerification.verify({
+      ...mir,
+      functions: mir.functions.map((fn) =>
+        fn !== main
+          ? fn
+          : {
+              ...fn,
+              localTypes: fn.localTypes.map((type, ordinal) =>
+                ordinal === callable.ordinal ? forged : type,
+              ),
+            },
+      ),
+    })
+    assert.isTrue(
+      violations.some(
+        (violation) =>
+          violation.rule === 'InvalidCallableOperation' &&
+          violation.detail.startsWith('callable application'),
+      ),
     )
   }),
 )

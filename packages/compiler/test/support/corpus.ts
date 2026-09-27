@@ -1460,6 +1460,22 @@ pub fn main() -> i32 {
   return pass(2) + token.value
 }`
 
+/** A generic section holding an exclusive borrow and a Copy value, applied at two types. */
+export const borrowedCaptureSection = `struct Counter { value: i32 }
+fn pick<A>(value: A, counter: &mut Counter, bonus: i32) -> A {
+  counter.value = counter.value + bonus
+  return move value
+}
+pub fn main() -> i32 {
+  let mut count = Counter { value: 30 }
+  let mut bump = pick(&mut count, 1)
+  let a = bump(10)
+  let flag = bump(true)
+  drop bump
+  if flag { return count.value + a }
+  return 0
+}`
+
 /** Fixed-seed xoshiro256** known answers pinned for native execution. */
 export const seededRandomFingerprint = `import silk.effect { Effect }
 import silk.insecure_random { InsecureRandom }
@@ -2282,6 +2298,12 @@ int32_t silk_finish_events(void) { puts(""); return 42; }
 `,
     },
     nativeStdout: '11,1,12,20,2,7,\n',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    // A section environment stores its exclusive borrow by value and passes it to each application.
+    name: 'borrowed-capture-section',
+    source: borrowedCaptureSection,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

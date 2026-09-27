@@ -2060,8 +2060,13 @@ const capturedFieldPasses = (
       acceptsRuntimeOperand(field.type, parameter.target)
     )
   if (field.representation === 'Callable') return acceptsRuntimeOperand(field.type, parameter)
+  // Layout stores a shared or exclusive capture by value only when the captured value is itself a
+  // reference or slice; the backend passes it to the parameter as stored.
   return (
-    (field.access === 'Take' || field.access === 'Copy') &&
+    (field.access === 'Take' ||
+      field.access === 'Copy' ||
+      SilkType.isReference(field.type) ||
+      SilkType.isSlice(field.type)) &&
     acceptsRuntimeOperand(field.type, parameter)
   )
 }
