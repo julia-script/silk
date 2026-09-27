@@ -2778,8 +2778,35 @@ export const make = (operations: Operations) => {
           ? [expression]
           : [],
       )
+      // A constrained section whose captures are concrete under its own selection has one
+      // environment for every application: the unapplied binders cannot change what it stores. Its identity keeps
+      // those binders as section binders, exactly as a relay carrying it names it, and each
+      // application invokes the target through its own complete call. Only captures that mention
+      // an unapplied binder need the application's solution, one environment per application.
+      const ownSelection = new Map(
+        [...section.substitution].map(([parameter, argument]) => [
+          parameter,
+          Type.substituteGenericArgument(argument, ownerSubstitution),
+        ]),
+      )
+      const preApplication =
+        applications.length > 0 &&
+        Type.namesUnappliedSection(
+          Type.callableIdentityArgument(
+            '',
+            Tir.callableTargetIdentity(section.target),
+            section.typeArguments,
+          ),
+        ) &&
+        section.captures.every(
+          (capture) =>
+            capture.value._tag !== 'Unavailable' &&
+            Type.isRuntimeConcrete(
+              specializeInstanceType(capture.value.type, owner, [ownerSubstitution, ownSelection]),
+            ),
+        )
       const candidates: ReadonlyArray<Type.Substitution> =
-        applications.length === 0
+        applications.length === 0 || preApplication
           ? [new Map()]
           : applications.map((application) => application.substitution)
       for (const applicationSubstitution of candidates) {
@@ -2790,8 +2817,29 @@ export const make = (operations: Operations) => {
             Type.substituteGenericArgument(argument, ownerSubstitution),
           ]),
         )
-        const type = specializeInstanceType(section.type, owner, [ownerSubstitution, substitution])
-        const arguments_ = targetArguments(section.target, substitution, results)
+        const specialized = specializeInstanceType(section.type, owner, [
+          ownerSubstitution,
+          substitution,
+        ])
+        const closed = preApplication ? Type.closeSectionSchema(specialized) : specialized
+        const type = Type.isTypeArgument(closed) ? closed : specialized
+        const arguments_ = preApplication
+          ? section.typeArguments.map((argument) =>
+              Type.substituteGenericArgument(argument, ownerSubstitution, context.compatibility),
+            )
+          : targetArguments(section.target, substitution, results)
+        if (
+          preApplication &&
+          arguments_ !== undefined &&
+          !Type.isRuntimeConcreteGenericArgument(
+            Type.callableIdentityArgument(
+              '',
+              Tir.callableTargetIdentity(section.target),
+              arguments_,
+            ),
+          )
+        )
+          continue
         const captureTypes = section.captures.flatMap((capture) =>
           capture.value._tag === 'Unavailable'
             ? []
@@ -2806,7 +2854,8 @@ export const make = (operations: Operations) => {
           !Type.isCallable(type) ||
           !Type.isRuntimeConcrete(type) ||
           arguments_ === undefined ||
-          arguments_.some((argument) => !Type.isRuntimeConcreteGenericArgument(argument)) ||
+          (!preApplication &&
+            arguments_.some((argument) => !Type.isRuntimeConcreteGenericArgument(argument))) ||
           captureTypes.length !== section.captures.length ||
           captureTypes.some((capture) => !Type.isRuntimeConcrete(capture))
         ) {

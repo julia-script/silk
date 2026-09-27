@@ -1023,12 +1023,37 @@ function lowerCallableApplyExpression(
     if (lowered === undefined || loweredType?._tag !== 'CallableValue') return false
     callable = lowered.result
     callableType = loweredType.type
+    const environment = loweredType.environment
+    if (
+      environment !== undefined &&
+      Type.namesUnappliedSection(
+        Type.callableIdentityArgument(
+          '',
+          Tir.callableTargetIdentity(environment.callable.target),
+          environment.callable.typeArguments,
+        ),
+      )
+    ) {
+      // A section environment precedes its applications, so this application's complete call
+      // names the invoked target and specializes the callee's contract.
+      const callee = expression.callee
+      if (callee._tag === 'Unavailable' || call === undefined) return false
+      const applied = Type.substitute(
+        fn.semantic(callee.type),
+        expression.substitution,
+        fn.owner.specialization.compatibility,
+      )
+      if (!Type.isCallable(applied) || !Type.isRuntimeConcrete(applied)) return false
+      callableType = { ...applied, mode: loweredType.type.mode }
+      typeArguments = call.target.typeArguments
+      return true
+    }
     // A realized environment names its hidden instance by its type arguments plus the
     // identities of the callables it captured, exactly as its construction registered it.
     typeArguments =
-      loweredType.environment === undefined
+      environment === undefined
         ? (loweredType.storage?.realization.targetArguments ?? loweredType.typeArguments ?? [])
-        : [...Layout.callableTargetArguments(loweredType.environment)]
+        : [...Layout.callableTargetArguments(environment)]
     return true
   }
   const first = expression.evaluation === 'LeftThenCallable' ? lowerArguments() : lowerCallee()

@@ -2225,6 +2225,29 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    // One provider section, applied to an i32 and a bool Effect, shares its environment.
+    name: 'constrained-section-two-applications',
+    source: `import silk.effect { Effect }
+service Counter { effect fn get() -> i32 ? &Counter }
+struct Fixed { value: i32 }
+effect fn get(self: &Fixed) -> i32 { return self.value }
+impl Counter for Fixed { get: Fixed.get }
+effect fn seed() -> i32 ? &Counter { return run Counter.get() }
+effect fn flag() -> bool ? &Counter {
+  let value = run Counter.get()
+  return value == 42
+}
+pub fn main() -> i32 {
+  let fixed = Fixed { value: 42 }
+  let bind = Effect.provide<Counter>(&fixed)
+  let number = run bind(seed())
+  let ok = run bind(flag())
+  if ok { return number }
+  return 1
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'identity',
     source: `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(42) }`,

@@ -72,6 +72,13 @@ export interface Parameter {
   readonly kind: ParameterKind
   readonly representationBound?: RepresentationBound
   readonly staticProperties: ReadonlyArray<SealedStaticProperty>
+  /**
+   * Marks a binder a constrained section leaves unapplied. It is scoped to the section's own
+   * hidden callable identity: its key is disjoint from the declaration's ordinary parameter, so no
+   * owner substitution can rewrite it, and it counts as closed only inside an identity whose
+   * target owns it.
+   */
+  readonly sectionBinder?: true
 }
 
 /** One canonical inline fixed array whose length participates in structural identity. */
@@ -1429,6 +1436,95 @@ export const parameterArgument = (self: Parameter): GenericArgument => {
   }
 }
 
+/** The section-scoped binder standing for `parameter` while a constrained section leaves it open. */
+export const sectionBinder = (parameter: Parameter): Parameter => ({
+  ...parameter,
+  sectionBinder: true,
+})
+
+/** Tests whether a type is a section-scoped binder (see `Parameter.sectionBinder`). */
+export const isSectionBinder = (self: Type): self is Parameter =>
+  isParameter(self) && self.sectionBinder === true
+
+// A section's schema binders close to the channels an unapplied section can carry: no success
+// value and no requirement. Lifetimes need no closure because runtime identity erases them.
+const closedSectionBinder = (binder: Parameter): GenericArgument | undefined => {
+  if (binder.kind === 'RequirementRow') return requirementRowArgument([])
+  if (binder.kind === 'Value') return 'never'
+  return undefined
+}
+
+/**
+ * Closes the unapplied schema binders of a constrained partial section's callable TYPE.
+ *
+ * The section's surface mentions binder-owned success/failure types and requirement rows that only
+ * a complete application resolves. Elaboration's escape gate proves such a value only reaches a
+ * whole-value relay, an application, or a drop, and its runtime representation is the environment
+ * named by its hidden callable identity. A relay therefore manipulates the value at this closed
+ * type. This is not identity: the identity keeps its unapplied positions as section binders.
+ */
+export const closeSectionSchema = (argument: GenericArgument): GenericArgument => {
+  if (!isTypeArgument(argument)) return argument
+  if (!isCallable(argument) || argument.schema === undefined) return argument
+  if (isRuntimeConcrete(argument)) return argument
+  const closure = new Map<string, GenericArgument>()
+  for (const binder of argument.schema.binders) {
+    const selected = argument.schema.substitution.get(key(binder))
+    if (selected !== undefined && !equalsGenericArgument(selected, parameterArgument(binder)))
+      continue
+    const closed = closedSectionBinder(binder)
+    if (closed !== undefined) closure.set(key(binder), closed)
+  }
+  if (closure.size === 0) return argument
+  const closed = substitute(argument, closure)
+  return isRuntimeConcrete(closed) ? closed : argument
+}
+
+/** Section binders owned by `target` anywhere inside one identity argument, closed for a check. */
+const closeOwnedSectionBinders = (
+  argument: GenericArgument,
+  target: CallableIdentityArgument['target'],
+): GenericArgument => {
+  if (target._tag !== 'Declaration') return argument
+  const closure = new Map<string, GenericArgument>()
+  const visit = (candidate: GenericArgument): void => {
+    if (Lifetime.isLifetime(candidate) || isUnavailableGenericArgument(candidate)) return
+    if (isCallableIdentityArgument(candidate)) {
+      for (const nested of candidate.typeArguments) visit(nested)
+      return
+    }
+    let owned: ReadonlyArray<Parameter> = []
+    if (isRequirementRowArgument(candidate)) {
+      const rowParameters = RowAlgebra.parameters(requirementRowPolicy(), candidate.row)
+      owned = [
+        ...rowParameters.rows,
+        ...rowParameters.members,
+        ...RowAlgebra.concreteMembers(requirementRowPolicy(), candidate.row).flatMap(
+          (requirement) => parameters(requirement.capability),
+        ),
+      ]
+    } else if (isTypeArgument(candidate)) owned = parameters(candidate)
+    for (const binder of owned) {
+      if (
+        !isSectionBinder(binder) ||
+        binder.owner.module !== target.module ||
+        binder.owner.name !== target.name
+      )
+        continue
+      const closed = closedSectionBinder(binder)
+      if (closed !== undefined) closure.set(key(binder), closed)
+    }
+  }
+  visit(argument)
+  return closure.size === 0 ? argument : substituteGenericArgument(argument, closure)
+}
+
+/** Tests whether an identity's arguments still name binders its section leaves unapplied. */
+export const namesUnappliedSection = (self: CallableIdentityArgument): boolean =>
+  self.typeArguments.some(
+    (argument) => !equalsGenericArgument(closeOwnedSectionBinders(argument, self.target), argument),
+  )
+
 /** Ranks access modes: Shared(0) < Exclusive(1) < Take(2). */
 export const accessRank = (access: CallableMode | Effect['access']): number => {
   switch (access) {
@@ -2009,7 +2105,7 @@ const computeKey = (self: Type): string => {
   if (isParameter(self) && self.kind === 'Lifetime')
     return Lifetime.key(Lifetime.bound(self.owner, self.ordinal, self.name))
   if (isParameter(self))
-    return `parameter:${self.kind}:${self.owner.module}.${self.owner.name}:${self.ordinal}:properties=${self.staticProperties.join('+')}`
+    return `${self.sectionBinder === true ? 'section-binder' : 'parameter'}:${self.kind}:${self.owner.module}.${self.owner.name}:${self.ordinal}:properties=${self.staticProperties.join('+')}`
   if (isFixedArray(self)) return `array:${self.length}<${key(self.element)}>`
   if (isSlice(self))
     return `slice:${self.access}<${Lifetime.key(self.lifetime)};${key(self.element)}>`
@@ -2925,7 +3021,9 @@ const runtimeAvailableGenericArgument = (self: GenericArgument): boolean => {
     return self.owner?.typeArguments.every(runtimeAvailableGenericArgument) ?? true
   if (isCallableIdentityArgument(self))
     return (
-      self.typeArguments.every(runtimeAvailableGenericArgument) &&
+      self.typeArguments.every((argument) =>
+        runtimeAvailableGenericArgument(closeOwnedSectionBinders(argument, self.target)),
+      ) &&
       (self.environment?.owner.typeArguments.every(runtimeAvailableGenericArgument) ?? true)
     )
   if (isRequirementRowArgument(self)) return runtimeAvailableRequirementRow(self.row)
@@ -3100,7 +3198,9 @@ const isClosedGenericArgument = (self: GenericArgument): boolean => {
     return self.owner?.typeArguments.every(isClosedGenericArgument) ?? true
   if (isCallableIdentityArgument(self))
     return (
-      self.typeArguments.every(isClosedGenericArgument) &&
+      self.typeArguments.every((argument) =>
+        isClosedGenericArgument(closeOwnedSectionBinders(argument, self.target)),
+      ) &&
       (self.environment?.owner.typeArguments.every(isClosedGenericArgument) ?? true)
     )
   if (isRequirementRowArgument(self))

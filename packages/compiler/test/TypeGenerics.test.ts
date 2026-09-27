@@ -381,15 +381,189 @@ pub fn main() -> i32 { return 0 }`
   }),
 )
 
-it.effect('admits a constrained callable relayed through bound calls', () =>
+/** Every layout environment realized for a section of `target`, with its owner name. */
+const sectionEnvironments = (snapshot: Analysis.Snapshot, target: string) => {
+  const layout = Analysis.layoutOf(snapshot)
+  return layout._tag !== 'Available'
+    ? []
+    : layout.value.callableEnvironments.flatMap((environment) =>
+        environment._tag === 'CallableEnvironment' &&
+        environment.callable.target._tag === 'DeclarationCallableTarget' &&
+        environment.callable.target.declaration.name === target
+          ? [environment.callable]
+          : [],
+      )
+}
+
+/** Section binders may appear only inside a section's own hidden callable identity. */
+const leaksSectionBinder = (type: Type.Type): boolean =>
+  Type.parameters(type).some(Type.isSectionBinder)
+
+it.effect('admits and lowers a constrained callable relayed through bound calls', () =>
   Effect.gen(function* () {
     // `forwardAgain` binds the result of `forward` before returning it, so the relay resolves a
-    // body local to the parameter the caller supplies.
+    // body local to the parameter the caller supplies. The relays carry the section before its
+    // application, so their hidden identity names the one environment the section constructs.
     const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/constrained-relay',
       new TextEncoder().encode(constrainedCallableForwarding),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+    const [environment, ...others] = sectionEnvironments(snapshot, 'Effect.provide')
+    assert.isDefined(environment)
+    assert.deepEqual(others, [])
+    for (const name of ['forward', 'forwardAgain']) {
+      const relays = mir.functions.filter((fn) => fn.id.name === name)
+      assert.strictEqual(relays.length, 1, name)
+      const relay = relays[0] ?? unreachable(`expected ${name}`)
+      assert.isFalse(
+        relay.regions.some(
+          (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
+        ),
+        name,
+      )
+      const identity = relay.instance.typeArguments.find(Type.isCallableIdentityArgument)
+      assert.deepEqual(
+        identity?.typeArguments.map(Type.runtimeGenericArgumentKey),
+        environment?.typeArguments.map(Type.runtimeGenericArgumentKey),
+        name,
+      )
+    }
+    for (const fn of mir.functions) {
+      assert.isFalse(fn.instance.typeArguments.filter(Type.isTypeArgument).some(leaksSectionBinder))
+      assert.isFalse(fn.localTypes.some((type) => leaksSectionBinder(Mir.semanticType(type))))
+    }
+  }),
+)
+
+it.effect('shares one section environment across applications at different types', () =>
+  Effect.gen(function* () {
+    // Both applications solve the section's leading Effect differently, but its captures do not
+    // mention those binders, so one environment serves two distinct invocations.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/constrained-section-two-applications',
+      new TextEncoder().encode(`import silk.effect { Effect }
+service Counter { effect fn get() -> i32 ? &Counter }
+struct Fixed { value: i32 }
+effect fn get(self: &Fixed) -> i32 { return self.value }
+impl Counter for Fixed { get: Fixed.get }
+effect fn seed() -> i32 ? &Counter { return run Counter.get() }
+effect fn flag() -> bool ? &Counter {
+  let value = run Counter.get()
+  return value == 42
+}
+pub fn main() -> i32 {
+  let fixed = Fixed { value: 42 }
+  let bind = Effect.provide<Counter>(&fixed)
+  let number = run bind(seed())
+  let ok = run bind(flag())
+  if ok { return number }
+  return 0
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    assert.strictEqual(sectionEnvironments(snapshot, 'Effect.provide').length, 1)
+    const invoked = Analysis.instancesOf(snapshot).instances.filter(
+      (instance) => instance.key.declaration.name === 'Effect.provide',
+    )
+    assert.strictEqual(new Set(invoked.map((instance) => Instances.keyText(instance.key))).size, 2)
+  }),
+)
+
+it.effect('keeps constrained section environments exact per site and selection', () =>
+  Effect.gen(function* () {
+    // `open` leaves the protected success unapplied while `fixedSuccess` selects it; each site keeps
+    // its own environment and selection. `repeat` sections itself, so its capture selects the
+    // section's binder with the enclosing function's own parameter, which owner substitution
+    // closes. `dropped` owns a capture and is never applied, so it is erased.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/constrained-section-identities',
+      new TextEncoder().encode(`import silk.effect { Effect }
+service Counter { effect fn get() -> i32 ? &Counter }
+struct Fixed { value: i32 }
+effect fn get(self: &Fixed) -> i32 { return self.value }
+impl Counter for Fixed { get: Fixed.get }
+struct Token { value: i32 }
+effect fn seed() -> i32 ? &Counter { return run Counter.get() }
+effect fn guarded<A>(pending: once Effect<A>, token: Token) -> A {
+  drop token
+  return run move pending
+}
+effect fn ready() -> i32 { return 1 }
+fn increment(value: i32) -> i32 { return value + 1 }
+fn repeat<A>(value: A, step: fn(A) -> A, count: i32) -> A {
+  if count == 0 { return move value }
+  let next = repeat(step, count - 1)
+  return next(step(move value))
+}
+pub fn main() -> i32 {
+  let fixed = Fixed { value: 40 }
+  let open = Effect.provide<Counter>(&fixed)
+  let fixedSuccess = Effect.provide<Counter, i32>(&fixed)
+  let dropped = guarded(Token { value: 0 })
+  drop dropped
+  let left = run open(seed())
+  let right = run fixedSuccess(seed())
+  let direct = run guarded(ready(), Token { value: 1 })
+  return repeat(left + right - 80, increment, 2) + direct - 1
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+    const provides = sectionEnvironments(snapshot, 'Effect.provide')
+    assert.strictEqual(provides.length, 2)
+    const unapplied = provides.filter((environment) =>
+      Type.namesUnappliedSection(
+        Type.callableIdentityArgument(
+          '',
+          Tir.callableTargetIdentity(environment.target),
+          environment.typeArguments,
+        ),
+      ),
+    )
+    // Both sections leave binders open (the failure and requirement remainder), but only `open`
+    // leaves the success open; `fixedSuccess` keeps its selected `i32`.
+    assert.strictEqual(unapplied.length, 2)
+    assert.isTrue(
+      provides.some((environment) =>
+        environment.typeArguments.some(
+          (argument) => Type.genericArgumentKey(argument) === 'builtin:i32',
+        ),
+      ),
+    )
+    // A constrained section dropped without any application is erased with its obligations.
+    assert.strictEqual(sectionEnvironments(snapshot, 'guarded').length, 0)
+    assert.isAtLeast(sectionEnvironments(snapshot, 'repeat').length, 1)
+    for (const fn of mir.functions)
+      assert.isFalse(fn.localTypes.some((type) => leaksSectionBinder(Mir.semanticType(type))))
+  }),
+)
+
+it.effect('rejects applying a take-once constrained section twice', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/constrained-section-once',
+      new TextEncoder().encode(`import silk.effect { Effect }
+struct Token { value: i32 }
+effect fn guarded<A>(pending: once Effect<A>, token: Token) -> A {
+  drop token
+  return run move pending
+}
+effect fn ready() -> i32 { return 1 }
+pub fn main() -> i32 {
+  let once = guarded(Token { value: 0 })
+  let first = run once(ready())
+  let second = run once(ready())
+  return first + second
+}`),
+    )
+    assert.isTrue(
+      Analysis.diagnostics(snapshot).some((diagnostic) => diagnostic.code.startsWith('OWN')),
+    )
   }),
 )
 
