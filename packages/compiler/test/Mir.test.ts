@@ -393,7 +393,75 @@ pub fn main() -> i32 {
 }`),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+
+    const effectReturn = (name: string) => {
+      const fn =
+        mir.functions.find((candidate) => candidate.id.name === name) ?? raise(`expected ${name}`)
+      const value =
+        fn.regions.flatMap((region) =>
+          region._tag === 'OperationRegion' && region.outcome._tag === 'Return'
+            ? [region.outcome.value]
+            : [],
+        )[0] ?? raise(`expected ${name} to return`)
+      const returned = fn.localTypes.at(value.ordinal)
+      const result = fn.result
+      if (result._tag !== 'EffectValue' || returned?._tag !== 'EffectValue')
+        return raise(`expected ${name} to return an Effect value`)
+      return { fn, ordinal: value.ordinal, returned, result }
+    }
+    const fallible = effectReturn('fallible')
+    const pending = effectReturn('pending')
+    assert.isTrue(Mir.realizesReturn(fallible.returned, fallible.result))
+    assert.isTrue(Mir.realizesReturn(pending.returned, pending.result))
+    // A declared `never` success does not accept a realized value.
+    assert.isFalse(Mir.realizesReturn(fallible.result, fallible.returned))
+    // The site and environment instance each pin the realization.
+    assert.isFalse(
+      Mir.realizesReturn(fallible.returned, { ...fallible.result, site: pending.result.site }),
+    )
+    assert.isFalse(
+      Mir.realizesReturn(fallible.returned, {
+        ...fallible.result,
+        environment: {
+          ...fallible.result.environment,
+          instance: pending.result.environment.instance,
+        },
+      }),
+    )
+    // Failure and requirement rows stay exact, including requirement access.
+    const withRows = (
+      failures: ReadonlyArray<Type.Type>,
+      access: 'Shared' | 'Exclusive',
+    ): Mir.Type => ({
+      ...fallible.result,
+      type: Type.effect('i32', failures, fallible.result.type, 'Shared', [
+        { capability: Type.nominal('mir/rows', 'Clock', []), role: 'DefaultRole', access },
+      ]),
+    })
+    assert.isTrue(Mir.realizesReturn(withRows([], 'Shared'), withRows([], 'Shared')))
+    assert.isFalse(Mir.realizesReturn(withRows([], 'Shared'), withRows(['bool'], 'Shared')))
+    assert.isFalse(Mir.realizesReturn(withRows([], 'Shared'), withRows([], 'Exclusive')))
+
+    const reversed: Mir.Module = {
+      ...mir,
+      functions: mir.functions.map((fn) =>
+        fn === fallible.fn
+          ? {
+              ...fn,
+              result: fallible.returned,
+              localTypes: fn.localTypes.map((type, ordinal) =>
+                ordinal === fallible.ordinal ? fallible.result : type,
+              ),
+            }
+          : fn,
+      ),
+    }
+    assert.include(
+      (yield* MirVerification.verify(reversed)).map((violation) => violation.rule),
+      'InvalidReturn',
+    )
   }),
 )
 it.effect(

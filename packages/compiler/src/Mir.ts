@@ -1808,20 +1808,32 @@ export const matchesInstance = (
   })
 
 /**
- * Tests whether a value of type `value` physically realizes the `expected` result type.
+ * Tests whether a returned value physically realizes its function's declared result.
  *
- * Effect values compare by their pinned realization: the site and environment instance already
- * identify one machine, so the contract only has to confirm it. Run access and executable lifetime
- * proofs are non-runtime facts, and a fail-only block reaches its declared result type through
- * `never`. Every other type compares by exact runtime identity.
+ * Unstored Effect values pinned to one site and environment instance name one machine, so only
+ * their executable contract has to agree: run access and executable lifetime proofs are non-runtime
+ * facts, and a realized `never` success widens into the declared success (EFF-007), while a
+ * declared `never` success accepts only a realized `never`. Stored Effects and every other type
+ * keep exact runtime identity.
  */
-export const realizesResult = (value: Type, expected: Type): boolean =>
-  value._tag === 'EffectValue' && expected._tag === 'EffectValue'
-    ? EffectExecutionContract.realizes(value.type, expected.type) &&
-      Tir.sameExecutableSite(value.site, expected.site) &&
-      Instances.runtimeKeyText(value.environment.instance) ===
-        Instances.runtimeKeyText(expected.environment.instance)
-    : SilkType.runtimeKey(semanticType(value)) === SilkType.runtimeKey(semanticType(expected))
+export const realizesReturn = (returned: Type, result: Type): boolean => {
+  if (
+    returned._tag !== 'EffectValue' ||
+    result._tag !== 'EffectValue' ||
+    returned.storage !== undefined ||
+    result.storage !== undefined
+  )
+    return SilkType.runtimeKey(semanticType(returned)) === SilkType.runtimeKey(semanticType(result))
+  const realized = SilkType.isNever(returned.type.success)
+    ? { ...returned.type, success: result.type.success }
+    : returned.type
+  return (
+    EffectExecutionContract.equals(realized, result.type) &&
+    Tir.sameExecutableSite(returned.site, result.site) &&
+    Instances.runtimeKeyText(returned.environment.instance) ===
+      Instances.runtimeKeyText(result.environment.instance)
+  )
+}
 
 /** Tests whether one concrete MIR function realizes a call's exact physical result contract. */
 export const matchesCall = (
@@ -1832,7 +1844,14 @@ export const matchesCall = (
   result: Type,
 ): boolean =>
   matchesInstance(fn, declaration, typeArguments, staticArguments) &&
-  realizesResult(result, fn.result)
+  (result._tag === 'EffectValue' && fn.result._tag === 'EffectValue'
+    ? // The site and environment instance below already pin one realization, so the contract only
+      // has to confirm it: a fail-only block reaches its declared result type through `never`.
+      EffectExecutionContract.realizes(result.type, fn.result.type) &&
+      Tir.sameExecutableSite(result.site, fn.result.site) &&
+      Instances.runtimeKeyText(result.environment.instance) ===
+        Instances.runtimeKeyText(fn.result.environment.instance)
+    : SilkType.runtimeKey(semanticType(result)) === SilkType.runtimeKey(semanticType(fn.result)))
 
 /** Filters the concrete declaration before comparing its exact semantic Effect contract. */
 export const matchesEffectInstance = (
