@@ -409,40 +409,6 @@ export const invalid = (rootModule: string): Discovery => ({
   residualOwnership: [],
 })
 
-/**
- * Closes a partial section's binder-owned channels before the type becomes instance identity.
- *
- * A constrained partial section is deliberately open in its target contract's own unapplied
- * binders: its Effect channels close only at application, so its surface mentions binder-owned
- * success/failure types and requirement rows no carrying call can resolve.
- * Elaboration's constrained
- * callable escape gate proves such a value only ever reaches a whole-value relay, an application,
- * or a drop — every other escape is rejected there with its own diagnostic — and the callable
- * itself is erased onto its hidden identity argument. The instance identity therefore closes the
- * schema's unapplied value binders to `never` and requirement binders to empty rows, exactly
- * the shape the erased relay needs, so a proven relay is not re-rejected as unresolved.
- */
-const carriedSectionArgument = (argument: Type.GenericArgument): Type.GenericArgument => {
-  if (!Type.isTypeArgument(argument)) return argument
-  if (!Type.isCallable(argument) || argument.schema === undefined) return argument
-  if (Type.isRuntimeConcrete(argument)) return argument
-  const closure = new Map<string, Type.GenericArgument>()
-  for (const binder of argument.schema.binders) {
-    const selected = argument.schema.substitution.get(Type.key(binder))
-    if (
-      selected !== undefined &&
-      !Type.equalsGenericArgument(selected, Type.parameterArgument(binder))
-    )
-      continue
-    if (binder.kind === 'RequirementRow')
-      closure.set(Type.key(binder), Type.requirementRowArgument([]))
-    else if (binder.kind === 'Value') closure.set(Type.key(binder), 'never')
-  }
-  if (closure.size === 0) return argument
-  const closed = Type.substitute(argument, closure)
-  return Type.isRuntimeConcrete(closed) ? closed : argument
-}
-
 // Discovery and every suspension-graph rebuild key the same target applications repeatedly. The
 // contract row is a function of the contract, its declared parameters, and the exact visible
 // arguments, so it is derived once per distinct application.
@@ -516,7 +482,7 @@ const keyOf = (
   staticArguments: ReadonlyArray<StaticValue.Value> = [],
   evidence: ReadonlyArray<string> = [],
 ): InstanceKey => {
-  const typeArguments = rawTypeArguments.map(carriedSectionArgument)
+  const typeArguments = rawTypeArguments.map(Type.closeSectionSchema)
   const contractRow = contractRowOf(
     contract,
     typeParameters,

@@ -483,12 +483,22 @@ pub fn main() -> i32 { let whenEnabled = select(true) return whenEnabled(42) }`)
         { name: 'select', arguments: ['i32'] },
       ],
     )
-    assert.deepEqual(generic.callables.at(0)?.typeArguments.map(Type.encodeGenericArgument), [
-      'i32',
-    ])
-    assert.strictEqual(
-      Type.encode(generic.callables.at(0)?.type ?? 'i32'),
-      "fn<'static>(i32) -> i32",
+    // The section leaves `T` open, so its one environment is named before its application: the
+    // identity keeps `T` as the section's own binder and the stored value has the closed contract.
+    // The application invokes the complete `select<i32>` instance above through its own call.
+    const [environment, ...others] = generic.callables
+    assert.deepEqual(others, [])
+    assert.isTrue(
+      environment?.typeArguments.every(
+        (argument) => Type.isTypeArgument(argument) && Type.isSectionBinder(argument),
+      ),
+    )
+    assert.strictEqual(Type.encode(environment?.type ?? 'i32'), "fn<'static>(never) -> never")
+    assert.deepEqual(
+      generic.calls
+        .filter((call) => call.target.declaration.name === 'select')
+        .map((call) => call.target.typeArguments.map(Type.encodeGenericArgument)),
+      [['i32']],
     )
   }),
 )
