@@ -127,6 +127,31 @@ it.effect('lowers relay calls carrying a section environment named before its ap
       .map((call) => call.target.typeArguments.map(Type.genericArgumentKey).join())
     assert.strictEqual(relays.length, 2)
     assert.sameMembers(relays, recorded)
+    // Both relay instances share one visible key and differ only in the hidden callable identity;
+    // each is exactly one recorded relay call, and neither body traps.
+    const forwards = mir.functions.filter((fn) => fn.id.name === 'forward')
+    assert.strictEqual(forwards.length, 2)
+    assert.strictEqual(
+      new Set(
+        forwards.map((fn) =>
+          fn.instance.typeArguments
+            .filter((argument) => !Type.isHiddenExecutableArgument(argument))
+            .map(Type.genericArgumentKey)
+            .join(),
+        ),
+      ).size,
+      1,
+    )
+    assert.sameMembers(
+      forwards.map((fn) => fn.instance.typeArguments.map(Type.genericArgumentKey).join()),
+      recorded,
+    )
+    for (const fn of forwards)
+      assert.isFalse(
+        fn.regions.some(
+          (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
+        ),
+      )
   }),
 )
 
