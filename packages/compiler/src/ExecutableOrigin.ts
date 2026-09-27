@@ -2459,15 +2459,9 @@ export const make = (operations: Operations) => {
       resolving: new Set<string>(),
       recordResolvedCall: (expression, target) => {
         if (expression._tag === 'CallableApply') {
-          // An application of a section environment named before its application invokes the
-          // instance only its own complete call names, so that call is always recorded.
-          const callee = callableOriginOf(expression.callee, context)
-          if (
-            Type.isEffect(expression.type) ||
-            target.typeArguments.some(Type.isHiddenExecutableArgument) ||
-            (callee !== undefined && Type.namesUnappliedSection(callee))
-          )
-            record(expression, target)
+          // An application invokes exactly the instance its own complete call names, so lowering
+          // and the verifier read the call rather than reconstructing its target arguments.
+          record(expression, target)
           return
         }
         if (carriesHiddenIdentity(expression, substitution)) record(expression, target)

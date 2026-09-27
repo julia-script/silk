@@ -993,10 +993,11 @@ function lowerCallableApplyExpression(
       if (directType === undefined) return false
       callableType = directType.type
       target = directType.target
-      typeArguments =
-        call?.target.typeArguments ??
-        directType.environment?.callable.typeArguments ??
-        [...expression.substitution.values()].map((argument) => fn.semanticArgument(argument))
+      // A declaration target is invoked exactly as the application's complete call names it; a
+      // builtin target has no instance identity.
+      if (target._tag === 'BuiltinCallableTarget') typeArguments = []
+      else if (call === undefined) return false
+      else typeArguments = call.target.typeArguments
       if (directSection !== undefined) {
         for (const capture of directSection.captures) {
           const lowered = lowerOperandWithProvision(

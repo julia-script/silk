@@ -3,6 +3,7 @@ import {
   constrainedCallableForwarding,
   constrainedSectionGenericOwner,
   genericItemPipelineInGenericOwner,
+  ownerTypedDirectSection,
   relayedSection,
 } from './support/corpus.js'
 import * as Layer from 'effect/Layer'
@@ -89,6 +90,43 @@ effect<'env> fn reject<E: 'env, 'env>(error: E) -> () ! Failure<E> {
     )
     assert.strictEqual(failures.length, 1)
     assert.isTrue(failures.some((failure) => Type.isNominal(failure) && failure.name === 'Failure'))
+  }),
+)
+
+it.effect('lowers relay calls carrying a section environment named before its applications', () =>
+  Effect.gen(function* () {
+    // `select(true)` leaves `U` unapplied; the relay instance is keyed by the section's closed
+    // callable type, and each relay call in `main` must select exactly that instance.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/relayed-section',
+      new TextEncoder().encode(relayedSection),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+    const main = mir.functions.find((fn) => fn.id.name === 'main') ?? unreachable('expected main')
+    assert.isFalse(
+      main.regions.some(
+        (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
+      ),
+    )
+    const relays = main.regions.flatMap((region) =>
+      region._tag === 'OperationRegion'
+        ? region.operations.flatMap((operation) =>
+            operation._tag === 'Call' && operation.target.name === 'forward'
+              ? [operation.typeArguments.map(Type.genericArgumentKey).join()]
+              : [],
+          )
+        : [],
+    )
+    const recorded = Analysis.instancesOf(snapshot)
+      .calls.filter(
+        (call) =>
+          call.owner.declaration.name === 'main' && call.target.declaration.name === 'forward',
+      )
+      .map((call) => call.target.typeArguments.map(Type.genericArgumentKey).join())
+    assert.strictEqual(relays.length, 2)
+    assert.sameMembers(relays, recorded)
   }),
 )
 
@@ -557,43 +595,6 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('lowers relay calls carrying a section environment named before its applications', () =>
-  Effect.gen(function* () {
-    // `select(true)` leaves `U` unapplied; the relay instance is keyed by the section's closed
-    // callable type, and each relay call in `main` must select exactly that instance.
-    const snapshot = yield* AnalysisFixture.retainingMain(
-      'generics/relayed-section',
-      new TextEncoder().encode(relayedSection),
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const mir = Analysis.loweredMir(snapshot)
-    assert.deepEqual(yield* MirVerification.verify(mir), [])
-    const main = mir.functions.find((fn) => fn.id.name === 'main') ?? unreachable('expected main')
-    assert.isFalse(
-      main.regions.some(
-        (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
-      ),
-    )
-    const relays = main.regions.flatMap((region) =>
-      region._tag === 'OperationRegion'
-        ? region.operations.flatMap((operation) =>
-            operation._tag === 'Call' && operation.target.name === 'forward'
-              ? [operation.typeArguments.map(Type.genericArgumentKey).join()]
-              : [],
-          )
-        : [],
-    )
-    const recorded = Analysis.instancesOf(snapshot)
-      .calls.filter(
-        (call) =>
-          call.owner.declaration.name === 'main' && call.target.declaration.name === 'forward',
-      )
-      .map((call) => call.target.typeArguments.map(Type.genericArgumentKey).join())
-    assert.strictEqual(relays.length, 2)
-    assert.sameMembers(relays, recorded)
-  }),
-)
-
 it.effect('lowers a constrained section that is relayed but never applied', () =>
   Effect.gen(function* () {
     const source = constrainedCallableForwarding.replace(
@@ -1049,6 +1050,60 @@ it.effect('applies a generic function item piped inside a generic owner', () =>
         .map((instance) => instance.key.typeArguments.map(Type.encodeGenericArgument).join())
         .sort(byName),
       ['generics/generic-item-pipeline-owner.Token', 'i32'].sort(byName),
+    )
+  }),
+)
+
+it.effect('invokes an owner-typed section with its complete call at each owner type', () =>
+  Effect.gen(function* () {
+    // `pair(move right)` selects `A := T` through its capture. Applied directly in a pipeline
+    // (`choose`) or through a value (`chooseBound`), each application invokes exactly `pair<T>`
+    // for the owner instance, named by its own complete call.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/owner-typed-direct-section',
+      new TextEncoder().encode(ownerTypedDirectSection),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+    assert.isFalse(
+      mir.functions.some((fn) =>
+        fn.regions.some(
+          (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
+        ),
+      ),
+    )
+    const byName = (left: string, right: string) => left.localeCompare(right)
+    for (const owner of ['choose', 'chooseBound']) {
+      const applications = mir.functions
+        .filter((fn) => fn.id.name === owner)
+        .flatMap((fn) =>
+          fn.regions.flatMap((region) =>
+            region._tag === 'OperationRegion'
+              ? region.operations.flatMap((operation) =>
+                  operation._tag === 'ApplyCallable'
+                    ? [operation.typeArguments.map(Type.encodeGenericArgument).join()]
+                    : [],
+                )
+              : [],
+          ),
+        )
+        .sort(byName)
+      assert.deepEqual(
+        applications,
+        ['generics/owner-typed-direct-section.Token', 'i32'].sort(byName),
+        owner,
+      )
+    }
+    assert.deepEqual(
+      Analysis.instancesOf(snapshot)
+        .calls.filter(
+          (call) =>
+            call.owner.declaration.name === 'choose' && call.target.declaration.name === 'pair',
+        )
+        .map((call) => call.target.typeArguments.map(Type.encodeGenericArgument).join())
+        .sort(byName),
+      ['generics/owner-typed-direct-section.Token', 'i32'].sort(byName),
     )
   }),
 )

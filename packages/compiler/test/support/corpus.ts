@@ -1460,6 +1460,23 @@ pub fn main() -> i32 {
   return pass(2) + token.value
 }`
 
+/** A section selecting its target's binder through an owner-typed capture, applied directly. */
+export const ownerTypedDirectSection = `struct Token { value: i32 }
+fn pair<A>(first: A, second: A) -> A {
+  drop second
+  return move first
+}
+fn choose<T>(left: T, right: T) -> T { return move left |> pair(move right) }
+fn chooseBound<T>(left: T, right: T) -> T {
+  let finish = pair(move right)
+  return finish(move left)
+}
+pub fn main() -> i32 {
+  let token = choose(Token { value: 40 }, Token { value: 1 })
+  let other = chooseBound(Token { value: 0 }, Token { value: 1 })
+  return choose(2, 3) + chooseBound(0, 5) + token.value + other.value
+}`
+
 /** A section with an unapplied binder relayed through a generic function, dropped or applied. */
 export const relayedSection = `fn select<U>(value: U, enabled: bool) -> U { return move value }
 fn forward<F>(value: F) -> F { return move value }
@@ -1924,6 +1941,12 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    // A relay call carries a section environment named before its applications.
+    name: 'relayed-section',
+    source: relayedSection,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'package-parameter-final-defaults',
     source: `pub param enabled: bool = true
 pub param answer: i32 = choose() where answer == 42
@@ -2298,12 +2321,6 @@ int32_t silk_finish_events(void) { puts(""); return 42; }
     expected: { _tag: 'Completes', result: 42 },
   },
   {
-    // A relay call carries a section environment named before its applications.
-    name: 'relayed-section',
-    source: relayedSection,
-    expected: { _tag: 'Completes', result: 42 },
-  },
-  {
     // A generic item piped inside a generic owner: `U := T` is solved in the owner's terms.
     name: 'generic-item-pipeline-in-generic-owner',
     source: genericItemPipelineInGenericOwner,
@@ -2313,6 +2330,12 @@ int32_t silk_finish_events(void) { puts(""); return 42; }
     // One section site in a generic owner, applied at the owner's instances for Token and i32.
     name: 'constrained-section-generic-owner',
     source: constrainedSectionGenericOwner,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    // Owner-typed sections at two owner types, applied directly in a pipeline and through a value.
+    name: 'owner-typed-direct-section',
+    source: ownerTypedDirectSection,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
