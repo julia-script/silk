@@ -719,6 +719,56 @@ pub fn main() -> () {
   }),
 )
 
+it.effect('admits sibling shared payload cleanup selected outside any cleanup measure', () =>
+  Effect.gen(function* () {
+    // Dropping a `Shared<Outer>` directly starts each payload hook's cleanup measure afresh; the
+    // hook's own helpers run at its `Shared<Head>` and `Shared<Ty>` arguments, which the
+    // `Shared<Outer>` root does not cover by descent. Entering the same types through a vector
+    // starts a measured path instead.
+    const types = `struct Ty { value: i32 }
+struct Head { tys: Vector<Shared<Ty>> }
+struct Outer { heads: Vector<Shared<Head>> }
+`
+    const direct = yield* snapshot(`import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.shared { Shared }
+import silk.vector { Vector }
+${types}effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let outer = run (Shared.make<Outer>(Outer { heads: Vector.make<Shared<Head>>() })
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  drop outer
+  return 0
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`)
+    const measured = yield* snapshot(`import silk.shared { Shared }
+import silk.vector { Vector }
+${types}pub fn main() -> i32 {
+  let outer = Vector.make<Shared<Outer>>()
+  drop outer
+  return 0
+}`)
+    const releases = (result: Analysis.Snapshot): Array<string> =>
+      result.instances.instances
+        .filter(
+          (instance) =>
+            instance.key.declaration.module === 'silk/vector' &&
+            instance.key.declaration.name === 'releaseFull',
+        )
+        .map((instance) => instance.key.typeArguments.map(Type.encodeGenericArgument).join(', '))
+        .sort()
+    for (const result of [direct, measured]) {
+      assert.deepEqual(Analysis.diagnostics(result), [])
+      assert.deepEqual(result.instances.violations, [])
+    }
+    assert.deepEqual(releases(direct), [
+      'silk/shared.Shared<golden/program.Head>',
+      'silk/shared.Shared<golden/program.Ty>',
+    ])
+  }),
+)
+
 it.effect('admits finite owned payload cleanup nested through a shared vector', () =>
   Effect.gen(function* () {
     const result = yield* snapshot(`import silk.bytes { Bytes }

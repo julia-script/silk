@@ -1981,8 +1981,16 @@ export const discover = (
     selectedRoots: ReadonlyArray<Type.Type>,
     ancestor: InstanceKey | undefined,
   ): CleanupMeasure | undefined => {
+    // A hook selected from a context without a measure starts one. Its concrete arguments are the
+    // frame, as when a measured context selects a hook: a root such as `Shared<P>` covers another
+    // `Shared<X>` only by type-argument descent, so without the frame the hook's own helper calls
+    // at those arguments would lose the measure. The frame admits only arguments equal to or
+    // strictly inside the hook's ordinary type arguments; a later hook still needs root coverage
+    // or a non-growing frame step, so recursion that grows a type argument remains rejected.
     if (measure === undefined)
-      return selectedRoots.length === 0 ? undefined : cleanupMeasureOf(selectedRoots)
+      return selectedRoots.length === 0
+        ? undefined
+        : cleanupMeasureOf(selectedRoots, typeArgumentsOf(target))
     // Each selected cleanup hook may expose a more deeply owned payload hidden from the
     // original roots by an opaque buffer. Its concrete arguments justify the next cleanup
     // owner, provided a repeated hook family does not grow. Keep the original roots fixed.
