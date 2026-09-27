@@ -375,6 +375,264 @@ jobs:
       - run: pnpm --filter @silklang/platform-webcontainer exec playwright install --with-deps chromium
       - run: pnpm --filter @silklang/platform-webcontainer test:browser
 
+  witness-memcheck-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/selfhost-witness-memcheck-diagnostic' && !inputs.full_verification && inputs.expected_sha == 'e98aa26a52193f614feeca1ee0eaf4c8a7147fb6'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: e98aa26a52193f614feeca1ee0eaf4c8a7147fb6
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: .diagnostic-source
+          persist-credentials: false
+      - name: Confirm pinned source and reviewed child launch seam
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'e98aa26a52193f614feeca1ee0eaf4c8a7147fb6'
+          test "$(uname -m)" = x86_64
+          test "$(git -C .diagnostic-source rev-parse HEAD)" = "$GITHUB_SHA"
+          cp .diagnostic-source/packages/cli/src/Program.ts packages/cli/src/Program.ts
+          rm -rf .diagnostic-source
+          test "$(git diff --name-only)" = packages/cli/src/Program.ts
+          test "$(sha256sum packages/cli/src/Program.ts | cut -d ' ' -f1)" = '0e23cbc3316a3cd1f26fce86206c5559df711342374130c30171d3247e011bf8'
+          git diff --check
+          mkdir -p "$RUNNER_TEMP/witness-memcheck/upload"
+          {
+            printf 'workflow_sha=%s\nsource_sha=%s\n' "$GITHUB_SHA" "$(git rev-parse HEAD)"
+            sha256sum packages/cli/src/Program.ts
+            printf 'modified_paths:\n'
+            git diff --name-only
+            printf 'host_memory:\n'
+            grep '^MemTotal:' /proc/meminfo
+            printf 'cgroup_memory_max='
+            cat /sys/fs/cgroup/memory.max 2>/dev/null || printf 'unavailable\n'
+          } > "$RUNNER_TEMP/witness-memcheck/identity.log"
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: ./.github/actions/setup-linux-llvm
+      - name: Confirm Memcheck without changing libc
+        shell: bash
+        run: |
+          set -euo pipefail
+          libc_before=$(dpkg-query -W -f='${Version}' libc6)
+          if ! command -v valgrind >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends valgrind
+          fi
+          test "$(dpkg-query -W -f='${Version}' libc6)" = "$libc_before"
+          test "$(command -v valgrind)" = /usr/bin/valgrind
+          [[ "$(node --version)" == v24* ]]
+          clang --version | head -1 | grep -F '22.1.8'
+          (
+            ulimit -v 12582912
+            timeout --signal=TERM --kill-after=5s 30s \
+              /usr/bin/valgrind --tool=memcheck --quiet --error-exitcode=0 /bin/true
+          )
+          {
+            valgrind --version
+            node --version
+            clang --version | head -1
+            printf 'glibc=%s\n' "$libc_before"
+          } >> "$RUNNER_TEMP/witness-memcheck/identity.log"
+      - run: pnpm install --frozen-lockfile
+      - run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
+      - name: Confirm compiled launch seam
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq SILK_TEST_CHILD_LAUNCHER packages/cli/dist/Program.js
+          sha256sum packages/cli/dist/Program.js >> "$RUNNER_TEMP/witness-memcheck/identity.log"
+      - name: Prepare exact native-child wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/witness-memcheck/child-wrapper.sh" <<'WRAPPER'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          : "${SILK_MEMCHECK_DIR:?}"
+          : "${SILK_EXPECTED_BINARY:?}"
+          test "$#" -eq 7
+          test "$(realpath "$1")" = "$(realpath "$SILK_EXPECTED_BINARY")"
+          test "$2" = --filter
+          test "$3" = witnessContractCompatibility
+          test "$4" = --silk-test-plan
+          test -s "$5"
+          test "$6" = --silk-test-result
+          test "$(dirname "$5")" = "$(dirname "$7")"
+          parent_command=$(tr '\0' ' ' < "/proc/$PPID/cmdline")
+          case "$parent_command" in
+            *'packages/cli/dist/bin.js test'*) ;;
+            *) echo 'Launcher parent is not the selected Node test CLI' >&2; exit 97 ;;
+          esac
+          {
+            printf 'launcher_parent=%s\n' "$parent_command"
+            printf 'child_binary=%s\n' "$(realpath "$1")"
+            printf 'child_argv='
+            printf '%q ' "$@"
+            printf '\n'
+            sha256sum "$1" "$5"
+            printf 'child_virtual_memory_limit_kib=12582912\n'
+          } > "$SILK_MEMCHECK_DIR/launch.log"
+          ulimit -v 12582912
+          ulimit -c 0
+          set +e
+          timeout --signal=TERM --kill-after=10s 8m /usr/bin/valgrind \
+            --tool=memcheck --trace-children=no --leak-check=no \
+            --keep-stacktraces=alloc-and-free --num-callers=32 \
+            --error-limit=yes --error-exitcode=0 \
+            --log-file="$SILK_MEMCHECK_DIR/memcheck.%p.log" "$@"
+          child_status=$?
+          printf 'memcheck_child_status=%s\n' "$child_status" > "$SILK_MEMCHECK_DIR/child-status.log"
+          exit "$child_status"
+          WRAPPER
+          chmod 700 "$RUNNER_TEMP/witness-memcheck/child-wrapper.sh"
+          sha256sum "$RUNNER_TEMP/witness-memcheck/child-wrapper.sh" >> "$RUNNER_TEMP/witness-memcheck/identity.log"
+      - name: Compile full SemanticCases root and run only witness under Memcheck
+        shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+          SILK_TEST_CHILD_LAUNCHER: ${{ runner.temp }}/witness-memcheck/child-wrapper.sh
+          SILK_MEMCHECK_DIR: ${{ runner.temp }}/witness-memcheck
+          SILK_EXPECTED_BINARY: ${{ github.workspace }}/compiler/build/test/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler
+        run: |
+          set -euo pipefail
+          diagnostic_dir="$RUNNER_TEMP/witness-memcheck"
+          ulimit -c 0
+          set +e
+          /usr/bin/time -v -o "$diagnostic_dir/resources.log" \
+            timeout --signal=TERM --kill-after=10s 15m \
+              node packages/cli/dist/bin.js test \
+                --manifest-path compiler/silk.toml \
+                --root src/semantic/SemanticCases.silk \
+                --filter witnessContractCompatibility \
+                --no-cache > "$diagnostic_dir/run.log" 2>&1
+          cli_status=$?
+          set -e
+          python3 - "$diagnostic_dir" "$cli_status" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+          root = Path(sys.argv[1])
+          cli_status = int(sys.argv[2])
+          upload = root / 'upload'
+          logs = sorted(root.glob('memcheck.*.log'))
+          child_status_file = root / 'child-status.log'
+          child_status = (int(child_status_file.read_text().split('=', 1)[1])
+                          if child_status_file.exists() else None)
+          first_report = bytearray()
+          report_seen = False
+          report_complete = False
+          report_truncated = False
+          error_count = None
+          if len(logs) == 1:
+              with logs[0].open('rb') as stream:
+                  for line in stream:
+                      summary = re.search(rb'ERROR SUMMARY: ([0-9]+) errors', line)
+                      if summary:
+                          error_count = int(summary.group(1))
+                      if not report_seen and re.match(rb'^==[0-9]+== Invalid (read|write|free\b)', line):
+                          report_seen = True
+                      if report_seen and not report_complete:
+                          if len(first_report) + len(line) <= 1048576:
+                              first_report.extend(line)
+                          else:
+                              report_truncated = True
+                          if re.match(rb'^==[0-9]+==\s*$', line):
+                              report_complete = True
+          if report_seen:
+              marker = b'\n[first invalid report truncated after 1 MiB]\n' if report_truncated else b''
+              (upload / 'first-invalid-report.log').write_bytes(first_report + marker)
+          def tail_text(path):
+              if not path.exists():
+                  return ''
+              with path.open('rb') as stream:
+                  stream.seek(max(0, path.stat().st_size - 65536))
+                  return stream.read(65536).decode(errors='replace')
+          resource_text = tail_text(root / 'run.log') + (tail_text(logs[0]) if len(logs) == 1 else '')
+          resource_cap = bool(re.search(r'out of memory|cannot allocate memory|failed to (map|allocate)|mmap.*fail|valgrind: fatal',
+                                        resource_text, re.IGNORECASE))
+          has_stack_frame = bool(re.search(rb'^==[0-9]+==[ \t]+(?:at|by) 0x[0-9A-Fa-f]+:',
+                                           first_report, re.MULTILINE))
+          has_address_explanation = bool(re.search(rb'^==[0-9]+==[ \t]+Address 0x[0-9A-Fa-f]+ is [^\r\n]+',
+                                                    first_report, re.MULTILINE))
+          if cli_status in (124, 137) or child_status in (124, 137):
+              classification, reason = 'inconclusive', 'timeout'
+          elif resource_cap:
+              classification, reason = 'inconclusive', 'virtual-memory-cap-or-allocation-failure'
+          elif not (root / 'launch.log').is_file() or len(logs) != 1 or child_status is None:
+              classification, reason = 'inconclusive', 'unverified-child-or-missing-memcheck-log'
+          elif report_truncated or not report_complete and report_seen:
+              classification, reason = 'inconclusive', 'first-invalid-report-not-preserved-in-full'
+          elif report_seen and (not has_stack_frame or not has_address_explanation):
+              classification, reason = 'inconclusive', 'first-invalid-report-lacks-stack-or-address-explanation'
+          elif report_complete and error_count is not None and error_count > 0:
+              classification, reason = 'diagnostic-evidence', 'first-invalid-report-preserved'
+          elif error_count is not None and error_count > 0:
+              classification, reason = 'inconclusive', 'memcheck-errors-without-complete-invalid-report'
+          elif cli_status != 0 or child_status != 0:
+              classification, reason = 'inconclusive', 'child-failed-without-preserved-first-report'
+          else:
+              classification, reason = 'inconclusive', 'clean-or-nonreproducing-memcheck'
+          report_origin = ('alloc-and-free' if b"Block was alloc'd at" in first_report and b"free'd" in first_report
+                           else 'allocation' if b"Block was alloc'd at" in first_report
+                           else 'free' if b"free'd" in first_report else 'unavailable')
+          outcome = [f'cli_status={cli_status}',
+                     f'memcheck_child_status={child_status if child_status is not None else "unavailable"}',
+                     f'memcheck_log_count={len(logs)}',
+                     f'memcheck_error_count={error_count if error_count is not None else "unavailable"}',
+                     f'first_invalid_report={"complete" if report_complete and not report_truncated else "truncated" if report_truncated else "incomplete" if report_seen else "absent"}',
+                     f'first_report_stack_frame={has_stack_frame}',
+                     f'first_report_address_explanation={has_address_explanation}',
+                     f'first_report_origin_context={report_origin}',
+                     f'classification={classification}', f'reason={reason}',
+                     'diagnostic_evidence_is_not_unit4_acceptance=true']
+          (root / 'outcome.log').write_text('\n'.join(outcome) + '\n')
+          for name in ('identity.log', 'launch.log', 'child-status.log', 'outcome.log', 'run.log', 'resources.log'):
+              source = root / name
+              if not source.exists():
+                  continue
+              limit = 1048576
+              with source.open('rb') as stream:
+                  data = stream.read(limit)
+              (upload / name).write_bytes(data + (b'\n[truncated after 1 MiB]\n' if source.stat().st_size > limit else b''))
+          for source in root.glob('memcheck.*.log'):
+              limit = 2097152
+              with source.open('rb') as stream:
+                  data = stream.read(limit)
+              (upload / source.name).write_bytes(data + (b'\n[truncated after 2 MiB]\n' if source.stat().st_size > limit else b''))
+          PY
+          cat "$diagnostic_dir/outcome.log"
+          # A diagnostic run cannot satisfy Unit4 acceptance, even when Memcheck is clean.
+          exit 1
+      - name: Record an inconclusive outcome if preflight stops the diagnostic
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          diagnostic_dir="$RUNNER_TEMP/witness-memcheck"
+          mkdir -p "$diagnostic_dir/upload"
+          if [ ! -s "$diagnostic_dir/outcome.log" ]; then
+            printf 'classification=inconclusive\nreason=preflight-build-or-reporting-failed-before-native-child-result\ncli_status=unavailable\nmemcheck_child_status=unavailable\ndiagnostic_evidence_is_not_unit4_acceptance=true\n' > "$diagnostic_dir/outcome.log"
+            cp "$diagnostic_dir/outcome.log" "$diagnostic_dir/upload/outcome.log"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: witness-memcheck-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/witness-memcheck/upload/
+          if-no-files-found: ignore
+          retention-days: 7
+
   full-verification:
     if: github.event_name == 'workflow_dispatch' && inputs.full_verification
     runs-on: ubuntu-24.04
@@ -420,7 +678,7 @@ jobs:
       - run: pnpm release:candidate
 
   platform-supplies:
-    if: github.event_name != 'workflow_dispatch' || !inputs.full_verification
+    if: (github.event_name != 'workflow_dispatch' || !inputs.full_verification) && github.ref != 'refs/heads/selfhost-witness-memcheck-diagnostic'
     name: Platform supply / ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45

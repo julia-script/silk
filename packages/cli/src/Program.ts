@@ -1,3 +1,4 @@
+import * as Config from 'effect/Config'
 import * as Data from 'effect/Data'
 import type * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
@@ -77,6 +78,7 @@ export const runTest = Effect.fn('Program.runTest')(function* (
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const launcher = yield* Config.String('SILK_TEST_CHILD_LAUNCHER').pipe(Effect.orDie)
   const encodedPlan = yield* TestExchange.encodePlan(plan)
   const maximumReceiptBytes = TestExchange.receiptMaximumBytes(plan)
   return yield* Effect.acquireUseRelease(
@@ -97,8 +99,8 @@ export const runTest = Effect.fn('Program.runTest')(function* (
         .writeFile(planPath, encodedPlan)
         .pipe(Effect.mapError((cause) => processError(executable, cause)))
       const command = ChildProcess.make(
-        executable,
-        [...arguments_, '--silk-test-plan', planPath, '--silk-test-result', resultPath],
+        launcher,
+        [executable, ...arguments_, '--silk-test-plan', planPath, '--silk-test-result', resultPath],
         { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' },
       )
       const processStatus = yield* spawner.exitCode(command).pipe(
