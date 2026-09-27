@@ -998,6 +998,62 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('answers each cleanup subterm question independently of other roots', () =>
+  Effect.gen(function* () {
+    // Each owner exercises one unfolding-guard branch: `Node` repeats its own type, `Bad` and the
+    // `Left`/`Right` pair recurse without descending, `Outer` descends, and `Fork` reaches one
+    // owner through two fields. No answer may depend on which other root's questions came first,
+    // so one discovery of every owner equals the union of the separate discoveries.
+    const declarations = `import silk.box { Box }
+import silk.option { Option }
+import silk.vector { Vector }
+struct Node { value: i32 next: Option<Box<Node>> }
+struct Bad<T> { next: Option<Box<Bad<Box<T>>>> }
+struct Left<T> { next: Box<Right<Box<T>>> }
+struct Right<T> { next: Box<Left<Box<T>>> }
+struct Outer<T> { next: Box<Middle<T>> }
+struct Middle<T> { next: Box<T> }
+struct Leaf { nodes: Vector<Node> }
+struct Fork { first: Box<Leaf> second: Vector<Leaf> }
+`
+    const owners = [
+      { owner: 'Node', codes: [] },
+      { owner: 'Bad<i32>', codes: ['SEM0053'] },
+      { owner: 'Left<i32>', codes: ['SEM0053'] },
+      { owner: 'Outer<Outer<i32>>', codes: [] },
+      { owner: 'Fork', codes: [] },
+    ]
+    const program = (held: ReadonlyArray<string>) =>
+      snapshot(`${declarations}pub fn main() -> i32 {
+${held.map((owner, ordinal) => `  let held${ordinal} = Vector.make<${owner}>()`).join('\n')}
+  return 0
+}`)
+    const keys = (result: Analysis.Snapshot): ReadonlyArray<string> =>
+      result.instances.instances
+        .filter((instance) => instance.key.declaration.name !== 'main')
+        .map((instance) => Instances.keyText(instance.key))
+    const violations = (result: Analysis.Snapshot): ReadonlyArray<string> =>
+      result.instances.violations.map(
+        (violation) =>
+          `${Instances.keyText(violation.caller)}\u0005${Instances.keyText(violation.target)}`,
+      )
+    const codes = (result: Analysis.Snapshot): ReadonlyArray<string> =>
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code)
+    const union = (lists: ReadonlyArray<ReadonlyArray<string>>): Array<string> =>
+      [...new Set(lists.flat())].sort()
+    const separate: Array<Analysis.Snapshot> = []
+    for (const { owner, codes: expected } of owners) {
+      const result = yield* program([owner])
+      assert.deepEqual(codes(result), expected, owner)
+      separate.push(result)
+    }
+    const combined = yield* program(owners.map(({ owner }) => owner))
+    assert.deepEqual(union([codes(combined)]), union(separate.map(codes)))
+    assert.deepEqual([...violations(combined)].sort(), union(separate.map(violations)))
+    assert.deepEqual([...keys(combined)].sort(), union(separate.map(keys)))
+  }),
+)
+
 it.effect('erases nested lifetimes while one cleanup type position descends', () =>
   Effect.gen(function* () {
     const result = yield* snapshot(`import silk.box { Box }
