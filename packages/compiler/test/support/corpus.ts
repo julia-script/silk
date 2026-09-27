@@ -1498,6 +1498,19 @@ pub fn main() -> i32 {
   return 0
 }`
 
+/** A section with an unapplied binder relayed through a generic function, dropped or applied. */
+export const relayedSection = `fn select<U>(value: U, enabled: bool) -> U { return move value }
+fn forward<F>(value: F) -> F { return move value }
+pub fn main() -> i32 {
+  let unused = forward(select(false))
+  drop unused
+  let pick = forward(select(true))
+  let number = pick(40)
+  let flag = pick(true)
+  if flag { return number + 2 }
+  return 0
+}`
+
 /** Fixed-seed xoshiro256** known answers pinned for native execution. */
 export const seededRandomFingerprint = `import silk.effect { Effect }
 import silk.insecure_random { InsecureRandom }
@@ -1952,6 +1965,12 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
     // A section environment stores borrows by value and passes them to each application.
     name: 'borrowed-capture-section',
     source: borrowedCaptureSection,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    // A relay call carries a section environment named before its applications.
+    name: 'relayed-section',
+    source: relayedSection,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

@@ -5,6 +5,7 @@ import {
   constrainedSectionGenericOwner,
   genericItemPipelineInGenericOwner,
   ownerTypedDirectSection,
+  relayedSection,
 } from './support/corpus.js'
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
@@ -90,6 +91,68 @@ effect<'env> fn reject<E: 'env, 'env>(error: E) -> () ! Failure<E> {
     )
     assert.strictEqual(failures.length, 1)
     assert.isTrue(failures.some((failure) => Type.isNominal(failure) && failure.name === 'Failure'))
+  }),
+)
+
+it.effect('lowers relay calls carrying a section environment named before its applications', () =>
+  Effect.gen(function* () {
+    // `select(true)` leaves `U` unapplied; the relay instance is keyed by the section's closed
+    // callable type, and each relay call in `main` must select exactly that instance.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/relayed-section',
+      new TextEncoder().encode(relayedSection),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+    const main = mir.functions.find((fn) => fn.id.name === 'main') ?? unreachable('expected main')
+    assert.isFalse(
+      main.regions.some(
+        (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
+      ),
+    )
+    const relays = main.regions.flatMap((region) =>
+      region._tag === 'OperationRegion'
+        ? region.operations.flatMap((operation) =>
+            operation._tag === 'Call' && operation.target.name === 'forward'
+              ? [operation.typeArguments.map(Type.genericArgumentKey).join()]
+              : [],
+          )
+        : [],
+    )
+    const recorded = Analysis.instancesOf(snapshot)
+      .calls.filter(
+        (call) =>
+          call.owner.declaration.name === 'main' && call.target.declaration.name === 'forward',
+      )
+      .map((call) => call.target.typeArguments.map(Type.genericArgumentKey).join())
+    assert.strictEqual(relays.length, 2)
+    assert.sameMembers(relays, recorded)
+    // Both relay instances share one visible key and differ only in the hidden callable identity;
+    // each is exactly one recorded relay call, and neither body traps.
+    const forwards = mir.functions.filter((fn) => fn.id.name === 'forward')
+    assert.strictEqual(forwards.length, 2)
+    assert.strictEqual(
+      new Set(
+        forwards.map((fn) =>
+          fn.instance.typeArguments
+            .filter((argument) => !Type.isHiddenExecutableArgument(argument))
+            .map(Type.genericArgumentKey)
+            .join(),
+        ),
+      ).size,
+      1,
+    )
+    assert.sameMembers(
+      forwards.map((fn) => fn.instance.typeArguments.map(Type.genericArgumentKey).join()),
+      recorded,
+    )
+    for (const fn of forwards)
+      assert.isFalse(
+        fn.regions.some(
+          (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
+        ),
+      )
   }),
 )
 
