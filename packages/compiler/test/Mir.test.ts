@@ -361,6 +361,41 @@ it.effect(
     )
   }),
 )
+it.effect('accepts a returned Effect that realizes the declared result contract', () =>
+  Effect.gen(function* () {
+    // `fallible` returns a fail-only block (`never` success) under a declared `i32` success, and
+    // `pending` returns a take-once witness Effect under a declared shared Effect. Both returned
+    // values pin the same realization the MIR result names.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'mir/effect-return-realization',
+      ascii(`import silk.effect { Effect }
+struct Problem { code: i32 }
+interface Decoder<S, Arguments> {
+  effect<'env> fn decode<'env>(self: &S, arguments: Arguments) -> i32 ! Problem
+}
+struct Schema { value: i32 }
+effect fn decodeSchema(self: &Schema, encoded: i32) -> i32 ! Problem {
+  return self.value + encoded
+}
+impl Decoder<Schema, i32> for Schema { decode: Schema.decodeSchema }
+fn pending<T: Decoder<T, i32>>(value: &T) -> Effect<i32 ! Problem> {
+  return Decoder.decode(value, 2)
+}
+fn fallible() -> Effect<'static; i32 ! Problem> {
+  return effect { fail Problem { code: 40 } }
+}
+effect fn recover(problem: Problem) -> i32 { return problem.code }
+pub fn main() -> i32 {
+  let schema = Schema { value: 40 }
+  let decoded = run Effect.catch<Problem>(pending<Schema>(&schema), recover)
+  let recovered = run Effect.catch<Problem>(fallible(), recover)
+  return decoded + recovered - 40
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(yield* MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+  }),
+)
 it.effect(
   'reports broken graphs deterministically as data',
   Effect.fnUntraced(function* () {

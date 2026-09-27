@@ -1807,6 +1807,22 @@ export const matchesInstance = (
     return expected !== undefined && StaticValue.key(argument) === StaticValue.key(expected)
   })
 
+/**
+ * Tests whether a value of type `value` physically realizes the `expected` result type.
+ *
+ * Effect values compare by their pinned realization: the site and environment instance already
+ * identify one machine, so the contract only has to confirm it. Run access and executable lifetime
+ * proofs are non-runtime facts, and a fail-only block reaches its declared result type through
+ * `never`. Every other type compares by exact runtime identity.
+ */
+export const realizesResult = (value: Type, expected: Type): boolean =>
+  value._tag === 'EffectValue' && expected._tag === 'EffectValue'
+    ? EffectExecutionContract.realizes(value.type, expected.type) &&
+      Tir.sameExecutableSite(value.site, expected.site) &&
+      Instances.runtimeKeyText(value.environment.instance) ===
+        Instances.runtimeKeyText(expected.environment.instance)
+    : SilkType.runtimeKey(semanticType(value)) === SilkType.runtimeKey(semanticType(expected))
+
 /** Tests whether one concrete MIR function realizes a call's exact physical result contract. */
 export const matchesCall = (
   fn: MirFunction,
@@ -1816,14 +1832,7 @@ export const matchesCall = (
   result: Type,
 ): boolean =>
   matchesInstance(fn, declaration, typeArguments, staticArguments) &&
-  (result._tag === 'EffectValue' && fn.result._tag === 'EffectValue'
-    ? // The site and environment instance below already pin one realization, so the contract only
-      // has to confirm it: a fail-only block reaches its declared result type through `never`.
-      EffectExecutionContract.realizes(result.type, fn.result.type) &&
-      Tir.sameExecutableSite(result.site, fn.result.site) &&
-      Instances.runtimeKeyText(result.environment.instance) ===
-        Instances.runtimeKeyText(fn.result.environment.instance)
-    : SilkType.runtimeKey(semanticType(result)) === SilkType.runtimeKey(semanticType(fn.result)))
+  realizesResult(result, fn.result)
 
 /** Filters the concrete declaration before comparing its exact semantic Effect contract. */
 export const matchesEffectInstance = (
