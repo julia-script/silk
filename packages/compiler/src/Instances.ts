@@ -1907,27 +1907,41 @@ export const discover = (
     }
     return descended
   }
-  // Instance discovery asks the same cleanup-subterm questions for many instances; the
-  // answer depends only on runtime identities and the unfolding path, so memoize it.
+  // Instance discovery asks the same cleanup-subterm questions for many instances; the answer
+  // depends only on runtime identities, so top-level questions are memoized for the discovery.
   const strictCleanupSubtermCache = new Map<string, boolean>()
-  const isStrictCleanupSubterm = (
-    candidate: Type.Type,
-    whole: Type.Type,
-    unfolding: ReadonlyMap<string, Type.Nominal> = new Map(),
-  ): boolean => {
-    let cacheKey = `${Type.runtimeKey(candidate)}\u0001${Type.runtimeKey(whole)}`
-    for (const nominal of unfolding.values()) cacheKey += `\u0001${Type.runtimeKey(nominal)}`
+  const isStrictCleanupSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
+    const cacheKey = `${Type.runtimeKey(candidate)}\u0001${Type.runtimeKey(whole)}`
     let cached = strictCleanupSubtermCache.get(cacheKey)
     if (cached === undefined) {
-      cached = computeStrictCleanupSubterm(candidate, whole, unfolding)
+      cached = strictCleanupSubtermUnder(candidate, whole, new Map(), new Map())
       strictCleanupSubtermCache.set(cacheKey, cached)
     }
     return cached
+  }
+  // A nested answer also depends on the unfolding path, which begins at the question's own root,
+  // so it is rarely shared between questions. It is memoized only while one question is answered;
+  // retaining it for the whole discovery kept millions of path-keyed entries alive.
+  const strictCleanupSubtermUnder = (
+    candidate: Type.Type,
+    whole: Type.Type,
+    unfolding: ReadonlyMap<string, Type.Nominal>,
+    memo: Map<string, boolean>,
+  ): boolean => {
+    let memoKey = `${Type.runtimeKey(candidate)}\u0001${Type.runtimeKey(whole)}`
+    for (const nominal of unfolding.values()) memoKey += `\u0001${Type.runtimeKey(nominal)}`
+    let memoized = memo.get(memoKey)
+    if (memoized === undefined) {
+      memoized = computeStrictCleanupSubterm(candidate, whole, unfolding, memo)
+      memo.set(memoKey, memoized)
+    }
+    return memoized
   }
   const computeStrictCleanupSubterm = (
     candidate: Type.Type,
     whole: Type.Type,
     unfolding: ReadonlyMap<string, Type.Nominal>,
+    memo: Map<string, boolean>,
   ): boolean => {
     if (sameRuntimeType(candidate, whole)) return false
     const candidateDeclaration = nominalTypeText(candidate)
@@ -1972,10 +1986,11 @@ export const discover = (
         fields.some(
           (field) =>
             field.declaredType._tag === 'Resolved' &&
-            isStrictCleanupSubterm(
+            strictCleanupSubtermUnder(
               candidate,
               Type.substitute(field.declaredType.type, substitution),
               nextUnfolding,
+              memo,
             ),
         )
       )
