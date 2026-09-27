@@ -375,6 +375,108 @@ jobs:
       - run: pnpm --filter @silklang/platform-webcontainer exec playwright install --with-deps chromium
       - run: pnpm --filter @silklang/platform-webcontainer test:browser
 
+  witness-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/selfhost-witness-linux-diagnostic' && !inputs.full_verification && inputs.expected_sha == 'e98aa26a52193f614feeca1ee0eaf4c8a7147fb6'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: e98aa26a52193f614feeca1ee0eaf4c8a7147fb6
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Confirm pinned source and prepare core capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'e98aa26a52193f614feeca1ee0eaf4c8a7147fb6'
+          test "$(uname -m)" = x86_64
+          libc_before=$(dpkg-query -W -f='${Version}' libc6)
+          if ! command -v gdb >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends gdb
+          fi
+          test "$(dpkg-query -W -f='${Version}' libc6)" = "$libc_before"
+          command -v gdb
+          cat /proc/sys/kernel/core_pattern > "$RUNNER_TEMP/witness-core-pattern.before"
+          sudo sysctl -w "kernel.core_pattern=$RUNNER_TEMP/silk-core.%p"
+          test "$(cat /proc/sys/kernel/core_pattern)" = "$RUNNER_TEMP/silk-core.%p"
+          ulimit -c 2097152
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: ./.github/actions/setup-linux-llvm
+      - uses: actions/cache/restore@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
+      - run: pnpm install --frozen-lockfile
+      - run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
+      - name: Compile the full root and capture the selected witness crash
+        shell: bash
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: |
+          set -euo pipefail
+          diagnostic_dir="$RUNNER_TEMP/witness-diagnostic"
+          mkdir -p "$diagnostic_dir"
+          ulimit -c 2097152
+          set +e
+          timeout --signal=TERM --kill-after=10s 15m \
+            node packages/cli/dist/bin.js test \
+              --manifest-path compiler/silk.toml \
+              --root src/semantic/SemanticCases.silk \
+              --filter witnessContractCompatibility \
+              --no-cache 2>&1 | tee "$diagnostic_dir/run.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          printf 'CLI exit status: %s\n' "$status" | tee -a "$diagnostic_dir/run.log"
+          if [ "$status" -eq 0 ]; then
+            echo 'The selected case passed in isolation.' | tee -a "$diagnostic_dir/run.log"
+            exit 0
+          fi
+          binary=compiler/build/test/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler
+          if [ ! -f "$binary" ]; then
+            echo 'No native binary was emitted; inspect the compile log.' | tee -a "$diagnostic_dir/run.log"
+            exit 1
+          fi
+          shopt -s nullglob
+          cores=("$RUNNER_TEMP"/silk-core.*)
+          if [ "${#cores[@]}" -eq 0 ]; then
+            echo 'The native process left no core; inspect core_pattern and the CLI log.' | tee -a "$diagnostic_dir/run.log"
+            exit 1
+          fi
+          timeout --signal=TERM --kill-after=10s 90s \
+            gdb --batch --quiet \
+              -ex 'set pagination off' \
+              -ex 'thread apply all bt 40' \
+              -ex 'thread apply all bt full 12' \
+              "$binary" "${cores[0]}" > "$diagnostic_dir/backtrace.log" 2>&1
+          cat "$diagnostic_dir/backtrace.log"
+          exit 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: witness-linux-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/witness-diagnostic/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Restore core settings and remove core files
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/witness-core-pattern.before" ]; then
+            sudo sysctl -w "kernel.core_pattern=$(cat "$RUNNER_TEMP/witness-core-pattern.before")"
+          fi
+          rm -f "$RUNNER_TEMP"/silk-core.*
+
   full-verification:
     if: github.event_name == 'workflow_dispatch' && inputs.full_verification
     runs-on: ubuntu-24.04
@@ -420,7 +522,7 @@ jobs:
       - run: pnpm release:candidate
 
   platform-supplies:
-    if: github.event_name != 'workflow_dispatch' || !inputs.full_verification
+    if: (github.event_name != 'workflow_dispatch' || !inputs.full_verification) && github.ref != 'refs/heads/selfhost-witness-linux-diagnostic'
     name: Platform supply / ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
