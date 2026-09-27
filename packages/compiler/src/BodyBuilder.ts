@@ -1056,6 +1056,7 @@ const sectionIdentityArguments = (
   parameters: ReadonlyArray<Type.Parameter>,
   selection: Type.Substitution,
   schema: Type.CallableSchema | undefined,
+  enclosing: boolean,
 ): ReadonlyArray<Type.GenericArgument> => {
   const unapplied = new Map<string, Type.GenericArgument>()
   for (const binder of schema?.binders ?? []) {
@@ -1069,6 +1070,15 @@ const sectionIdentityArguments = (
         parameters.some((candidate) => Type.key(candidate) === parameter),
     ),
   )
+  // In a function sectioning itself, selection values name the enclosing function's parameters,
+  // which share their keys with the target's binders; they are kept verbatim for owner substitution.
+  if (enclosing)
+    return parameters.map(
+      (parameter) =>
+        selected.get(Type.key(parameter)) ??
+        unapplied.get(Type.key(parameter)) ??
+        Type.parameterArgument(parameter),
+    )
   for (let pass = 0; pass < parameters.length; pass += 1) {
     let changed = false
     for (const [parameter, argument] of selected) {
@@ -2121,6 +2131,9 @@ const residualExpression = (
             fact.reference.declaration.typeParameters.map((parameter) => parameter.type),
             fact.substitution,
             Type.isCallable(fact.type.type) ? fact.type.type.schema : undefined,
+            options.functionId !== undefined &&
+              fact.reference.declaration.id.sourceId === options.functionId.sourceId &&
+              fact.reference.declaration.id.ordinal === options.functionId.ordinal,
           )
         : fact.typeArguments
     return {

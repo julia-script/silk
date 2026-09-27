@@ -2789,15 +2789,18 @@ export const make = (operations: Operations) => {
           Type.substituteGenericArgument(argument, ownerSubstitution),
         ]),
       )
+      const preApplicationArguments = section.typeArguments.map((argument) =>
+        Type.substituteGenericArgument(argument, ownerSubstitution, context.compatibility),
+      )
+      const preApplicationIdentity = Type.callableIdentityArgument(
+        '',
+        Tir.callableTargetIdentity(section.target),
+        preApplicationArguments,
+      )
       const preApplication =
         applications.length > 0 &&
-        Type.namesUnappliedSection(
-          Type.callableIdentityArgument(
-            '',
-            Tir.callableTargetIdentity(section.target),
-            section.typeArguments,
-          ),
-        ) &&
+        Type.namesUnappliedSection(preApplicationIdentity) &&
+        Type.isRuntimeConcreteGenericArgument(preApplicationIdentity) &&
         section.captures.every(
           (capture) =>
             capture.value._tag !== 'Unavailable' &&
@@ -2824,22 +2827,8 @@ export const make = (operations: Operations) => {
         const closed = preApplication ? Type.closeSectionSchema(specialized) : specialized
         const type = Type.isTypeArgument(closed) ? closed : specialized
         const arguments_ = preApplication
-          ? section.typeArguments.map((argument) =>
-              Type.substituteGenericArgument(argument, ownerSubstitution, context.compatibility),
-            )
+          ? preApplicationArguments
           : targetArguments(section.target, substitution, results)
-        if (
-          preApplication &&
-          arguments_ !== undefined &&
-          !Type.isRuntimeConcreteGenericArgument(
-            Type.callableIdentityArgument(
-              '',
-              Tir.callableTargetIdentity(section.target),
-              arguments_,
-            ),
-          )
-        )
-          continue
         const captureTypes = section.captures.flatMap((capture) =>
           capture.value._tag === 'Unavailable'
             ? []
