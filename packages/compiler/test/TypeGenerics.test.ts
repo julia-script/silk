@@ -1,5 +1,5 @@
 import { records } from './support/records.js'
-import { constrainedCallableForwarding } from './support/corpus.js'
+import { constrainedCallableForwarding, ownerTypedDirectSection } from './support/corpus.js'
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
@@ -945,6 +945,60 @@ pub fn main() -> i32 { let plusTwo = add(2) return plusTwo(40) }`),
     assert.include(
       (yield* MirVerification.verify(changed)).map((violation) => violation.rule),
       'InvalidCallableOperation',
+    )
+  }),
+)
+
+it.effect('invokes an owner-typed section with its complete call at each owner type', () =>
+  Effect.gen(function* () {
+    // `pair(move right)` selects `A := T` through its capture. Applied directly in a pipeline
+    // (`choose`) or through a value (`chooseBound`), each application invokes exactly `pair<T>`
+    // for the owner instance, named by its own complete call.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/owner-typed-direct-section',
+      new TextEncoder().encode(ownerTypedDirectSection),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+    assert.isFalse(
+      mir.functions.some((fn) =>
+        fn.regions.some(
+          (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
+        ),
+      ),
+    )
+    const byName = (left: string, right: string) => left.localeCompare(right)
+    for (const owner of ['choose', 'chooseBound']) {
+      const applications = mir.functions
+        .filter((fn) => fn.id.name === owner)
+        .flatMap((fn) =>
+          fn.regions.flatMap((region) =>
+            region._tag === 'OperationRegion'
+              ? region.operations.flatMap((operation) =>
+                  operation._tag === 'ApplyCallable'
+                    ? [operation.typeArguments.map(Type.encodeGenericArgument).join()]
+                    : [],
+                )
+              : [],
+          ),
+        )
+        .sort(byName)
+      assert.deepEqual(
+        applications,
+        ['generics/owner-typed-direct-section.Token', 'i32'].sort(byName),
+        owner,
+      )
+    }
+    assert.deepEqual(
+      Analysis.instancesOf(snapshot)
+        .calls.filter(
+          (call) =>
+            call.owner.declaration.name === 'choose' && call.target.declaration.name === 'pair',
+        )
+        .map((call) => call.target.typeArguments.map(Type.encodeGenericArgument).join())
+        .sort(byName),
+      ['generics/owner-typed-direct-section.Token', 'i32'].sort(byName),
     )
   }),
 )

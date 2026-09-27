@@ -1439,6 +1439,23 @@ pub fn main() -> i32 {
   return run bind(read())
 }`
 
+/** A section selecting its target's binder through an owner-typed capture, applied directly. */
+export const ownerTypedDirectSection = `struct Token { value: i32 }
+fn pair<A>(first: A, second: A) -> A {
+  drop second
+  return move first
+}
+fn choose<T>(left: T, right: T) -> T { return move left |> pair(move right) }
+fn chooseBound<T>(left: T, right: T) -> T {
+  let finish = pair(move right)
+  return finish(move left)
+}
+pub fn main() -> i32 {
+  let token = choose(Token { value: 40 }, Token { value: 1 })
+  let other = chooseBound(Token { value: 0 }, Token { value: 1 })
+  return choose(2, 3) + chooseBound(0, 5) + token.value + other.value
+}`
+
 /** Fixed-seed xoshiro256** known answers pinned for native execution. */
 export const seededRandomFingerprint = `import silk.effect { Effect }
 import silk.insecure_random { InsecureRandom }
@@ -2261,6 +2278,12 @@ int32_t silk_finish_events(void) { puts(""); return 42; }
 `,
     },
     nativeStdout: '11,1,12,20,2,7,\n',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    // Owner-typed sections at two owner types, applied directly in a pipeline and through a value.
+    name: 'owner-typed-direct-section',
+    source: ownerTypedDirectSection,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
