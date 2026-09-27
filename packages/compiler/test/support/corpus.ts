@@ -1477,6 +1477,27 @@ pub fn main() -> i32 {
   return choose(2, 3) + chooseBound(0, 5) + token.value + other.value
 }`
 
+/**
+ * A generic section holding an exclusive borrow, a shared borrow, a shared slice and a Copy value
+ * by value, applied at two types.
+ */
+export const borrowedCaptureSection = `struct Counter { value: i32 }
+fn pick<A>(value: A, counter: &mut Counter, seen: &Counter, items: &[i32], bonus: i32) -> A {
+  counter.value = counter.value + seen.value + items[0] + bonus
+  return move value
+}
+pub fn main() -> i32 {
+  let mut count = Counter { value: 30 }
+  let seen = Counter { value: 3 }
+  let items = [1]
+  let mut bump = pick(&mut count, &seen, &items, 1)
+  let a = bump(2)
+  let flag = bump(true)
+  drop bump
+  if flag { return count.value + a }
+  return 0
+}`
+
 /** Fixed-seed xoshiro256** known answers pinned for native execution. */
 export const seededRandomFingerprint = `import silk.effect { Effect }
 import silk.insecure_random { InsecureRandom }
@@ -1925,6 +1946,12 @@ export const corpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'narrow-record-effect-success-lanes',
     source: narrowEffectRecord,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    // A section environment stores borrows by value and passes them to each application.
+    name: 'borrowed-capture-section',
+    source: borrowedCaptureSection,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
