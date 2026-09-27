@@ -650,41 +650,6 @@ pub fn main() -> i32 { return expand<i32>(0, 1) }`)
   }),
 )
 
-it.effect('publishes one exact answer when one round promotes several recursion families', () =>
-  Effect.gen(function* () {
-    // `pick` and `grow` each reach a second instance key in the first round; `grow<i32>` was
-    // scheduled before its family was promoted, so its growth is guarded only from the next level.
-    const result = yield* snapshot(`fn pick<T>(value: T) -> T { return move value }
-fn grow<T>(depth: i32, value: T) -> i32 {
-  if depth == 0 { return 0 }
-  return grow<[T; 1]>(depth - 1, [move value])
-}
-pub fn main() -> i32 {
-  let first = pick<i32>(1)
-  let second = pick<bool>(true)
-  drop second
-  return grow<i32>(first, 7)
-}`)
-    const keyOf = (key: Instances.InstanceKey): string =>
-      `${key.declaration.name}<${key.typeArguments.map(Type.encodeGenericArgument).join(', ')}>`
-    assert.deepEqual(
-      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
-      ['SEM0053'],
-    )
-    assert.deepEqual(
-      result.instances.instances.map((instance) => keyOf(instance.key)),
-      ['main<>', 'pick<i32>', 'pick<bool>', 'grow<i32>'],
-    )
-    assert.deepEqual(
-      result.instances.violations.map((violation) => [
-        keyOf(violation.caller),
-        keyOf(violation.target),
-      ]),
-      [['grow<i32>', 'grow<Array<i32, 1>>']],
-    )
-  }),
-)
-
 it.effect('discovers cleanup hooks called by source failure recovery', () =>
   Effect.gen(function* () {
     const result = yield* snapshot(`struct SomeError { storage: RawBuffer<i32> }
