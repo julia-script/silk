@@ -2459,9 +2459,13 @@ export const make = (operations: Operations) => {
       resolving: new Set<string>(),
       recordResolvedCall: (expression, target) => {
         if (expression._tag === 'CallableApply') {
+          // An application of a section environment named before its application invokes the
+          // instance only its own complete call names, so that call is always recorded.
+          const callee = callableOriginOf(expression.callee, context)
           if (
             Type.isEffect(expression.type) ||
-            target.typeArguments.some(Type.isHiddenExecutableArgument)
+            target.typeArguments.some(Type.isHiddenExecutableArgument) ||
+            (callee !== undefined && Type.namesUnappliedSection(callee))
           )
             record(expression, target)
           return
@@ -2779,10 +2783,12 @@ export const make = (operations: Operations) => {
           : [],
       )
       // A constrained section whose captures are concrete under its own selection has one
-      // environment for every application: the unapplied binders cannot change what it stores. Its identity keeps
-      // those binders as section binders, exactly as a relay carrying it names it, and each
-      // application invokes the target through its own complete call. Only captures that mention
-      // an unapplied binder need the application's solution, one environment per application.
+      // environment whatever its applications: the unapplied binders cannot change what it
+      // stores. The environment exists even when the section is only relayed or dropped, so its
+      // captures are released once. Its identity keeps those binders as section binders, exactly
+      // as a relay carrying it names it, and each application invokes the target through its own
+      // complete call. Only captures that mention an unapplied binder need the application's
+      // solution, one environment per application.
       const ownSelection = new Map(
         [...section.substitution].map(([parameter, argument]) => [
           parameter,
@@ -2798,7 +2804,6 @@ export const make = (operations: Operations) => {
         preApplicationArguments,
       )
       const preApplication =
-        applications.length > 0 &&
         Type.namesUnappliedSection(preApplicationIdentity) &&
         Type.isRuntimeConcreteGenericArgument(preApplicationIdentity) &&
         section.captures.every(

@@ -1481,12 +1481,13 @@ export const closeSectionSchema = (argument: GenericArgument): GenericArgument =
 }
 
 /** Section binders owned by `target` anywhere inside one identity argument, closed for a check. */
-const closeOwnedSectionBinders = (
+/** Section binders owned by `target` anywhere inside one identity argument, nested included. */
+const ownedSectionBinders = (
   argument: GenericArgument,
   target: CallableIdentityArgument['target'],
-): GenericArgument => {
-  if (target._tag !== 'Declaration') return argument
-  const closure = new Map<string, GenericArgument>()
+): ReadonlyArray<Parameter> => {
+  if (target._tag !== 'Declaration') return []
+  const found = new Map<string, Parameter>()
   const visit = (candidate: GenericArgument): void => {
     if (Lifetime.isLifetime(candidate) || isUnavailableGenericArgument(candidate)) return
     if (isCallableIdentityArgument(candidate)) {
@@ -1504,19 +1505,115 @@ const closeOwnedSectionBinders = (
         ),
       ]
     } else if (isTypeArgument(candidate)) owned = parameters(candidate)
-    for (const binder of owned) {
+    for (const binder of owned)
       if (
-        !isSectionBinder(binder) ||
-        binder.owner.module !== target.module ||
-        binder.owner.name !== target.name
+        isSectionBinder(binder) &&
+        binder.owner.module === target.module &&
+        binder.owner.name === target.name
       )
-        continue
-      const closed = closedSectionBinder(binder)
-      if (closed !== undefined) closure.set(key(binder), closed)
-    }
+        found.set(key(binder), binder)
   }
   visit(argument)
+  return [...found.values()]
+}
+
+/**
+ * Instantiates a section identity argument with a complete application's solution.
+ *
+ * The solution names the target's ordinary parameters; each section binder the target owns takes
+ * the solution of the parameter it stands for, wherever it occurs. Binders the solution does not
+ * name stay section binders, so an incomplete solution never passes for a concrete one.
+ */
+export const solveSectionBinders = (
+  argument: GenericArgument,
+  target: CallableIdentityArgument['target'],
+  solution: Substitution,
+): GenericArgument => {
+  const solved = new Map<string, GenericArgument>()
+  for (const binder of ownedSectionBinders(argument, target)) {
+    const parameter: Parameter = {
+      _tag: 'TypeParameter',
+      owner: binder.owner,
+      ordinal: binder.ordinal,
+      name: binder.name,
+      kind: binder.kind,
+      staticProperties: binder.staticProperties,
+      ...(binder.representationBound === undefined
+        ? {}
+        : { representationBound: binder.representationBound }),
+    }
+    const value = solution.get(key(parameter))
+    if (value !== undefined) solved.set(key(binder), value)
+  }
+  return solved.size === 0 ? argument : substituteGenericArgument(argument, solved)
+}
+
+/** Section binders owned by `target` inside one identity argument, closed for a check. */
+const closeOwnedSectionBinders = (
+  argument: GenericArgument,
+  target: CallableIdentityArgument['target'],
+): GenericArgument => {
+  const closure = new Map<string, GenericArgument>()
+  for (const binder of ownedSectionBinders(argument, target)) {
+    const closed = closedSectionBinder(binder)
+    if (closed !== undefined) closure.set(key(binder), closed)
+  }
   return closure.size === 0 ? argument : substituteGenericArgument(argument, closure)
+}
+
+/**
+ * Tests whether a complete invocation instantiates a pre-application section identity.
+ *
+ * Each identity position that is exactly one of the target's section binders takes the invocation
+ * argument at that position; every section binder the identity mentions must be bound so. Then
+ * every identity argument, with those binders substituted wherever they occur, must name exactly
+ * the invocation argument at its position. Selected positions therefore stay as the section chose
+ * them, and nested occurrences such as `Option<A>` agree with `A`'s solution.
+ */
+export const instantiatesSectionIdentity = (
+  target: CallableIdentityArgument['target'],
+  identity: ReadonlyArray<GenericArgument>,
+  invocation: ReadonlyArray<GenericArgument>,
+): boolean => {
+  if (target._tag !== 'Declaration' || invocation.length < identity.length) return false
+  const owns = (binder: Parameter): boolean =>
+    isSectionBinder(binder) &&
+    binder.owner.module === target.module &&
+    binder.owner.name === target.name
+  const solution = new Map<string, GenericArgument>()
+  identity.forEach((argument, ordinal) => {
+    const invoked = invocation[ordinal]
+    if (invoked === undefined) return
+    if (isTypeArgument(argument) && isParameter(argument) && owns(argument)) {
+      solution.set(key(argument), invoked)
+      return
+    }
+    if (!isRequirementRowArgument(argument)) return
+    const rowParameters = RowAlgebra.parameters(requirementRowPolicy(), argument.row)
+    const [row] = rowParameters.rows
+    if (
+      row !== undefined &&
+      rowParameters.rows.length === 1 &&
+      rowParameters.members.length === 0 &&
+      RowAlgebra.concreteMembers(requirementRowPolicy(), argument.row).length === 0 &&
+      owns(row)
+    )
+      solution.set(key(row), invoked)
+  })
+  if (
+    identity.some((argument) =>
+      ownedSectionBinders(argument, target).some((binder) => !solution.has(key(binder))),
+    )
+  )
+    return false
+  return identity.every((argument, ordinal) => {
+    const invoked = invocation[ordinal]
+    return (
+      invoked !== undefined &&
+      runtimeGenericArgumentKey(substituteGenericArgument(argument, solution)) ===
+        runtimeGenericArgumentKey(invoked)
+    )
+  })
 }
 
 /** Tests whether an identity's arguments still name binders its section leaves unapplied. */
