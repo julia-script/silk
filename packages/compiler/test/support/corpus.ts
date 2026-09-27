@@ -2225,6 +2225,68 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    // A constrained section owning a capture evaluates it once at construction; dropped unapplied,
+    // its environment drops the capture once; applied, the target consumes it.
+    name: 'constrained-section-owned-capture-lifecycle',
+    source: `import silk.effect { Effect }
+unsafe extern "C" fn silk_record_event(value: i32) -> ()
+unsafe extern "C" fn silk_finish_events() -> i32
+struct Recorder { value: i32 }
+impl Drop for Recorder {
+  fn drop(self: &mut Recorder) -> () { unsafe { silk_record_event(self.value) } return () }
+}
+fn make(value: i32) -> Recorder {
+  unsafe { silk_record_event(value + 10) }
+  return Recorder { value: value }
+}
+effect fn guarded<A>(pending: once Effect<A>, recorder: Recorder) -> A {
+  drop recorder
+  return run move pending
+}
+effect fn ready() -> i32 { return 7 }
+pub fn main() -> i32 {
+  let dropped = guarded(make(1))
+  drop dropped
+  let applied = guarded(make(2))
+  unsafe { silk_record_event(20) }
+  let value = run applied(ready())
+  unsafe { silk_record_event(value) }
+  unsafe { return silk_finish_events() }
+}`,
+    nativeCSources: {
+      events: `#include <stdint.h>
+#include <stdio.h>
+void silk_record_event(int32_t value) { printf("%d,", value); }
+int32_t silk_finish_events(void) { puts(""); return 42; }
+`,
+    },
+    nativeStdout: '11,1,12,20,2,7,\n',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    // One provider section, applied to an i32 and a bool Effect, shares its environment.
+    name: 'constrained-section-two-applications',
+    source: `import silk.effect { Effect }
+service Counter { effect fn get() -> i32 ? &Counter }
+struct Fixed { value: i32 }
+effect fn get(self: &Fixed) -> i32 { return self.value }
+impl Counter for Fixed { get: Fixed.get }
+effect fn seed() -> i32 ? &Counter { return run Counter.get() }
+effect fn flag() -> bool ? &Counter {
+  let value = run Counter.get()
+  return value == 42
+}
+pub fn main() -> i32 {
+  let fixed = Fixed { value: 42 }
+  let bind = Effect.provide<Counter>(&fixed)
+  let number = run bind(seed())
+  let ok = run bind(flag())
+  if ok { return number }
+  return 1
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'identity',
     source: `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(42) }`,
