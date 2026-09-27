@@ -2015,6 +2015,39 @@ const constructionTargetArgumentsConcrete = (
   )
 }
 
+/**
+ * The hidden callable identity an instance key carries for one callable parameter.
+ *
+ * Mirrors Instances.parameterCallableIdentity on a lowered function: callable parameters are
+ * those whose type is a callable contract, and the key names their identities in parameter order
+ * among its callable identity arguments.
+ */
+const parameterCallableIdentity = (
+  fn: MirFunction,
+  ordinal: number,
+): SilkType.CallableIdentityArgument | undefined => {
+  const callables = fn.localTypes
+    .slice(0, fn.parameterCount)
+    .flatMap((type, parameter) => (SilkType.isCallable(semanticType(type)) ? [parameter] : []))
+  const position = callables.indexOf(ordinal)
+  return position < 0
+    ? undefined
+    : fn.instance.typeArguments.filter(SilkType.isCallableIdentityArgument).at(position)
+}
+
+/** A captured callable names exactly the identity its invoked parameter position carries. */
+const capturedIdentityMatches = (
+  field: Layout.CallableEnvironmentField,
+  expected: SilkType.CallableIdentityArgument | undefined,
+): boolean => {
+  if (field.representation !== 'Callable' && field.callableIdentity === undefined) return true
+  return (
+    field.callableIdentity !== undefined &&
+    expected !== undefined &&
+    SilkType.genericArgumentKey(field.callableIdentity) === SilkType.genericArgumentKey(expected)
+  )
+}
+
 /** Whether a captured environment field passes to its parameter as the backend passes it. */
 const capturedFieldPasses = (
   field: Layout.CallableEnvironmentField,
@@ -2058,7 +2091,8 @@ const invokesPreApplicationEnvironment = (
     return false
   const environment = source.environment
   const target = environment.callable.target
-  if (target._tag !== 'DeclarationCallableTarget') return false
+  if (target._tag !== 'DeclarationCallableTarget' || !Tir.sameCallableTarget(source.target, target))
+    return false
   const identityTarget = Tir.callableTargetIdentity(target)
   const identity = environment.callable.typeArguments
   if (
@@ -2071,15 +2105,6 @@ const invokesPreApplicationEnvironment = (
   if (
     invoked === undefined ||
     !SilkType.instantiatesSectionIdentity(identityTarget, identity, operation.typeArguments)
-  )
-    return false
-  const invokedHidden = new Set(
-    operation.typeArguments.slice(identity.length).map(SilkType.genericArgumentKey),
-  )
-  if (
-    !Layout.callableTargetArguments(environment)
-      .slice(identity.length)
-      .every((captured) => invokedHidden.has(SilkType.genericArgumentKey(captured)))
   )
     return false
   const captured = environment.fields.map((field) => field.parameterOrdinal)
@@ -2111,7 +2136,11 @@ const invokesPreApplicationEnvironment = (
     }) &&
     environment.fields.every((field) => {
       const parameter = invoked.localTypes.at(field.parameterOrdinal)
-      return parameter !== undefined && capturedFieldPasses(field, semanticType(parameter))
+      return (
+        parameter !== undefined &&
+        capturedFieldPasses(field, semanticType(parameter)) &&
+        capturedIdentityMatches(field, parameterCallableIdentity(invoked, field.parameterOrdinal))
+      )
     }) &&
     matchesCall(invoked, target.declaration, operation.typeArguments, undefined, operation.type) &&
     operation.access === source.type.mode &&

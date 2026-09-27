@@ -795,6 +795,95 @@ pub fn main() -> i32 {
       yield* withFields([{ ...field, representation: 'Borrow', access: 'Shared' }]),
       'InvalidCallableOperation',
     )
+    // The applied value's own target must be its environment's target: a relayed or parameter
+    // value has no construction in this body to vouch for it.
+    assert.include(
+      yield* rules(
+        mutated(new Map(), new Map([[source.ordinal, { ...value, target: after.target }]])),
+      ),
+      'InvalidCallableOperation',
+    )
+  }),
+)
+
+it.effect('binds each captured callable to its own invoked parameter', () =>
+  Effect.gen(function* () {
+    // `forward` and `backward` capture the same two same-signature callables in opposite order.
+    // Each application must invoke the instance whose hidden callable identities match its own
+    // captures position by position; the other instance exists and has the same signature.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/constrained-section-callable-positions',
+      new TextEncoder().encode(`import silk.effect { Effect }
+effect fn both<A>(pending: once Effect<A>, first: fn(i32) -> i32, second: fn(i32) -> i32) -> A {
+  let value = run move pending
+  drop first
+  drop second
+  return move value
+}
+fn increment(value: i32) -> i32 { return value + 1 }
+fn decrement(value: i32) -> i32 { return value - 1 }
+effect fn ready() -> i32 { return 1 }
+pub fn main() -> i32 {
+  let forward = both(increment, decrement)
+  let backward = both(decrement, increment)
+  let left = run forward(ready())
+  let right = run backward(ready())
+  return left + right
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+    const main = mir.functions.find((fn) => fn.id.name === 'main') ?? unreachable('expected main')
+    const applications = main.regions
+      .flatMap((region) => (region._tag === 'OperationRegion' ? region.operations : []))
+      .filter(
+        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }> =>
+          operation._tag === 'ApplyCallable' && operation.callable !== undefined,
+      )
+    const [forward, backward] = applications
+    if (forward === undefined || backward === undefined)
+      return unreachable('expected both applications')
+    assert.notDeepEqual(
+      forward.typeArguments.map(Type.genericArgumentKey),
+      backward.typeArguments.map(Type.genericArgumentKey),
+    )
+    // The swapped application names `backward`'s real instance and result, so every other premise
+    // holds; only the positions of the captured callables disagree.
+    const swapped: Mir.Module = {
+      ...mir,
+      functions: mir.functions.map((fn) =>
+        fn !== main
+          ? fn
+          : {
+              ...fn,
+              localTypes: fn.localTypes.map((type, ordinal) =>
+                ordinal === forward.destination.ordinal ? backward.type : type,
+              ),
+              regions: fn.regions.map((region) =>
+                region._tag !== 'OperationRegion'
+                  ? region
+                  : {
+                      ...region,
+                      operations: region.operations.map((operation) =>
+                        operation === forward
+                          ? {
+                              ...forward,
+                              typeArguments: backward.typeArguments,
+                              callableType: backward.callableType,
+                              type: backward.type,
+                            }
+                          : operation,
+                      ),
+                    },
+              ),
+            },
+      ),
+    }
+    assert.include(
+      (yield* MirVerification.verify(swapped)).map((violation) => violation.rule),
+      'InvalidCallableOperation',
+    )
   }),
 )
 
