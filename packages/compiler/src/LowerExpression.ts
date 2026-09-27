@@ -1039,11 +1039,9 @@ function lowerCallableApplyExpression(
       // names the invoked target and specializes the callee's contract.
       const callee = expression.callee
       if (callee._tag === 'Unavailable' || call === undefined) return false
-      const applied = Type.substitute(
-        fn.semantic(callee.type),
-        expression.substitution,
-        fn.owner.specialization.compatibility,
-      )
+      // The application solves the section's binders in the owner's terms (`U := T`), so it is
+      // applied before the owner specialization, as for a directly applied section.
+      const applied = fn.semantic(Type.substitute(callee.type, expression.substitution))
       if (!Type.isCallable(applied) || !Type.isRuntimeConcrete(applied)) return false
       callableType = { ...applied, mode: loweredType.type.mode }
       typeArguments = call.target.typeArguments
