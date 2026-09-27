@@ -1,5 +1,9 @@
 import { records } from './support/records.js'
-import { constrainedCallableForwarding } from './support/corpus.js'
+import {
+  constrainedCallableForwarding,
+  constrainedSectionGenericOwner,
+  genericItemPipelineInGenericOwner,
+} from './support/corpus.js'
 import * as Layer from 'effect/Layer'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
@@ -945,6 +949,68 @@ pub fn main() -> i32 { let plusTwo = add(2) return plusTwo(40) }`),
     assert.include(
       (yield* MirVerification.verify(changed)).map((violation) => violation.rule),
       'InvalidCallableOperation',
+    )
+  }),
+)
+
+it.effect('applies a section built inside a generic owner at each owner instance', () =>
+  Effect.gen(function* () {
+    // `select(true)` leaves `U` open; inside `pickOne<T>` its application solves `U := T`, the
+    // owner's own parameter, which each owner instance then makes concrete.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/constrained-section-generic-owner',
+      new TextEncoder().encode(constrainedSectionGenericOwner),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+    assert.isFalse(
+      mir.functions.some((fn) =>
+        fn.regions.some(
+          (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
+        ),
+      ),
+    )
+    // One environment per owner instance, and one concrete invocation of `select` per owner.
+    const byName = (left: string, right: string) => left.localeCompare(right)
+    const owners = sectionEnvironments(snapshot, 'select')
+      .map((environment) => environment.owner.typeArguments.map(Type.encodeGenericArgument).join())
+      .sort(byName)
+    const invoked = Analysis.instancesOf(snapshot)
+      .calls.filter((call) => call.target.declaration.name === 'select')
+      .map((call) => call.target.typeArguments.map(Type.encodeGenericArgument).join())
+      .sort(byName)
+    const expected = ['generics/constrained-section-generic-owner.Token', 'i32'].sort(byName)
+    assert.deepEqual(owners, expected)
+    assert.deepEqual(invoked, expected)
+  }),
+)
+
+it.effect('applies a generic function item piped inside a generic owner', () =>
+  Effect.gen(function* () {
+    // `move value |> keep` solves `U := T` in `pass<T>`'s terms; each owner instance makes it
+    // concrete and invokes its own `keep<…>`.
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'generics/generic-item-pipeline-owner',
+      new TextEncoder().encode(genericItemPipelineInGenericOwner),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(yield* MirVerification.verify(mir), [])
+    assert.isFalse(
+      mir.functions.some((fn) =>
+        fn.regions.some(
+          (region) => region._tag === 'OperationRegion' && region.outcome._tag === 'Trap',
+        ),
+      ),
+    )
+    const byName = (left: string, right: string) => left.localeCompare(right)
+    assert.deepEqual(
+      Analysis.instancesOf(snapshot)
+        .instances.filter((instance) => instance.key.declaration.name === 'keep')
+        .map((instance) => instance.key.typeArguments.map(Type.encodeGenericArgument).join())
+        .sort(byName),
+      ['generics/generic-item-pipeline-owner.Token', 'i32'].sort(byName),
     )
   }),
 )

@@ -1439,6 +1439,27 @@ pub fn main() -> i32 {
   return run bind(read())
 }`
 
+/** A section built inside a generic owner and applied there, at two owner instances. */
+export const constrainedSectionGenericOwner = `struct Token { value: i32 }
+fn select<U>(value: U, enabled: bool) -> U { return move value }
+fn pickOne<T>(value: T) -> T {
+  let pick = select(true)
+  return pick(move value)
+}
+pub fn main() -> i32 {
+  let token = pickOne(Token { value: 40 })
+  return pickOne(2) + token.value
+}`
+
+/** A generic function item piped inside a generic owner, at two owner instances. */
+export const genericItemPipelineInGenericOwner = `struct Token { value: i32 }
+fn keep<U>(value: U) -> U { return move value }
+fn pass<T>(value: T) -> T { return move value |> keep }
+pub fn main() -> i32 {
+  let token = pass(Token { value: 40 })
+  return pass(2) + token.value
+}`
+
 /** Fixed-seed xoshiro256** known answers pinned for native execution. */
 export const seededRandomFingerprint = `import silk.effect { Effect }
 import silk.insecure_random { InsecureRandom }
@@ -2261,6 +2282,18 @@ int32_t silk_finish_events(void) { puts(""); return 42; }
 `,
     },
     nativeStdout: '11,1,12,20,2,7,\n',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    // A generic item piped inside a generic owner: `U := T` is solved in the owner's terms.
+    name: 'generic-item-pipeline-in-generic-owner',
+    source: genericItemPipelineInGenericOwner,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    // One section site in a generic owner, applied at the owner's instances for Token and i32.
+    name: 'constrained-section-generic-owner',
+    source: constrainedSectionGenericOwner,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
