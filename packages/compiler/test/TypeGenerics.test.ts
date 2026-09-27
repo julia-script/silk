@@ -592,10 +592,10 @@ it.effect('lowers a constrained section that is relayed but never applied', () =
   }),
 )
 
-it.effect('applies a section environment holding a borrowed capture by value', () =>
+it.effect('applies a section environment holding borrows by value', () =>
   Effect.gen(function* () {
-    // `pick(&mut count, 1)` stores the exclusive borrow itself and a Copy `i32` by value. Each
-    // application passes the stored borrow to the target's `&mut Counter` parameter.
+    // `pick(&mut count, &seen, &items, 1)` stores each borrow itself and a Copy `i32` by value; each
+    // application passes the stored descriptors to the target's parameters as stored.
     const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/borrowed-capture-section',
       new TextEncoder().encode(borrowedCaptureSection),
@@ -624,51 +624,74 @@ it.effect('applies a section environment holding a borrowed capture by value', (
       ),
       [['i32'], ['bool']],
     )
-    const application = applications.at(0) ?? unreachable('expected an application')
-    const callable = application.callable ?? unreachable('expected a callable operand')
+    const callable =
+      applications.at(0)?.callable ?? unreachable('expected an application through a value')
     const value = main.localTypes.at(callable.ordinal)
     if (value?._tag !== 'CallableValue' || value.environment === undefined)
       return unreachable('expected a section environment')
     const environment = value.environment
+    const descriptor = (type: DeclarationFacts.SemanticType) => {
+      if (Type.isReference(type)) return `reference ${type.access}`
+      if (Type.isSlice(type)) return `slice ${type.access}`
+      return 'value'
+    }
     assert.deepEqual(
       environment.fields.map((field) => [
         field.representation,
         field.access,
-        Type.isReference(field.type),
+        descriptor(field.type),
       ]),
       [
-        ['Value', 'Exclusive', true],
-        ['Value', 'Copy', false],
+        ['Value', 'Exclusive', 'reference Exclusive'],
+        ['Value', 'Shared', 'reference Shared'],
+        ['Value', 'Shared', 'slice Shared'],
+        ['Value', 'Copy', 'value'],
       ],
     )
-    // A by-value field claiming shared or exclusive access to a non-reference is still rejected.
-    const forged = {
-      ...value,
-      environment: {
-        ...environment,
-        fields: environment.fields.map((field) =>
-          field.access === 'Copy' ? { ...field, access: 'Exclusive' as const } : field,
+    // Each forged field must be rejected at the application: a borrow access on a non-descriptor,
+    // an access disagreeing with its descriptor, and a descriptor the parameter cannot accept.
+    const forging = (
+      forge: (field: Layout.CallableEnvironmentField) => Layout.CallableEnvironmentField,
+    ) =>
+      MirVerification.verify({
+        ...mir,
+        functions: mir.functions.map((fn) =>
+          fn !== main
+            ? fn
+            : {
+                ...fn,
+                localTypes: fn.localTypes.map((type, ordinal) =>
+                  ordinal === callable.ordinal
+                    ? {
+                        ...value,
+                        environment: { ...environment, fields: environment.fields.map(forge) },
+                      }
+                    : type,
+                ),
+              },
         ),
-      },
-    }
-    const violations = yield* MirVerification.verify({
-      ...mir,
-      functions: mir.functions.map((fn) =>
-        fn !== main
-          ? fn
-          : {
-              ...fn,
-              localTypes: fn.localTypes.map((type, ordinal) =>
-                ordinal === callable.ordinal ? forged : type,
-              ),
-            },
-      ),
-    })
+      }).pipe(
+        Effect.map((violations) =>
+          violations.some(
+            (violation) =>
+              violation.rule === 'InvalidCallableOperation' &&
+              violation.detail.startsWith('callable application'),
+          ),
+        ),
+      )
     assert.isTrue(
-      violations.some(
-        (violation) =>
-          violation.rule === 'InvalidCallableOperation' &&
-          violation.detail.startsWith('callable application'),
+      yield* forging((field) =>
+        field.access === 'Copy' ? { ...field, access: 'Exclusive' } : field,
+      ),
+    )
+    assert.isTrue(
+      yield* forging((field) =>
+        field.access === 'Exclusive' ? { ...field, access: 'Shared' } : field,
+      ),
+    )
+    assert.isTrue(
+      yield* forging((field) =>
+        Type.isSlice(field.type) ? { ...field, type: { ...field.type, element: 'bool' } } : field,
       ),
     )
   }),

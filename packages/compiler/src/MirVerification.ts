@@ -2061,12 +2061,15 @@ const capturedFieldPasses = (
     )
   if (field.representation === 'Callable') return acceptsRuntimeOperand(field.type, parameter)
   // Layout stores a shared or exclusive capture by value only when the captured value is itself a
-  // reference or slice; the backend passes it to the parameter as stored.
+  // reference or slice (`Layout.borrowedCapture`); the backend passes it as stored, so its own
+  // access must be the captured access.
+  const descriptorAccess =
+    SilkType.isReference(field.type) || SilkType.isSlice(field.type) ? field.type.access : undefined
   return (
     (field.access === 'Take' ||
       field.access === 'Copy' ||
-      SilkType.isReference(field.type) ||
-      SilkType.isSlice(field.type)) &&
+      ((field.access === 'Shared' || field.access === 'Exclusive') &&
+        descriptorAccess === field.access)) &&
     acceptsRuntimeOperand(field.type, parameter)
   )
 }
