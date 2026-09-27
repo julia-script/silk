@@ -2492,10 +2492,12 @@ export const discover = (
   }
   trace('Instances.expandWorklist', () => {
     while (true) {
-      // A declaration proved discriminating mid-round leaves the guards below it already taken
-      // without its ancestry, so the round is abandoned rather than expanded further: without that
-      // guard an unbounded specialization would keep scheduling work the restart discards anyway.
-      for (let cursor = 0; cursor < pending.length && !discriminatingGrew; cursor += 1) {
+      // A round drains even after a family proves discriminating. That family is recorded from its
+      // next ancestry push, so a growing chain through it is guarded at most one level later, and
+      // the round terminates under the same finite measures as the final attempt. Restarting once
+      // per quiescent round, instead of abandoning at each promotion, keeps the number of attempts
+      // proportional to promotion waves rather than to every family realized at a second key.
+      for (let cursor = 0; cursor < pending.length; cursor += 1) {
         const context = pending[cursor]
         if (context === undefined) continue
         queuedContexts.delete(context)
@@ -2616,10 +2618,6 @@ export const discover = (
           }
         }
       }
-      if (discriminatingGrew) {
-        restartDiscovery()
-        continue
-      }
       pending.length = 0
 
       const currentInstances = [...prepared]
@@ -2726,6 +2724,16 @@ export const discover = (
   })
   // Earlier attempts may have analyzed keys the final attempt does not reach.
   const reached = (text: string): boolean => recordedContexts.has(text)
+  // Analysis caches persist across attempts, so their insertion order records which discarded
+  // attempt first analyzed a key. Publish them in the final attempt's reach order instead; items
+  // of one key keep their deterministic within-body order (the sort is stable).
+  const reachOrdinal = new Map([...recordedContexts.keys()].map((text, ordinal) => [text, ordinal]))
+  const inReachOrder = <A>(items: ReadonlyArray<A>, keyOf: (item: A) => string): Array<A> =>
+    items.toSorted(
+      (left, right) =>
+        (reachOrdinal.get(keyOf(left)) ?? reachOrdinal.size) -
+        (reachOrdinal.get(keyOf(right)) ?? reachOrdinal.size),
+    )
   for (const text of prepared.keys()) if (!reached(text)) prepared.delete(text)
   for (const text of preparedUnavailableOwnership.keys())
     if (!reached(text)) preparedUnavailableOwnership.delete(text)
@@ -2733,7 +2741,7 @@ export const discover = (
     if (!reached(text)) specializationFailures.delete(text)
   for (const [text, call] of recordedCalls)
     if (!reached(keyText(call.owner))) recordedCalls.delete(text)
-  for (const { key, diagnostic, published } of reported) {
+  for (const { key, diagnostic, published } of inReachOrder(reported, (entry) => entry.key)) {
     if (!reached(key)) continue
     if (Location.isShared(diagnostic.span)) sharedDiagnostics.push({ key, diagnostic })
     else
@@ -2761,9 +2769,13 @@ export const discover = (
   }
   // Success identities may resolve through another instance's block, so they are traced only once
   // every instance is prepared.
-  const preparedInstances = [...prepared.values()].map((candidate) => candidate.instance)
+  const preparedInstances = inReachOrder([...prepared.values()], ({ instance }) =>
+    keyText(instance.key),
+  ).map((candidate) => candidate.instance)
   const instances = trace('Instances.finalizeInstances', () => {
-    const instances = [...prepared.values()].map(({ instance, lifetimes }) => {
+    const instances = inReachOrder([...prepared.values()], ({ instance }) =>
+      keyText(instance.key),
+    ).map(({ instance, lifetimes }) => {
       const checked = trace(
         'Instances.checkOwnership',
         () =>
@@ -2810,7 +2822,10 @@ export const discover = (
     return instances
   })
   const unavailableOwnership = trace('Instances.checkUnavailableOwnership', () => {
-    const unavailableOwnership = [...preparedUnavailableOwnership.values()].map((candidate) => {
+    const unavailableOwnership = inReachOrder(
+      [...preparedUnavailableOwnership.values()],
+      (candidate) => keyText(candidate.key),
+    ).map((candidate) => {
       const checked = ResidualOwnership.check(
         residualOwnership,
         Ownership.input(
@@ -2874,7 +2889,10 @@ export const discover = (
     knownExecutionNodes.has(node)
       ? (summaries.get(node) ?? SuspensionMode.direct)
       : unavailableSummary
-  const callInstances = [...recordedCalls.values(), ...providerCalls.values()]
+  const callInstances = [
+    ...inReachOrder([...recordedCalls.values()], (call) => keyText(call.owner)),
+    ...providerCalls.values(),
+  ]
   const generatedAggregates = Residualization.generatedAggregates(residualization)
   return {
     _tag: 'InstanceDiscovery',
@@ -2936,7 +2954,9 @@ export const discover = (
       summary: nonParkingSummaryOfNode(obligation.node),
     })),
     residualizationDiagnostics: [...residualizationDiagnostics.values()],
-    specializationFailures: [...specializationFailures.values()],
+    specializationFailures: inReachOrder([...specializationFailures.values()], (failure) =>
+      keyText(failure.key),
+    ),
     violations: violations,
     counters: {
       _tag: 'InstanceDiscoveryCounters',
