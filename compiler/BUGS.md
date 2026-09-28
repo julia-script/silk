@@ -1,9 +1,10 @@
 # Compiler findings
 
-## Scalar enum equality can leave a native call target unresolved
+## Scalar enum equality native call target — fixed in bootstrap
 
-**Status:** open bootstrap native-emission bug, observed on 2026-09-28. The method-selection
-test now uses explicit variant patterns; this does not fix the bootstrap compiler.
+**Status:** fixed on main by [#571](https://github.com/julia-script/silk/pull/571) and synced
+to selfhost by [#572](https://github.com/julia-script/silk/pull/572). The method-selection test
+still uses explicit variant patterns; removing that source workaround remains open.
 
 At selfhost method head `08d5ce8aa2fe12f7760d1ed87ee831d00333fc7c`,
 `SemanticCases.silk` defines `bodyRetainsReceiverPass(body, mode)` and calls it from a
@@ -22,10 +23,17 @@ NODE_OPTIONS=--max-old-space-size=8192 node packages/cli/dist/bin.js test \
 ```
 
 The [Focused Linux run](https://github.com/julia-script/silk/actions/runs/36417381326)
-records the failure before any native test executes. The intended behavior is a resolved helper
-call and a boolean comparison of the enum variants. A small standalone repro and main-first
-bootstrap repair remain to be done; this entry records the exact source-written reproducer rather
-than claiming a smaller fixture has been verified.
+records the original failure before any native test executes. The repair loads a copyable scalar
+enum from an `EnvironmentBorrow` before `EnumEquality`; the native corpus case
+`scalar-enum-equality-from-borrowed-variant` failed before the repair and passes after it.
+
+The later `sameImplementationKind` failure in [#568](https://github.com/julia-script/silk/pull/568)
+used a `packages/compiler/dist/LowerExpression.js` built before #571, although the branch's
+source included #572. That compiled file still accepted only direct `Enum` operands. With a fresh
+main bootstrap, #568's source at `05d44cfe` compiled and emitted 9,433 native symbols when its
+explicit variant match was changed back to `property == other`. One unrelated specialization
+identity assertion failed at runtime; no second enum call-target failure reproduced. Rebuild the
+bootstrap outputs after syncing source changes before diagnosing another native emission defect.
 
 ## Instance discovery multiplies call-path contexts for the full parser
 
