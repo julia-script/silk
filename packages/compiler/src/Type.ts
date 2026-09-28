@@ -2339,7 +2339,7 @@ const computeIdentity = (self: Exclude<Type, string>): number => {
   if (isNever(self)) return internIdentity('Never')
   if (isNominal(self))
     return internIdentity('Nominal', [
-      self.sealed ?? '',
+      self.sealed === undefined ? 'nominal' : `sealed:${self.sealed}`,
       self.module,
       self.name,
       ...self.arguments.map(genericArgumentIdentity),
@@ -2378,8 +2378,9 @@ const computeIdentity = (self: Exclude<Type, string>): number => {
       schema === undefined
         ? 0
         : internIdentity('QuantifiedCallableSchema', [
-            schema.source?.module ?? '',
-            schema.source?.name ?? '',
+            schema.source === undefined
+              ? 0
+              : internIdentity('CallableSchemaSource', [schema.source.module, schema.source.name]),
             schema.contractKey,
             internIdentity('ConstraintKeys', schema.constraintKeys),
             internIdentity('EvidenceKeys', schema.evidenceKeys),
