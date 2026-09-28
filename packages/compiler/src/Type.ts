@@ -1917,18 +1917,28 @@ const callableIdentityKey = (self: CallableIdentityArgument): string =>
     self.environment === undefined ? '' : callableEnvironmentKey(self.environment),
   ].join('')
 
-/** Memoized on the argument object itself, like `key`. */
 const cachedGenericArgumentKey: unique symbol = Symbol('Type.genericArgumentKey')
+const cachedKey: unique symbol = Symbol('Type.key')
+const cachedRuntimeKey: unique symbol = Symbol('Type.runtimeKey')
+const cachedTextKeyLimit = 128
 
-export const genericArgumentKey = (self: GenericArgument): string => {
-  if (typeof self === 'string') return computeGenericArgumentKey(self)
-  const cached: unknown = Reflect.get(self, cachedGenericArgumentKey)
+const presentationKey = <T extends object>(
+  self: T,
+  cache: symbol,
+  compute: () => string,
+): string => {
+  const cached: unknown = Reflect.get(self, cache)
   if (typeof cached === 'string') return cached
-  const computed = computeGenericArgumentKey(self)
-  if (Object.isExtensible(self))
-    Object.defineProperty(self, cachedGenericArgumentKey, { value: computed })
+  const computed = compute()
+  if (computed.length <= cachedTextKeyLimit && Object.isExtensible(self))
+    Object.defineProperty(self, cache, { value: computed })
   return computed
 }
+
+export const genericArgumentKey = (self: GenericArgument): string =>
+  typeof self === 'string'
+    ? computeGenericArgumentKey(self)
+    : presentationKey(self, cachedGenericArgumentKey, () => computeGenericArgumentKey(self))
 
 const computeGenericArgumentKey = (self: GenericArgument): string => {
   if (Lifetime.isLifetime(self)) return Lifetime.key(self)
@@ -2012,7 +2022,7 @@ export const compareGenericArgument = (left: GenericArgument, right: GenericArgu
 
 /** Tests canonical structural equality across all generic argument kinds. */
 export const equalsGenericArgument = (left: GenericArgument, right: GenericArgument): boolean =>
-  genericArgumentKey(left) === genericArgumentKey(right)
+  genericArgumentIdentity(left) === genericArgumentIdentity(right)
 
 /** Computes one deterministic unsigned FNV-1a hash of a canonical generic argument key. */
 export const hashGenericArgument = (self: GenericArgument): number => {
@@ -2156,23 +2166,11 @@ const hasTypeDiscriminant = (self: unknown): self is Type =>
     typeof self._tag === 'string' &&
     semanticTypeTags.has(self._tag))
 
-/**
- * Each immutable type object carries its canonical key once computed, in a non-enumerable
- * property that spreads, clones and structural comparisons never see. Most keyed types are
- * fresh substitution results keyed once: a weak map paid an ephemeron insertion per type and
- * made every major collection trace the table.
- */
-const cachedKey: unique symbol = Symbol('Type.key')
-
-/** Returns the canonical deterministic key used for equality and ordering. */
-export const key = (self: Type): string => {
-  if (typeof self === 'string') return computeKey(self)
-  const cached: unknown = Reflect.get(self, cachedKey)
-  if (typeof cached === 'string') return cached
-  const computed = computeKey(self)
-  if (Object.isExtensible(self)) Object.defineProperty(self, cachedKey, { value: computed })
-  return computed
-}
+/** Returns the canonical deterministic key used for presentation and ordering. */
+export const key = (self: Type): string =>
+  typeof self === 'string'
+    ? computeKey(self)
+    : presentationKey(self, cachedKey, () => computeKey(self))
 
 /**
  * Admits one immutable semantic type from untyped compiler data.
@@ -2249,8 +2247,191 @@ const computeKey = (self: Type): string => {
   return `union:${self.members.map(key).join('|')}`
 }
 
+const identities = new Map<string, number>()
+const cachedIdentity: unique symbol = Symbol('Type.identity')
+const cachedGenericArgumentIdentity: unique symbol = Symbol('Type.genericArgumentIdentity')
+
+const internIdentity = (tag: string, fields: ReadonlyArray<string | number> = []): number => {
+  const signature = Canonical.record(tag, fields.map(String))
+  const found = identities.get(signature)
+  if (found !== undefined) return found
+  const id = identities.size + 1
+  identities.set(signature, id)
+  return id
+}
+
+/** Exact semantic identity without retaining recursively concatenated type keys. */
+export const identity = (self: Type): number => {
+  if (typeof self === 'string') return internIdentity('Builtin', [self])
+  const cached: unknown = Reflect.get(self, cachedIdentity)
+  if (typeof cached === 'number') return cached
+  const computed = computeIdentity(self)
+  if (Object.isExtensible(self)) Object.defineProperty(self, cachedIdentity, { value: computed })
+  return computed
+}
+
+/** Exact erased-argument identity; Type arguments share their Type identity. */
+export const genericArgumentIdentity = (self: GenericArgument): number => {
+  if (typeof self === 'string') return identity(self)
+  if (
+    !Lifetime.isLifetime(self) &&
+    !isUnavailableGenericArgument(self) &&
+    !isRepresentationParameterArgument(self) &&
+    !isOpaqueRepresentationArgument(self) &&
+    !isExactRepresentationArgument(self) &&
+    !isCompositeEffectRepresentationArgument(self) &&
+    !isEffectIdentityArgument(self) &&
+    !isCallableIdentityArgument(self) &&
+    !isRequirementRowArgument(self)
+  )
+    return identity(self)
+  const cached: unknown = Reflect.get(self, cachedGenericArgumentIdentity)
+  if (typeof cached === 'number') return cached
+  const computed = computeGenericArgumentIdentity(self)
+  if (Object.isExtensible(self))
+    Object.defineProperty(self, cachedGenericArgumentIdentity, { value: computed })
+  return computed
+}
+
+const computeGenericArgumentIdentity = (self: GenericArgument): number => {
+  if (Lifetime.isLifetime(self)) return internIdentity('Lifetime', [Lifetime.key(self)])
+  if (isUnavailableGenericArgument(self))
+    return internIdentity('Unavailable', [self.expectedKind, self.reason])
+  if (isRepresentationParameterArgument(self))
+    return internIdentity('RepresentationParameter', [identity(self.parameter)])
+  if (isOpaqueRepresentationArgument(self))
+    return internIdentity('OpaqueRepresentation', [
+      opaqueFamilyKey(self.family),
+      ...self.arguments.map(genericArgumentIdentity),
+      identity(self.contract),
+    ])
+  if (isExactRepresentationArgument(self))
+    return internIdentity('ExactRepresentation', [
+      genericArgumentIdentity(self.identity),
+      identity(self.contract),
+    ])
+  if (isCompositeEffectRepresentationArgument(self))
+    return internIdentity('CompositeEffectRepresentation', [
+      identity(self.contract),
+      ...self.alternatives.map(genericArgumentIdentity),
+    ])
+  if (isEffectIdentityArgument(self))
+    return internIdentity('EffectIdentity', [
+      self.identity,
+      ...(self.owner === undefined
+        ? []
+        : [
+            self.owner.declaration.module,
+            self.owner.declaration.name,
+            ...self.owner.typeArguments.map(genericArgumentIdentity),
+            executableOwnerStaticKey(self.owner),
+          ]),
+    ])
+  if (isCallableIdentityArgument(self))
+    return internIdentity('CallableIdentity', [callableIdentityKey(self)])
+  if (isRequirementRowArgument(self))
+    return internIdentity('RequirementRow', [RowAlgebra.key(requirementRowPolicy(), self.row)])
+  return identity(self)
+}
+
+const computeIdentity = (self: Exclude<Type, string>): number => {
+  if (isString(self)) return internIdentity('String', [Lifetime.key(self.lifetime)])
+  if (isNever(self)) return internIdentity('Never')
+  if (isNominal(self))
+    return internIdentity('Nominal', [
+      self.sealed ?? '',
+      self.module,
+      self.name,
+      ...self.arguments.map(genericArgumentIdentity),
+    ])
+  if (isParameter(self) && self.kind === 'Lifetime')
+    return internIdentity('Lifetime', [
+      Lifetime.key(Lifetime.bound(self.owner, self.ordinal, self.name)),
+    ])
+  if (isParameter(self))
+    return internIdentity('Parameter', [
+      self.sectionBinder === true ? 'section-binder' : 'parameter',
+      self.kind,
+      self.owner.module,
+      self.owner.name,
+      self.ordinal,
+      ...self.staticProperties,
+    ])
+  if (isFixedArray(self)) return internIdentity('FixedArray', [self.length, identity(self.element)])
+  if (isSlice(self))
+    return internIdentity('Slice', [
+      self.access,
+      Lifetime.key(self.lifetime),
+      identity(self.element),
+    ])
+  if (isReference(self))
+    return internIdentity('Reference', [
+      self.access,
+      Lifetime.key(self.lifetime),
+      identity(self.target),
+    ])
+  if (isPointer(self))
+    return internIdentity('Pointer', [pointerQualifierKey(self), identity(self.pointee)])
+  if (isCallable(self)) {
+    const schema = self.schema
+    const schemaIdentity =
+      schema === undefined
+        ? 0
+        : internIdentity('QuantifiedCallableSchema', [
+            schema.source?.module ?? '',
+            schema.source?.name ?? '',
+            schema.contractKey,
+            internIdentity('ConstraintKeys', schema.constraintKeys),
+            internIdentity('EvidenceKeys', schema.evidenceKeys),
+            internIdentity(
+              'SubstitutionEntries',
+              [...schema.substitution.entries()]
+                .sort(([left], [right]) => compareText(left, right))
+                .map(([parameter_, argument]) =>
+                  internIdentity('SubstitutionEntry', [
+                    parameter_,
+                    genericArgumentIdentity(argument),
+                  ]),
+                ),
+            ),
+          ])
+    return internIdentity('Callable', [
+      executableLifetimeKey(self),
+      self.unsafe ? 'unsafe' : 'safe',
+      self.mode,
+      ...self.parameters.map(identity),
+      identity(self.result),
+      schemaIdentity,
+    ])
+  }
+  if (isForeignFunction(self))
+    return internIdentity('ForeignFunction', [
+      executableLifetimeKey(self),
+      ForeignContract.key(self.contract),
+      ...self.parameters.map(identity),
+      identity(self.result),
+    ])
+  if (isEffect(self))
+    return internIdentity('Effect', [
+      executableLifetimeKey(self),
+      self.access,
+      identity(self.success),
+      RowAlgebra.key(failureRowPolicy(), self.failureRow),
+      RowAlgebra.key(requirementRowPolicy(), self.requirementRow),
+    ])
+  if (isRepresented(self))
+    return internIdentity('Represented', [
+      identity(self.contract),
+      isCallable(self.representation.requiredBound)
+        ? identity(self.representation.requiredBound)
+        : 0,
+      genericArgumentIdentity(self.representation.argument),
+    ])
+  return internIdentity('Union', self.members.map(identity))
+}
+
 /** Compares semantic types by canonical identity. */
-export const equals = (left: Type, right: Type): boolean => key(left) === key(right)
+export const equals = (left: Type, right: Type): boolean => identity(left) === identity(right)
 
 export interface RepresentationDivergence {
   readonly left: RepresentationArgument
@@ -4392,22 +4573,153 @@ export const runtimeGenericArgumentKey = (self: GenericArgument): string => {
   return runtimeKey(self)
 }
 
-/** Memoized on the type object itself, like `key`. */
-const cachedRuntimeKey: unique symbol = Symbol('Type.runtimeKey')
+/** Encodes layout/instance identity for deterministic presentation. */
+export const runtimeKey = (self: Type): string =>
+  typeof self === 'string'
+    ? key(self)
+    : presentationKey(self, cachedRuntimeKey, () => computeRuntimeKey(self))
 
-/**
- * Encodes a layout/instance type identity with all lifetime proof arguments erased.
- * Like semantic keys, runtime keys are memoized on the immutable type object in a
- * non-enumerable property: instance keys and layouts key many fresh substitution results
- * exactly once, where a weak map paid an ephemeron insertion each and grew every major GC.
- */
-export const runtimeKey = (self: Type): string => {
-  if (typeof self === 'string') return key(self)
-  const cached: unknown = Reflect.get(self, cachedRuntimeKey)
-  if (typeof cached === 'string') return cached
-  const computed = computeRuntimeKey(self)
-  if (Object.isExtensible(self)) Object.defineProperty(self, cachedRuntimeKey, { value: computed })
+const cachedRuntimeIdentity: unique symbol = Symbol('Type.runtimeIdentity')
+const cachedRuntimeGenericArgumentIdentity: unique symbol = Symbol(
+  'Type.runtimeGenericArgumentIdentity',
+)
+
+/** Exact runtime identity after erasing proof-only lifetime arguments. */
+export const runtimeIdentity = (self: Type): number => {
+  if (typeof self === 'string') return identity(self)
+  const cached: unknown = Reflect.get(self, cachedRuntimeIdentity)
+  if (typeof cached === 'number') return cached
+  const computed = computeRuntimeIdentity(self)
+  if (Object.isExtensible(self))
+    Object.defineProperty(self, cachedRuntimeIdentity, { value: computed })
   return computed
+}
+
+export const runtimeGenericArgumentIdentity = (self: GenericArgument): number => {
+  if (Lifetime.isLifetime(self)) return internIdentity('RuntimeEmpty')
+  if (
+    !isUnavailableGenericArgument(self) &&
+    !isRepresentationParameterArgument(self) &&
+    !isOpaqueRepresentationArgument(self) &&
+    !isExactRepresentationArgument(self) &&
+    !isCompositeEffectRepresentationArgument(self) &&
+    !isEffectIdentityArgument(self) &&
+    !isCallableIdentityArgument(self) &&
+    !isRequirementRowArgument(self)
+  )
+    return runtimeIdentity(self)
+  const cached: unknown = Reflect.get(self, cachedRuntimeGenericArgumentIdentity)
+  if (typeof cached === 'number') return cached
+  const computed = computeRuntimeGenericArgumentIdentity(self)
+  if (Object.isExtensible(self))
+    Object.defineProperty(self, cachedRuntimeGenericArgumentIdentity, { value: computed })
+  return computed
+}
+
+const runtimeArgumentIdentities = (self: ReadonlyArray<GenericArgument>): ReadonlyArray<number> =>
+  self.flatMap((argument) =>
+    Lifetime.isLifetime(argument) ? [] : [runtimeGenericArgumentIdentity(argument)],
+  )
+
+const computeRuntimeGenericArgumentIdentity = (self: GenericArgument): number => {
+  if (Lifetime.isLifetime(self)) return internIdentity('RuntimeEmpty')
+  if (isUnavailableGenericArgument(self)) return genericArgumentIdentity(self)
+  if (isRepresentationParameterArgument(self))
+    return internIdentity('RuntimeRepresentationParameter', [runtimeIdentity(self.parameter)])
+  if (isRequirementRowArgument(self))
+    return internIdentity('RuntimeRequirementRow', [runtimeRequirementsRowKey(self.row)])
+  if (isOpaqueRepresentationArgument(self))
+    return internIdentity('RuntimeOpaque', [
+      opaqueFamilyKey(self.family),
+      runtimeIdentity(self.contract),
+      ...runtimeArgumentIdentities(self.arguments),
+    ])
+  if (isExactRepresentationArgument(self))
+    return internIdentity('RuntimeExact', [
+      runtimeGenericArgumentIdentity(self.identity),
+      runtimeIdentity(self.contract),
+    ])
+  if (isCompositeEffectRepresentationArgument(self))
+    return internIdentity('RuntimeCompositeEffect', [
+      runtimeIdentity(self.contract),
+      ...[...new Set(self.alternatives.map(runtimeGenericArgumentIdentity))].sort((a, b) => a - b),
+    ])
+  if (isEffectIdentityArgument(self))
+    return internIdentity('RuntimeEffectIdentity', [
+      self.identity,
+      self.owner === undefined ? '' : runtimeOwnerKey(self.owner),
+    ])
+  if (isCallableIdentityArgument(self))
+    return internIdentity('RuntimeCallableIdentity', [
+      self.identity,
+      self.target._tag === 'Declaration'
+        ? Canonical.record('Declaration', [self.target.module, self.target.name])
+        : Canonical.record('Builtin', [
+            self.target.actor,
+            self.target.operation,
+            self.target.intrinsic.actor,
+            self.target.intrinsic.name,
+          ]),
+      ...runtimeArgumentIdentities(self.typeArguments),
+      self.environment === undefined ? '' : runtimeCallableEnvironmentIdentityKey(self.environment),
+    ])
+  return runtimeIdentity(self)
+}
+
+const computeRuntimeIdentity = (self: Exclude<Type, string>): number => {
+  if (isString(self)) return internIdentity('RuntimeString')
+  if (isParameter(self))
+    return self.kind === 'Lifetime' ? internIdentity('RuntimeEmpty') : identity(self)
+  if (isNominal(self))
+    return internIdentity('RuntimeNominal', [
+      self.module,
+      self.name,
+      self.sealed ?? '',
+      ...runtimeArgumentIdentities(self.arguments),
+    ])
+  if (isFixedArray(self))
+    return internIdentity('RuntimeArray', [self.length, runtimeIdentity(self.element)])
+  if (isSlice(self))
+    return internIdentity('RuntimeSlice', [self.access, runtimeIdentity(self.element)])
+  if (isReference(self))
+    return internIdentity('RuntimeReference', [self.access, runtimeIdentity(self.target)])
+  if (isPointer(self))
+    return internIdentity('RuntimePointer', [
+      pointerQualifierKey(self),
+      runtimeIdentity(self.pointee),
+    ])
+  if (isForeignFunction(self))
+    return internIdentity('RuntimeForeignFunction', [
+      self.abi,
+      ForeignContract.key(self.contract),
+      ...self.parameters.map(runtimeIdentity),
+      runtimeIdentity(self.result),
+    ])
+  if (isCallable(self))
+    return internIdentity('RuntimeCallable', [
+      self.unsafe ? 'unsafe' : 'safe',
+      self.mode,
+      ...self.parameters.map(runtimeIdentity),
+      runtimeIdentity(self.result),
+      self.schema === undefined ? '' : runtimeCallableSchemaKey(self.schema),
+    ])
+  if (isEffect(self))
+    return internIdentity('RuntimeEffect', [
+      self.access,
+      runtimeIdentity(self.success),
+      runtimeFailureRowKey(self.failureRow),
+      runtimeRequirementsRowKey(self.requirementRow),
+    ])
+  if (isRepresented(self))
+    return internIdentity('RuntimeRepresented', [
+      runtimeIdentity(self.contract),
+      runtimeIdentity(self.representation.requiredBound),
+      runtimeGenericArgumentIdentity(self.representation.argument),
+    ])
+  return internIdentity(
+    'RuntimeUnion',
+    [...new Set(self.members.map(runtimeIdentity))].sort((a, b) => a - b),
+  )
 }
 
 const computeRuntimeKey = (self: Exclude<Type, string>): string => {

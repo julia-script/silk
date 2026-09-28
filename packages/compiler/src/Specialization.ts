@@ -33,7 +33,7 @@ export const key = (self: Specialization): string => {
   return cached
 }
 
-/** Memoized on the specialization object itself, like `Type.key`. */
+/** Memoized on the specialization object itself. */
 const cachedRuntimeKey: unique symbol = Symbol('Specialization.runtimeKey')
 
 /** Identifies machine-code specialization while retaining semantic arguments on the value. */
