@@ -1889,29 +1889,107 @@ export const discover = (
   // depends only on runtime identities, so top-level questions are memoized for the discovery.
   const strictCleanupSubtermCache = new Map<string, boolean>()
   const isStrictCleanupSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
-    const cacheKey = `${runtimeOrdinal(candidate)},${runtimeOrdinal(whole)}`
+    const candidateOrdinal = runtimeOrdinal(candidate)
+    const wholeOrdinal = runtimeOrdinal(whole)
+    const cacheKey = `${candidateOrdinal},${wholeOrdinal}`
     let cached = strictCleanupSubtermCache.get(cacheKey)
     if (cached === undefined) {
-      cached = strictCleanupSubtermUnder(candidate, whole, new Map(), new Map())
+      cached = strictCleanupSubtermUnder(
+        { type: candidate, ordinal: candidateOrdinal },
+        { type: whole, ordinal: wholeOrdinal },
+        emptyUnfolding,
+        new Map(),
+      )
       strictCleanupSubtermCache.set(cacheKey, cached)
     }
     return cached
   }
+  interface RuntimeType<T extends Type.Type = Type.Type> {
+    readonly type: T
+    readonly ordinal: number
+  }
+  /**
+   * The nominals already unfolded on one search path, by declaration. The answer reads the path
+   * only as this mapping, so its key is the sorted set of unfolded ordinals: paths reaching the
+   * same mapping in another order share one memo entry. The key is built once per extension.
+   */
+  interface Unfolding {
+    readonly byDeclaration: ReadonlyMap<string, RuntimeType<Type.Nominal>>
+    readonly key: string
+  }
+  const emptyUnfolding: Unfolding = { byDeclaration: new Map(), key: '' }
+  const unfold = (
+    self: Unfolding,
+    declaration: string,
+    nominal: RuntimeType<Type.Nominal>,
+  ): Unfolding => {
+    const byDeclaration = new Map(self.byDeclaration).set(declaration, nominal)
+    return {
+      byDeclaration,
+      key: Array.from(byDeclaration.values(), (entry) => entry.ordinal)
+        .sort((left, right) => left - right)
+        .join(','),
+    }
+  }
+  // Runtime-level facts about one type, shared by every search that reaches an equal type: the
+  // distinct nominals it contains, and each nominal's field types under its arguments.
+  const containedNominals = new Map<
+    number,
+    ReadonlyArray<{ readonly declaration: string; readonly nominal: RuntimeType<Type.Nominal> }>
+  >()
+  const nominalsIn = (whole: RuntimeType) => {
+    let found = containedNominals.get(whole.ordinal)
+    if (found === undefined) {
+      const byKey = new Map<string, Type.Nominal>()
+      Type.visit(whole.type, (type) => {
+        if (Type.isNominal(type)) byKey.set(Type.runtimeKey(type), type)
+      })
+      found = Array.from(byKey.values(), (nominal) => ({
+        declaration: `${nominal.module}\u0000${nominal.name}`,
+        nominal: { type: nominal, ordinal: runtimeOrdinal(nominal) },
+      }))
+      containedNominals.set(whole.ordinal, found)
+    }
+    return found
+  }
+  const nominalFields = new Map<number, ReadonlyArray<RuntimeType> | undefined>()
+  const fieldsOf = (nominal: RuntimeType<Type.Nominal>): ReadonlyArray<RuntimeType> | undefined => {
+    if (nominalFields.has(nominal.ordinal)) return nominalFields.get(nominal.ordinal)
+    const declaration = DeclarationFacts.byCanonical(index, {
+      _tag: 'CanonicalDeclarationId',
+      module: nominal.type.module,
+      name: nominal.type.name,
+    })
+    let fields: ReadonlyArray<RuntimeType> | undefined
+    if (declaration?._tag === 'StructDeclaration' || declaration?._tag === 'UnionDeclaration') {
+      const substitution =
+        TypeInference.substitution(
+          declaration.typeParameters.map((parameter) => parameter.type),
+          nominal.type.arguments,
+        ) ?? new Map()
+      const declared =
+        declaration._tag === 'StructDeclaration'
+          ? declaration.fields
+          : declaration.variants.flatMap((variant) => variant.fields)
+      fields = declared.flatMap((field) => {
+        if (field.declaredType._tag !== 'Resolved') return []
+        const type = Type.substitute(field.declaredType.type, substitution)
+        return [{ type, ordinal: runtimeOrdinal(type) }]
+      })
+    }
+    nominalFields.set(nominal.ordinal, fields)
+    return fields
+  }
   // A nested answer also depends on the unfolding path, which begins at the question's own root,
   // so it is rarely shared between questions. It is memoized only while one question is answered;
-  // retaining it for the whole discovery kept millions of path-keyed entries alive. The answer reads
-  // the path only as a declaration-to-nominal mapping, so the key is the sorted set of unfolded
-  // nominals: paths reaching the same mapping in another order share one entry.
+  // retaining it for the whole discovery kept millions of path-keyed entries alive.
   const strictCleanupSubtermUnder = (
-    candidate: Type.Type,
-    whole: Type.Type,
-    unfolding: ReadonlyMap<string, Type.Nominal>,
+    candidate: RuntimeType,
+    whole: RuntimeType,
+    unfolding: Unfolding,
     memo: Map<string, boolean>,
   ): boolean => {
-    const unfolded = Array.from(unfolding.values(), runtimeOrdinal).sort(
-      (left, right) => left - right,
-    )
-    const memoKey = `${runtimeOrdinal(candidate)},${runtimeOrdinal(whole)}:${unfolded.join(',')}`
+    const memoKey = `${whole.ordinal}:${unfolding.key}`
     let memoized = memo.get(memoKey)
     if (memoized === undefined) {
       memoized = computeStrictCleanupSubterm(candidate, whole, unfolding, memo)
@@ -1920,60 +1998,39 @@ export const discover = (
     return memoized
   }
   const computeStrictCleanupSubterm = (
-    candidate: Type.Type,
-    whole: Type.Type,
-    unfolding: ReadonlyMap<string, Type.Nominal>,
+    candidate: RuntimeType,
+    whole: RuntimeType,
+    unfolding: Unfolding,
     memo: Map<string, boolean>,
   ): boolean => {
-    if (sameRuntimeType(candidate, whole)) return false
-    const candidateDeclaration = nominalTypeText(candidate)
-    const wholeDeclaration = nominalTypeText(whole)
+    if (candidate.ordinal === whole.ordinal) return false
+    const candidateDeclaration = nominalTypeText(candidate.type)
+    const wholeDeclaration = nominalTypeText(whole.type)
     if (candidateDeclaration !== undefined && candidateDeclaration === wholeDeclaration)
       return (
-        Type.isNominal(candidate) &&
-        Type.isNominal(whole) &&
-        strictlyDescendsSameNominal(candidate, whole)
+        Type.isNominal(candidate.type) &&
+        Type.isNominal(whole.type) &&
+        strictlyDescendsSameNominal(candidate.type, whole.type)
       )
-    if (isStrictRuntimeStructuralSubterm(candidate, whole)) return true
-    const nominals = new Map<string, Type.Nominal>()
-    Type.visit(whole, (type) => {
-      if (Type.isNominal(type)) nominals.set(Type.runtimeKey(type), type)
-    })
-    for (const nominal of nominals.values()) {
-      const declarationText = `${nominal.module}\u0000${nominal.name}`
-      const prior = unfolding.get(declarationText)
+    if (isStrictRuntimeStructuralSubterm(candidate.type, whole.type)) return true
+    for (const { declaration, nominal } of nominalsIn(whole)) {
+      const prior = unfolding.byDeclaration.get(declaration)
       if (
         prior !== undefined &&
-        (sameRuntimeType(nominal, prior) || !strictlyDescendsSameNominal(nominal, prior))
+        (prior.ordinal === nominal.ordinal ||
+          !strictlyDescendsSameNominal(nominal.type, prior.type))
       )
         continue
-      const declaration = DeclarationFacts.byCanonical(index, {
-        _tag: 'CanonicalDeclarationId',
-        module: nominal.module,
-        name: nominal.name,
-      })
-      if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
-        continue
-      const substitution =
-        TypeInference.substitution(
-          declaration.typeParameters.map((parameter) => parameter.type),
-          nominal.arguments,
-        ) ?? new Map()
-      const nextUnfolding = new Map(unfolding).set(declarationText, nominal)
-      const fields =
-        declaration._tag === 'StructDeclaration'
-          ? declaration.fields
-          : declaration.variants.flatMap((variant) => variant.fields)
+      const fields = fieldsOf(nominal)
+      if (fields === undefined) continue
+      const next = unfold(unfolding, declaration, nominal)
       // A field of exactly the candidate's type is itself a strict subterm of `whole`.
       if (
-        fields.some((field) => {
-          if (field.declaredType._tag !== 'Resolved') return false
-          const type = Type.substitute(field.declaredType.type, substitution)
-          return (
-            sameRuntimeType(candidate, type) ||
-            strictCleanupSubtermUnder(candidate, type, nextUnfolding, memo)
-          )
-        })
+        fields.some(
+          (field) =>
+            field.ordinal === candidate.ordinal ||
+            strictCleanupSubtermUnder(candidate, field, next, memo),
+        )
       )
         return true
     }
