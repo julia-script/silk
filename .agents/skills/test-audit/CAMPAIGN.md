@@ -1,116 +1,126 @@
-# Test-pruning campaign
+# Test-audit campaign
 
-Campaign mode prunes one subsystem's whole test surface in one PR: a plugin
-such as `extensions/telegram`, or one core area. The value bar, retention bar,
-candidate evidence, and validation in [SKILL.md](SKILL.md) apply to every
-lane. This file adds the order of work and the lessons of a full campaign.
-Each step ends on its completion criterion; do not start the next step early.
+Use campaign mode for an explicitly requested audit of a whole Silk package or
+subsystem. The value bar, proof tiers, evidence requirements, and validation in
+[SKILL.md](SKILL.md) apply throughout. Cover the complete requested surface without
+turning every audit into a repository-wide cleanup.
 
-## 1. Baseline
+## 1. Scope and baseline
 
-Record the subsystem's test and support line counts and every test file's
-pass/fail state at a pinned `main` SHA. Keep baseline failures in their own
-list: in the Telegram campaign, all three were real delivery bugs, not stale
-tests.
+Record the base SHA, relevant working-tree changes, owned test files, shared corpus
+cases, fixtures, and conformance harnesses. Optionally record production and
+support/test line counts to describe the result; they are not deletion targets.
 
-Done when every in-scope test file has a recorded baseline result.
+Use existing CI results for the exact baseline SHA where available. Run focused
+local baselines for candidates when needed to distinguish existing failures from
+audit regressions. Mark unverified areas explicitly; do not run the whole suite
+just to fill a baseline table. Keep failures separate from deletion candidates.
 
-## 2. Lanes and inventory
+Done when the scope and available baseline evidence are recorded, including gaps.
 
-Split the surface into **lanes** along production owner boundaries, not file
-prefixes. For Telegram these were accounts, commands, context, dispatch,
-inbound, outbound, persistence, transport, shared, harness, and live/QA
-scenarios. Include the subsystem's cases at shared core boundaries and its QA
-and live-proof harness tests.
+## 2. Inventory by owner
 
-Done when every test file and QA scenario the subsystem owns belongs to exactly
-one lane.
+Partition the surface by production responsibility. For a compiler campaign,
+possible boundaries are parsing, resolution/typing, ownership/effects, evaluation,
+lowering, driver/runtime acceptance, and platform conformance. For LLVM, group by
+the actor and the binary or resource contract it owns. Use only relevant groups.
+Include proof outside the obvious test directory, especially shared native corpus
+cases and separately compiled C or Wasm fixtures.
 
-## 3. Read-only ledger per lane
+Done when every in-scope declaration or corpus case has one discovery owner, with
+cross-boundary dependencies recorded.
 
-Give each lane to its own read-only agent. The agent reads every assigned test
-in full, including parameter tables. It also reads the production owners and
-their entry points, callers, history, and CI routing. Each test declaration
-goes into a written **ledger** with one mark. An `it.each` is one declaration
-unless its rows need different marks; then mark each row.
+## 3. Read-only ledger
 
-- `R`: retain, naming the contract and the bug it catches; a retained test that
-  only moves to a better-named file stays `R` with the move noted;
-- `F`: retain the contract but repair the assertion, such as a vacuous negative
-  that passes when only one of several items is missing;
-- `C`: consolidate, naming the owner that absorbs the assertion first: a sibling
-  table case, a stronger boundary suite, or the shared owner in another package;
-- `D`: delete, naming the proof that remains, or why no contract exists.
+Read every assigned test, including parameter rows, plus the production owner,
+callers, history, and CI routing. For large campaigns, use read-only subagents for
+independent owner groups when available; otherwise inspect groups sequentially.
+Keep edits with one coordinating owner to avoid conflicting support-file changes.
 
-Judge a test by its assertions, not its name. One Telegram test named for
-retiring a progress window asserted the window was _not_ cleared.
+Give each declaration a mark and the evidence required by `SKILL.md`:
 
-Done when every declaration in the lane has a mark and an evidence line.
+- `R`: retain, naming its contract and distinct failure mode;
+- `F`: retain the contract but repair an inadequate or vacuous assertion;
+- `C`: consolidate, naming the existing suite or corpus case that absorbs it;
+- `D`: delete, naming remaining proof or explaining why the contract is obsolete.
 
-## 4. Layer plan per lane
+A parameterized declaration is one entry unless rows need different decisions.
+Judge assertions, not names: an analysis-only test cannot prove native execution.
 
-Treat the per-test ledger as input, not as the edit list. A second read-only
-pass, starting from the ledger, looks for the redundant **layer**. In Telegram,
-several dispatch suites replayed the same shared compositor through one mocked
-preview, around stronger real-stream and HTTP-fixture suites. Name the
-**keeper** suite for each contract. Prefer the real transport boundary with a
-fake network over a mocked collaborator. Correct any ledger errors this pass
-finds.
+Done when each declaration has a supported decision, or is explicitly unresolved
+and retained pending evidence.
 
-Done when each lane plan names its retired files, its keeper per contract, the
-assertions to carry into keepers, and the test-only production seams unlocked.
+## 4. Coverage plan
 
-## 5. Cutover
+Review the ledger for redundant layers, not just individual assertions. Name the
+retained owner for each contract and the assertions it must absorb. Choose Silk's
+cheapest adequate tier: analysis for semantic claims, `Evaluation` for compile-time
+execution, native corpus for target-neutral runtime behavior, and structural or C
+fixture proof for lowering/ABI claims. An end-to-end test does not automatically
+subsume a structural invariant or a distinct target-specific failure.
 
-Edit lane by lane. Serialize changes to shared harnesses and support files
-through one owner. With each lane, remove the test-only production seams it
-unlocks: injection parameters, getters, reset exports, and indirection layers.
-Register moved suites in CI routing and test inventories. Update shrink-only
-line-cap baselines. Put durable test-ownership rules in the subsystem's
-`AGENTS.md`, drawn from mistakes this campaign actually found.
+Done when every proposed removal has a retained proof owner or an evidence-backed
+obsolete contract, and each production seam removal has a caller assessment.
 
-Done when every lane plan is applied and each lane's keepers pass.
+## 5. Apply coherent batches
+
+Edit one boundary at a time. Consolidate retained assertions before removing their
+old locations. Remove dead production paths and obsolete support in the same
+batch. Serialize shared harness changes and preserve unrelated working-tree edits.
+
+Check existing Vitest configuration, package scripts, shard selection, and CI
+routing when moving or deleting suites. Update explicit references where needed;
+do not invent test inventories or line-cap gates. Add durable ownership guidance
+to a scoped `AGENTS.md` only when findings justify it. Run focused retained tests.
+
+Done when every accepted plan is applied and its focused checks pass, with
+unresolved candidates left intact and explained.
 
 ## 6. Preservation review
 
-Before claiming completion, have independent reviewers compare deleted
-coverage against the keepers, one reviewer per boundary group. They look for
-contracts that lost their only proof. They also look for new assertions that
-cannot fail, such as a rejection row the production code never reaches. The
-Telegram review found nine real gaps and one unreachable assertion.
+Compare deleted assertions against retained proof to find contracts that lost their
+only witness. Use an independent read-only reviewer for substantial batches when
+available. Check that negative controls reach the intended compiler phase and that
+fixtures do not supply the behavior they purport to test.
 
-For each restored contract, make one deliberate **mutation** of the production
-owner and confirm the keeper goes red. Then restore the source byte for byte.
+For repaired regressions, demonstrate failure on the pre-fix code when feasible.
+For subtle or vacuous assertions, a deliberate mutation of the owning behavior can
+verify that the retained test detects it. Use isolated scratch work for mutations;
+never overwrite unrelated edits or leave deliberate faults in the candidate.
+Report any missing control evidence.
 
-Done when every reported gap is restored or rejected with source evidence, and
-every restored contract has a caught mutation.
+Done when each review gap is repaired or rejected with evidence, and remaining
+uncertainties are explicit.
 
 ## 7. Product defects
 
-A baseline failure that survives into a keeper is a bug report. Fix it at its
-owner as a separate commit, and prove it through the real user flow, with a
-**control** run that reverts the fix and shows the old behavior. Record
-unrelated product discrepancies you find as follow-ups instead of fixing them
-in the campaign.
+Treat retained baseline failures as possible defects. Diagnose them separately from
+coverage pruning. Fix an in-scope defect at its owner and prove the repair at the
+cheapest adequate tier; use a separate commit when it clarifies review. Record
+unrelated defects as follow-ups rather than expanding the campaign. Do not rewrite
+valid assertions merely to accommodate a broken baseline.
 
-Done when each repaired defect has a failing control and a passing candidate
-on the same harness.
+Done when repaired defects have recorded control/candidate evidence and unrelated
+or unresolved failures are clearly identified.
 
 ## 8. Reconcile and hand off
 
-Campaigns outlive many `main` commits. Merge `main` rather than rebasing a
-long, many-commit campaign. When `main` modified a file the campaign
-deleted, keep the deletion. Port the new contract into the keeper instead, and
-confirm every new regression `main` added still has a home. Rerun the whole
-subsystem suite and repeat live proof on the merged head.
+If the base moved, reconcile using the repository's current workflow. Reinspect
+contracts introduced by upstream changes, including changes to files being deleted.
+Port valid new assertions to the retained owner; reconsider a deletion if the new
+contract needs that boundary. Preserve no obsolete path solely for compatibility.
 
-Expect review tooling to see a truncated file list on a diff this large.
-Record maintainer decisions for generic compatibility flags in the PR evidence
-rather than editing gates.
+Run affected focused checks after reconciliation and finish all repository edits
+before the final push. Required PR CI must pass on that head; do not repeat the
+complete CI suite locally or edit files just to record a passing gate.
 
-Hand off with the [SKILL.md](SKILL.md) report, plus:
+Use the `SKILL.md` handoff, adding:
 
-- baseline and final test/support line counts, with production counted separately;
-- lanes, retired layers, and keepers;
-- preservation gaps found and their mutations;
-- product defects with control and candidate proof.
+- inventory coverage and unresolved entries;
+- retired layers and retained owners;
+- preservation gaps found and evidence for their repairs;
+- product defects, baseline failures, and control/candidate results;
+- production versus test/support size changes, if measured.
+
+Do not claim complete coverage when files, parameter rows, or required proof remain
+unexamined. Further batches require scope already authorized by the user.
