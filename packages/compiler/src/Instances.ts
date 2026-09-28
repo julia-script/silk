@@ -2626,6 +2626,9 @@ export const discover = (
       targetKeys: new Map(),
     }
   }
+  // Contexts processed by the current attempt, and where it stops once a family grew.
+  let attemptProcessed = 0
+  let stopAt = Number.POSITIVE_INFINITY
   const restartDiscovery = (): void => {
     scheduledContexts.clear()
     queuedContexts.clear()
@@ -2639,14 +2642,23 @@ export const discover = (
     violationKeys.clear()
     projectedCycleSizes.clear()
     discriminatingGrew = false
+    attemptProcessed = 0
+    stopAt = Number.POSITIVE_INFINITY
     for (const root of roots) schedule(root)
   }
   trace('Instances.expandWorklist', () => {
     while (true) {
-      // A declaration proved discriminating mid-round leaves the guards below it already taken
-      // without its ancestry, so the round is abandoned rather than expanded further: without that
-      // guard an unbounded specialization would keep scheduling work the restart discards anyway.
-      for (let cursor = 0; cursor < pending.length && !discriminatingGrew; cursor += 1) {
+      for (let cursor = 0; cursor < pending.length; cursor += 1) {
+        // A family proved discriminating leaves the guards taken without its ancestry, so this
+        // attempt is abandoned, but not at once: other families usually prove discriminating
+        // nearby, and each would otherwise cost a full restart from the roots. The attempt runs
+        // on for up to twice its work so far, which also bounds any specialization the missing
+        // guard admits before the restart discards it.
+        if (discriminatingGrew) {
+          if (stopAt === Number.POSITIVE_INFINITY) stopAt = attemptProcessed * 2 + 1024
+          if (attemptProcessed >= stopAt) break
+        }
+        attemptProcessed += 1
         const context = pending[cursor]
         if (context === undefined) continue
         queuedContexts.delete(context)
