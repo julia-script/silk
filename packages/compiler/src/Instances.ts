@@ -1775,18 +1775,18 @@ export const discover = (
   const nominalTypeText = (type: Type.Type): string | undefined =>
     Type.isNominal(type) ? `${type.module}\u0000${type.name}` : undefined
   const sameRuntimeType = (left: Type.Type, right: Type.Type): boolean =>
-    Type.runtimeKey(left) === Type.runtimeKey(right)
+    Type.runtimeIdentity(left) === Type.runtimeIdentity(right)
   // Runtime keys of every subterm of one whole type, shared by repeated subterm queries.
-  const runtimeSubtermKeys = new Map<string, ReadonlySet<string>>()
+  const runtimeSubtermKeys = new Map<number, ReadonlySet<number>>()
   const isStrictRuntimeStructuralSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
-    const candidateKey = Type.runtimeKey(candidate)
-    const wholeKey = Type.runtimeKey(whole)
+    const candidateKey = Type.runtimeIdentity(candidate)
+    const wholeKey = Type.runtimeIdentity(whole)
     if (candidateKey === wholeKey) return false
     let keys = runtimeSubtermKeys.get(wholeKey)
     if (keys === undefined) {
-      const collected = new Set<string>()
+      const collected = new Set<number>()
       Type.visit(whole, (type) => {
-        collected.add(Type.runtimeKey(type))
+        collected.add(Type.runtimeIdentity(type))
       })
       keys = collected
       runtimeSubtermKeys.set(wholeKey, keys)
@@ -1829,7 +1829,10 @@ export const discover = (
           return (
             sameRuntimeType(argument, parent) || isStrictRuntimeStructuralSubterm(argument, parent)
           )
-        return Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(parent)
+        return (
+          Type.runtimeGenericArgumentIdentity(argument) ===
+          Type.runtimeGenericArgumentIdentity(parent)
+        )
       }) &&
       candidate.arguments.some((argument, index) => {
         const parent = whole.arguments.at(index)
@@ -1867,7 +1870,7 @@ export const discover = (
         descended = true
       } else if (
         !(Type.isEffectIdentityArgument(argument) && Type.isEffectIdentityArgument(next)) &&
-        Type.runtimeGenericArgumentKey(argument) !== Type.runtimeGenericArgumentKey(next)
+        Type.runtimeGenericArgumentIdentity(argument) !== Type.runtimeGenericArgumentIdentity(next)
       )
         return false
     }
@@ -1877,7 +1880,7 @@ export const discover = (
   // depends only on runtime identities, so top-level questions are memoized for the discovery.
   const strictCleanupSubtermCache = new Map<string, boolean>()
   const isStrictCleanupSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
-    const cacheKey = `${Type.runtimeKey(candidate)}\u0001${Type.runtimeKey(whole)}`
+    const cacheKey = `${Type.runtimeIdentity(candidate)}\u0001${Type.runtimeIdentity(whole)}`
     let cached = strictCleanupSubtermCache.get(cacheKey)
     if (cached === undefined) {
       cached = strictCleanupSubtermUnder(candidate, whole, new Map(), new Map())
@@ -1894,8 +1897,8 @@ export const discover = (
     unfolding: ReadonlyMap<string, Type.Nominal>,
     memo: Map<string, boolean>,
   ): boolean => {
-    let memoKey = `${Type.runtimeKey(candidate)}\u0001${Type.runtimeKey(whole)}`
-    for (const nominal of unfolding.values()) memoKey += `\u0001${Type.runtimeKey(nominal)}`
+    let memoKey = `${Type.runtimeIdentity(candidate)}\u0001${Type.runtimeIdentity(whole)}`
+    for (const nominal of unfolding.values()) memoKey += `\u0001${Type.runtimeIdentity(nominal)}`
     let memoized = memo.get(memoKey)
     if (memoized === undefined) {
       memoized = computeStrictCleanupSubterm(candidate, whole, unfolding, memo)
@@ -1919,9 +1922,9 @@ export const discover = (
         strictlyDescendsSameNominal(candidate, whole)
       )
     if (isStrictRuntimeStructuralSubterm(candidate, whole)) return true
-    const nominals = new Map<string, Type.Nominal>()
+    const nominals = new Map<number, Type.Nominal>()
     Type.visit(whole, (type) => {
-      if (Type.isNominal(type)) nominals.set(Type.runtimeKey(type), type)
+      if (Type.isNominal(type)) nominals.set(Type.runtimeIdentity(type), type)
     })
     for (const nominal of nominals.values()) {
       const declarationText = `${nominal.module}\u0000${nominal.name}`
@@ -1971,7 +1974,7 @@ export const discover = (
     roots: ReadonlyArray<Type.Type>,
     frame: ReadonlyArray<Type.Type> = [],
   ): CleanupMeasure => ({
-    roots: [...new Map(roots.map((root) => [Type.runtimeKey(root), root])).values()],
+    roots: [...new Map(roots.map((root) => [Type.runtimeIdentity(root), root])).values()],
     frame,
   })
   const cleanupTransition = (

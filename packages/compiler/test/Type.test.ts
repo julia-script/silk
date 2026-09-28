@@ -103,15 +103,51 @@ it('reuses the runtime identity of an immutable type across nested layout querie
       return arguments_
     },
   }
-  const first = Type.runtimeKey(nominal)
+  const first = Type.runtimeIdentity(nominal)
   const readsAfterFirst = argumentReads
   assert.isAbove(readsAfterFirst, 0)
-  assert.strictEqual(Type.runtimeKey(nominal), first)
+  assert.strictEqual(Type.runtimeIdentity(nominal), first)
   assert.strictEqual(
-    Type.runtimeKey(Type.fixedArray(nominal, 2)),
-    Type.runtimeKey(Type.fixedArray(Type.nominal('runtime-key', 'Box', arguments_), 2)),
+    Type.runtimeIdentity(Type.fixedArray(nominal, 2)),
+    Type.runtimeIdentity(Type.fixedArray(Type.nominal('runtime-key', 'Box', arguments_), 2)),
   )
   assert.strictEqual(argumentReads, readsAfterFirst)
+})
+
+it('interns equal semantic and runtime type identities without conflating distinct types', () => {
+  const owner = { module: 'identity', name: 'Box' }
+  const local = Lifetime.bound(owner, 0, 'local')
+  const other = Lifetime.bound(owner, 1, 'other')
+  const types: ReadonlyArray<Type.Type> = [
+    'i32',
+    'u32',
+    Type.nominal('identity', 'Box', ['i32']),
+    Type.nominal('identity', 'Box', ['i32']),
+    Type.nominal('identity', 'Box', ['u32']),
+    Type.fixedArray(Type.nominal('identity', 'Box', ['i32']), 2),
+    Type.fixedArray(Type.nominal('identity', 'Box', ['i32']), 3),
+    Type.reference('Shared', 'i32', local),
+    Type.reference('Shared', 'i32', other),
+    Type.reference('Exclusive', 'i32', local),
+    Type.effect('i32', [], detached, 'Take'),
+    Type.effect('u32', [], detached, 'Take'),
+  ]
+  for (const left of types) {
+    for (const right of types) {
+      assert.strictEqual(
+        Type.identity(left) === Type.identity(right),
+        Type.key(left) === Type.key(right),
+      )
+      assert.strictEqual(
+        Type.runtimeIdentity(left) === Type.runtimeIdentity(right),
+        Type.runtimeKey(left) === Type.runtimeKey(right),
+      )
+    }
+  }
+  const first = types[7] ?? unreachable('expected the first reference')
+  const second = types[8] ?? unreachable('expected the second reference')
+  assert.notStrictEqual(Type.identity(first), Type.identity(second))
+  assert.strictEqual(Type.runtimeIdentity(first), Type.runtimeIdentity(second))
 })
 
 const span = (sourceId: string, start: number, end: number): SourceSpan.SourceSpan =>

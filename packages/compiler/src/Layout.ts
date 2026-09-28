@@ -436,7 +436,7 @@ export const computeTypes = Effect.fn('Layout.computeTypes')(function* (
 ): Effect.fn.Return<Catalog> {
   const state = makeCatalogState(target, index, undefined, opaqueRealizations)
   const { declarations, unionDeclarations, completed } = state
-  const referenced = new Map<string, DeclarationFacts.SemanticType>()
+  const referenced = new Map<number, DeclarationFacts.SemanticType>()
   yield* collectDeclaredTypes(index, referenced)
   for (const declaration of declarations) {
     if (declaration.struct.typeParameters.length === 0)
@@ -474,16 +474,16 @@ const completeForInstances = Effect.fnUntraced(function* (
   self: Catalog,
   discovery: Instances.Discovery,
   index: DeclarationIndex.Index,
-  reached: ReadonlyMap<string, DeclarationFacts.SemanticType>,
+  reached: ReadonlyMap<number, DeclarationFacts.SemanticType>,
   opaqueRealizations?: OpaqueRealization.Catalog,
 ): Effect.fn.Return<Catalog> {
   const state = makeCatalogState(self.target, index, discovery, opaqueRealizations)
-  const referenced = new Map<string, DeclarationFacts.SemanticType>()
+  const referenced = new Map<number, DeclarationFacts.SemanticType>()
   yield* collectDeclaredTypes(index, referenced)
   yield* collectInstanceTypes(discovery, referenced)
   yield* completeCatalog(state, referenced)
-  const runtimeReferenced = new Map<string, DeclarationFacts.SemanticType>()
-  const visiting = new Set<string>()
+  const runtimeReferenced = new Map<number, DeclarationFacts.SemanticType>()
+  const visiting = new Set<number>()
   for (const type of reached.values()) yield* addReached(runtimeReferenced, type, visiting)
   for (const key of runtimeReferenced.keys()) {
     if (state.completed.get(key)?._tag === 'UnavailableLayoutEntry') state.completed.delete(key)
@@ -493,7 +493,7 @@ const completeForInstances = Effect.fnUntraced(function* (
   // decisions. Pre-seeding `completed` would suppress that walk for declaration types that are
   // also roots of concrete executable specializations.
   for (const entry of self.entries) {
-    if (entry._tag === 'LayoutEntry') state.completed.set(Type.runtimeKey(entry.type), entry)
+    if (entry._tag === 'LayoutEntry') state.completed.set(Type.runtimeIdentity(entry.type), entry)
   }
   return {
     ...self,
@@ -512,7 +512,7 @@ export const computeRuntime = Effect.fn('Layout.computeRuntime')(function* (
 ): Effect.fn.Return<Plan> {
   const reached = yield* collectReachableTypes(discovery)
   const completed = yield* completeForInstances(self, discovery, index, reached, opaqueRealizations)
-  const entries = new Map<string, Entry>()
+  const entries = new Map<number, Entry>()
   const state: PlanState = { catalog: completed, entries }
   yield* resolveEntries(state, reached)
   const orderedEntries = [...entries.values()].sort((left, right) =>
@@ -538,10 +538,10 @@ export const computeRuntime = Effect.fn('Layout.computeRuntime')(function* (
     callablePlans,
   )
   const specializedShapeTypes = new Map(
-    shapeTypes.map((type) => [Type.runtimeKey(type), type] as const),
+    shapeTypes.map((type) => [Type.runtimeIdentity(type), type] as const),
   )
   for (const environment of effectPlans)
-    specializedShapeTypes.set(Type.runtimeKey(environment.effect), environment.effect)
+    specializedShapeTypes.set(Type.runtimeIdentity(environment.effect), environment.effect)
   const plannedShapes = yield* planCallingShapes(
     completed.target,
     orderedEntries,
@@ -579,7 +579,9 @@ export const make = Effect.fn('Layout.make')(function* (
   target: Target.Target,
   types: ReadonlyArray<Type.Builtin>,
 ): Effect.fn.Return<Plan> {
-  const entries = new Map(types.map((type) => [Type.runtimeKey(type), scalarEntry(target, type)]))
+  const entries = new Map(
+    types.map((type) => [Type.runtimeIdentity(type), scalarEntry(target, type)]),
+  )
   const orderedEntries = [...entries.values()].sort((left, right) =>
     compareRuntimeTypes(left.type, right.type),
   )
@@ -661,7 +663,7 @@ const makeCatalogState = (
       declaration,
     ]),
   )
-  const completed = new Map<string, CatalogEntry>()
+  const completed = new Map<number, CatalogEntry>()
   for (const declaration of enumDeclarations) {
     const entry = scalarEnumEntry(target, declaration.enum_)
     let cause: Diagnostic.CauseIdentity | undefined
@@ -671,7 +673,7 @@ const makeCatalogState = (
       cause = declaration.enum_.representation.cause
     }
     completed.set(
-      Type.runtimeKey(declaration.type),
+      Type.runtimeIdentity(declaration.type),
       entry ??
         unavailable(
           declaration.type,
@@ -684,7 +686,7 @@ const makeCatalogState = (
         ),
     )
   }
-  const visiting = new Set<string>()
+  const visiting = new Set<number>()
   const callableRealizations =
     discovery === undefined
       ? undefined
@@ -706,7 +708,7 @@ const makeCatalogState = (
 
 const collectDeclaredTypes = Effect.fn('Layout.collectDeclaredTypes')(function* (
   index: DeclarationIndex.Index,
-  referenced: Map<string, Type.Type>,
+  referenced: Map<number, Type.Type>,
 ): Effect.fn.Return<void> {
   for (const module of index.modules) {
     for (const member of module.members) {
@@ -751,7 +753,7 @@ const collectDeclaredTypes = Effect.fn('Layout.collectDeclaredTypes')(function* 
 
 const collectInstanceTypes = Effect.fn('Layout.collectInstanceTypes')(function* (
   discovery: Instances.Discovery | undefined,
-  referenced: Map<string, Type.Type>,
+  referenced: Map<number, Type.Type>,
 ): Effect.fn.Return<void> {
   for (const instance of discovery?.instances ?? []) {
     if (needsInitializationFlags(instance)) yield* addReferenced(referenced, 'bool')
@@ -785,7 +787,7 @@ const collectInstanceTypes = Effect.fn('Layout.collectInstanceTypes')(function* 
 
 const completeCatalog = Effect.fn('Layout.completeCatalog')(function* (
   state: CatalogState,
-  referenced: Map<string, Type.Type>,
+  referenced: Map<number, Type.Type>,
 ): Effect.fn.Return<void> {
   const { completed } = state
   let completedSize = -1
@@ -808,12 +810,12 @@ const layoutType = Effect.fnUntraced(function* (
   if (Type.isBuiltin(type)) return scalarEntry(target, type)
   if (Type.isString(type)) {
     const result = stringEntry(target, type)
-    completed.set(Type.runtimeKey(type), result)
+    completed.set(Type.runtimeIdentity(type), result)
     return result
   }
   if (Type.isNever(type)) {
     const result = neverEntry()
-    completed.set(Type.runtimeKey(type), result)
+    completed.set(Type.runtimeIdentity(type), result)
     return result
   }
   if (Type.isParameter(type)) {
@@ -824,7 +826,7 @@ const layoutType = Effect.fnUntraced(function* (
   }
   if (Type.isNominal(type)) return yield* layoutNominal(state, type)
   if (Type.isSlice(type)) {
-    const key = Type.runtimeKey(type)
+    const key = Type.runtimeIdentity(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
     const element = yield* layoutType(state, type.element)
@@ -844,20 +846,20 @@ const layoutType = Effect.fnUntraced(function* (
   }
   if (Type.isReference(type)) {
     const result = referenceEntry(target, type)
-    completed.set(Type.runtimeKey(type), result)
+    completed.set(Type.runtimeIdentity(type), result)
     return result
   }
   if (Type.isPointer(type)) {
     const result = pointerEntry(target, type)
-    completed.set(Type.runtimeKey(type), result)
+    completed.set(Type.runtimeIdentity(type), result)
     return result
   }
   if (Type.isForeignFunction(type)) {
     const result = foreignFunctionEntry(target, type)
-    completed.set(Type.runtimeKey(type), result)
+    completed.set(Type.runtimeIdentity(type), result)
     return result
   }
-  const key = Type.runtimeKey(type)
+  const key = Type.runtimeIdentity(type)
   const existing = completed.get(key)
   if (existing !== undefined) return existing
   if (Type.isUnion(type)) {
@@ -929,7 +931,7 @@ const layoutNominal = Effect.fn('Layout.layoutNominal')(function* (
   type: Type.Nominal,
 ): Effect.fn.Return<CatalogEntry> {
   const { target, index, completed, visiting, byType, unionByType } = state
-  const key = Type.runtimeKey(type)
+  const key = Type.runtimeIdentity(type)
   const existing = completed.get(key)
   if (existing !== undefined) return existing
   if (Type.isSharedCore(type) || Type.isExecution(type) || Type.isWake(type)) {
@@ -1097,7 +1099,7 @@ const layoutIntrinsicNominal = Effect.fn('Layout.layoutIntrinsicNominal')(functi
   type: Type.Nominal,
 ): Effect.fn.Return<CatalogEntry> {
   const { target, completed } = state
-  const key = Type.runtimeKey(type)
+  const key = Type.runtimeIdentity(type)
   const ordinal = Type.equals(type, Type.unit)
     ? Type.intrinsicNominals.size
     : Type.intrinsicNominalOrdinal(type)
@@ -1185,7 +1187,7 @@ const layoutNominalUnion = Effect.fn('Layout.layoutNominalUnion')(function* (
   unionDeclaration: NonNullable<ReturnType<CatalogState['unionByType']['get']>>,
 ): Effect.fn.Return<CatalogEntry> {
   const { index, visiting, completed } = state
-  const key = Type.runtimeKey(type)
+  const key = Type.runtimeIdentity(type)
   const union = unionDeclaration.union
   if (union.canonical._tag !== 'Canonical') {
     const result = unavailable(type, [], {
@@ -1411,10 +1413,10 @@ const visitAggregateField = Effect.fnUntraced(function* (
 const layoutDirectRepresented = Effect.fn('Layout.layoutDirectRepresented')(function* (
   state: CatalogState,
   type: Type.Represented,
-  active: ReadonlySet<string> = new Set<string>(),
+  active: ReadonlySet<number> = new Set<number>(),
 ): Effect.fn.Return<CatalogEntry> {
   const { completed } = state
-  const typeKey = Type.runtimeKey(type)
+  const typeKey = Type.runtimeIdentity(type)
   const existing = completed.get(typeKey)
   if (existing?._tag === 'LayoutEntry') return existing
   if (active.has(typeKey))
@@ -1447,10 +1449,10 @@ const layoutOpaqueRepresentation = Effect.fn('Layout.layoutOpaqueRepresentation'
   state: CatalogState,
   type: Type.Represented,
   argument: Type.OpaqueRepresentationArgument,
-  next: ReadonlySet<string>,
+  next: ReadonlySet<number>,
 ): Effect.fn.Return<CatalogEntry> {
   const { opaqueRealizations, completed } = state
-  const typeKey = Type.runtimeKey(type)
+  const typeKey = Type.runtimeIdentity(type)
 
   const definition =
     opaqueRealizations === undefined
@@ -1477,10 +1479,10 @@ const layoutCompositeRepresentation = Effect.fn('Layout.layoutCompositeRepresent
   state: CatalogState,
   type: Type.Represented,
   argument: Type.CompositeEffectRepresentationArgument,
-  next: ReadonlySet<string>,
+  next: ReadonlySet<number>,
 ): Effect.fn.Return<CatalogEntry> {
   const { completed } = state
-  const typeKey = Type.runtimeKey(type)
+  const typeKey = Type.runtimeIdentity(type)
 
   const alternatives = yield* Effect.forEach(
     argument.alternatives,
@@ -1532,7 +1534,7 @@ const layoutCallableRepresentation = Effect.fn('Layout.layoutCallableRepresentat
   identity: Type.CallableIdentityArgument,
 ): Effect.fn.Return<CatalogEntry> {
   const { target, discovery, completed } = state
-  const typeKey = Type.runtimeKey(type)
+  const typeKey = Type.runtimeIdentity(type)
 
   const callable =
     identity.environment === undefined
@@ -1611,7 +1613,7 @@ const layoutEffectRepresentation = Effect.fn('Layout.layoutEffectRepresentation'
   identity: Type.EffectIdentityArgument,
 ): Effect.fn.Return<CatalogEntry> {
   const { discovery, completed } = state
-  const typeKey = Type.runtimeKey(type)
+  const typeKey = Type.runtimeIdentity(type)
 
   const effect =
     discovery === undefined ? undefined : Instances.representedEffectOf(discovery, identity)
@@ -1780,7 +1782,7 @@ const layoutRepresentedCallable = Effect.fn('Layout.layoutRepresentedCallable')(
   realization: FieldRealization.CallableRealization,
 ): Effect.fn.Return<CatalogEntry> {
   const { target, completed } = state
-  const key = Type.runtimeKey(type)
+  const key = Type.runtimeIdentity(type)
   const existing = completed.get(key)
   if (existing !== undefined) return existing
   let copy = true
@@ -1841,7 +1843,7 @@ const layoutRepresentedEffect = Effect.fn('Layout.layoutRepresentedEffect')(func
   realization: FieldRealization.EffectRealization,
 ): Effect.fn.Return<CatalogEntry> {
   const { completed } = state
-  const key = Type.runtimeKey(type)
+  const key = Type.runtimeIdentity(type)
   const existing = completed.get(key)
   if (existing !== undefined) return existing
   const environment = yield* layoutEffectSlots(
@@ -1875,11 +1877,11 @@ const layoutRepresentedEffect = Effect.fn('Layout.layoutRepresentedEffect')(func
 })
 
 const addReferenced = Effect.fnUntraced(function* (
-  referenced: Map<string, Type.Type>,
+  referenced: Map<number, Type.Type>,
   type: DeclarationFacts.SemanticType,
 ): Effect.fn.Return<void> {
   if (!Type.isRuntimeConcrete(type)) return
-  const key = Type.runtimeKey(type)
+  const key = Type.runtimeIdentity(type)
   if (referenced.has(key)) return
   referenced.set(key, type)
   if (Type.isNominal(type)) {
@@ -1905,11 +1907,11 @@ const addReferenced = Effect.fnUntraced(function* (
 
 /** Adds runtime-reached types in dependency order, including exact executable representations. */
 const addReached = Effect.fnUntraced(function* (
-  referenced: Map<string, Type.Type>,
+  referenced: Map<number, Type.Type>,
   type: DeclarationFacts.SemanticType,
-  visiting: Set<string>,
+  visiting: Set<number>,
 ): Effect.fn.Return<void> {
-  const key = Type.runtimeKey(type)
+  const key = Type.runtimeIdentity(type)
   if (referenced.has(key) || visiting.has(key)) return
   visiting.add(key)
   if (Type.isNominal(type)) {
@@ -1937,7 +1939,7 @@ const addReached = Effect.fnUntraced(function* (
 })
 
 const addSpecializedExpression = Effect.fnUntraced(function* (
-  referenced: Map<string, Type.Type>,
+  referenced: Map<number, Type.Type>,
   substitution: Type.Substitution,
   expression: Tir.Expression,
 ): Effect.fn.Return<void> {
@@ -1973,7 +1975,7 @@ const addSpecializedExpression = Effect.fnUntraced(function* (
 })
 
 const addPatternStatementTypes = Effect.fnUntraced(function* (
-  referenced: Map<string, Type.Type>,
+  referenced: Map<number, Type.Type>,
   substitution: Type.Substitution,
   statement: Tir.Statement,
 ): Effect.fn.Return<void> {
@@ -2002,7 +2004,7 @@ const addPatternStatementTypes = Effect.fnUntraced(function* (
 
 interface PlanState {
   readonly catalog: Catalog
-  readonly entries: Map<string, Entry>
+  readonly entries: Map<number, Entry>
 }
 
 const resolvePlanEntry = (
@@ -2029,7 +2031,7 @@ const resolvePlanEntry = (
 
 const addPlanEntry = (state: PlanState, type: DeclarationFacts.SemanticType): void => {
   const { entries } = state
-  const key = Type.runtimeKey(type)
+  const key = Type.runtimeIdentity(type)
   if (Type.isEffect(type)) {
     addPlanEntry(state, type.success)
     for (const failure of Type.failureMembers(type)) addPlanEntry(state, failure)
@@ -2084,14 +2086,15 @@ const addPlanEntry = (state: PlanState, type: DeclarationFacts.SemanticType): vo
 const collectReachableTypes = Effect.fn('Layout.collectReachableTypes')(function* (
   discovery: Instances.Discovery,
 ) {
-  const reached = new Map<string, DeclarationFacts.SemanticType>()
+  const reached = new Map<number, DeclarationFacts.SemanticType>()
   for (const instance of discovery.instances) yield* addFunctionTypes(reached, instance)
-  for (const effect of discovery.effects) reached.set(Type.runtimeKey(effect.type), effect.type)
+  for (const effect of discovery.effects)
+    reached.set(Type.runtimeIdentity(effect.type), effect.type)
   for (const instance of discovery.instances) {
     for (const expression of instance.function.statements
       .flatMap(Tir.statementExpressions)
       .flatMap(Tir.expressionTree)) {
-      if (expression._tag === 'EffectCatch') reached.set(Type.runtimeKey('bool'), 'bool')
+      if (expression._tag === 'EffectCatch') reached.set(Type.runtimeIdentity('bool'), 'bool')
       if (
         expression._tag !== 'BuiltinCall' ||
         (expression.operation !== 'ExecutionLayout' &&
@@ -2111,38 +2114,38 @@ const collectReachableTypes = Effect.fn('Layout.collectReachableTypes')(function
       )
       for (const argument of [arguments_.at(0), arguments_.at(2)])
         if (argument !== undefined && Type.isTypeArgument(argument))
-          reached.set(Type.runtimeKey(argument), argument)
+          reached.set(Type.runtimeIdentity(argument), argument)
       for (const argument of [arguments_.at(1), arguments_.at(3)]) {
         const represented = argument === undefined ? undefined : Type.representedType(argument)
-        if (represented !== undefined) reached.set(Type.runtimeKey(represented), represented)
+        if (represented !== undefined) reached.set(Type.runtimeIdentity(represented), represented)
       }
     }
   }
   for (const callable of discovery.callables) {
     for (const capture of callable.captures)
-      reached.set(Type.runtimeKey(capture.type), capture.type)
+      reached.set(Type.runtimeIdentity(capture.type), capture.type)
   }
   return reached
 })
 
 const addFunctionTypes = Effect.fnUntraced(function* (
-  types: Map<string, DeclarationFacts.SemanticType>,
+  types: Map<number, DeclarationFacts.SemanticType>,
   instance: Instances.Instance,
 ): Effect.fn.Return<void> {
   const fn = instance.function
   for (const represented of representedParameterTypes(instance))
-    types.set(Type.runtimeKey(represented), represented)
-  if (needsInitializationFlags(instance)) types.set(Type.runtimeKey('bool'), 'bool')
+    types.set(Type.runtimeIdentity(represented), represented)
+  if (needsInitializationFlags(instance)) types.set(Type.runtimeIdentity('bool'), 'bool')
   const substitution = instance.substitution
   for (const parameter of fn.declaration.parameters) {
     if (parameter.declaredType._tag === 'Resolved') {
       const type = Type.substitute(parameter.declaredType.type, substitution)
-      types.set(Type.runtimeKey(type), type)
+      types.set(Type.runtimeIdentity(type), type)
     }
   }
   if (fn.declaration.returnType._tag === 'Resolved') {
     const type = Type.substitute(fn.declaration.returnType.type, substitution)
-    types.set(Type.runtimeKey(type), type)
+    types.set(Type.runtimeIdentity(type), type)
     if (fn.declaration.functionKind === 'Effect') {
       const failures = fn.declaration.failureRow.failures.flatMap((failure) => {
         const specialized = Type.substitute(failure, substitution)
@@ -2159,14 +2162,14 @@ const addFunctionTypes = Effect.fnUntraced(function* (
         'Shared',
         requirements,
       )
-      types.set(Type.runtimeKey(outcome), outcome)
+      types.set(Type.runtimeIdentity(outcome), outcome)
     }
   }
   yield* addStatementTypes(types, fn.statements, substitution)
 })
 
 const addStatementTypes = Effect.fnUntraced(function* (
-  types: Map<string, DeclarationFacts.SemanticType>,
+  types: Map<number, DeclarationFacts.SemanticType>,
   statements: ReadonlyArray<Tir.Statement>,
   substitution: Type.Substitution = new Map(),
 ): Effect.fn.Return<void> {
@@ -2176,15 +2179,15 @@ const addStatementTypes = Effect.fnUntraced(function* (
     if (statement._tag === 'Bind')
       yield* addExpressionTypes(types, statement.initializer, substitution)
     if (statement._tag === 'PatternBind') {
-      types.set(Type.runtimeKey('bool'), 'bool')
+      types.set(Type.runtimeIdentity('bool'), 'bool')
       yield* addExpressionTypes(types, statement.selection.subject, substitution)
       for (const member of statement.selection.members) {
         const type = Type.substitute(Match.sourceType(member), substitution)
-        types.set(Type.runtimeKey(type), type)
+        types.set(Type.runtimeIdentity(type), type)
       }
       for (const binding of statement.selection.bindings) {
         const type = Type.substitute(binding.type, substitution)
-        types.set(Type.runtimeKey(type), type)
+        types.set(Type.runtimeIdentity(type), type)
       }
     }
     if (statement._tag === 'Evaluate')
@@ -2199,15 +2202,15 @@ const addStatementTypes = Effect.fnUntraced(function* (
       yield* addStatementTypes(types, statement.otherwise, substitution)
     }
     if (statement._tag === 'IfLet') {
-      types.set(Type.runtimeKey('bool'), 'bool')
+      types.set(Type.runtimeIdentity('bool'), 'bool')
       yield* addExpressionTypes(types, statement.selection.subject, substitution)
       for (const member of statement.selection.members) {
         const type = Type.substitute(Match.sourceType(member), substitution)
-        types.set(Type.runtimeKey(type), type)
+        types.set(Type.runtimeIdentity(type), type)
       }
       for (const binding of statement.selection.bindings) {
         const type = Type.substitute(binding.type, substitution)
-        types.set(Type.runtimeKey(type), type)
+        types.set(Type.runtimeIdentity(type), type)
       }
       yield* addStatementTypes(types, statement.taken, substitution)
       yield* addStatementTypes(types, statement.otherwise, substitution)
@@ -2228,21 +2231,22 @@ const addStatementTypes = Effect.fnUntraced(function* (
 })
 
 const addExpressionTypes = Effect.fnUntraced(function* (
-  types: Map<string, DeclarationFacts.SemanticType>,
+  types: Map<number, DeclarationFacts.SemanticType>,
   expression: Tir.Expression,
   substitution: Type.Substitution = new Map(),
 ): Effect.fn.Return<void> {
   if (expression._tag === 'Unavailable') return
   const specialized = Type.substitute(expression.type, substitution)
-  types.set(Type.runtimeKey(specialized), specialized)
+  types.set(Type.runtimeIdentity(specialized), specialized)
   if (expression._tag === 'BuiltinCall') {
-    if (Scalar.isCheckedOperation(expression.operation)) types.set(Type.runtimeKey('bool'), 'bool')
+    if (Scalar.isCheckedOperation(expression.operation))
+      types.set(Type.runtimeIdentity('bool'), 'bool')
     for (const argument of expression.typeArguments) {
       const specialized = Type.substituteGenericArgument(argument, substitution)
       const type = Type.isTypeArgument(specialized)
         ? specialized
         : Type.representedType(specialized)
-      if (type !== undefined) types.set(Type.runtimeKey(type), type)
+      if (type !== undefined) types.set(Type.runtimeIdentity(type), type)
     }
   }
   if (expression._tag === 'Move') yield* addExpressionTypes(types, expression.subject, substitution)
@@ -2260,7 +2264,7 @@ const addExpressionTypes = Effect.fnUntraced(function* (
     yield* addExpressionTypes(types, expression.value, substitution)
   if (expression._tag === 'UnionConvert') {
     const sourceType = Type.substitute(expression.sourceType, substitution)
-    types.set(Type.runtimeKey(sourceType), sourceType)
+    types.set(Type.runtimeIdentity(sourceType), sourceType)
     yield* addExpressionTypes(types, expression.source, substitution)
   }
   if (expression._tag === 'Project')
@@ -2308,7 +2312,7 @@ const addExpressionTypes = Effect.fnUntraced(function* (
     for (const operand of contract?.operands ?? []) {
       if (operand.type._tag !== 'Resolved') continue
       const type = Type.substitute(operand.type.type, substitution)
-      types.set(Type.runtimeKey(type), type)
+      types.set(Type.runtimeIdentity(type), type)
     }
   }
   if (expression._tag === 'CallableSection') {
@@ -2329,7 +2333,7 @@ const addExpressionTypes = Effect.fnUntraced(function* (
     yield* addExpressionTypes(types, expression.protected, substitution)
     const provider = Type.substitute(expression.provider.providerType, substitution)
     if (Type.isNominal(provider)) {
-      types.set(Type.runtimeKey(provider), provider)
+      types.set(Type.runtimeIdentity(provider), provider)
       const reference = Type.reference(
         expression.provider.selectionAccess === 'Take'
           ? 'Exclusive'
@@ -2337,20 +2341,20 @@ const addExpressionTypes = Effect.fnUntraced(function* (
         provider,
         Type.substituteLifetime(expression.type.environment, substitution),
       )
-      types.set(Type.runtimeKey(reference), reference)
+      types.set(Type.runtimeIdentity(reference), reference)
     }
   }
   if (expression._tag === 'EffectCatch') {
-    types.set(Type.runtimeKey('never'), 'never')
-    types.set(Type.runtimeKey('bool'), 'bool')
+    types.set(Type.runtimeIdentity('never'), 'never')
+    types.set(Type.runtimeIdentity('bool'), 'bool')
     yield* addExpressionTypes(types, expression.protected, substitution)
     yield* addExpressionTypes(types, expression.handler, substitution)
     if (expression.protected._tag !== 'Unavailable') {
       const protected_ = Type.substitute(expression.protected.type, substitution)
       if (Type.isEffect(protected_)) {
-        types.set(Type.runtimeKey(protected_.success), protected_.success)
+        types.set(Type.runtimeIdentity(protected_.success), protected_.success)
         const failure = Type.failureValue(Type.failureMembers(protected_))
-        types.set(Type.runtimeKey(failure), failure)
+        types.set(Type.runtimeIdentity(failure), failure)
       }
     }
   }
@@ -2358,15 +2362,16 @@ const addExpressionTypes = Effect.fnUntraced(function* (
     yield* addExpressionTypes(types, expression.scrutinee, substitution)
     for (const member of expression.members) {
       const type = Type.substitute(Match.sourceType(member), substitution)
-      types.set(Type.runtimeKey(type), type)
+      types.set(Type.runtimeIdentity(type), type)
     }
     for (const arm of expression.arms) {
       if (!arm.reachable) continue
       if (arm.member !== undefined) {
         const memberType = Match.sourceType(arm.member)
-        types.set(Type.runtimeKey(memberType), memberType)
+        types.set(Type.runtimeIdentity(memberType), memberType)
       }
-      for (const binding of arm.bindings) types.set(Type.runtimeKey(binding.type), binding.type)
+      for (const binding of arm.bindings)
+        types.set(Type.runtimeIdentity(binding.type), binding.type)
       if (arm.guard !== undefined) yield* addExpressionTypes(types, arm.guard, substitution)
       if (arm.body._tag === 'Expression')
         yield* addExpressionTypes(types, arm.body.expression, substitution)
@@ -2409,7 +2414,7 @@ const representedParameterTypes = (instance: Instances.Instance): ReadonlyArray<
 
 const resolveEntries = Effect.fn('Layout.resolveEntries')(function* (
   state: PlanState,
-  reached: ReadonlyMap<string, Type.Type>,
+  reached: ReadonlyMap<number, Type.Type>,
 ) {
   yield* Effect.annotateCurrentSpan({ 'reachable.count': reached.size })
 
@@ -2418,7 +2423,7 @@ const resolveEntries = Effect.fn('Layout.resolveEntries')(function* (
 
 const collectShapeTypes = Effect.fn('Layout.collectShapeTypes')(function* (
   orderedEntries: ReadonlyArray<Entry>,
-  reached: ReadonlyMap<string, Type.Type>,
+  reached: ReadonlyMap<number, Type.Type>,
 ) {
   yield* Effect.annotateCurrentSpan({
     'entries.count': orderedEntries.length,
@@ -2426,7 +2431,7 @@ const collectShapeTypes = Effect.fn('Layout.collectShapeTypes')(function* (
   })
 
   const shaped = new Map(
-    orderedEntries.map((entry) => [Type.runtimeKey(entry.type), entry.type] as const),
+    orderedEntries.map((entry) => [Type.runtimeIdentity(entry.type), entry.type] as const),
   )
   for (const type of reached.values()) {
     if (
@@ -2436,7 +2441,7 @@ const collectShapeTypes = Effect.fn('Layout.collectShapeTypes')(function* (
         (Type.isRepresented(type) &&
           Type.isCompositeEffectRepresentationArgument(type.representation.argument)))
     )
-      shaped.set(Type.runtimeKey(type), type)
+      shaped.set(Type.runtimeIdentity(type), type)
   }
   const shapeTypes = [...shaped.values()].sort(compareRuntimeTypes)
   return shapeTypes
@@ -2816,7 +2821,7 @@ interface EffectEnvironmentState {
   readonly target: Target.Target
   readonly discovery: Instances.Discovery
   readonly callablePlans: ReadonlyArray<CallableEnvironment>
-  readonly layouts: ReadonlyMap<string, Entry>
+  readonly layouts: ReadonlyMap<number, Entry>
   readonly environments: Array<EffectEnvironment>
 }
 
@@ -2838,7 +2843,7 @@ type EffectCapturePlan =
 interface CallableEnvironmentState {
   readonly target: Target.Target
   readonly discovery: Instances.Discovery
-  readonly layouts: ReadonlyMap<string, Entry>
+  readonly layouts: ReadonlyMap<number, Entry>
   readonly view: CallableView
   readonly planned: Map<Instances.CallableInstance, CallableEnvironment>
   readonly planning: Set<Instances.CallableInstance>
@@ -2851,7 +2856,7 @@ const planEffectEnvironments = Effect.fn('Layout.planEffectEnvironments')(functi
   callablePlans: ReadonlyArray<CallableEnvironment>,
 ): Effect.fn.Return<ReadonlyArray<EffectEnvironment>> {
   const layouts = new Map(
-    entries.map((candidate) => [Type.runtimeKey(candidate.type), candidate] as const),
+    entries.map((candidate) => [Type.runtimeIdentity(candidate.type), candidate] as const),
   )
   const environments: Array<EffectEnvironment> = []
   const state: EffectEnvironmentState = { target, discovery, callablePlans, layouts, environments }
@@ -3260,7 +3265,7 @@ const planEffectCapture = Effect.fn('Layout.planEffectCapture')(function* (
       ? undefined
       : (capturedEffectEnvironment ??
         capturedCompositeLayout ??
-        layouts.get(Type.runtimeKey(fieldType)))
+        layouts.get(Type.runtimeIdentity(fieldType)))
   if (!borrowed && !callable && valueLayout === undefined) {
     return {
       _tag: 'Unavailable',
@@ -3418,7 +3423,7 @@ const planWitnessEffect = Effect.fn('Layout.planWitnessEffect')(function* (
       instance.substitution,
       instance.specialization.compatibility,
     )
-    const valueLayout = layouts.get(Type.runtimeKey(fieldType))
+    const valueLayout = layouts.get(Type.runtimeIdentity(fieldType))
     if (valueLayout === undefined) {
       unavailable = `interface operand ${ordinal} has no value layout`
       break
@@ -3514,7 +3519,9 @@ const planCallableEnvironments = Effect.fn('Layout.planCallableEnvironments')(fu
   entries: ReadonlyArray<Entry>,
   discovery: Instances.Discovery,
 ): Effect.fn.Return<ReadonlyArray<CallableEnvironment>> {
-  const layouts = new Map(entries.map((entry) => [Type.runtimeKey(entry.type), entry] as const))
+  const layouts = new Map(
+    entries.map((entry) => [Type.runtimeIdentity(entry.type), entry] as const),
+  )
   const view = callableView(target)
   const planned = new Map<Instances.CallableInstance, CallableEnvironment>()
   const planning = new Set<Instances.CallableInstance>()
@@ -3571,7 +3578,7 @@ const planCallableEnvironment = Effect.fn('Layout.planCallableEnvironment')(func
       )
     }
     const valueLayout =
-      borrowed || callableCapture ? undefined : layouts.get(Type.runtimeKey(capture.type))
+      borrowed || callableCapture ? undefined : layouts.get(Type.runtimeIdentity(capture.type))
     if (!borrowed && !callableCapture && valueLayout === undefined) {
       return unavailableCallableEnvironment(
         state,
@@ -3771,7 +3778,7 @@ export const effectEnvironmentByIdentity = (
 
 interface ShapeContext {
   readonly target: Target.Target
-  readonly entries: ReadonlyMap<string, Entry>
+  readonly entries: ReadonlyMap<number, Entry>
   readonly effectEnvironments: ReadonlyArray<EffectEnvironment>
   readonly callableEnvironments: ReadonlyArray<CallableEnvironment>
   readonly active: ReadonlySet<string>
@@ -3786,7 +3793,9 @@ export const planCallingShapes = Effect.fn('Layout.planCallingShapes')(function*
 ): Effect.fn.Return<ReadonlyArray<CallingShape>> {
   yield* Effect.annotateCurrentSpan({ 'types.count': types.length })
 
-  const byType = new Map(entries.map((candidate) => [Type.runtimeKey(candidate.type), candidate]))
+  const byType = new Map(
+    entries.map((candidate) => [Type.runtimeIdentity(candidate.type), candidate]),
+  )
   return yield* Effect.forEach(
     types,
     Effect.fnUntraced(function* (type) {
@@ -3798,7 +3807,7 @@ export const planCallingShapes = Effect.fn('Layout.planCallingShapes')(function*
 const planCallingShape = Effect.fn('Layout.planCallingShape')(function* (
   target: Target.Target,
   type: DeclarationFacts.SemanticType,
-  entries: ReadonlyMap<string, Entry>,
+  entries: ReadonlyMap<number, Entry>,
   effectEnvironments: ReadonlyArray<EffectEnvironment>,
   callableEnvironments: ReadonlyArray<CallableEnvironment>,
 ): Effect.fn.Return<CallingShape> {
@@ -3834,7 +3843,7 @@ const shapeNode = Effect.fnUntraced(function* (
   if (Type.isBuiltin(type)) {
     return { _tag: 'ScalarShape', type, laneCount: 1 }
   }
-  const enumRepresentation = entries.get(Type.runtimeKey(type))?.representation
+  const enumRepresentation = entries.get(Type.runtimeIdentity(type))?.representation
   if (Type.isNominal(type) && enumRepresentation?._tag === 'ScalarEnum') {
     return {
       _tag: 'ScalarEnumShape',
@@ -3935,7 +3944,7 @@ const shapeNode = Effect.fnUntraced(function* (
   if (Type.isRepresented(type)) {
     return yield* representedShape(type, context)
   }
-  const candidate = entries.get(Type.runtimeKey(type))
+  const candidate = entries.get(Type.runtimeIdentity(type))
   if (Type.isNominal(type) && candidate?.representation._tag === 'NominalUnion') {
     return yield* nominalUnionShape(type, context, candidate.representation)
   }
@@ -4019,7 +4028,7 @@ const representedShape = Effect.fn('Layout.representedShape')(function* (
       laneCount: payloadTypes.length + 1,
     }
   }
-  const entry = entries.get(Type.runtimeKey(type))
+  const entry = entries.get(Type.runtimeIdentity(type))
   const executable = entry?.executable
   const stored = entry?.representation
   const storedCallable = stored?._tag === 'CallableEnvironment' ? stored : undefined
@@ -4532,23 +4541,23 @@ const materializeLanes = (
  * Both lookups run once per lowered operation. Their physical indexes erase lifetime proof
  * arguments while retaining the original semantic types on entries for inspection.
  */
-const entryIndexCache = new WeakMap<ReadonlyArray<Entry>, Map<string, Entry>>()
+const entryIndexCache = new WeakMap<ReadonlyArray<Entry>, Map<number, Entry>>()
 
-const callingShapeIndexCache = new WeakMap<ReadonlyArray<CallingShape>, Map<string, CallingShape>>()
+const callingShapeIndexCache = new WeakMap<ReadonlyArray<CallingShape>, Map<number, CallingShape>>()
 
 const indexByTypeKey = <
   A extends {
     readonly type: DeclarationFacts.SemanticType
   },
 >(
-  cache: WeakMap<ReadonlyArray<A>, Map<string, A>>,
+  cache: WeakMap<ReadonlyArray<A>, Map<number, A>>,
   values: ReadonlyArray<A>,
-): Map<string, A> => {
+): Map<number, A> => {
   let index = cache.get(values)
   if (index === undefined) {
     index = new Map()
     for (const value of values) {
-      const key = Type.runtimeKey(value.type)
+      const key = Type.runtimeIdentity(value.type)
       if (!index.has(key)) index.set(key, value)
     }
     cache.set(values, index)
@@ -4558,7 +4567,7 @@ const indexByTypeKey = <
 
 /** Looks up one canonical runtime-plan entry. */
 export const entry = (self: Plan, type: DeclarationFacts.SemanticType): Entry | undefined =>
-  indexByTypeKey(entryIndexCache, self.entries).get(Type.runtimeKey(type))
+  indexByTypeKey(entryIndexCache, self.entries).get(Type.runtimeIdentity(type))
 
 /** Looks up one compiler-owned calling shape by logical type. */
 export const callingShape = (
@@ -4566,7 +4575,7 @@ export const callingShape = (
   type: DeclarationFacts.SemanticType,
 ): CallingShape | undefined => {
   const physical = indexByTypeKey(callingShapeIndexCache, self.callingShapes).get(
-    Type.runtimeKey(type),
+    Type.runtimeIdentity(type),
   )
   if (physical === undefined || Type.equals(physical.type, type)) return physical
   return {
@@ -4585,7 +4594,9 @@ export const catalogEntry = (
   self: Catalog,
   type: DeclarationFacts.SemanticType,
 ): CatalogEntry | undefined =>
-  self.entries.find((candidate) => Type.runtimeKey(candidate.type) === Type.runtimeKey(type))
+  self.entries.find(
+    (candidate) => Type.runtimeIdentity(candidate.type) === Type.runtimeIdentity(type),
+  )
 
 /**
  * Plans the bit-exact movement of one nominal failure payload between two tagged carriers.
@@ -4612,7 +4623,7 @@ export const failurePayloadRepacking = (
   const sourceShape = callingShape(self, sourceType)
   const targetShape = callingShape(self, targetType)
   if (sourceShape === undefined || targetShape?.tree._tag !== 'OutcomeShape') return undefined
-  if (!(Type.runtimeKey(sourceMember) === Type.runtimeKey(targetMember))) return undefined
+  if (!(Type.runtimeIdentity(sourceMember) === Type.runtimeIdentity(targetMember))) return undefined
   const memberShape = callingShape(self, sourceMember)
   if (memberShape === undefined) return undefined
   const sourceOffset = Type.isNominal(sourceType) ? 0 : 1
@@ -4951,7 +4962,7 @@ export const memberFieldSlots = (
   member: Type.Type,
   path: ReadonlyArray<DeclarationFacts.FieldId>,
 ): ReadonlyArray<number> | undefined => {
-  if (path.length === 0 && Type.runtimeKey(shape.type) === Type.runtimeKey(member))
+  if (path.length === 0 && Type.runtimeIdentity(shape.type) === Type.runtimeIdentity(member))
     return Array.from({ length: shape.laneCount }, (_, ordinal) => ordinal)
   let selected:
     | {
@@ -4961,12 +4972,12 @@ export const memberFieldSlots = (
     | undefined
   if (
     shape.tree._tag === 'ProductShape' &&
-    Type.runtimeKey(shape.tree.type) === Type.runtimeKey(member)
+    Type.runtimeIdentity(shape.tree.type) === Type.runtimeIdentity(member)
   ) {
     selected = { shape: shape.tree, physicalOffset: 0 }
   } else if (shape.tree._tag === 'SumShape') {
     const candidate = shape.tree.members.find(
-      (entry) => Type.runtimeKey(entry.member) === Type.runtimeKey(member),
+      (entry) => Type.runtimeIdentity(entry.member) === Type.runtimeIdentity(member),
     )
     if (candidate !== undefined) {
       selected = { shape: candidate.shape, physicalOffset: 1 }
@@ -5027,11 +5038,11 @@ export const coveragePath = (
   > = []
   if (
     Type.isUnion(current) &&
-    Type.runtimeKey(current) !== Type.runtimeKey(Match.sourceType(member))
+    Type.runtimeIdentity(current) !== Type.runtimeIdentity(Match.sourceType(member))
   ) {
     const selected = Match.sourceType(member)
     const ordinal = current.members.findIndex(
-      (candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(selected),
+      (candidate) => Type.runtimeIdentity(candidate) === Type.runtimeIdentity(selected),
     )
     if (ordinal < 0) return undefined
     selectors.push({ _tag: 'Variant', ordinal })
@@ -5078,7 +5089,7 @@ export const coverageFieldSlots = (
     | undefined
   if (
     shape.tree._tag === 'NominalUnionShape' &&
-    Type.runtimeKey(shape.tree.type) === Type.runtimeKey(member.type)
+    Type.runtimeIdentity(shape.tree.type) === Type.runtimeIdentity(member.type)
   ) {
     if (path.length === 0)
       return Array.from({ length: shape.tree.laneCount }, (_, ordinal) => ordinal)
@@ -5092,7 +5103,7 @@ export const coverageFieldSlots = (
     if (variant !== undefined) selected = { shape: variant.shape, physicalOffset: 1 }
   } else if (shape.tree._tag === 'SumShape') {
     const outer = shape.tree.members.find(
-      (candidate) => Type.runtimeKey(candidate.member) === Type.runtimeKey(member.root),
+      (candidate) => Type.runtimeIdentity(candidate.member) === Type.runtimeIdentity(member.root),
     )
     if (outer?.shape._tag === 'NominalUnionShape') {
       if (path.length === 0)
@@ -5124,7 +5135,7 @@ export const coverageBindingSlots = (
   path: ReadonlyArray<DeclarationFacts.FieldId>,
   type: DeclarationFacts.SemanticType,
 ): ReadonlyArray<number> | undefined =>
-  path.length === 0 && Type.runtimeKey(type) === Type.runtimeKey(shape.type)
+  path.length === 0 && Type.runtimeIdentity(type) === Type.runtimeIdentity(shape.type)
     ? Array.from({ length: shape.laneCount }, (_, ordinal) => ordinal)
     : coverageFieldSlots(shape, member, path)
 
@@ -5416,7 +5427,7 @@ const dependenciesOf = (
   aggregate: DeclarationFacts.StructFact | DeclarationFacts.UnionFact,
   substitution: Type.Substitution = new Map(),
 ): ReadonlyArray<Type.Nominal> => {
-  const dependencies = new Map<string, Type.Nominal>()
+  const dependencies = new Map<number, Type.Nominal>()
   const fields =
     aggregate._tag === 'StructDeclaration'
       ? aggregate.fields
@@ -5431,7 +5442,7 @@ const dependenciesOf = (
     ) {
       types = [field.declaredType.candidate]
     }
-    for (const type of types) dependencies.set(Type.runtimeKey(type), type)
+    for (const type of types) dependencies.set(Type.runtimeIdentity(type), type)
   }
   return [...dependencies.values()].sort(compareRuntimeTypes)
 }
