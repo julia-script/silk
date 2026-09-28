@@ -1894,12 +1894,12 @@ export const discover = (
     const cacheKey = `${candidateOrdinal},${wholeOrdinal}`
     let cached = strictCleanupSubtermCache.get(cacheKey)
     if (cached === undefined) {
-      cached = strictCleanupSubtermUnder(
-        { type: candidate, ordinal: candidateOrdinal },
-        { type: whole, ordinal: wholeOrdinal },
-        emptyUnfolding,
-        new Map(),
-      )
+      const question = { type: candidate, ordinal: candidateOrdinal }
+      const root = { type: whole, ordinal: wholeOrdinal }
+      const reaching = reachingCandidate(question, root)
+      cached =
+        reaching?.has(wholeOrdinal) !== false &&
+        strictCleanupSubtermUnder(question, root, emptyUnfolding, reaching, new Map())
       strictCleanupSubtermCache.set(cacheKey, cached)
     }
     return cached
@@ -1980,6 +1980,78 @@ export const discover = (
     nominalFields.set(nominal.ordinal, fields)
     return fields
   }
+  // Every field type of every struct or union nominal contained in one type: the unfolding edges of
+  // the cleanup search with its path restrictions left out.
+  const cleanupSuccessors = new Map<number, ReadonlyArray<RuntimeType>>()
+  const successorsOf = (node: RuntimeType): ReadonlyArray<RuntimeType> => {
+    let successors = cleanupSuccessors.get(node.ordinal)
+    if (successors === undefined) {
+      successors = nominalsIn(node).flatMap(({ nominal }) => fieldsOf(nominal) ?? [])
+      cleanupSuccessors.set(node.ordinal, successors)
+    }
+    return successors
+  }
+  // Declarations whose arguments grow on every unfolding make the unrestricted graph infinite; past
+  // this many types a question keeps the exact search, which the unfolding path keeps finite.
+  const reachingBudget = 512
+  /**
+   * The types from which the search could reach an answer for `candidate`, ignoring the unfolding
+   * path, or undefined when the graph exceeds its budget. The path only ever removes edges, so a
+   * type outside this set answers false under every path and the search skips it instead of
+   * exploring the paths beneath it: one linear pass instead of a path-keyed search that is
+   * exponential in the worst case.
+   */
+  const reachingCandidate = (
+    candidate: RuntimeType,
+    root: RuntimeType,
+  ): ReadonlySet<number> | undefined => {
+    const candidateDeclaration = nominalTypeText(candidate.type)
+    const predecessors = new Map<number, Array<number>>()
+    const hits: Array<number> = []
+    const visited = new Set<number>([root.ordinal])
+    const pending: Array<RuntimeType> = [root]
+    for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+      if (node.ordinal === candidate.ordinal) continue
+      const declaration = nominalTypeText(node.type)
+      // Mirrors computeStrictCleanupSubterm: a same-declaration type answers without unfolding.
+      if (candidateDeclaration !== undefined && candidateDeclaration === declaration) {
+        if (
+          Type.isNominal(candidate.type) &&
+          Type.isNominal(node.type) &&
+          strictlyDescendsSameNominal(candidate.type, node.type)
+        )
+          hits.push(node.ordinal)
+        continue
+      }
+      const successors = successorsOf(node)
+      if (
+        isStrictRuntimeStructuralSubterm(candidate.type, node.type) ||
+        successors.some((successor) => successor.ordinal === candidate.ordinal)
+      )
+        hits.push(node.ordinal)
+      for (const successor of successors) {
+        let from = predecessors.get(successor.ordinal)
+        if (from === undefined) {
+          from = []
+          predecessors.set(successor.ordinal, from)
+        }
+        from.push(node.ordinal)
+        if (!visited.has(successor.ordinal)) {
+          if (visited.size >= reachingBudget) return undefined
+          visited.add(successor.ordinal)
+          pending.push(successor)
+        }
+      }
+    }
+    const reaching = new Set<number>(hits)
+    for (let index = 0; index < hits.length; index += 1)
+      for (const predecessor of predecessors.get(hits[index] ?? -1) ?? [])
+        if (!reaching.has(predecessor)) {
+          reaching.add(predecessor)
+          hits.push(predecessor)
+        }
+    return reaching
+  }
   // A nested answer also depends on the unfolding path, which begins at the question's own root,
   // so it is rarely shared between questions. It is memoized only while one question is answered;
   // retaining it for the whole discovery kept millions of path-keyed entries alive.
@@ -1987,12 +2059,13 @@ export const discover = (
     candidate: RuntimeType,
     whole: RuntimeType,
     unfolding: Unfolding,
+    reaching: ReadonlySet<number> | undefined,
     memo: Map<string, boolean>,
   ): boolean => {
     const memoKey = `${whole.ordinal}:${unfolding.key}`
     let memoized = memo.get(memoKey)
     if (memoized === undefined) {
-      memoized = computeStrictCleanupSubterm(candidate, whole, unfolding, memo)
+      memoized = computeStrictCleanupSubterm(candidate, whole, unfolding, reaching, memo)
       memo.set(memoKey, memoized)
     }
     return memoized
@@ -2001,6 +2074,7 @@ export const discover = (
     candidate: RuntimeType,
     whole: RuntimeType,
     unfolding: Unfolding,
+    reaching: ReadonlySet<number> | undefined,
     memo: Map<string, boolean>,
   ): boolean => {
     if (candidate.ordinal === whole.ordinal) return false
@@ -2023,14 +2097,13 @@ export const discover = (
         continue
       const fields = fieldsOf(nominal)
       if (fields === undefined) continue
-      const next = unfold(unfolding, declaration, nominal)
       // A field of exactly the candidate's type is itself a strict subterm of `whole`.
+      if (fields.some((field) => field.ordinal === candidate.ordinal)) return true
+      const descend = fields.filter((field) => reaching?.has(field.ordinal) !== false)
+      if (descend.length === 0) continue
+      const next = unfold(unfolding, declaration, nominal)
       if (
-        fields.some(
-          (field) =>
-            field.ordinal === candidate.ordinal ||
-            strictCleanupSubtermUnder(candidate, field, next, memo),
-        )
+        descend.some((field) => strictCleanupSubtermUnder(candidate, field, next, reaching, memo))
       )
         return true
     }
