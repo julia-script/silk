@@ -5,7 +5,7 @@ import type { LlvmError } from '../../LlvmError.js'
 import type * as ValueActor from '../../Value.js'
 import * as FunctionBodyDescription from '../FunctionBodyDescription.js'
 import * as Handle from '../Handle.js'
-import { type Draft, fail, localName, type MutableBlock, noAttachments } from './primitives.js'
+import { type Draft, fail, localName, type MutableBlock } from './primitives.js'
 
 /**
  * Construction's measured per-instruction append/validation loop. Direct Result transitions
@@ -41,8 +41,6 @@ export const appendInstruction = (
   const index = draft.instructions.length
   const handle = Handle.make('Instruction', draft.owner, index)
   draft.instructions.push(instruction)
-  draft.metadata.push(noAttachments)
-  draft.debugLocations.push(undefined)
   draft.instructionHandles.push(handle)
   cursor.success.block.instructions.push(index)
   return Result.succeed(handle)
@@ -76,8 +74,6 @@ export const appendResult = (
   })
   draft.valueHandles.push(value)
   draft.instructions.push(makeInstruction(result, finalName))
-  draft.metadata.push(noAttachments)
-  draft.debugLocations.push(undefined)
   draft.instructionHandles.push(undefined)
   cursor.success.block.instructions.push(instructionIndex)
   return Result.succeed(value)

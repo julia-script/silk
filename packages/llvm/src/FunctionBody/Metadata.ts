@@ -2,7 +2,7 @@ import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import * as Constant from '../Constant.js'
 import * as FunctionBodyState from '../internal/FunctionBodyState.js'
-import { invalidInput, invalidState, type LlvmError } from '../LlvmError.js'
+import { invalidInput, type LlvmError } from '../LlvmError.js'
 import * as Metadata from '../Metadata.js'
 import * as Type from '../Type.js'
 import type { FunctionBody, Instruction } from './_internal.js'
@@ -35,19 +35,10 @@ export const attachMetadata = Effect.fnUntraced(function* (
         'FunctionBody.attachMetadata',
       )
       if (metadataIndex === undefined) return
-      const attachments = draft.metadata[instructionIndex]
-      if (attachments === undefined) {
-        return yield* Result.fail(
-          invalidState({
-            operation: 'FunctionBody.attachMetadata',
-            message: 'Instruction metadata table entry is missing',
-            state: instruction,
-          }),
-        )
-      }
+      const attachments = draft.metadata.get(instructionIndex) ?? []
       const next = attachments.filter((attachment) => attachment.kind !== kind)
       next.push({ kind, metadata: metadataIndex })
-      draft.metadata[instructionIndex] = next
+      draft.metadata.set(instructionIndex, next)
     }),
   )
 })
@@ -104,7 +95,8 @@ export const setDebugLocationIn = (
         )
       }
     }
-    draft.debugLocations[instructionIndex] = metadataIndex
+    if (metadataIndex === undefined) draft.debugLocations.delete(instructionIndex)
+    else draft.debugLocations.set(instructionIndex, metadataIndex)
   })
 }
 

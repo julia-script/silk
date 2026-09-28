@@ -396,16 +396,17 @@ export const renderBody = (
       const instructions = block.instructions.map((instructionIndex) => {
         const instruction = body.instructions[instructionIndex]
         if (instruction === undefined) throw new Error(`missing instruction ${instructionIndex}`)
+        const debugLocation = body.debugLocations.get(instructionIndex)
         const attachments: Array<MetadataDescription.Attachment> = [
-          ...(body.debugLocations[instructionIndex] === undefined
+          ...(debugLocation === undefined
             ? []
             : [
                 {
                   kind: 'dbg' as const,
-                  metadata: body.debugLocations[instructionIndex],
+                  metadata: debugLocation,
                 },
               ]),
-          ...(body.metadata[instructionIndex] ?? []),
+          ...(body.metadata.get(instructionIndex) ?? []),
         ]
         const suffix = renderMetadataAttachments(state, context, attachments)
         return `  ${renderInstruction(state, body, instruction).replaceAll('\n', '\n  ')}${suffix === '' ? '' : `, ${suffix}`}`

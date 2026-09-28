@@ -201,6 +201,7 @@ it.effect(
           const returned = yield* FunctionBody.returnVoid(body)
           yield* FunctionBody.setDebugLocation(body, alloca, location)
           yield* FunctionBody.setDebugLocation(body, store, location)
+          yield* FunctionBody.setDebugLocation(body, store, undefined)
           yield* FunctionBody.setDebugLocation(body, returned, nextLocation)
         }),
       )
@@ -213,7 +214,7 @@ it.effect(
         ir,
         '!DIStringType(name: "string", size: 128, align: 64, encoding: DW_ATE_UTF)',
       )
-      assert.strictEqual(ir.match(/!dbg !/g)?.length, 4)
+      assert.strictEqual(ir.match(/!dbg !/g)?.length, 3)
       assert.include(ir, 'DIFlagAllCallsDescribed')
     }),
 )

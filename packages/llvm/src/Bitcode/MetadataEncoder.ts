@@ -53,9 +53,7 @@ export const writeMetadataKinds = (
   const hasAttachments =
     state.globalMetadata.some((attachments) => attachments.length > 0) ||
     state.functions.some(
-      (fn) =>
-        fn.body?.metadata.some((attachments) => attachments.length > 0) === true ||
-        fn.body?.debugLocations.some((location) => location !== undefined) === true,
+      (fn) => (fn.body?.metadata.size ?? 0) > 0 || (fn.body?.debugLocations.size ?? 0) > 0,
     )
   if (metadata.entries.length === 0 && !hasAttachments) return
   const block = Bitstream.enterBlock(
@@ -404,7 +402,7 @@ export const writeFunctionAttachments = (
   metadata: MetadataAdapter,
 ): void => {
   const globalAttachments = state.globalMetadata[globalIndex] ?? []
-  const hasInstructionAttachments = body.metadata.some((attachments) => attachments.length > 0)
+  const hasInstructionAttachments = body.metadata.size > 0
   if (globalAttachments.length === 0 && !hasInstructionAttachments) return
   const block = Bitstream.enterBlock(
     functionBlock.writer,
@@ -418,8 +416,10 @@ export const writeFunctionAttachments = (
       metadata.index(attachment.metadata),
     ])
   }
-  for (let instructionIndex = 0; instructionIndex < body.metadata.length; instructionIndex += 1) {
-    for (const attachment of body.metadata[instructionIndex] ?? []) {
+  for (const [instructionIndex, attachments] of [...body.metadata.entries()].sort(
+    ([left], [right]) => left - right,
+  )) {
+    for (const attachment of attachments) {
       Bitstream.writeUnabbreviatedRecord(block, 11, [
         instructionIndex,
         metadataKindCode[attachment.kind],

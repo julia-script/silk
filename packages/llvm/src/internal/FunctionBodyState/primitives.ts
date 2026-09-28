@@ -63,12 +63,9 @@ export interface Draft {
   readonly context: BuilderState.Context
   readonly values: Array<MutableValue>
   readonly valueHandles: Array<ValueActor.Value>
-  readonly metadata: Array<ReadonlyArray<MetadataDescription.Attachment>>
-  readonly debugLocations: Array<number | undefined>
+  readonly metadata: Map<number, ReadonlyArray<MetadataDescription.Attachment>>
+  readonly debugLocations: Map<number, number>
 }
-
-/** Shared empty attachment list; attaching metadata replaces an instruction's list. */
-export const noAttachments: ReadonlyArray<MetadataDescription.Attachment> = []
 
 export const drafts = new WeakMap<FunctionBodyActor.FunctionBody, Draft>()
 

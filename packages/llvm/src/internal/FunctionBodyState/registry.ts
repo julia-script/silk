@@ -54,8 +54,8 @@ export const makeDraft = (
     localOperands: [],
     values: [],
     valueHandles: [],
-    metadata: [],
-    debugLocations: [],
+    metadata: new Map(),
+    debugLocations: new Map(),
   }
   for (let index = 0; index < signature.parameters.length; index += 1) {
     const type = signature.parameters[index]

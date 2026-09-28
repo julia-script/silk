@@ -1349,12 +1349,12 @@ export const reachable = (state: BuilderState.Snapshot, operation: string): Reac
       return body === undefined
         ? []
         : [
-            ...body.metadata.flatMap((attachments) =>
-              attachments.map((attachment) => attachment.metadata),
-            ),
-            ...body.debugLocations.flatMap((location) =>
-              location === undefined ? [] : [location],
-            ),
+            ...[...body.metadata.entries()]
+              .sort(([left], [right]) => left - right)
+              .flatMap(([, attachments]) => attachments.map((attachment) => attachment.metadata)),
+            ...[...body.debugLocations.entries()]
+              .sort(([left], [right]) => left - right)
+              .map(([, location]) => location),
           ]
     }),
   ]

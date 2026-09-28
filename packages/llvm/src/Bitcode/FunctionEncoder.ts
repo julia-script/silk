@@ -506,7 +506,7 @@ export const writeFunctionBodies = (
           instructionIndex,
           instruction,
         )
-        const debugLocation = body.debugLocations[instructionIndex]
+        const debugLocation = body.debugLocations.get(instructionIndex)
         if (debugLocation === undefined) {
           activeDebugLocation = undefined
         } else if (activeDebugLocation === debugLocation) {

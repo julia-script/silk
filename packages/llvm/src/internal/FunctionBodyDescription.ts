@@ -318,8 +318,8 @@ export interface Snapshot {
   readonly blocks: ReadonlyArray<Block>
   readonly instructions: ReadonlyArray<Instruction>
   readonly values: ReadonlyArray<Value>
-  readonly metadata: ReadonlyArray<ReadonlyArray<MetadataDescription.Attachment>>
-  readonly debugLocations: ReadonlyArray<number | undefined>
+  readonly metadata: ReadonlyMap<number, ReadonlyArray<MetadataDescription.Attachment>>
+  readonly debugLocations: ReadonlyMap<number, number>
 }
 
 /** @internal */
