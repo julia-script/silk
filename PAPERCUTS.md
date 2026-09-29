@@ -261,3 +261,5 @@ HEAD...@{u}` before reporting a head, and confirm each claimed deliverable again
 - 2026-09-28 · Interval-based heap samplers reported a 3.8 GB peak, but the SemanticCases compile still ran out of memory at 4608 MiB. Instance discovery runs synchronously for minutes, so timers never fired while a transient 2.8 GB memo map lived · Force GCs at probes called from inside the work loop (or use `--heapsnapshot-near-heap-limit`), never timer samples · compiler memory
 - 2026-09-28 · Codebase Memory indexing refused this checkout while another unverified generation was active · Use targeted source searches until the index is available · compiler
 - 2026-09-28 · A native acceptance fixture added to `corpus` was silently skipped by `DriverNativeAcceptance` · Add native-only cases to `nativeCorpus` and select them with `SILK_NATIVE_CORPUS_CASES` · compiler
+
+- 2026-09-29 · Focused tests in a new worktree could not resolve the prepared LLVM Emitter, and pnpm exec tried to reinstall linked dependencies · Build isolated LLVM TypeScript artifacts and invoke the installed tool binaries directly under pinned Node 24 · bootstrap argument-order repair
