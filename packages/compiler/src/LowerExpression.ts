@@ -272,18 +272,7 @@ export const captureCallOperand = (
   const valueType = type._tag === 'EnvironmentBorrow' ? fn.type(type.type) : type
   if (valueType === undefined) return undefined
   const destination = fn.alloc(valueType)
-  if (type._tag === 'EnvironmentBorrow') {
-    fn.emit({
-      _tag: 'ReadPlace',
-      destination,
-      root: source,
-      selectors: [],
-      type: valueType,
-      provenance: authored(span),
-    })
-  } else {
-    fn.emit({ _tag: 'Move', destination, source, provenance: authored(span) })
-  }
+  fn.emit({ _tag: 'Move', destination, source, provenance: authored(span) })
   const heldLoans = fn.slotLoans.get(source.ordinal)
   if (heldLoans !== undefined) {
     fn.slotLoans.delete(source.ordinal)
