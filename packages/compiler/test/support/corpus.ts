@@ -6849,6 +6849,35 @@ export const httpRedirectCorpusProgram = Object.freeze({
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
+    name: 'foreign-libc-pointer-roundtrip',
+    source: `pub fn main() -> i32 {
+  return 42
+}`,
+    nativeSource: `unsafe extern "C" fn malloc(size: usize) -> ?*mut u8
+unsafe extern "C" fn free(pointer: ?*mut u8) -> ()
+pub fn main() -> i32 {
+  let memory = unsafe malloc(16)
+  unsafe free(memory)
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'foreign-libc-floating',
+    source: `pub fn main() -> i32 {
+  return 42
+}`,
+    nativeSource: `unsafe extern "C" fn fabs(value: f64) -> f64
+unsafe extern "C" fn fabsf(value: f32) -> f32
+pub fn main() -> i32 {
+  if unsafe fabs(-42.0) != 42.0 { return 1 }
+  if unsafe fabsf(-7.0) != 7.0 { return 2 }
+  return 42
+}`,
+    nativeDynamicLibraries: ['m'],
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     // A borrowed variant field must reach a concrete helper body for native enum equality.
     name: 'scalar-enum-equality-from-borrowed-variant',
     source: `import silk.option { Option }
