@@ -6839,7 +6839,7 @@ pub fn main() -> i32 {
 unsafe extern "C" fn fabsf(value: f32) -> f32
 pub fn main() -> i32 {
   if unsafe fabs(-42.0) != 42.0 { return 1 }
-  if unsafe fabsf(-7.0f32) != 7.0f32 { return 2 }
+  if unsafe fabsf(-7.0) != 7.0 { return 2 }
   return 42
 }`,
     nativeDynamicLibraries: ['m'],
