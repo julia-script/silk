@@ -1957,6 +1957,38 @@ pub fn main() -> i32 { return run Effect.catchAll(check(), recover) }`
 
 export const corpus: ReadonlyArray<CorpusProgram> = [
   {
+    name: 'scalar-reference-read',
+    source: `fn read(value: &i32) -> i32 { return value.* }
+pub fn main() -> i32 {
+  let value: i32 = 42
+  return read(&value)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'scalar-reference-write-through',
+    source: `fn store(value: &mut i32) -> () { value.* = 42 }
+pub fn main() -> i32 {
+  let mut value: i32 = 0
+  store(&mut value)
+  return value
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'scalar-reference-argument-order',
+    source: `fn change(value: &mut i32) -> i32 {
+  value.* = 7
+  return 22
+}
+fn add(first: i32, second: i32) -> i32 { return first + second }
+pub fn main() -> i32 {
+  let mut value: i32 = 20
+  return add(value, change(&mut value))
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'narrow-record-effect-success-lanes',
     source: narrowEffectRecord,
     expected: { _tag: 'Completes', result: 42 },
