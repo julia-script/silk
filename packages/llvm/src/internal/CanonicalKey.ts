@@ -4,7 +4,7 @@ export type CanonicalKey = string
 
 // Native function declaration encoded each long symbol twice (collision check and insertion).
 // Reuse keys for immutable byte arrays and avoid formatting every byte on each first visit.
-const byteKeys = new WeakMap<ReadonlyArray<number>, CanonicalKey>()
+const byteKeys = new WeakMap<ByteString.ReadonlyBytes, CanonicalKey>()
 
 /** @internal */
 export const bytes = (value: ByteString.ByteString): CanonicalKey => {
@@ -15,7 +15,7 @@ export const bytes = (value: ByteString.ByteString): CanonicalKey => {
   // Bounded argument lists handle arbitrary name lengths; joining keeps the retained key flat.
   const chunks: Array<string> = []
   for (let index = 0; index < value.bytes.length; index += 8192) {
-    chunks.push(String.fromCharCode(...value.bytes.slice(index, index + 8192)))
+    chunks.push(String.fromCharCode(...value.bytes.subarray(index, index + 8192)))
   }
   const key = `${value.bytes.length}:${chunks.join('')}`
   byteKeys.set(value.bytes, key)
