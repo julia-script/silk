@@ -432,7 +432,7 @@ it('declares native HTTP providers unconditionally and rejects unsupported use i
     ['NativeTransport', 'StructDeclaration'],
     ['NativeRouteProvider', 'StructDeclaration'],
     ['acquireOwned', 'FunctionDeclaration'],
-  ]) {
+  ] as const) {
     const declaration = named(name)
     assert.strictEqual(declaration.kind, kind)
     assert.isTrue(
