@@ -1491,7 +1491,7 @@ consumed once and the accepted loans remain independently higher-ranked.
 ### Operation `use`
 
 ```silk
-effect<'call> fn use<'call: 'call>(context: Self, view: &'call mut silk/native_socket.AcceptedView<'call>) -> A ! E ? CallbackRequirements | ContextRequirements
+effect<'call> fn use<'call>(context: Self, view: &'call mut silk/native_socket.AcceptedView<'call>) -> A ! E ? CallbackRequirements | ContextRequirements
 ```
 
 Consumes one owned context while using temporary accepted-connection loans.
