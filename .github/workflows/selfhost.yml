@@ -1,4 +1,4 @@
-name: B11 remaining integer operator diagnosis
+name: B11 integer declaration encoding diagnosis
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   silk:
-    name: B11 integer operator phases
+    name: B11 integer encoding phases
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -59,7 +59,7 @@ jobs:
         run: pnpm --filter @silklang/compiler exec tsx --test ../../compiler/scripts/runSelfhostCorpus.test.ts
       - name: Build bootstrap CLI
         run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
-      - name: Add ephemeral integer operator clocks
+      - name: Add ephemeral integer operator and encoding clocks
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -205,6 +205,49 @@ jobs:
            ('\n    namespaceAt = namespaceAt + usize.ONE','\n'+trace('module','namespaceAt','visible-namespace-end','    ')+'    namespaceAt = namespaceAt + usize.ONE'),
            ('  return Result.succeed<Vector<DeclarationId>, Shared<Rejection>>(move visible)',trace('module','span.start','visible-end')+'  return Result.succeed<Vector<DeclarationId>, Shared<Rejection>>(move visible)'),
           ])
+          p.write_text(s)
+          from pathlib import Path
+          p = Path('compiler/src/semantic/SourceUnit.silk')
+          s = p.read_text()
+          helper = r"""
+          pub effect fn b11EncodingTrace(index: usize, phase: &[u8]) -> ()
+          ! OutOfMemoryError ? &mut Allocator {
+            let tick = unsafe clock()
+            let mut message = run Bytes.copy(b"B11_PHASE fingerprint ")
+            run b11Decimal(&mut message, usize.toU64(index))
+            run Bytes.append(&mut message, b" ")
+            run Bytes.append(&mut message, phase)
+            run Bytes.append(&mut message, b" ")
+            run b11Decimal(&mut message, i64.toU64(tick))
+            run Bytes.append(&mut message, b"\n")
+            let mut nativeError = 0
+            let written = run NativeDescriptor.writeAll(2, Bytes.asSlice(&message), &mut nativeError)
+            return ()
+          }
+          """
+          assert s.count('impl SourceUnit {') == 1
+          s=s.replace('impl SourceUnit {',helper+'\nimpl SourceUnit {')
+          p.write_text(s)
+          p=Path('compiler/src/hir/Fingerprint.silk')
+          s=p.read_text();anchor='import silk.writer {Writer, WriterError}';assert s.count(anchor)==1
+          s=s.replace(anchor,anchor+'\nimport semantic.SourceUnit {b11EncodingTrace}')
+          start=s.index('effect fn ordinalsOf(');end=s.index('\n///',start+1)
+          part=s[start:end]
+          a='  let mut blank = Vector.make<usize>()';assert part.count(a)==1
+          part=part.replace(a,'  run b11EncodingTrace(id.index, b"ordinals-start")\n'+a)
+          a='  let mut state = run beginEncoding(Domain.Header, false, move blank)';assert part.count(a)==1
+          part=part.replace(a,'  run b11EncodingTrace(id.index, b"ordinals-fill-end")\n'+a)
+          a='  let EncodeState {bytes, ordinals, next: ignored1, emit: ignored2} = move state';assert part.count(a)==1
+          part=part.replace(a,'  run b11EncodingTrace(id.index, b"ordinals-walk-end")\n'+a)
+          s=s[:start]+part+s[end:];p.write_text(s)
+          p=Path('compiler/src/semantic/BodyInput.silk')
+          s=p.read_text();anchor='import silk.usize';assert s.count(anchor)==1
+          s=s.replace(anchor,anchor+'\nimport semantic.SourceUnit {b11EncodingTrace}')
+          a='    let span = Module.span(module, syntax)';assert s.count(a)==1
+          s=s.replace(a,'    run b11EncodingTrace(syntax.index, b"input-start")\n'+a)
+          a='    return BodyInput {';assert s.count(a)==1
+          s=s.replace(a,'    let copiedDeclaration = run DeclarationId.copy(declaration)\n    run b11EncodingTrace(syntax.index, b"input-header-start")\n    let capturedHeader = run Fingerprint.header(module, syntax)\n    run b11EncodingTrace(syntax.index, b"input-header-end")\n    let capturedBody = run Fingerprint.body(module, syntax)\n    run b11EncodingTrace(syntax.index, b"input-body-end")\n'+a)
+          s=s.replace('declaration: run DeclarationId.copy(declaration),','declaration: move copiedDeclaration,').replace('header: run Fingerprint.header(module, syntax),','header: move capturedHeader,').replace('body: run Fingerprint.body(module, syntax),','body: move capturedBody,')
           p.write_text(s)
           PY
       - name: Build self-hosted compiler CLI
