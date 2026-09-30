@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: 74366557c3e5cfe40d01fff5f0293932061299b8
+          ref: b34f2a4455c358b68f0e702037dcfdbaf904bc89
       - name: Check main-first bootstrap provenance
         if: github.event_name == 'pull_request'
         env:
@@ -281,7 +281,7 @@ jobs:
           B11_REAL_SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler
           B11_DIRECTORY: ${{ runner.temp }}/b11-integer-operator
           B11_LABEL: integer-operator
-          B11_SOURCE: 74366557c3e5cfe40d01fff5f0293932061299b8
+          B11_SOURCE: b34f2a4455c358b68f0e702037dcfdbaf904bc89
       - name: Upload integer operator phase evidence
         if: always()
         uses: actions/upload-artifact@v4
