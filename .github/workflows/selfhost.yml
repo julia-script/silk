@@ -226,8 +226,15 @@ jobs:
           part = s[start:end]
           begin = part.index('  let count = Vector.length<SourceFrame>'); finish = part.index('  // The frame keeps')
           section = part[begin:finish]
-          part = part[:begin] + '  let b11EvidenceStart = b11Tick()\n  {\n' + ''.join('  ' + line + '\n' for line in section.splitlines()) + '  }\n' + update('resolver.b11', 'evidence', 'b11EvidenceStart') + part[finish:]
-          s = s[:start] + part + s[end:]
+          helper = '''effect fn b11AppendEvidence(
+            resolver: &mut Resolver,
+            footprint: Shared<DemandFootprint>,
+            bodyDependency: Option<BodyDependency>,
+            answer: &Shared<Result<Answer, NoRejection>>,
+          ) -> () ! OutOfMemoryError ? &mut Allocator {
+          ''' + section.replace('&answer)', 'answer)') + '  return ()\n}\n\n'
+          part = part[:begin] + '  let b11EvidenceStart = b11Tick()\n  run b11AppendEvidence(&mut resolver.*, move footprint, move bodyDependency, &answer)\n' + update('resolver.b11', 'evidence', 'b11EvidenceStart') + part[finish:]
+          s = s[:start] + helper + part + s[end:]
 
           old = '  let mut label = run Bytes.copy(phase)'; assert s.count(old) == 1
           snapshots = '  if same(phase, b"body-start") {\n' + ''.join(f'    run b11Counter(b"{name}", resolver.b11.{name}Ticks, resolver.b11.{name}Count)\n' for name in fields) + '  }\n'
