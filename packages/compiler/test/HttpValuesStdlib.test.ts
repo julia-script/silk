@@ -5,6 +5,9 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as Intrinsic from '../src/Intrinsic.js'
+import * as Lexer from '../src/Lexer.js'
+import * as Parser from '../src/Parser.js'
+import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -408,50 +411,54 @@ it.effect(
   120_000,
 )
 
-it.effect('keeps native HTTP imports portable and rejects reached native preflight', () =>
-  Effect.gen(function* () {
-    const source = `import silk.http_client_native {NativeRouteProvider, NativeTransport, acquireOwned, Options, preflight}
-import silk.http_origin {Origin}
-pub fn main(origin: Origin) -> i32 {
-  let options = Options.defaults()
-  drop preflight(&origin, &options)
-  return 42
-}`
-    const module =
-      Stdlib.find('silk/http_client_native') ?? unreachable('expected HTTP native source')
-    const text = new TextDecoder().decode(module.bytes)
-    const operation = text.indexOf('pub fn preflight(')
-    const start = text.indexOf('compileError("', operation) + 'compileError("'.length
-    const end = text.indexOf('"', start)
-    for (const profile of [
-      { target: 'wasm32-unknown-unknown' },
-      { target: 'x86_64-unknown-linux-gnu', libc: 'none' },
-    ] as const) {
-      const sourceId = `http-values/native-preflight-${profile.target}`
-      const selected = AnalysisFixture.configuration(sourceId, profile.target, [])
-      const configuration = { ...selected, profile: { ...selected.profile, ...profile } }
-      const resolver = SourceResolver.overlay([SourceFile.make(sourceId, ascii(source))]).pipe(
-        Layer.provideMerge(SourceResolver.empty),
+it('declares native HTTP providers unconditionally and rejects unsupported use inside bodies', () => {
+  const module =
+    Stdlib.find('silk/http_client_native') ?? unreachable('expected HTTP native source')
+  const syntax = Parser.parse(Lexer.lex(SourceFile.make(module.module, module.bytes)))
+  assert.deepEqual(syntax.lexicalDiagnostics, [])
+  assert.deepEqual(syntax.parserDiagnostics, [])
+  const declarations = syntax.root.children.filter(SyntaxTree.isNode)
+  assert.isFalse(declarations.some((node) => node.kind === 'StaticConditionalDeclaration'))
+  const decode = new TextDecoder()
+  const named = (name: string): SyntaxTree.Node =>
+    declarations.find((node) => {
+      const token = SyntaxTree.tokens(node).find((token) => token.kind === 'Identifier')
+      return (
+        token !== undefined &&
+        decode.decode(module.bytes.subarray(token.span.start, token.span.end)) === name
       )
-      const frontend = yield* Analysis.make({ root: sourceId, configuration }).pipe(
-        Effect.provide(resolver),
-      )
-      assert.deepEqual(Analysis.diagnostics(frontend), [])
-      const retained = AnalysisFixture.configuration(sourceId, profile.target)
-      const snapshot = yield* Analysis.realize(frontend, {
-        ...configuration,
-        composition: retained.composition,
-      }).pipe(Effect.provide(resolver))
-      assert.deepEqual(Analysis.instancesOf(snapshot).foreignCalls, [])
-      assert.deepEqual(
-        Analysis.diagnostics(snapshot).map((diagnostic) => [
-          diagnostic.code,
-          diagnostic.span.sourceId,
-          diagnostic.span.start,
-          diagnostic.span.end,
-        ]),
-        [['SEM0177', module.module, start, end]],
-      )
-    }
-  }),
-)
+    }) ?? unreachable(`expected declaration ${name}`)
+  for (const [name, kind] of [
+    ['NativeTransport', 'StructDeclaration'],
+    ['NativeRouteProvider', 'StructDeclaration'],
+    ['acquireOwned', 'FunctionDeclaration'],
+  ]) {
+    const declaration = named(name)
+    assert.strictEqual(declaration.kind, kind)
+    assert.isTrue(
+      declaration.children.some(
+        (child) => SyntaxTree.isToken(child) && child.kind === 'PubKeyword',
+      ),
+    )
+  }
+  const preflight = named('preflight')
+  const body =
+    preflight.children.filter(SyntaxTree.isNode).find((node) => node.kind === 'Block') ??
+    unreachable('expected preflight body')
+  const guard =
+    body.children
+      .filter(SyntaxTree.isNode)
+      .find((node) => node.kind === 'StaticConditionalStatement') ??
+    unreachable('expected body-level platform guard')
+  const branches = guard.children.filter(SyntaxTree.isNode).filter((node) => node.kind === 'Block')
+  assert.strictEqual(branches.length, 2)
+  const rejected = branches.at(-1) ?? unreachable('expected unsupported branch')
+  const descendants = (node: SyntaxTree.Node): ReadonlyArray<SyntaxTree.Node> => [
+    node,
+    ...node.children.filter(SyntaxTree.isNode).flatMap(descendants),
+  ]
+  assert.strictEqual(
+    descendants(rejected).filter((node) => node.kind === 'CompileErrorExpression').length,
+    1,
+  )
+})

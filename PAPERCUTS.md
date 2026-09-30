@@ -272,3 +272,5 @@ HEAD...@{u}` before reporting a head, and confirm each claimed deliverable again
 - 2026-09-30 · Documentation generation reported missing comments after a body-level `else static if`, hiding parser recovery · Use `else { static if ... }` in bodies; only the module-level grammar accepts a chained static group · B13 stdlib platform migration
 
 - 2026-09-30 · Existing compiler dist generated older synthesized lifetime signatures for B13 documentation, despite fresh source bytes · Preserve current-base signatures for unchanged APIs and let exact-head documentation CI validate; do not rebuild the compiler locally · B13 stdlib platform migration
+
+- 2026-09-30 · Prepared compiler/docgen dist kept emitting stale lifetime signatures during B13 repairs · Use mise Node 24.18.1 with temporary current-source transform hooks for the canonical documentation script; focused Vitest uses current LLVM source aliases · B13 stdlib platform migration
