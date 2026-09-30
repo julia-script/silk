@@ -263,3 +263,6 @@ HEAD...@{u}` before reporting a head, and confirm each claimed deliverable again
 - 2026-09-28 · A native acceptance fixture added to `corpus` was silently skipped by `DriverNativeAcceptance` · Add native-only cases to `nativeCorpus` and select them with `SILK_NATIVE_CORPUS_CASES` · compiler
 
 - 2026-09-29 · Focused tests in a new worktree could not resolve the prepared LLVM Emitter, and pnpm exec tried to reinstall linked dependencies · Build isolated LLVM TypeScript artifacts and invoke the installed tool binaries directly under pinned Node 24 · bootstrap argument-order repair
+- 2026-09-29 · Compiler profiling could not use Codebase Memory because an unverified generation held the coordination lock · Inspect the worker log and use targeted source discovery while the existing generation remains active · compiler performance
+- 2026-09-29 · The Homebrew node@24 executable reported Node 26.5.0 during profiling · Record the actual runtime version and use the same executable for before/after comparisons; CI still validates on Node 24 · compiler performance
+- 2026-09-29 · Vitest 4 accepts --execArgv but rejects --setupFiles, and --logHeapUsage reports uncollected allocations · Supply temporary setupFiles through a merged config and expose GC in worker execArgv for retained-heap diagnostics · compiler performance
