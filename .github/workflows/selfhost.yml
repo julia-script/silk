@@ -63,13 +63,13 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          
+
           p = Path('compiler/src/semantic/SourceUnit.silk')
           s = p.read_text()
           s = s.replace('import Stream {Stream}', 'import Stream {Stream}\nimport silk.native_descriptor {NativeDescriptor}\nimport silk.i64\nimport silk.u64')
           helper = r'''
           unsafe extern "C" fn clock() -> i64
-          
+
           pub effect fn b11Trace(id: &ModuleId, revision: usize, phase: &[u8]) -> ()
           ! OutOfMemoryError ? &mut Allocator {
             let tick = unsafe clock()
@@ -86,7 +86,7 @@ jobs:
             let written = run NativeDescriptor.writeAll(2, Bytes.asSlice(&message), &mut nativeError)
             return ()
           }
-          
+
           pub effect fn b11Decimal(output: &mut Bytes, value: u64) -> ()
           ! OutOfMemoryError ? &mut Allocator {
             let mut reversed = Vector.make<u8>()
@@ -122,7 +122,7 @@ jobs:
           assert s.count(old) == 1
           s = s.replace(old, '        run b11Trace(id, number, b"index-start")\n' + old + '\n        run b11Trace(id, number, b"index-end")')
           p.write_text(s)
-          
+
           p = Path('compiler/src/semantic/Semantic.silk')
           s = p.read_text()
           s = s.replace('import semantic.SourceRevision {Observation, Revision}', 'import semantic.SourceRevision {Observation, Revision}\nimport semantic.SourceUnit {b11Trace, b11Decimal}')
@@ -134,7 +134,7 @@ jobs:
             run b11Decimal(&mut label, usize.toU64(ordinal))
             return run b11Trace(module, SourceIndex.revisionNumber(&resolver.source), Bytes.asSlice(&label))
           }
-          
+
           """
           start = s.index('effect fn resolveBody(')
           end = s.index('\neffect fn ', start + 1)
@@ -158,16 +158,16 @@ jobs:
             part = part.replace(needle,trace+'\n'+needle)
           s=s[:start]+helper+part+s[end:]
           p.write_text(s)
-          
+
           from pathlib import Path
-          
+
           p = Path('compiler/src/semantic/SourceUnit.silk')
           s = p.read_text()
           helper = r"""
           pub fn b11Tick() -> u64 {
             return i64.toU64(unsafe clock())
           }
-          
+
           pub effect fn b11Counter(kind: &[u8], ticks: u64, count: usize) -> ()
           ! OutOfMemoryError ? &mut Allocator {
             let mut message = run Bytes.copy(b"B11_COUNTER ")
@@ -185,7 +185,7 @@ jobs:
           assert s.count('impl SourceUnit {') == 1
           s = s.replace('impl SourceUnit {', helper + '\nimpl SourceUnit {')
           p.write_text(s)
-          
+
           p = Path('compiler/src/semantic/Semantic.silk')
           s = p.read_text()
           assert s.count('import semantic.SourceUnit {b11Trace, b11Decimal}') == 1
@@ -196,10 +196,10 @@ jobs:
           s = s.replace('struct Resolver {', stat + 'struct Resolver {\n  b11: B11Stats')
           assert s.count('      resolver: Resolver {') == 1
           s = s.replace('      resolver: Resolver {', '      resolver: Resolver {\n        b11: B11Stats {' + ', '.join(f'{name}Ticks: 0, {name}Count: usize.ZERO' for name in fields) + '},')
-          
+
           def update(expression, name, start):
             return f'  {expression}.{name}Ticks = {expression}.{name}Ticks + (b11Tick() - {start})\n  {expression}.{name}Count = {expression}.{name}Count + usize.ONE\n'
-          
+
           start = s.index('effect fn demandRaw('); end = s.index('\nfn cycleMember(', start)
           part = s[start:end]
           old = '  let word = run internKey(&mut resolver.*, key)'; assert part.count(old) == 1
@@ -211,7 +211,7 @@ jobs:
           s = s[:start] + part + s[end:]
           old = '    value.identity = run identityOf(&value.outcome)'; assert s.count(old) == 1
           s = s.replace(old, '    let b11IdentityStart = b11Tick()\n' + old + '\n' + update('resource.resolver.b11', 'identity', 'b11IdentityStart'))
-          
+
           start = s.index('effect fn dependency('); end = s.index('\neffect fn cycleAnswer(', start)
           part = s[start:end]
           old = '  let modules = Vector.asSlice<ModuleId>(&resolver.modules)'; assert part.count(old) == 1
@@ -221,14 +221,14 @@ jobs:
           assert part.endswith('}\n')
           part = part[:-2] + update('resolver.b11', 'dependency', 'b11DependencyStart') + '  return move b11Value\n}\n'
           s = s[:start] + part + s[end:]
-          
+
           start = s.index('effect fn demandChild('); end = s.index('\neffect fn resolvedModule(', start)
           part = s[start:end]
           begin = part.index('  let count = Vector.length<SourceFrame>'); finish = part.index('  // The frame keeps')
           section = part[begin:finish]
           part = part[:begin] + '  let b11EvidenceStart = b11Tick()\n  {\n' + ''.join('  ' + line + '\n' for line in section.splitlines()) + '  }\n' + update('resolver.b11', 'evidence', 'b11EvidenceStart') + part[finish:]
           s = s[:start] + part + s[end:]
-          
+
           old = '  let mut label = run Bytes.copy(phase)'; assert s.count(old) == 1
           snapshots = '  if same(phase, b"body-start") {\n' + ''.join(f'    run b11Counter(b"{name}", resolver.b11.{name}Ticks, resolver.b11.{name}Count)\n' for name in fields) + '  }\n'
           s = s.replace(old, snapshots + old)
