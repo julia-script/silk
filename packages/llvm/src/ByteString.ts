@@ -1,4 +1,21 @@
 /**
+ * A read-only view of owned byte storage, without mutators or access to its backing buffer.
+ *
+ * Slices are independent mutable copies; subarrays remain read-only views.
+ *
+ * @category byte strings
+ * @since 0.0.0
+ */
+export interface ReadonlyBytes extends Iterable<number> {
+  readonly [index: number]: number
+  readonly length: number
+  at(index: number): number | undefined
+  indexOf(value: number, fromIndex?: number): number
+  slice(start?: number, end?: number): Uint8Array
+  subarray(begin?: number, end?: number): ReadonlyBytes
+}
+
+/**
  * An immutable sequence of bytes used at LLVM's byte-oriented boundaries.
  *
  * @category byte strings
@@ -7,7 +24,7 @@
 export interface ByteString {
   readonly _tag: 'ByteString'
   /** Owned by the byte string; never mutated after construction. */
-  readonly bytes: Uint8Array
+  readonly bytes: ReadonlyBytes
 }
 
 /** @internal */

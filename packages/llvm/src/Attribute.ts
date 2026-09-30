@@ -60,16 +60,8 @@ export interface FunctionSetEntries {
 }
 
 /** @internal */
-const descriptionBytesKey = (value: ByteString.ByteString): string => {
-  // Attribute description keys also define emitted set order. Their length-prefixed
-  // hexadecimal spelling must stay stable when identity-only byte keys are compacted.
-  const hexadecimal = Array.from(value.bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
-  return `${value.bytes.length}:${hexadecimal}`
-}
-
-/** @internal */
 const descriptionKey = (description: AttributeDescription.Description): string => {
-  const name = descriptionBytesKey(description.name)
+  const name = CanonicalKey.bytes(description.name)
   switch (description._tag) {
     case 'Flag':
       return CanonicalKey.tagged('flag', [name])
@@ -78,7 +70,7 @@ const descriptionKey = (description: AttributeDescription.Description): string =
     case 'Type':
       return CanonicalKey.tagged('type', [name, CanonicalKey.integer(description.type)])
     case 'String':
-      return CanonicalKey.tagged('string', [name, descriptionBytesKey(description.value)])
+      return CanonicalKey.tagged('string', [name, CanonicalKey.bytes(description.value)])
     case 'IntegerList':
       return CanonicalKey.tagged('integer-list', [
         name,
@@ -261,7 +253,11 @@ const internSetIn = (
       const leftDescription = state.attributes.descriptions[left]
       const rightDescription = state.attributes.descriptions[right]
       if (leftDescription === undefined || rightDescription === undefined) return left - right
-      return descriptionKey(leftDescription).localeCompare(descriptionKey(rightDescription))
+      // Canonical keys preserve arbitrary bytes; locale collation can equate distinct names.
+      const leftKey = descriptionKey(leftDescription)
+      const rightKey = descriptionKey(rightDescription)
+      if (leftKey === rightKey) return 0
+      return leftKey < rightKey ? -1 : 1
     })
     const names = new Map<string, number>()
     for (const index of ordered) {

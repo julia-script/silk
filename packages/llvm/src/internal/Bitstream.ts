@@ -1,3 +1,4 @@
+import type * as ByteString from '../ByteString.js'
 import { invalidInput, type LlvmError } from '../LlvmError.js'
 
 export interface Writer {
@@ -35,7 +36,7 @@ export interface BlockWriter {
   readonly sizeWordIndex: number
 }
 
-export type RecordValue = Scalar | ReadonlyArray<Scalar> | Uint8Array
+export type RecordValue = Scalar | ReadonlyArray<Scalar> | ByteString.ReadonlyBytes
 
 /** @internal */
 const failure = (operation: string, message: string, cause: unknown): LlvmError =>
@@ -209,7 +210,10 @@ export const write6BitChar = (self: Writer, value: string): void => {
 }
 
 /** @internal */
-export const writeBlob = (self: Writer, bytes: ReadonlyArray<Scalar> | Uint8Array): void => {
+export const writeBlob = (
+  self: Writer,
+  bytes: ReadonlyArray<Scalar> | ByteString.ReadonlyBytes,
+): void => {
   // `parity:bench` exercises a one-megabyte blob; this measured byte-copy loop remains imperative
   // and is contained by the same Bitcode.encode Effect boundary as writeBits.
   alignTo32(self)
@@ -308,7 +312,7 @@ const scalar = (value: RecordValue | undefined, operation: string): Scalar => {
 const array = (
   value: RecordValue | undefined,
   operation: string,
-): ReadonlyArray<Scalar> | Uint8Array => {
+): ReadonlyArray<Scalar> | ByteString.ReadonlyBytes => {
   if (value !== undefined && typeof value !== 'number' && typeof value !== 'bigint') return value
   throw failure(operation, 'Expected an array record operand', value)
 }
@@ -398,7 +402,7 @@ export const writeRecord = (
 export const writeUnabbreviatedRecord = (
   self: BlockWriter,
   code: Scalar,
-  values: ReadonlyArray<Scalar> | Uint8Array,
+  values: ReadonlyArray<Scalar> | ByteString.ReadonlyBytes,
 ): void => {
   writeBits(self.writer, 3, self.abbrevWidth)
   writeVbr(self.writer, code, 6)
