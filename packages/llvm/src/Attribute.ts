@@ -60,8 +60,16 @@ export interface FunctionSetEntries {
 }
 
 /** @internal */
+const descriptionBytesKey = (value: ByteString.ByteString): string => {
+  // Attribute description keys also define emitted set order. Their length-prefixed
+  // hexadecimal spelling must stay stable when identity-only byte keys are compacted.
+  const hexadecimal = Array.from(value.bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `${value.bytes.length}:${hexadecimal}`
+}
+
+/** @internal */
 const descriptionKey = (description: AttributeDescription.Description): string => {
-  const name = CanonicalKey.bytes(description.name)
+  const name = descriptionBytesKey(description.name)
   switch (description._tag) {
     case 'Flag':
       return CanonicalKey.tagged('flag', [name])
@@ -70,7 +78,7 @@ const descriptionKey = (description: AttributeDescription.Description): string =
     case 'Type':
       return CanonicalKey.tagged('type', [name, CanonicalKey.integer(description.type)])
     case 'String':
-      return CanonicalKey.tagged('string', [name, CanonicalKey.bytes(description.value)])
+      return CanonicalKey.tagged('string', [name, descriptionBytesKey(description.value)])
     case 'IntegerList':
       return CanonicalKey.tagged('integer-list', [
         name,
