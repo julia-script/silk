@@ -1,4 +1,4 @@
-name: Selfhost Silk
+name: B11 remaining integer body diagnosis
 
 on:
   push:
@@ -17,13 +17,14 @@ concurrency:
 
 jobs:
   silk:
-    name: Focused Linux Silk
+    name: B11 integer body phases
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: c967a0254c3e578137dd2b962ad3ceefc8a4923d
       - name: Check main-first bootstrap provenance
         if: github.event_name == 'pull_request'
         env:
@@ -58,110 +59,195 @@ jobs:
         run: pnpm --filter @silklang/compiler exec tsx --test ../../compiler/scripts/runSelfhostCorpus.test.ts
       - name: Build bootstrap CLI
         run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
-      # Temporary headroom until the bootstrap LLVM-emission memory fix lands (see memory handoff).
+      - name: Add ephemeral integer body clocks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          
+          p = Path('compiler/src/semantic/SourceUnit.silk')
+          s = p.read_text()
+          s = s.replace('import Stream {Stream}', 'import Stream {Stream}\nimport silk.native_descriptor {NativeDescriptor}\nimport silk.i64\nimport silk.u64')
+          helper = r'''
+          unsafe extern "C" fn clock() -> i64
+          
+          pub effect fn b11Trace(id: &ModuleId, revision: usize, phase: &[u8]) -> ()
+          ! OutOfMemoryError ? &mut Allocator {
+            let tick = unsafe clock()
+            let mut message = run Bytes.copy(b"B11_PHASE ")
+            run Bytes.append(&mut message, ModuleId.logicalPath(id))
+            run Bytes.append(&mut message, b" ")
+            run b11Decimal(&mut message, usize.toU64(revision))
+            run Bytes.append(&mut message, b" ")
+            run Bytes.append(&mut message, phase)
+            run Bytes.append(&mut message, b" ")
+            run b11Decimal(&mut message, i64.toU64(tick))
+            run Bytes.append(&mut message, b"\n")
+            let mut nativeError = 0
+            let written = run NativeDescriptor.writeAll(2, Bytes.asSlice(&message), &mut nativeError)
+            return ()
+          }
+          
+          pub effect fn b11Decimal(output: &mut Bytes, value: u64) -> ()
+          ! OutOfMemoryError ? &mut Allocator {
+            let mut reversed = Vector.make<u8>()
+            let mut remaining = value
+            if remaining == 0 { return run Bytes.append(&mut output.*, b"0") }
+            while remaining > 0 {
+              run Vector.append<u8>(&mut reversed, u64.toU8(48 + u64.remainder(remaining, 10)))
+              remaining = u64.divide(remaining, 10)
+            }
+            let digits = Vector.asSlice<u8>(&reversed)
+            let mut at = digits.length
+            while at > usize.ZERO {
+              at = at - usize.ONE
+              run Bytes.append(&mut output.*, &[digits[at]])
+            }
+            return ()
+          }
+          '''
+          s = s.replace('impl SourceUnit {', helper + '\nimpl SourceUnit {')
+          for old, new in [
+              ('    let mut lexer = Lexer.make', '    run b11Trace(id, revision, b"lex-start")\n    let mut lexer = Lexer.make'),
+              ('    let syntax = run Parser.parse', '    run b11Trace(id, revision, b"lex-end")\n    let syntax = run Parser.parse'),
+              ('    let authored = run Lower.lower', '    run b11Trace(id, revision, b"parse-end")\n    let authored = run Lower.lower'),
+              ('    return SourceUnit {', '    run b11Trace(id, revision, b"lower-end")\n    return SourceUnit {'),
+          ]:
+              assert s.count(old) == 1, old
+              s = s.replace(old, new)
+          p.write_text(s)
+          p = Path('compiler/src/semantic/SourceIndex.silk')
+          s = p.read_text()
+          s = s.replace('import semantic.SourceUnit {SourceUnit}', 'import semantic.SourceUnit {SourceUnit, b11Trace}')
+          old = '        let index = run ModuleIndex.build(&unit)'
+          assert s.count(old) == 1
+          s = s.replace(old, '        run b11Trace(id, number, b"index-start")\n' + old + '\n        run b11Trace(id, number, b"index-end")')
+          p.write_text(s)
+          
+          p = Path('compiler/src/semantic/Semantic.silk')
+          s = p.read_text()
+          s = s.replace('import semantic.SourceRevision {Observation, Revision}', 'import semantic.SourceRevision {Observation, Revision}\nimport semantic.SourceUnit {b11Trace, b11Decimal}')
+          helper = r"""
+          effect fn b11BodyTrace(resolver: &Resolver, module: &ModuleId, ordinal: usize, phase: &[u8]) -> ()
+          ! OutOfMemoryError ? &mut Allocator {
+            let mut label = run Bytes.copy(phase)
+            run Bytes.append(&mut label, b".")
+            run b11Decimal(&mut label, usize.toU64(ordinal))
+            return run b11Trace(module, SourceIndex.revisionNumber(&resolver.source), Bytes.asSlice(&label))
+          }
+          
+          """
+          start = s.index('effect fn resolveBody(')
+          end = s.index('\neffect fn ', start + 1)
+          part = s[start:end]
+          phases = [
+           ('  let module = run resolvedModule(&resolver.*, key.module)', 'body-start'),
+           ('  let sourceAnswer = run source(&mut resolver.*, &module)', 'signature-end'),
+           ('  let mut annotations = Vector.make<ResolvedAnnotation>()', 'collect-end'),
+           ('  let mut noElision = LifetimeElision {', 'template-end'),
+           ('  let mut resolvedCalls = Vector.make<ResolvedCall>()', 'annotations-end'),
+           ('  let prepared = match move sourceOf(&resolver.*, &sourceAnswer, &module) {', 'calls-end'),
+           ('  let PreparedBody {block, identity, locals: preparedLocals, contractBody: abstractBody, staticBody} = move preparedBody', 'prepare-end'),
+           ('  let mut operationRequest = Request.make()', 'cursor-end'),
+           ('  let control = match move checked {', 'check-end'),
+           ('  if control.canComplete && Shared.with<Type, usize>(&resultType, scalarCode) != 1 {', 'static-validation-end'),
+           ('  let selectedInput = run SourceIndex.bodyInput(&mut resolver.source, &sourceAnswer, &module, key.declaration)', 'obligations-end'),
+           ('  if let Option<&IndexedSource>.Some {value: indexed} = move sourceOf(', 'input-end'),
+          ]
+          for needle, phase in phases:
+           trace = f'  run b11BodyTrace(&resolver.*, &module, key.declaration, b"{phase}")'
+           if phase == 'body-start':
+            assert part.count(needle) == 1, needle
+            part = part.replace(needle, needle + '\n' + trace)
+           elif phase == 'input-end':
+            at=part.index('  let selectedInput =')
+            tail=part[at:]
+            assert tail.count(needle) == 1, needle
+            part=part[:at]+tail.replace(needle,trace+'\n'+needle)
+           else:
+            assert part.count(needle) == 1, needle
+            part = part.replace(needle,trace+'\n'+needle)
+          s=s[:start]+helper+part+s[end:]
+          p.write_text(s)
+          PY
       - name: Build self-hosted compiler CLI
         run: node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml
         env:
           NODE_OPTIONS: --max-old-space-size=8192
-      - name: Run M1 query and source-index cases
+      - name: Prepare bounded integer body probe
         run: |
-          set -o pipefail
-          node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/M1Cases.silk --no-cache | tee "$RUNNER_TEMP/m1-tests.log"
-          node .github/scripts/check-selfhost-test-times.mjs "$RUNNER_TEMP/m1-tests.log"
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
-      - name: Run M1 semantic cases
-        run: |
-          set -o pipefail
-          node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/semantic/SemanticCases.silk --no-cache | tee "$RUNNER_TEMP/semantic-tests.log"
-          node .github/scripts/check-selfhost-test-times.mjs "$RUNNER_TEMP/semantic-tests.log"
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
-      - name: Run frozen target cases
-        run: |
-          set -o pipefail
-          node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/semantic/TargetCases.silk --no-cache | tee "$RUNNER_TEMP/target-tests.log"
-          node .github/scripts/check-selfhost-test-times.mjs "$RUNNER_TEMP/target-tests.log"
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
-      - name: Run HIR lowering and fingerprint cases
-        run: |
-          set -o pipefail
-          node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/hir/LoweringCases.silk --no-cache | tee "$RUNNER_TEMP/hir-tests.log"
-          node .github/scripts/check-selfhost-test-times.mjs "$RUNNER_TEMP/hir-tests.log"
-      - name: Run selfhost native corpus
-        run: |
-          set -o pipefail
-          pnpm --filter @silklang/compiler exec tsx ../../compiler/scripts/runSelfhostCorpus.ts | tee "$RUNNER_TEMP/selfhost-corpus.log"
-        env:
-          SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler
-      - name: Check B11 parsed-source retention baseline
-        run: |
-          node --input-type=module - "$RUNNER_TEMP/selfhost-corpus.log" <<'JS'
-          import { readFileSync } from 'node:fs'
-          const lines = readFileSync(process.argv[2], 'utf8').split('\n')
-          // Part one preserves merged #615's baseline; five timeouts remain in B11.
-          const baselinePasses = [
-            'foreign-libc-pointer-roundtrip',
-            'foreign-libc-floating',
-            'else-if-chain',
-            'scalar-reference-read',
-            'scalar-reference-write-through',
-            'literal',
-            'identity',
-            'second-parameter',
-            'nested',
-            'nested-siblings',
-            'forward-call',
-            'direct-recursion',
-            'mutual-recursion',
-            'binding',
-            'binding-chain',
-            'moved-binding',
-            'operator-precedence',
-            'operator-negation-overflow-trap',
-            'operator-bool-not',
-            'mutable-scalar-loop',
-            'nested-loops',
-            'foreign-libc-abs',
-          ]
-          const acceptedFailures = new Set([
-            'ecdsa-p256-verification',
-            'http-client-request',
-            'json-scanner',
-            'toml-scanner',
-            'borrowed-temporary-stream-suspension',
-            'integer-operation-matrix',
-            'float-operation-matrix',
-            'chacha20-poly1305',
-            'aes-gcm',
-            'rsa-verification',
-            'fixed-output-sha',
-            'pointer-parameter-write',
-            'foreign-libc-qsort-callback',
-            'foreign-libc-environ-static',
-            'secure-random-provider',
-          ])
-          const passes = new Set(lines.filter((line) => line.startsWith('PASS ')).map((line) => line.slice(5)))
-          for (const name of baselinePasses) {
-            if (!passes.has(name)) throw new Error(`Baseline PASS lost: ${name}`)
+          set -euo pipefail
+          git rev-parse HEAD
+          echo "Diagnostic workflow head: ${{ github.event.pull_request.head.sha }}"
+          mkdir -p "$RUNNER_TEMP/b11-integer-body" .scratch
+          cat > .scratch/b11-integer-body.mjs <<'JS'
+          import { createHash } from 'node:crypto'
+          import { performance } from 'node:perf_hooks'
+          import { writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          import { nativeCorpus } from '../packages/compiler/test/support/corpus.ts'
+          import { runCase } from '../compiler/scripts/runSelfhostCorpus.ts'
+          const names = ['integer-operation-matrix']
+          const outcomes = []
+          for (const [ordinal, name] of names.entries()) {
+            const program = nativeCorpus.find((entry) => entry.name === name)
+            if (program === undefined) throw new Error(`Missing corpus case: ${name}`)
+            const fixture = JSON.stringify({
+              source: program.nativeSource ?? program.source,
+              imports: program.nativeImports ?? {},
+              libraries: program.nativeDynamicLibraries ?? [],
+              expected: program.expected,
+            })
+            const fixtureSha256 = createHash('sha256').update(fixture).digest('hex')
+            writeFileSync(join(process.env.B11_DIRECTORY, `${ordinal}-${name}.json`), fixture)
+            // runCase launches a fresh compiler process and uses a fresh temporary project.
+            const started = performance.now()
+            const result = runCase(process.env.SILKC, program)
+            const outcome = {
+              label: process.env.B11_LABEL,
+              source: process.env.B11_SOURCE,
+              ordinal,
+              name,
+              fixtureSha256,
+              elapsedMs: Math.round(performance.now() - started),
+              result,
+            }
+            outcomes.push(outcome)
+            console.log(`B11_TIMING ${JSON.stringify(outcome)}`)
           }
-          for (const line of lines.filter((line) => line.startsWith('FAIL '))) {
-            const name = line.slice(5).split(':', 1)[0]
-            if (!acceptedFailures.has(name)) throw new Error(`New corpus failure: ${line}`)
-          }
-          if (lines.some((line) => /(?:code=RUNTIME_MISMATCH|code=CORPUS_RUNNER_FAILURE|module-source:)/.test(line))) {
-            throw new Error('Corpus has a runtime mismatch, runner failure, or module-source gap')
-          }
-          const timings = lines.filter((line) => line.startsWith('SELFHOST_CASE_TIMING='))
-          const outcomes = lines.filter((line) => /^(?:PASS|FAIL|UNSUPPORTED) /.test(line))
-          if (timings.length !== outcomes.length || outcomes.length === 0) throw new Error('Incomplete corpus timing receipt')
-          console.log(`Preserved ${baselinePasses.length} baseline passes; remaining failures are accepted baseline programs`)
+          writeFileSync(join(process.env.B11_DIRECTORY, 'results.json'), JSON.stringify(outcomes, null, 2))
+          if (outcomes.some(({ result }) => result.status !== 'pass')) process.exitCode = 1
           JS
-      - name: Upload corpus build timings
+          cat > .scratch/b11-integer-wrapper.sh <<'SH'
+          #!/usr/bin/env bash
+          set -u
+          "$B11_REAL_SILKC" "$@" 2> >(tee "$B11_DIRECTORY/integer-operation-matrix.phases.log" | sed '/^B11_PHASE /d' >&2) &
+          compiler_pid=$!
+          cleanup() {
+            kill -TERM "$compiler_pid" 2>/dev/null || true
+            wait "$compiler_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          trap 'exit 143' TERM INT
+          wait "$compiler_pid"
+          compiler_exit=$?
+          exit "$compiler_exit"
+          SH
+          chmod +x .scratch/b11-integer-wrapper.sh
+      - name: Measure remaining integer body phases
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pnpm --filter @silklang/compiler exec tsx ../../.scratch/b11-integer-body.mjs | tee "$RUNNER_TEMP/b11-integer-body/control.log"
+        env:
+          SILKC: ${{ github.workspace }}/.scratch/b11-integer-wrapper.sh
+          B11_REAL_SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler
+          B11_DIRECTORY: ${{ runner.temp }}/b11-integer-body
+          B11_LABEL: integer-body
+          B11_SOURCE: c967a0254c3e578137dd2b962ad3ceefc8a4923d
+      - name: Upload integer body phase evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: selfhost-corpus-timings
-          path: ${{ runner.temp }}/selfhost-corpus.log
-          retention-days: 7
+          name: b11-integer-body-phases
+          path: ${{ runner.temp }}/b11-integer-body
+          retention-days: 3
