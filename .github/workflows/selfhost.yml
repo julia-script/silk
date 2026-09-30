@@ -1,4 +1,4 @@
-name: B11 integer declaration encoding diagnosis
+name: B11 sparse declaration ordinals experiment
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   silk:
-    name: B11 integer encoding phases
+    name: B11 sparse ordinal prototype
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -59,7 +59,7 @@ jobs:
         run: pnpm --filter @silklang/compiler exec tsx --test ../../compiler/scripts/runSelfhostCorpus.test.ts
       - name: Build bootstrap CLI
         run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
-      - name: Add ephemeral integer operator and encoding clocks
+      - name: Prototype sparse ordinals with temporary clocks
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -249,9 +249,56 @@ jobs:
           s=s.replace(a,'    let copiedDeclaration = run DeclarationId.copy(declaration)\n    run b11EncodingTrace(syntax.index, b"input-header-start")\n    let capturedHeader = run Fingerprint.header(module, syntax)\n    run b11EncodingTrace(syntax.index, b"input-header-end")\n    let capturedBody = run Fingerprint.body(module, syntax)\n    run b11EncodingTrace(syntax.index, b"input-body-end")\n'+a)
           s=s.replace('declaration: run DeclarationId.copy(declaration),','declaration: move copiedDeclaration,').replace('header: run Fingerprint.header(module, syntax),','header: move capturedHeader,').replace('body: run Fingerprint.body(module, syntax),','body: move capturedBody,')
           p.write_text(s)
+          from pathlib import Path
+          p=Path('compiler/src/hir/Fingerprint.silk')
+          s=p.read_text()
+          a='struct EncodeState {';assert s.count(a)==1
+          s=s.replace(a,'struct NodeOrdinal {\n  id: HirId\n  ordinal: usize\n}\n\nimpl Copy for NodeOrdinal {}\n\n'+a)
+          assert s.count('Vector<usize>')==3,s.count('Vector<usize>')
+          s=s.replace('Vector<usize>','Vector<NodeOrdinal>')
+          s=s.replace('Vector.make<usize>()','Vector.make<NodeOrdinal>()')
+          a='    Vector.set<usize>(&mut state.ordinals, id.index, state.next)';assert s.count(a)==1
+          s=s.replace(a,'    run Vector.append<NodeOrdinal>(&mut state.ordinals, NodeOrdinal {id: id, ordinal: state.next})')
+          a='''  let mut index = usize.ZERO
+            while index < Module.length(module) {
+              run Vector.append<usize>(&mut blank, usize.ZERO)
+              index = index + usize.ONE
+            }
+          ''';assert s.count(a)==1
+          s=s.replace(a,'')
+          a='''  if reference.id.index >= Vector.length<usize>(&state.ordinals) {
+              return run encodeAbsent(&state.*)
+            }
+          '''
+          # Preserve last-visit semantics for any repeated child identities; absence stays absent.
+          start=s.index('effect fn encodeBinding(');end=s.index('\n///',start+1);part=s[start:end]
+          begin=part.index('  if reference.id.index >=');part=part[:begin]+'''  if !state.emit { return () }
+            let mut at = Vector.length<NodeOrdinal>(&state.ordinals)
+            while at > usize.ZERO {
+              at = at - usize.ONE
+              let entry = Vector.get<NodeOrdinal>(&state.ordinals, at)
+              if entry.id.index == reference.id.index {
+                return run encodeNumber(&mut state.*, usize.toU64(entry.ordinal))
+              }
+            }
+            return run encodeAbsent(&mut state.*)
+          }
+          '''
+          s=s[:start]+part+s[end:]
+          # The old comments describe the dense representation. Diagnostics use the intended sparse design.
+          s=s.replace('`ordinals` maps an arena index to its one-based preorder position within the declaration being\n/// encoded, and zero for a node the declaration does not reach.', '`ordinals` records reached arena identities and their one-based preorder positions within the\n/// declaration being encoded; unrecorded identities are absent.')
+          p.write_text(s)
           PY
       - name: Build self-hosted compiler CLI
         run: node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+      - name: Run existing HIR canonical-byte cases
+        run: |
+          set -o pipefail
+          mkdir -p "$RUNNER_TEMP/b11-integer-operator"
+          node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/hir/LoweringCases.silk --no-cache | tee "$RUNNER_TEMP/b11-integer-operator/hir-tests.log"
+          node .github/scripts/check-selfhost-test-times.mjs "$RUNNER_TEMP/b11-integer-operator/hir-tests.log"
         env:
           NODE_OPTIONS: --max-old-space-size=8192
       - name: Prepare bounded integer operator probe
