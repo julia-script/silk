@@ -1,4 +1,4 @@
-name: B11 matched ordinal performance controls
+name: B11 remaining integer query diagnosis
 
 on:
   push:
@@ -17,14 +17,14 @@ concurrency:
 
 jobs:
   silk:
-    name: B11 ordinal branch controls
+    name: B11 integer query counters
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: 0c6665b48c53c7e7a8e0f3bc3840e647d68239b7
+          ref: 484302dcd15c0a1d88c09e963234a99edfd33ded
       - name: Check main-first bootstrap provenance
         if: github.event_name == 'pull_request'
         env:
@@ -59,57 +59,201 @@ jobs:
         run: pnpm --filter @silklang/compiler exec tsx --test ../../compiler/scripts/runSelfhostCorpus.test.ts
       - name: Build bootstrap CLI
         run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
-      # Temporary headroom until the bootstrap LLVM-emission memory fix lands (see memory handoff).
-      - name: Build both fixed compiler revisions on this runner
+      - name: Add ephemeral query cost counters
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          
+          p = Path('compiler/src/semantic/SourceUnit.silk')
+          s = p.read_text()
+          s = s.replace('import Stream {Stream}', 'import Stream {Stream}\nimport silk.native_descriptor {NativeDescriptor}\nimport silk.i64\nimport silk.u64')
+          helper = r'''
+          unsafe extern "C" fn clock() -> i64
+          
+          pub effect fn b11Trace(id: &ModuleId, revision: usize, phase: &[u8]) -> ()
+          ! OutOfMemoryError ? &mut Allocator {
+            let tick = unsafe clock()
+            let mut message = run Bytes.copy(b"B11_PHASE ")
+            run Bytes.append(&mut message, ModuleId.logicalPath(id))
+            run Bytes.append(&mut message, b" ")
+            run b11Decimal(&mut message, usize.toU64(revision))
+            run Bytes.append(&mut message, b" ")
+            run Bytes.append(&mut message, phase)
+            run Bytes.append(&mut message, b" ")
+            run b11Decimal(&mut message, i64.toU64(tick))
+            run Bytes.append(&mut message, b"\n")
+            let mut nativeError = 0
+            let written = run NativeDescriptor.writeAll(2, Bytes.asSlice(&message), &mut nativeError)
+            return ()
+          }
+          
+          pub effect fn b11Decimal(output: &mut Bytes, value: u64) -> ()
+          ! OutOfMemoryError ? &mut Allocator {
+            let mut reversed = Vector.make<u8>()
+            let mut remaining = value
+            if remaining == 0 { return run Bytes.append(&mut output.*, b"0") }
+            while remaining > 0 {
+              run Vector.append<u8>(&mut reversed, u64.toU8(48 + u64.remainder(remaining, 10)))
+              remaining = u64.divide(remaining, 10)
+            }
+            let digits = Vector.asSlice<u8>(&reversed)
+            let mut at = digits.length
+            while at > usize.ZERO {
+              at = at - usize.ONE
+              run Bytes.append(&mut output.*, &[digits[at]])
+            }
+            return ()
+          }
+          '''
+          s = s.replace('impl SourceUnit {', helper + '\nimpl SourceUnit {')
+          for old, new in [
+              ('    let mut lexer = Lexer.make', '    run b11Trace(id, revision, b"lex-start")\n    let mut lexer = Lexer.make'),
+              ('    let syntax = run Parser.parse', '    run b11Trace(id, revision, b"lex-end")\n    let syntax = run Parser.parse'),
+              ('    let authored = run Lower.lower', '    run b11Trace(id, revision, b"parse-end")\n    let authored = run Lower.lower'),
+              ('    return SourceUnit {', '    run b11Trace(id, revision, b"lower-end")\n    return SourceUnit {'),
+          ]:
+              assert s.count(old) == 1, old
+              s = s.replace(old, new)
+          p.write_text(s)
+          p = Path('compiler/src/semantic/SourceIndex.silk')
+          s = p.read_text()
+          s = s.replace('import semantic.SourceUnit {SourceUnit}', 'import semantic.SourceUnit {SourceUnit, b11Trace}')
+          old = '        let index = run ModuleIndex.build(&unit)'
+          assert s.count(old) == 1
+          s = s.replace(old, '        run b11Trace(id, number, b"index-start")\n' + old + '\n        run b11Trace(id, number, b"index-end")')
+          p.write_text(s)
+          
+          p = Path('compiler/src/semantic/Semantic.silk')
+          s = p.read_text()
+          s = s.replace('import semantic.SourceRevision {Observation, Revision}', 'import semantic.SourceRevision {Observation, Revision}\nimport semantic.SourceUnit {b11Trace, b11Decimal}')
+          helper = r"""
+          effect fn b11BodyTrace(resolver: &Resolver, module: &ModuleId, ordinal: usize, phase: &[u8]) -> ()
+          ! OutOfMemoryError ? &mut Allocator {
+            let mut label = run Bytes.copy(phase)
+            run Bytes.append(&mut label, b".")
+            run b11Decimal(&mut label, usize.toU64(ordinal))
+            return run b11Trace(module, SourceIndex.revisionNumber(&resolver.source), Bytes.asSlice(&label))
+          }
+          
+          """
+          start = s.index('effect fn resolveBody(')
+          end = s.index('\neffect fn ', start + 1)
+          part = s[start:end]
+          phases = [
+           ('  let module = run resolvedModule(&resolver.*, key.module)', 'body-start'),
+           ('  if let Option<&IndexedSource>.Some {value: indexed} = move sourceOf(', 'input-end'),
+          ]
+          for needle, phase in phases:
+           trace = f'  run b11BodyTrace(&resolver.*, &module, key.declaration, b"{phase}")'
+           if phase == 'body-start':
+            assert part.count(needle) == 1, needle
+            part = part.replace(needle, needle + '\n' + trace)
+           elif phase == 'input-end':
+            at=part.index('  let selectedInput =')
+            tail=part[at:]
+            assert tail.count(needle) == 1, needle
+            part=part[:at]+tail.replace(needle,trace+'\n'+needle)
+           else:
+            assert part.count(needle) == 1, needle
+            part = part.replace(needle,trace+'\n'+needle)
+          s=s[:start]+helper+part+s[end:]
+          p.write_text(s)
+          
+          from pathlib import Path
+          
+          p = Path('compiler/src/semantic/SourceUnit.silk')
+          s = p.read_text()
+          helper = r"""
+          pub fn b11Tick() -> u64 {
+            return i64.toU64(unsafe clock())
+          }
+          
+          pub effect fn b11Counter(kind: &[u8], ticks: u64, count: usize) -> ()
+          ! OutOfMemoryError ? &mut Allocator {
+            let mut message = run Bytes.copy(b"B11_COUNTER ")
+            run Bytes.append(&mut message, kind)
+            run Bytes.append(&mut message, b" ")
+            run b11Decimal(&mut message, ticks)
+            run Bytes.append(&mut message, b" ")
+            run b11Decimal(&mut message, usize.toU64(count))
+            run Bytes.append(&mut message, b"\n")
+            let mut nativeError = 0
+            let written = run NativeDescriptor.writeAll(2, Bytes.asSlice(&message), &mut nativeError)
+            return ()
+          }
+          """
+          assert s.count('impl SourceUnit {') == 1
+          s = s.replace('impl SourceUnit {', helper + '\nimpl SourceUnit {')
+          p.write_text(s)
+          
+          p = Path('compiler/src/semantic/Semantic.silk')
+          s = p.read_text()
+          assert s.count('import semantic.SourceUnit {b11Trace, b11Decimal}') == 1
+          s = s.replace('import semantic.SourceUnit {b11Trace, b11Decimal}', 'import semantic.SourceUnit {b11Trace, b11Decimal, b11Tick, b11Counter}')
+          fields = ['intern', 'validation', 'identity', 'dependency', 'evidence']
+          stat = 'struct B11Stats {\n' + ''.join(f'  {name}Ticks: u64\n  {name}Count: usize\n' for name in fields) + '}\n\n'
+          assert s.count('struct Resolver {') == 1
+          s = s.replace('struct Resolver {', stat + 'struct Resolver {\n  b11: B11Stats')
+          assert s.count('      resolver: Resolver {') == 1
+          s = s.replace('      resolver: Resolver {', '      resolver: Resolver {\n        b11: B11Stats {' + ', '.join(f'{name}Ticks: 0, {name}Count: usize.ZERO' for name in fields) + '},')
+          
+          def update(expression, name, start):
+            return f'  {expression}.{name}Ticks = {expression}.{name}Ticks + (b11Tick() - {start})\n  {expression}.{name}Count = {expression}.{name}Count + usize.ONE\n'
+          
+          start = s.index('effect fn demandRaw('); end = s.index('\nfn cycleMember(', start)
+          part = s[start:end]
+          old = '  let word = run internKey(&mut resolver.*, key)'; assert part.count(old) == 1
+          part = part.replace(old, '  let b11InternStart = b11Tick()\n' + old + '\n' + update('resolver.b11', 'intern', 'b11InternStart'))
+          old = '  let cached = Query.completed(&mut owner.*, word)'; assert part.count(old) == 1
+          part = part.replace(old, '  let b11ValidationStart = b11Tick()\n' + old)
+          old = '  let answer = run Query.demand('; assert part.count(old) == 1
+          part = part.replace(old, update('resolver.b11', 'validation', 'b11ValidationStart') + old)
+          s = s[:start] + part + s[end:]
+          old = '    value.identity = run identityOf(&value.outcome)'; assert s.count(old) == 1
+          s = s.replace(old, '    let b11IdentityStart = b11Tick()\n' + old + '\n' + update('resource.resolver.b11', 'identity', 'b11IdentityStart'))
+          
+          start = s.index('effect fn dependency('); end = s.index('\neffect fn cycleAnswer(', start)
+          part = s[start:end]
+          old = '  let modules = Vector.asSlice<ModuleId>(&resolver.modules)'; assert part.count(old) == 1
+          part = part.replace(old, '  let b11DependencyStart = b11Tick()\n' + old)
+          old = '  return Dependency {'; assert part.count(old) == 1
+          part = part.replace(old, '  let b11Value = Dependency {')
+          assert part.endswith('}\n')
+          part = part[:-2] + update('resolver.b11', 'dependency', 'b11DependencyStart') + '  return move b11Value\n}\n'
+          s = s[:start] + part + s[end:]
+          
+          start = s.index('effect fn demandChild('); end = s.index('\neffect fn resolvedModule(', start)
+          part = s[start:end]
+          begin = part.index('  let count = Vector.length<SourceFrame>'); finish = part.index('  // The frame keeps')
+          section = part[begin:finish]
+          part = part[:begin] + '  let b11EvidenceStart = b11Tick()\n  {\n' + ''.join('  ' + line + '\n' for line in section.splitlines()) + '  }\n' + update('resolver.b11', 'evidence', 'b11EvidenceStart') + part[finish:]
+          s = s[:start] + part + s[end:]
+          
+          old = '  let mut label = run Bytes.copy(phase)'; assert s.count(old) == 1
+          snapshots = '  if same(phase, b"body-start") {\n' + ''.join(f'    run b11Counter(b"{name}", resolver.b11.{name}Ticks, resolver.b11.{name}Count)\n' for name in fields) + '  }\n'
+          s = s.replace(old, snapshots + old)
+          p.write_text(s)
+          PY
+      - name: Build self-hosted compiler CLI
+        run: node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml
         env:
           NODE_OPTIONS: --max-old-space-size=8192
-          BASELINE_REVISION: 937416c9769858e5b247a91b91c5a2fc1e453a1c
-          MERGED_REVISION: 0c6665b48c53c7e7a8e0f3bc3840e647d68239b7
+      - name: Prepare bounded integer body probe
         run: |
           set -euo pipefail
-          git diff --exit-code "$BASELINE_REVISION" "$MERGED_REVISION" -- packages/ scripts/ config/ .github/actions/setup-linux-llvm/ package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json .npmrc .node-version
-          mkdir -p "$RUNNER_TEMP/b11-paired"
-          lscpu > "$RUNNER_TEMP/b11-paired/host.txt"
-          git checkout --detach "$BASELINE_REVISION"
           git rev-parse HEAD
-          node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml
-          cp compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler "$RUNNER_TEMP/b11-paired/baseline-silkc"
-          git checkout --detach "$MERGED_REVISION"
-          git rev-parse HEAD
-          node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml
-          cp compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler "$RUNNER_TEMP/b11-paired/merged-silkc"
-          sha256sum "$RUNNER_TEMP/b11-paired/baseline-silkc" "$RUNNER_TEMP/b11-paired/merged-silkc" > "$RUNNER_TEMP/b11-paired/binaries.sha256"
-      - name: Prepare repeated fresh-process controls
-        run: |
-          set -euo pipefail
-          mkdir -p .scratch
-          cat > .scratch/b11-paired.mjs <<'JS'
+          echo "Diagnostic workflow head: ${{ github.event.pull_request.head.sha }}"
+          mkdir -p "$RUNNER_TEMP/b11-integer-body" .scratch
+          cat > .scratch/b11-integer-body.mjs <<'JS'
           import { createHash } from 'node:crypto'
           import { performance } from 'node:perf_hooks'
           import { writeFileSync } from 'node:fs'
           import { join } from 'node:path'
           import { nativeCorpus } from '../packages/compiler/test/support/corpus.ts'
           import { runCase } from '../compiler/scripts/runSelfhostCorpus.ts'
-          const names = [
-            'sealed-scalar-intrinsics',
-            'branch-otherwise',
-            'branch-taken',
-            'branch-else',
-            'json-scanner',
-          ]
-          const revisions = {
-            baseline: '937416c9769858e5b247a91b91c5a2fc1e453a1c',
-            merged: '0c6665b48c53c7e7a8e0f3bc3840e647d68239b7',
-          }
-          const order = ['baseline', 'merged', 'merged', 'baseline']
-          const directory = process.env.B11_DIRECTORY
+          const names = ['integer-operation-matrix']
           const outcomes = []
-          const classification = (result) => JSON.stringify({
-            status: result.status,
-            code: result.code,
-            gaps: result.gaps?.map(({ code }) => code).sort(),
-          })
-          for (const name of names) {
+          for (const [ordinal, name] of names.entries()) {
             const program = nativeCorpus.find((entry) => entry.name === name)
             if (program === undefined) throw new Error(`Missing corpus case: ${name}`)
             const fixture = JSON.stringify({
@@ -117,49 +261,60 @@ jobs:
               imports: program.nativeImports ?? {},
               libraries: program.nativeDynamicLibraries ?? [],
               profiles: program.nativeProfiles ?? [],
-              expected: program.expected,
               runs: program.nativeRuns ?? [],
+              expected: program.expected,
             })
             const fixtureSha256 = createHash('sha256').update(fixture).digest('hex')
-            writeFileSync(join(directory, `${name}.json`), fixture)
-            for (const [ordinal, label] of order.entries()) {
-              // Every invocation launches a fresh native compiler and temporary project.
-              const started = performance.now()
-              const result = runCase(join(directory, `${label}-silkc`), program)
-              const outcome = {
-                name,
-                ordinal,
-                label,
-                source: revisions[label],
-                fixtureSha256,
-                elapsedMs: Math.round(performance.now() - started),
-                result,
-              }
-              outcomes.push(outcome)
-              console.log(`B11_PAIRED ${JSON.stringify(outcome)}`)
+            writeFileSync(join(process.env.B11_DIRECTORY, `${ordinal}-${name}.json`), fixture)
+            // runCase launches a fresh compiler process and uses a fresh temporary project.
+            const started = performance.now()
+            const result = runCase(process.env.SILKC, program)
+            const outcome = {
+              label: process.env.B11_LABEL,
+              source: process.env.B11_SOURCE,
+              ordinal,
+              name,
+              fixtureSha256,
+              elapsedMs: Math.round(performance.now() - started),
+              result,
             }
+            outcomes.push(outcome)
+            console.log(`B11_TIMING ${JSON.stringify(outcome)}`)
           }
-          writeFileSync(join(directory, 'results.json'), JSON.stringify(outcomes, null, 2))
-          const inconsistent = names.some((name) => {
-            const results = outcomes.filter((outcome) => outcome.name === name)
-            return new Set(results.map(({ result }) => classification(result))).size !== 1
-          })
-          if (inconsistent || outcomes.some(({ result }) => result.status === 'fail')) process.exitCode = 1
+          writeFileSync(join(process.env.B11_DIRECTORY, 'results.json'), JSON.stringify(outcomes, null, 2))
+          if (outcomes.some(({ result }) => result.status !== 'pass')) process.exitCode = 1
           JS
-      - name: Measure paired compiler controls with the original watchdog
-        env:
-          B11_DIRECTORY: ${{ runner.temp }}/b11-paired
+          cat > .scratch/b11-integer-wrapper.sh <<'SH'
+          #!/usr/bin/env bash
+          set -u
+          "$B11_REAL_SILKC" "$@" 2> >(tee "$B11_DIRECTORY/integer-operation-matrix.phases.log" | sed -e '/^B11_PHASE /d' -e '/^B11_COUNTER /d' >&2) &
+          compiler_pid=$!
+          cleanup() {
+            kill -TERM "$compiler_pid" 2>/dev/null || true
+            wait "$compiler_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          trap 'exit 143' TERM INT
+          wait "$compiler_pid"
+          compiler_exit=$?
+          exit "$compiler_exit"
+          SH
+          chmod +x .scratch/b11-integer-wrapper.sh
+      - name: Measure remaining integer query counters
+        continue-on-error: true
         run: |
           set -o pipefail
-          pnpm --filter @silklang/compiler exec tsx ../../.scratch/b11-paired.mjs | tee "$RUNNER_TEMP/b11-paired/control.log"
-      - name: Upload paired performance evidence
+          pnpm --filter @silklang/compiler exec tsx ../../.scratch/b11-integer-body.mjs | tee "$RUNNER_TEMP/b11-integer-body/control.log"
+        env:
+          SILKC: ${{ github.workspace }}/.scratch/b11-integer-wrapper.sh
+          B11_REAL_SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler
+          B11_DIRECTORY: ${{ runner.temp }}/b11-integer-body
+          B11_LABEL: integer-query-counters
+          B11_SOURCE: 484302dcd15c0a1d88c09e963234a99edfd33ded
+      - name: Upload integer query evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: b11-paired-controls
-          path: |
-            ${{ runner.temp }}/b11-paired/*.json
-            ${{ runner.temp }}/b11-paired/*.log
-            ${{ runner.temp }}/b11-paired/*.txt
-            ${{ runner.temp }}/b11-paired/*.sha256
+          name: b11-integer-query-counters
+          path: ${{ runner.temp }}/b11-integer-body
           retention-days: 3
