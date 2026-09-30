@@ -113,10 +113,12 @@ impl Drop for AddrInfoChain {
     let head = Intrinsic.replace(self.head, Pointer.null<u8>())
     if !Pointer.isNull<u8>(head) {
       static if Intrinsic.targetOperatingSystem() == "darwin" {
-        let present = unsafe Intrinsic.pointerRequalify<?*mut u8, *mut DarwinAddrInfo>(head)
+        let typed = unsafe Intrinsic.pointerReinterpret<?*mut u8, ?*mut DarwinAddrInfo>(head)
+      let present = unsafe Intrinsic.pointerRequalify<?*mut DarwinAddrInfo, *mut DarwinAddrInfo>(typed)
         unsafe { darwinFreeAddrInfo(present) }
       } else {
-        let present = unsafe Intrinsic.pointerRequalify<?*mut u8, *mut GnuAddrInfo>(head)
+        let typed = unsafe Intrinsic.pointerReinterpret<?*mut u8, ?*mut GnuAddrInfo>(head)
+      let present = unsafe Intrinsic.pointerRequalify<?*mut GnuAddrInfo, *mut GnuAddrInfo>(typed)
         unsafe { gnuFreeAddrInfo(present) }
       }
     }
@@ -274,21 +276,25 @@ unsafe fn lookupAddressInfo(node: ?[*]const u8, serviceText: ?[*]const u8, famil
     let hints = darwinHints(family)
     let mut head = Pointer.null<DarwinAddrInfo>()
     let status = unsafe darwinGetAddrInfo(node, serviceText, Pointer.fromRef<DarwinAddrInfo>(&hints), Pointer.fromMutRef<?*mut DarwinAddrInfo>(&mut head))
-    return AddressInfoLookup {status: status, head: unsafe Intrinsic.pointerRequalify<?*mut DarwinAddrInfo, ?*mut u8>(head)}
+    return AddressInfoLookup {status: status, head: unsafe Intrinsic.pointerReinterpret<?*mut DarwinAddrInfo, ?*mut u8>(head)}
   } else {
     let hints = gnuHints(family)
     let mut head = Pointer.null<GnuAddrInfo>()
     let status = unsafe gnuGetAddrInfo(node, serviceText, Pointer.fromRef<GnuAddrInfo>(&hints), Pointer.fromMutRef<?*mut GnuAddrInfo>(&mut head))
-    return AddressInfoLookup {status: status, head: unsafe Intrinsic.pointerRequalify<?*mut GnuAddrInfo, ?*mut u8>(head)}
+    return AddressInfoLookup {status: status, head: unsafe Intrinsic.pointerReinterpret<?*mut GnuAddrInfo, ?*mut u8>(head)}
   }
 }
 unsafe fn readEntry(pointer: ?*mut u8) -> AddrInfo {
   static if Intrinsic.targetOperatingSystem() == "darwin" {
-    let native = unsafe Pointer.read<DarwinAddrInfo>(unsafe Intrinsic.pointerRequalify<?*mut u8, *const DarwinAddrInfo>(pointer))
-    return AddrInfo {family: native.family, addressLength: native.addressLength, address: native.address, next: unsafe Intrinsic.pointerRequalify<?*mut DarwinAddrInfo, ?*mut u8>(native.next)}
+    let typed = unsafe Intrinsic.pointerReinterpret<?*mut u8, ?*mut DarwinAddrInfo>(pointer)
+    let present = unsafe Intrinsic.pointerRequalify<?*mut DarwinAddrInfo, *const DarwinAddrInfo>(typed)
+    let native = unsafe Pointer.read<DarwinAddrInfo>(present)
+    return AddrInfo {family: native.family, addressLength: native.addressLength, address: native.address, next: unsafe Intrinsic.pointerReinterpret<?*mut DarwinAddrInfo, ?*mut u8>(native.next)}
   } else {
-    let native = unsafe Pointer.read<GnuAddrInfo>(unsafe Intrinsic.pointerRequalify<?*mut u8, *const GnuAddrInfo>(pointer))
-    return AddrInfo {family: native.family, addressLength: native.addressLength, address: native.address, next: unsafe Intrinsic.pointerRequalify<?*mut GnuAddrInfo, ?*mut u8>(native.next)}
+    let typed = unsafe Intrinsic.pointerReinterpret<?*mut u8, ?*mut GnuAddrInfo>(pointer)
+    let present = unsafe Intrinsic.pointerRequalify<?*mut GnuAddrInfo, *const GnuAddrInfo>(typed)
+    let native = unsafe Pointer.read<GnuAddrInfo>(present)
+    return AddrInfo {family: native.family, addressLength: native.addressLength, address: native.address, next: unsafe Intrinsic.pointerReinterpret<?*mut GnuAddrInfo, ?*mut u8>(native.next)}
   }
 }
 unsafe fn currentError() -> i32 {

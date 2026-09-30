@@ -201,8 +201,9 @@ import silk.network_address {Endpoint}
 import silk.option {Option}
 import silk.system_clock {Instant}
 
-pub fn main(endpoints: &[Endpoint]) -> i32 {
-  let pending = connectResolvedOwned(endpoints, ConnectOptions.defaults(), Option.none<Instant>())
+pub fn main() -> i32 {
+  let endpoints: [Endpoint; 0] = []
+  let pending = connectResolvedOwned(&endpoints, ConnectOptions.defaults(), Option.none<Instant>())
   drop pending
   return 42
 }`
