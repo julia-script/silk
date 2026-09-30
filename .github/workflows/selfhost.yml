@@ -1,4 +1,4 @@
-name: B11 repeated integer materialization diagnosis
+name: B11 optimized compiler corpus diagnosis
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   silk:
-    name: B11 repeated integer materialization
+    name: B11 optimized compiler corpus
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -59,205 +59,11 @@ jobs:
         run: pnpm --filter @silklang/compiler exec tsx --test ../../compiler/scripts/runSelfhostCorpus.test.ts
       - name: Build bootstrap CLI
         run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
-      - name: Add ephemeral body and backend clocks
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path('compiler/src/semantic/SourceUnit.silk')
-          s = p.read_text()
-          s = s.replace('import Stream {Stream}', 'import Stream {Stream}\nimport silk.native_descriptor {NativeDescriptor}\nimport silk.i64\nimport silk.u64')
-          helper = r'''
-          unsafe extern "C" fn clock() -> i64
-
-          pub effect fn b11Trace(id: &ModuleId, revision: usize, phase: &[u8]) -> ()
-          ! OutOfMemoryError ? &mut Allocator {
-            let tick = unsafe clock()
-            let mut message = run Bytes.copy(b"B11_PHASE ")
-            run Bytes.append(&mut message, ModuleId.logicalPath(id))
-            run Bytes.append(&mut message, b" ")
-            run b11Decimal(&mut message, usize.toU64(revision))
-            run Bytes.append(&mut message, b" ")
-            run Bytes.append(&mut message, phase)
-            run Bytes.append(&mut message, b" ")
-            run b11Decimal(&mut message, i64.toU64(tick))
-            run Bytes.append(&mut message, b"\n")
-            let mut nativeError = 0
-            let written = run NativeDescriptor.writeAll(2, Bytes.asSlice(&message), &mut nativeError)
-            return ()
-          }
-
-          pub effect fn b11Decimal(output: &mut Bytes, value: u64) -> ()
-          ! OutOfMemoryError ? &mut Allocator {
-            let mut reversed = Vector.make<u8>()
-            let mut remaining = value
-            if remaining == 0 { return run Bytes.append(&mut output.*, b"0") }
-            while remaining > 0 {
-              run Vector.append<u8>(&mut reversed, u64.toU8(48 + u64.remainder(remaining, 10)))
-              remaining = u64.divide(remaining, 10)
-            }
-            let digits = Vector.asSlice<u8>(&reversed)
-            let mut at = digits.length
-            while at > usize.ZERO {
-              at = at - usize.ONE
-              run Bytes.append(&mut output.*, &[digits[at]])
-            }
-            return ()
-          }
-          '''
-          s = s.replace('impl SourceUnit {', helper + '\nimpl SourceUnit {')
-          for old, new in [
-              ('    let mut lexer = Lexer.make', '    run b11Trace(id, revision, b"lex-start")\n    let mut lexer = Lexer.make'),
-              ('    let syntax = run Parser.parse', '    run b11Trace(id, revision, b"lex-end")\n    let syntax = run Parser.parse'),
-              ('    let authored = run Lower.lower', '    run b11Trace(id, revision, b"parse-end")\n    let authored = run Lower.lower'),
-              ('    return SourceUnit {', '    run b11Trace(id, revision, b"lower-end")\n    return SourceUnit {'),
-          ]:
-              assert s.count(old) == 1, old
-              s = s.replace(old, new)
-          p.write_text(s)
-          p = Path('compiler/src/semantic/SourceIndex.silk')
-          s = p.read_text()
-          s = s.replace('import semantic.SourceUnit {SourceUnit}', 'import semantic.SourceUnit {SourceUnit, b11Trace}')
-          old = '        let index = run ModuleIndex.build(&unit)'
-          assert s.count(old) == 1
-          s = s.replace(old, '        run b11Trace(id, number, b"index-start")\n' + old + '\n        run b11Trace(id, number, b"index-end")')
-          p.write_text(s)
-
-          p = Path('compiler/src/semantic/Semantic.silk')
-          s = p.read_text()
-          s = s.replace('import semantic.SourceRevision {Observation, Revision}', 'import semantic.SourceRevision {Observation, Revision}\nimport semantic.SourceUnit {b11Trace, b11Decimal}')
-          helper = r"""
-          effect fn b11BodyTrace(resolver: &Resolver, module: &ModuleId, ordinal: usize, phase: &[u8]) -> ()
-          ! OutOfMemoryError ? &mut Allocator {
-            let mut label = run Bytes.copy(phase)
-            run Bytes.append(&mut label, b".")
-            run b11Decimal(&mut label, usize.toU64(ordinal))
-            return run b11Trace(module, SourceIndex.revisionNumber(&resolver.source), Bytes.asSlice(&label))
-          }
-
-          """
-          start = s.index('effect fn resolveBody(')
-          end = s.index('\neffect fn ', start + 1)
-          part = s[start:end]
-          phases = [
-           ('  let module = run resolvedModule(&resolver.*, key.module)', 'body-start'),
-           ('  if let Option<&IndexedSource>.Some {value: indexed} = move sourceOf(', 'input-end'),
-          ]
-          for needle, phase in phases:
-           trace = f'  run b11BodyTrace(&resolver.*, &module, key.declaration, b"{phase}")'
-           if phase == 'body-start':
-            assert part.count(needle) == 1, needle
-            part = part.replace(needle, needle + '\n' + trace)
-           elif phase == 'input-end':
-            at=part.index('  let selectedInput =')
-            tail=part[at:]
-            assert tail.count(needle) == 1, needle
-            part=part[:at]+tail.replace(needle,trace+'\n'+needle)
-           else:
-            assert part.count(needle) == 1, needle
-            part = part.replace(needle,trace+'\n'+needle)
-          s=s[:start]+helper+part+s[end:]
-          p.write_text(s)
-
-          p = Path('compiler/src/semantic/Semantic.silk')
-          s = p.read_text()
-          def change(name, edits):
-           global s
-           start = s.index('effect fn ' + name + '(')
-           end = s.index('\neffect fn ', start + 1)
-           part = s[start:end]
-           for old,new in edits:
-            assert part.count(old)==1,(name,old,part.count(old))
-            part=part.replace(old,new)
-           s=s[:start]+part+s[end:]
-          def trace(module,ordinal,phase,indent='  '):
-           return f'{indent}run b11BodyTrace(&resolver.*, {module}, {ordinal}, b"{phase}")\n'
-          change('selectOperator',[
-           ('  let mut suppliers =',trace('siteModule','siteSpan.start','operator-start')+'  let mut suppliers ='),
-           ('  if let Result<(), Shared<Rejection>>.Failure {error} = move bound {',trace('siteModule','siteSpan.start','operator-bound-end')+'  if let Result<(), Shared<Rejection>>.Failure {error} = move bound {'),
-           ('    if let Result<(), Shared<Rejection>>.Failure {error} = move concrete {',trace('siteModule','siteSpan.start','operator-concrete-end','    ')+'    if let Result<(), Shared<Rejection>>.Failure {error} = move concrete {'),
-          ])
-          change('gatherConcreteOperator',[
-           ('  let discovered =',trace('siteModule','siteSpan.start','concrete-visible-start')+'  let discovered ='),
-           ('  let visible = match move discovered {',trace('siteModule','siteSpan.start','concrete-visible-end')+'  let visible = match move discovered {'),
-          ])
-          change('visibleOperatorInterfaces',[
-           ('  let sourceAnswer =',trace('module','span.start','visible-start')+'  let sourceAnswer ='),
-           ('  let moduleOrdinal =',trace('module','span.start','visible-candidates-end')+'  let moduleOrdinal ='),
-           ('    let selected = run selectDeclaration(',trace('module','at','visible-name-start','    ')+'    let selected = run selectDeclaration('),
-           ('    let location = match move selected {',trace('module','at','visible-name-selected','    ')+'    let location = match move selected {'),
-           ('\n    run appendVisibleOperatorInterface(&mut resolver.*, move location, &mut visible)','\n    run appendVisibleOperatorInterface(&mut resolver.*, move location, &mut visible)\n'+trace('module','at','visible-name-end','    ').rstrip()),
-           ('    let selected = run select(&mut resolver.*, module, Bytes.asSlice(&imported[namespaceAt]), false)',trace('module','namespaceAt','visible-namespace-start','    ')+'    let selected = run select(&mut resolver.*, module, Bytes.asSlice(&imported[namespaceAt]), false)'),
-           ('      let public = Vector.asSlice<Bytes>(&publicNames)',trace('module','namespaceAt','visible-public-candidates-end','      ')+'      let public = Vector.asSlice<Bytes>(&publicNames)'),
-           ('        let found = run selectDeclaration(',trace('&target','publicAt','visible-public-name-start','        ')+'        let found = run selectDeclaration('),
-           ('        publicAt = publicAt + usize.ONE',trace('&target','publicAt','visible-public-name-end','        ')+'        publicAt = publicAt + usize.ONE'),
-           ('\n    namespaceAt = namespaceAt + usize.ONE','\n'+trace('module','namespaceAt','visible-namespace-end','    ')+'    namespaceAt = namespaceAt + usize.ONE'),
-           ('  return Result.succeed<Vector<DeclarationId>, Shared<Rejection>>(move visible)',trace('module','span.start','visible-end')+'  return Result.succeed<Vector<DeclarationId>, Shared<Rejection>>(move visible)'),
-          ])
-          p.write_text(s)
-
-          change('visibleOperatorInterfaces', [
-           ('    if selected.count != usize.ONE || selected.kind != CandidateKind.ImportModule {', trace('module','namespaceAt','visible-namespace-selected','    ') + '    if selected.count != usize.ONE || selected.kind != CandidateKind.ImportModule {'),
-           ('    let binding = run demandChild(', trace('module','namespaceAt','visible-import-start','    ') + '    let binding = run demandChild('),
-           ('    let importSelection = Shared.with<Result<Answer, NoRejection>, ImportSelection>(', trace('module','namespaceAt','visible-import-end','    ') + '    let importSelection = Shared.with<Result<Answer, NoRejection>, ImportSelection>('),
-           ('      let target = run resolvedModule(&resolver.*, targetOrdinal)', trace('module','namespaceAt','visible-source-start','      ') + '      let target = run resolvedModule(&resolver.*, targetOrdinal)'),
-           ('      let mut publicNames = Vector.make<Bytes>()', trace('module','namespaceAt','visible-source-end','      ') + '      let mut publicNames = Vector.make<Bytes>()'),
-          ])
-          change('resolveBody', [
-           ('  let sourceAnswer = run source(&mut resolver.*, &module)', trace('&module','key.declaration','signature-end') + '  let sourceAnswer = run source(&mut resolver.*, &module)'),
-           ('  let facts = run resolveBodyFacts(', trace('&module','key.declaration','collect-end') + '  let facts = run resolveBodyFacts('),
-           ('  let bodyFacts = match move facts {', trace('&module','key.declaration','facts-end') + '  let bodyFacts = match move facts {'),
-           ('  let PreparedBody {block, identity, locals: preparedLocals, contractBody: abstractBody, staticBody} = move preparedBody', trace('&module','key.declaration','prepare-end') + '  let PreparedBody {block, identity, locals: preparedLocals, contractBody: abstractBody, staticBody} = move preparedBody'),
-           ('  let mut operationRequest = Request.make()', trace('&module','key.declaration','cursor-end') + '  let mut operationRequest = Request.make()'),
-           ('  let control = match move checked {', trace('&module','key.declaration','check-end') + '  let control = match move checked {'),
-           ('  let selectedInput = run SourceIndex.bodyInput(&mut resolver.source, &sourceAnswer, &module, key.declaration)', trace('&module','key.declaration','obligations-end') + '  let selectedInput = run SourceIndex.bodyInput(&mut resolver.source, &sourceAnswer, &module, key.declaration)'),
-          ])
-          change('resolveBodyFacts', [
-           ('  let mut annotations = Vector.make<ResolvedAnnotation>()', trace('module','declaration','facts-start') + '  let mut annotations = Vector.make<ResolvedAnnotation>()'),
-           ('  let mut noElision = LifetimeElision {', trace('module','declaration','template-end') + '  let mut noElision = LifetimeElision {'),
-           ('  let mut resolvedCalls = Vector.make<ResolvedCall>()', trace('module','declaration','annotations-end') + '  let mut resolvedCalls = Vector.make<ResolvedCall>()'),
-           ('  return Result.succeed<BodyFacts, Shared<Rejection>>(', trace('module','declaration','calls-end') + '  return Result.succeed<BodyFacts, Shared<Rejection>>('),
-          ])
-          change('resolveBody', [
-           ('    )\n    return Answer {', '    )\n' + trace('&module','key.declaration','body-make-end','    ') + '    return Answer {'),
-          ])
-          change('resolveMir', [
-           ('  let module = run resolvedModule(&resolver.*, key.module)', '  let module = run resolvedModule(&resolver.*, key.module)\n' + trace('&module','key.declaration','mir-start').rstrip()),
-           ('  let bodyAnswer = run demandChild(', trace('&module','key.declaration','mir-body-start') + '  let bodyAnswer = run demandChild('),
-           ('  let bodyFailure = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(', trace('&module','key.declaration','mir-body-end') + '  let bodyFailure = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>('),
-           ('  let lowered = match move sourceOf(&resolver.*, &sourceAnswer, &module) {', trace('&module','key.declaration','mir-lower-start') + '  let lowered = match move sourceOf(&resolver.*, &sourceAnswer, &module) {'),
-           ('  return match move lowered {', trace('&module','key.declaration','mir-lower-end') + '  return match move lowered {'),
-          ])
-          change('resolveInstance', [
-           ('  let module = run resolvedModule(&resolver.*, key.module)', '  let module = run resolvedModule(&resolver.*, key.module)\n' + trace('&module','key.declaration','instance-start').rstrip()),
-           ('  let rejected = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(', trace('&module','key.declaration','instance-mir-end') + '  let rejected = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>('),
-           ('  let mut types = run copyMirLocalTypes(&resolver.*, mirIndex)', trace('&module','key.declaration','instance-foreign-end') + '  let mut types = run copyMirLocalTypes(&resolver.*, mirIndex)'),
-           ('  let emitted = run Effect.result(emitMirInstance(', trace('&module','key.declaration','instance-layout-end') + '  let emitted = run Effect.result(emitMirInstance('),
-           ('  return match move emitted {', trace('&module','key.declaration','instance-emit-end') + '  return match move emitted {'),
-          ])
-          start = s.index('  pub effect fn buildMain(')
-          part = s[start:]
-          old = '      let answer = run demandRaw('
-          assert part.count(old) == 1
-          part = part.replace(old, '      let b11InstanceModule = run resolvedModule(&self.resolver, location.module)\n      run b11BodyTrace(&self.resolver, &b11InstanceModule, location.declaration, b"build-instance-start")\n' + old)
-          old = '      let rejected = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>('
-          assert part.count(old) == 1
-          part = part.replace(old, '      run b11BodyTrace(&self.resolver, &b11InstanceModule, location.declaration, b"build-instance-end")\n' + old)
-          old = '        run Vector.append<Shared<BackendGap>>(&mut gaps, move value)'
-          assert part.count(old) == 1
-          part = part.replace(old, '''        let b11Code = Shared.with<BackendGap, GapCode>(&value, fn(gap: &BackendGap) -> GapCode { return gap.code })
-                  let mut b11Label = run Bytes.copy(b"build-gap-")
-                  run Bytes.append(&mut b11Label, BackendGap.name(b11Code))
-                  run b11BodyTrace(&self.resolver, &b11InstanceModule, location.declaration, Bytes.asSlice(&b11Label))
-          ''' + old)
-          s = s[:start] + part
-          p.write_text(s)
-          PY
       - name: Build self-hosted compiler CLI
-        run: node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml
+        run: node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml --optimization release-with-debug
         env:
           NODE_OPTIONS: --max-old-space-size=8192
-      - name: Prepare bounded integer body probe
+      - name: Prepare uninstrumented optimized compiler corpus probe
         run: |
           set -euo pipefail
           git rev-parse HEAD
@@ -270,7 +76,7 @@ jobs:
           import { join } from 'node:path'
           import { nativeCorpus } from '../packages/compiler/test/support/corpus.ts'
           import { runCase } from '../compiler/scripts/runSelfhostCorpus.ts'
-          const names = Array.from({ length: 3 }, () => 'integer-operation-matrix')
+          const names = nativeCorpus.map((entry) => entry.name)
           const outcomes = []
           for (const [ordinal, name] of names.entries()) {
             const program = nativeCorpus.find((entry) => entry.name === name)
@@ -286,7 +92,6 @@ jobs:
             const fixtureSha256 = createHash('sha256').update(fixture).digest('hex')
             writeFileSync(join(process.env.B11_DIRECTORY, `${ordinal}-${name}.json`), fixture)
             // runCase launches a fresh compiler process and uses a fresh temporary project.
-            process.env.B11_TRACE_ORDINAL = String(ordinal)
             const started = performance.now()
             const result = runCase(process.env.SILKC, program)
             const outcome = {
@@ -304,37 +109,20 @@ jobs:
           writeFileSync(join(process.env.B11_DIRECTORY, 'results.json'), JSON.stringify(outcomes, null, 2))
           if (outcomes.some(({ result }) => result.status !== 'pass')) process.exitCode = 1
           JS
-          cat > .scratch/b11-integer-wrapper.sh <<'SH'
-          #!/usr/bin/env bash
-          set -u
-          "$B11_REAL_SILKC" "$@" 2> >(tee "$B11_DIRECTORY/${B11_TRACE_ORDINAL}-integer-operation-matrix.phases.log" | sed -e '/^B11_PHASE /d' >&2) &
-          compiler_pid=$!
-          cleanup() {
-            kill -TERM "$compiler_pid" 2>/dev/null || true
-            wait "$compiler_pid" 2>/dev/null || true
-          }
-          trap cleanup EXIT
-          trap 'exit 143' TERM INT
-          wait "$compiler_pid"
-          compiler_exit=$?
-          exit "$compiler_exit"
-          SH
-          chmod +x .scratch/b11-integer-wrapper.sh
-      - name: Repeat bounded body and backend measurements
+      - name: Measure full corpus with the optimized compiler
         continue-on-error: true
         run: |
           set -o pipefail
           pnpm --filter @silklang/compiler exec tsx ../../.scratch/b11-integer-body.mjs | tee "$RUNNER_TEMP/b11-integer-body/control.log"
         env:
-          SILKC: ${{ github.workspace }}/.scratch/b11-integer-wrapper.sh
-          B11_REAL_SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler
+          SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/release-with-debug/silk-compiler
           B11_DIRECTORY: ${{ runner.temp }}/b11-integer-body
-          B11_LABEL: integer-materialization
+          B11_LABEL: optimized-compiler-corpus
           B11_SOURCE: 484302dcd15c0a1d88c09e963234a99edfd33ded
       - name: Upload integer query evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: b11-integer-materialization-repeats
+          name: b11-optimized-compiler-corpus
           path: ${{ runner.temp }}/b11-integer-body
           retention-days: 3
