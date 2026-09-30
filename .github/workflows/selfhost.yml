@@ -254,7 +254,7 @@ jobs:
           p.write_text(s)
           PY
       - name: Build self-hosted compiler CLI
-        run: node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml
+        run: node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml --optimization release-with-debug
         env:
           NODE_OPTIONS: --max-old-space-size=8192
       - name: Prepare bounded HTTP body probe
@@ -326,9 +326,9 @@ jobs:
           pnpm --filter @silklang/compiler exec tsx ../../.scratch/b13-http-body.mjs | tee "$RUNNER_TEMP/b13-http-body/control.log"
         env:
           SILKC: ${{ github.workspace }}/.scratch/b13-http-wrapper.sh
-          B13_REAL_SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler
+          B13_REAL_SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/release-with-debug/silk-compiler
           B13_DIRECTORY: ${{ runner.temp }}/b13-http-body
-          B13_LABEL: http-materialization
+          B13_LABEL: http-materialization-optimized
           B13_SOURCE: 484302dcd15c0a1d88c09e963234a99edfd33ded
       - name: Upload HTTP query evidence
         if: always()
