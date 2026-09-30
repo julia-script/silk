@@ -1,4 +1,4 @@
-name: B11 current operator discovery diagnosis
+name: B11 body and backend materialization diagnosis
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   silk:
-    name: B11 current operator discovery
+    name: B11 body and backend materialization
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -59,7 +59,7 @@ jobs:
         run: pnpm --filter @silklang/compiler exec tsx --test ../../compiler/scripts/runSelfhostCorpus.test.ts
       - name: Build bootstrap CLI
         run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
-      - name: Add ephemeral operator discovery clocks
+      - name: Add ephemeral body and backend clocks
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -218,6 +218,39 @@ jobs:
            ('  let mut resolvedCalls = Vector.make<ResolvedCall>()', trace('module','declaration','annotations-end') + '  let mut resolvedCalls = Vector.make<ResolvedCall>()'),
            ('  return Result.succeed<BodyFacts, Shared<Rejection>>(', trace('module','declaration','calls-end') + '  return Result.succeed<BodyFacts, Shared<Rejection>>('),
           ])
+          change('resolveBody', [
+           ('    )\n    return Answer {', '    )\n' + trace('&module','key.declaration','body-make-end','    ') + '    return Answer {'),
+          ])
+          change('resolveMir', [
+           ('  let module = run resolvedModule(&resolver.*, key.module)', '  let module = run resolvedModule(&resolver.*, key.module)\n' + trace('&module','key.declaration','mir-start').rstrip()),
+           ('  let bodyAnswer = run demandChild(', trace('&module','key.declaration','mir-body-start') + '  let bodyAnswer = run demandChild('),
+           ('  let bodyFailure = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(', trace('&module','key.declaration','mir-body-end') + '  let bodyFailure = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>('),
+           ('  let lowered = match move sourceOf(&resolver.*, &sourceAnswer, &module) {', trace('&module','key.declaration','mir-lower-start') + '  let lowered = match move sourceOf(&resolver.*, &sourceAnswer, &module) {'),
+           ('  return match move lowered {', trace('&module','key.declaration','mir-lower-end') + '  return match move lowered {'),
+          ])
+          change('resolveInstance', [
+           ('  let module = run resolvedModule(&resolver.*, key.module)', '  let module = run resolvedModule(&resolver.*, key.module)\n' + trace('&module','key.declaration','instance-start').rstrip()),
+           ('  let rejected = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(', trace('&module','key.declaration','instance-mir-end') + '  let rejected = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>('),
+           ('  let mut types = run copyMirLocalTypes(&resolver.*, mirIndex)', trace('&module','key.declaration','instance-foreign-end') + '  let mut types = run copyMirLocalTypes(&resolver.*, mirIndex)'),
+           ('  let emitted = run Effect.result(emitMirInstance(', trace('&module','key.declaration','instance-layout-end') + '  let emitted = run Effect.result(emitMirInstance('),
+           ('  return match move emitted {', trace('&module','key.declaration','instance-emit-end') + '  return match move emitted {'),
+          ])
+          start = s.index('  pub effect fn buildMain(')
+          part = s[start:]
+          old = '      let answer = run demandRaw('
+          assert part.count(old) == 1
+          part = part.replace(old, '      let b11InstanceModule = run resolvedModule(&self.resolver, location.module)\n      run b11BodyTrace(&self.resolver, &b11InstanceModule, location.declaration, b"build-instance-start")\n' + old)
+          old = '      let rejected = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>('
+          assert part.count(old) == 1
+          part = part.replace(old, '      run b11BodyTrace(&self.resolver, &b11InstanceModule, location.declaration, b"build-instance-end")\n' + old)
+          old = '        run Vector.append<Shared<BackendGap>>(&mut gaps, move value)'
+          assert part.count(old) == 1
+          part = part.replace(old, '''        let b11Code = Shared.with<BackendGap, GapCode>(&value, fn(gap: &BackendGap) -> GapCode { return gap.code })
+                  let mut b11Label = run Bytes.copy(b"build-gap-")
+                  run Bytes.append(&mut b11Label, BackendGap.name(b11Code))
+                  run b11BodyTrace(&self.resolver, &b11InstanceModule, location.declaration, Bytes.asSlice(&b11Label))
+          ''' + old)
+          s = s[:start] + part
           p.write_text(s)
           PY
       - name: Build self-hosted compiler CLI
@@ -286,7 +319,7 @@ jobs:
           exit "$compiler_exit"
           SH
           chmod +x .scratch/b11-integer-wrapper.sh
-      - name: Measure current operator discovery
+      - name: Measure body and backend materialization
         continue-on-error: true
         run: |
           set -o pipefail
@@ -295,12 +328,12 @@ jobs:
           SILKC: ${{ github.workspace }}/.scratch/b11-integer-wrapper.sh
           B11_REAL_SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler
           B11_DIRECTORY: ${{ runner.temp }}/b11-integer-body
-          B11_LABEL: integer-operator-discovery
+          B11_LABEL: integer-materialization
           B11_SOURCE: 484302dcd15c0a1d88c09e963234a99edfd33ded
       - name: Upload integer query evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: b11-integer-operator-discovery
+          name: b11-integer-materialization
           path: ${{ runner.temp }}/b11-integer-body
           retention-days: 3

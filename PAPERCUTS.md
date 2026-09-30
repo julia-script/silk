@@ -377,3 +377,5 @@ HEAD...@{u}` before reporting a head, and confirm each claimed deliverable again
 - 2026-09-30 · Existing compiler dist generated older synthesized lifetime signatures for B13 documentation, despite fresh source bytes · Preserve current-base signatures for unchanged APIs and let exact-head documentation CI validate; do not rebuild the compiler locally · B13 stdlib platform migration
 
 - 2026-09-30 · Prepared compiler/docgen dist kept emitting stale lifetime signatures during B13 repairs · Use mise Node 24.18.1 with temporary current-source transform hooks for the canonical documentation script; focused Vitest uses current LLVM source aliases · B13 stdlib platform migration
+
+- 2026-09-30 · Host restart cleared /private/tmp worktrees and local CI receipts, leaving stale Git worktree registrations · Restore the committed diagnostic branch in a fresh worktree with git worktree add --force and download its exact-head artifacts again; keep durable receipts in workspace notes · B11 self-hosted compiler diagnosis
