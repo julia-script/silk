@@ -414,9 +414,25 @@ it.effect('keeps unused native HTTP imports portable and rejects reached native 
 pub fn main() -> i32 { return 42 }`
     const reached = `import silk.http_client_native {Options, preflight}
 import silk.http_origin {Origin}
-pub fn main(origin: &Origin) -> i32 {
+import silk.result {Result}
+import silk.uri {Uri}
+pub fn main() -> i32 {
+  let uri = match move Uri.parse("http://127.0.0.1/") {
+    Result.Success {value} => value
+    Result.Failure {error} => {
+      drop error
+      return 1
+    }
+  }
+  let origin = match move Origin.fromUri(&uri) {
+    Result.Success {value} => value
+    Result.Failure {error} => {
+      drop error
+      return 2
+    }
+  }
   let options = Options.defaults()
-  drop preflight(origin, &options)
+  drop preflight(&origin, &options)
   return 42
 }`
     const module =

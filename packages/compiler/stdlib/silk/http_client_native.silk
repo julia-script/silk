@@ -851,13 +851,6 @@ pub effect<'env> fn withConnection<
 ! E | ClientError | NativeClientError | ResolverError | NativeSocketError | ConnectionError | IdentityError | TrustSourceError | OutOfMemoryError
 ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random | &mut TrustSource
 where R in Without<R, HttpTransport> {
-  static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText(
-    "libc",
-  ) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
-    "libc",
-  ) == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {} else {
-    compileError("Native HTTP acquisition requires a supported Darwin or GNU libc profile")
-  }
   let admitted = preflight(&origin, &options)
   if let Result.Failure {error} = move admitted {
     fail move error
@@ -893,13 +886,6 @@ pub effect<'env> fn withUnixConnection<
 ! E | ClientError | NativeClientError | NativeSocketError | ConnectionError | IdentityError | TrustSourceError | OutOfMemoryError
 ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random | &mut TrustSource
 where R in Without<R, HttpTransport> {
-  static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText(
-    "libc",
-  ) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
-    "libc",
-  ) == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {} else {
-    compileError("Native HTTP acquisition requires a supported Darwin or GNU libc profile")
-  }
   run checkOpeningDeadline(&options.deadline)
   let trust = run prepareTrust(&origin, &options)
   let connection = run acquireUnixOwned(
@@ -979,13 +965,6 @@ pub effect<'env> fn withProxyRoute<
 ! E | ProxyError | ClientError | NativeClientError | ResolverError | NativeSocketError | ConnectionError | IdentityError | OutOfMemoryError
 ? R | &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random
 where R in Without<R, ByteDuplex>, R in Without<R, HttpTransport> {
-  static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText(
-    "libc",
-  ) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
-    "libc",
-  ) == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {} else {
-    compileError("Native HTTP acquisition requires a supported Darwin or GNU libc profile")
-  }
   let expectedPeer = match move proxyPeer(&route) {
     Result.Success {value} => value
     Result.Failure {error} => {
@@ -1848,13 +1827,6 @@ impl<'configuration, 'policy, A, HandlerError, ?HandlerRequirements> NativeRedir
   where
     HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
     HandlerRequirements in Without<HandlerRequirements, HttpTransport> {
-    static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText(
-      "libc",
-    ) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
-      "libc",
-    ) == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {} else {
-      compileError("Native HTTP acquisition requires a supported Darwin or GNU libc profile")
-    }
     let uri = request.uri.view()
     let origin = match move Origin.fromUri(&uri) {
       Result.Failure {error} => {
