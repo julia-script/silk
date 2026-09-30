@@ -408,29 +408,11 @@ it.effect(
   120_000,
 )
 
-it.effect('keeps unused native HTTP imports portable and rejects reached native preflight', () =>
+it.effect('keeps native HTTP imports portable and rejects reached native preflight', () =>
   Effect.gen(function* () {
-    const unused = `import silk.http_client_native {NativeRouteProvider, NativeTransport, acquireOwned}
-pub fn main() -> i32 { return 42 }`
-    const reached = `import silk.http_client_native {Options, preflight}
+    const source = `import silk.http_client_native {NativeRouteProvider, NativeTransport, acquireOwned, Options, preflight}
 import silk.http_origin {Origin}
-import silk.result {Result}
-import silk.uri {Uri}
-pub fn main() -> i32 {
-  let uri = match move Uri.parse("http://127.0.0.1/") {
-    Result.Success {value} => value
-    Result.Failure {error} => {
-      drop error
-      return 1
-    }
-  }
-  let origin = match move Origin.fromUri(&uri) {
-    Result.Success {value} => value
-    Result.Failure {error} => {
-      drop error
-      return 2
-    }
-  }
+pub fn main(origin: Origin) -> i32 {
   let options = Options.defaults()
   drop preflight(&origin, &options)
   return 42
@@ -445,32 +427,22 @@ pub fn main() -> i32 {
       { target: 'wasm32-unknown-unknown' },
       { target: 'x86_64-unknown-linux-gnu', libc: 'none' },
     ] as const) {
-      const unusedId = `http-values/native-unused-${profile.target}`
-      const selected = AnalysisFixture.configuration(unusedId, profile.target)
-      const unusedSnapshot = yield* Analysis.makeRealized({
-        root: unusedId,
-        configuration: { ...selected, profile: { ...selected.profile, ...profile } },
-      }).pipe(
-        Effect.provide(
-          SourceResolver.overlay([SourceFile.make(unusedId, ascii(unused))]).pipe(
-            Layer.provideMerge(SourceResolver.empty),
-          ),
-        ),
-      )
-      assert.deepEqual(Analysis.diagnostics(unusedSnapshot), [])
-      assert.deepEqual(Analysis.instancesOf(unusedSnapshot).foreignCalls, [])
       const sourceId = `http-values/native-preflight-${profile.target}`
-      const configuration = AnalysisFixture.configuration(sourceId, profile.target)
-      const snapshot = yield* Analysis.makeRealized({
-        root: sourceId,
-        configuration: { ...configuration, profile: { ...configuration.profile, ...profile } },
-      }).pipe(
-        Effect.provide(
-          SourceResolver.overlay([SourceFile.make(sourceId, ascii(reached))]).pipe(
-            Layer.provideMerge(SourceResolver.empty),
-          ),
-        ),
+      const selected = AnalysisFixture.configuration(sourceId, profile.target, [])
+      const configuration = { ...selected, profile: { ...selected.profile, ...profile } }
+      const resolver = SourceResolver.overlay([SourceFile.make(sourceId, ascii(source))]).pipe(
+        Layer.provideMerge(SourceResolver.empty),
       )
+      const frontend = yield* Analysis.make({ root: sourceId, configuration }).pipe(
+        Effect.provide(resolver),
+      )
+      assert.deepEqual(Analysis.diagnostics(frontend), [])
+      const retained = AnalysisFixture.configuration(sourceId, profile.target)
+      const snapshot = yield* Analysis.realize(frontend, {
+        ...configuration,
+        composition: retained.composition,
+      }).pipe(Effect.provide(resolver))
+      assert.deepEqual(Analysis.instancesOf(snapshot).foreignCalls, [])
       assert.deepEqual(
         Analysis.diagnostics(snapshot).map((diagnostic) => [
           diagnostic.code,
