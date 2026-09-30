@@ -422,8 +422,21 @@ jobs:
           mkdir -p "$workload_dir" "$RUNNER_TEMP/selfhost-logs"
           git archive "$SELFHOST_SHA" compiler | tar -x -C "$workload_dir"
           git show "$SELFHOST_SHA:.github/scripts/check-selfhost-test-times.mjs" > "$workload_dir/check-test-times.mjs"
-          echo "SELFHOST_MANIFEST=$workload_dir/compiler/silk.toml" >> "$GITHUB_ENV"
-          echo "SELFHOST_TIME_CHECK=$workload_dir/check-test-times.mjs" >> "$GITHUB_ENV"
+          git show "$SELFHOST_SHA:.github/workflows/selfhost.yml" > "$RUNNER_TEMP/selfhost-logs/selfhost-workflow.yml"
+          heap_options=()
+          while IFS= read -r option; do
+            heap_options+=("$option")
+          done < <(sed -n 's/^[[:space:]]*NODE_OPTIONS:[[:space:]]*//p' "$RUNNER_TEMP/selfhost-logs/selfhost-workflow.yml")
+          test "${#heap_options[@]}" -eq 4
+          [[ "${heap_options[0]}" =~ ^--max-old-space-size=[1-9][0-9]*$ ]]
+          for option in "${heap_options[@]}"; do
+            test "$option" = "${heap_options[0]}"
+          done
+          {
+            echo "SELFHOST_MANIFEST=$workload_dir/compiler/silk.toml"
+            echo "SELFHOST_TIME_CHECK=$workload_dir/check-test-times.mjs"
+            echo "SELFHOST_NODE_OPTIONS=${heap_options[0]}"
+          } >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
@@ -433,13 +446,29 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build candidate or baseline bootstrap CLI
         run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
+      - name: Record compiler, runtime, and host provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'workflow_sha=%s\nbootstrap_sha=%s\nselfhost_sha=%s\n' "$EXPECTED_SHA" "$(git rev-parse HEAD)" "$SELFHOST_SHA"
+            printf 'selfhost_node_options=%s\n' "$SELFHOST_NODE_OPTIONS"
+            uname -a
+            lscpu
+            free -b
+            command -v node
+            node --version
+            node -p 'JSON.stringify(process.versions, null, 2)'
+            command -v clang
+            clang --version
+          } > "$RUNNER_TEMP/selfhost-logs/machine.log" 2>&1
       - name: Build self-hosted compiler CLI
         shell: bash
         run: |
           set -euo pipefail
           /usr/bin/time -v node packages/cli/dist/bin.js build --manifest-path "$SELFHOST_MANIFEST" 2>&1 | tee "$RUNNER_TEMP/selfhost-logs/build.log"
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: ${{ env.SELFHOST_NODE_OPTIONS }}
       - name: Run M1 query and source-index cases
         shell: bash
         run: |
@@ -447,7 +476,7 @@ jobs:
           /usr/bin/time -v node packages/cli/dist/bin.js test --manifest-path "$SELFHOST_MANIFEST" --root src/M1Cases.silk --no-cache 2>&1 | tee "$RUNNER_TEMP/selfhost-logs/m1.log"
           node "$SELFHOST_TIME_CHECK" "$RUNNER_TEMP/selfhost-logs/m1.log"
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: ${{ env.SELFHOST_NODE_OPTIONS }}
       - name: Run M1 semantic cases
         shell: bash
         run: |
@@ -455,7 +484,7 @@ jobs:
           /usr/bin/time -v node packages/cli/dist/bin.js test --manifest-path "$SELFHOST_MANIFEST" --root src/semantic/SemanticCases.silk --no-cache 2>&1 | tee "$RUNNER_TEMP/selfhost-logs/semantic.log"
           node "$SELFHOST_TIME_CHECK" "$RUNNER_TEMP/selfhost-logs/semantic.log"
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: ${{ env.SELFHOST_NODE_OPTIONS }}
       - name: Run frozen target cases
         shell: bash
         run: |
@@ -463,7 +492,7 @@ jobs:
           /usr/bin/time -v node packages/cli/dist/bin.js test --manifest-path "$SELFHOST_MANIFEST" --root src/semantic/TargetCases.silk --no-cache 2>&1 | tee "$RUNNER_TEMP/selfhost-logs/target.log"
           node "$SELFHOST_TIME_CHECK" "$RUNNER_TEMP/selfhost-logs/target.log"
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: ${{ env.SELFHOST_NODE_OPTIONS }}
       - name: Run HIR lowering and fingerprint cases
         shell: bash
         run: |
