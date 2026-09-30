@@ -1,4 +1,4 @@
-name: B11 sparse declaration ordinals experiment
+name: B11 matched ordinal performance controls
 
 on:
   push:
@@ -17,14 +17,14 @@ concurrency:
 
 jobs:
   silk:
-    name: B11 sparse ordinal prototype
+    name: B11 ordinal branch controls
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: b34f2a4455c358b68f0e702037dcfdbaf904bc89
+          ref: 0c6665b48c53c7e7a8e0f3bc3840e647d68239b7
       - name: Check main-first bootstrap provenance
         if: github.event_name == 'pull_request'
         env:
@@ -59,323 +59,107 @@ jobs:
         run: pnpm --filter @silklang/compiler exec tsx --test ../../compiler/scripts/runSelfhostCorpus.test.ts
       - name: Build bootstrap CLI
         run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
-      - name: Prototype sparse ordinals with temporary clocks
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path('compiler/src/semantic/SourceUnit.silk')
-          s = p.read_text()
-          s = s.replace('import Stream {Stream}', 'import Stream {Stream}\nimport silk.native_descriptor {NativeDescriptor}\nimport silk.i64\nimport silk.u64')
-          helper = r'''
-          unsafe extern "C" fn clock() -> i64
-
-          pub effect fn b11Trace(id: &ModuleId, revision: usize, phase: &[u8]) -> ()
-          ! OutOfMemoryError ? &mut Allocator {
-            let tick = unsafe clock()
-            let mut message = run Bytes.copy(b"B11_PHASE ")
-            run Bytes.append(&mut message, ModuleId.logicalPath(id))
-            run Bytes.append(&mut message, b" ")
-            run b11Decimal(&mut message, usize.toU64(revision))
-            run Bytes.append(&mut message, b" ")
-            run Bytes.append(&mut message, phase)
-            run Bytes.append(&mut message, b" ")
-            run b11Decimal(&mut message, i64.toU64(tick))
-            run Bytes.append(&mut message, b"\n")
-            let mut nativeError = 0
-            let written = run NativeDescriptor.writeAll(2, Bytes.asSlice(&message), &mut nativeError)
-            return ()
-          }
-
-          pub effect fn b11Decimal(output: &mut Bytes, value: u64) -> ()
-          ! OutOfMemoryError ? &mut Allocator {
-            let mut reversed = Vector.make<u8>()
-            let mut remaining = value
-            if remaining == 0 { return run Bytes.append(&mut output.*, b"0") }
-            while remaining > 0 {
-              run Vector.append<u8>(&mut reversed, u64.toU8(48 + u64.remainder(remaining, 10)))
-              remaining = u64.divide(remaining, 10)
-            }
-            let digits = Vector.asSlice<u8>(&reversed)
-            let mut at = digits.length
-            while at > usize.ZERO {
-              at = at - usize.ONE
-              run Bytes.append(&mut output.*, &[digits[at]])
-            }
-            return ()
-          }
-          '''
-          s = s.replace('impl SourceUnit {', helper + '\nimpl SourceUnit {')
-          for old, new in [
-              ('    let mut lexer = Lexer.make', '    run b11Trace(id, revision, b"lex-start")\n    let mut lexer = Lexer.make'),
-              ('    let syntax = run Parser.parse', '    run b11Trace(id, revision, b"lex-end")\n    let syntax = run Parser.parse'),
-              ('    let authored = run Lower.lower', '    run b11Trace(id, revision, b"parse-end")\n    let authored = run Lower.lower'),
-              ('    return SourceUnit {', '    run b11Trace(id, revision, b"lower-end")\n    return SourceUnit {'),
-          ]:
-              assert s.count(old) == 1, old
-              s = s.replace(old, new)
-          p.write_text(s)
-          p = Path('compiler/src/semantic/SourceIndex.silk')
-          s = p.read_text()
-          s = s.replace('import semantic.SourceUnit {SourceUnit}', 'import semantic.SourceUnit {SourceUnit, b11Trace}')
-          old = '        let index = run ModuleIndex.build(&unit)'
-          assert s.count(old) == 1
-          s = s.replace(old, '        run b11Trace(id, number, b"index-start")\n' + old + '\n        run b11Trace(id, number, b"index-end")')
-          p.write_text(s)
-
-          p = Path('compiler/src/semantic/Semantic.silk')
-          s = p.read_text()
-          s = s.replace('import semantic.SourceRevision {Observation, Revision}', 'import semantic.SourceRevision {Observation, Revision}\nimport semantic.SourceUnit {b11Trace, b11Decimal}')
-          helper = r"""
-          effect fn b11BodyTrace(resolver: &Resolver, module: &ModuleId, ordinal: usize, phase: &[u8]) -> ()
-          ! OutOfMemoryError ? &mut Allocator {
-            let mut label = run Bytes.copy(phase)
-            run Bytes.append(&mut label, b".")
-            run b11Decimal(&mut label, usize.toU64(ordinal))
-            return run b11Trace(module, SourceIndex.revisionNumber(&resolver.source), Bytes.asSlice(&label))
-          }
-
-          """
-          start = s.index('effect fn resolveBody(')
-          end = s.index('\neffect fn ', start + 1)
-          part = s[start:end]
-          phases = [
-           ('  let module = run resolvedModule(&resolver.*, key.module)', 'body-start'),
-           ('  let sourceAnswer = run source(&mut resolver.*, &module)', 'signature-end'),
-           ('  let mut annotations = Vector.make<ResolvedAnnotation>()', 'collect-end'),
-           ('  let mut noElision = LifetimeElision {', 'template-end'),
-           ('  let mut resolvedCalls = Vector.make<ResolvedCall>()', 'annotations-end'),
-           ('  let prepared = match move sourceOf(&resolver.*, &sourceAnswer, &module) {', 'calls-end'),
-           ('  let PreparedBody {block, identity, locals: preparedLocals, contractBody: abstractBody, staticBody} = move preparedBody', 'prepare-end'),
-           ('  let mut operationRequest = Request.make()', 'cursor-end'),
-           ('  let control = match move checked {', 'check-end'),
-           ('  if control.canComplete && Shared.with<Type, usize>(&resultType, scalarCode) != 1 {', 'static-validation-end'),
-           ('  let selectedInput = run SourceIndex.bodyInput(&mut resolver.source, &sourceAnswer, &module, key.declaration)', 'obligations-end'),
-           ('  if let Option<&IndexedSource>.Some {value: indexed} = move sourceOf(', 'input-end'),
-          ]
-          for needle, phase in phases:
-           trace = f'  run b11BodyTrace(&resolver.*, &module, key.declaration, b"{phase}")'
-           if phase == 'body-start':
-            assert part.count(needle) == 1, needle
-            part = part.replace(needle, needle + '\n' + trace)
-           elif phase == 'input-end':
-            at=part.index('  let selectedInput =')
-            tail=part[at:]
-            assert tail.count(needle) == 1, needle
-            part=part[:at]+tail.replace(needle,trace+'\n'+needle)
-           else:
-            assert part.count(needle) == 1, needle
-            part = part.replace(needle,trace+'\n'+needle)
-          s=s[:start]+helper+part+s[end:]
-          p.write_text(s)
-
-          from pathlib import Path
-          p = Path('compiler/src/semantic/Semantic.silk')
-          s = p.read_text()
-          def change(name, edits):
-           global s
-           start = s.index('effect fn ' + name + '(')
-           end = s.index('\neffect fn ', start + 1)
-           part = s[start:end]
-           for old,new in edits:
-            assert part.count(old)==1,(name,old,part.count(old))
-            part=part.replace(old,new)
-           s=s[:start]+part+s[end:]
-          def trace(module,ordinal,phase,indent='  '):
-           return f'{indent}run b11BodyTrace(&resolver.*, {module}, {ordinal}, b"{phase}")\n'
-          change('selectOperator',[
-           ('  let mut suppliers =',trace('siteModule','siteSpan.start','operator-start')+'  let mut suppliers ='),
-           ('  if let Result<(), Shared<Rejection>>.Failure {error} = move bound {',trace('siteModule','siteSpan.start','operator-bound-end')+'  if let Result<(), Shared<Rejection>>.Failure {error} = move bound {'),
-           ('    if let Result<(), Shared<Rejection>>.Failure {error} = move concrete {',trace('siteModule','siteSpan.start','operator-concrete-end','    ')+'    if let Result<(), Shared<Rejection>>.Failure {error} = move concrete {'),
-          ])
-          change('gatherConcreteOperator',[
-           ('  let discovered =',trace('siteModule','siteSpan.start','concrete-visible-start')+'  let discovered ='),
-           ('  let visible = match move discovered {',trace('siteModule','siteSpan.start','concrete-visible-end')+'  let visible = match move discovered {'),
-          ])
-          change('visibleOperatorInterfaces',[
-           ('  let sourceAnswer =',trace('module','span.start','visible-start')+'  let sourceAnswer ='),
-           ('  let moduleOrdinal =',trace('module','span.start','visible-candidates-end')+'  let moduleOrdinal ='),
-           ('    let selected = run selectDeclaration(',trace('module','at','visible-name-start','    ')+'    let selected = run selectDeclaration('),
-           ('    let location = match move selected {',trace('module','at','visible-name-selected','    ')+'    let location = match move selected {'),
-           ('\n    run appendVisibleOperatorInterface(&mut resolver.*, move location, &mut visible)','\n    run appendVisibleOperatorInterface(&mut resolver.*, move location, &mut visible)\n'+trace('module','at','visible-name-end','    ').rstrip()),
-           ('    let selected = run select(&mut resolver.*, module, Bytes.asSlice(&imported[namespaceAt]), false)',trace('module','namespaceAt','visible-namespace-start','    ')+'    let selected = run select(&mut resolver.*, module, Bytes.asSlice(&imported[namespaceAt]), false)'),
-           ('      let public = Vector.asSlice<Bytes>(&publicNames)',trace('module','namespaceAt','visible-public-candidates-end','      ')+'      let public = Vector.asSlice<Bytes>(&publicNames)'),
-           ('        let found = run selectDeclaration(',trace('&target','publicAt','visible-public-name-start','        ')+'        let found = run selectDeclaration('),
-           ('        publicAt = publicAt + usize.ONE',trace('&target','publicAt','visible-public-name-end','        ')+'        publicAt = publicAt + usize.ONE'),
-           ('\n    namespaceAt = namespaceAt + usize.ONE','\n'+trace('module','namespaceAt','visible-namespace-end','    ')+'    namespaceAt = namespaceAt + usize.ONE'),
-           ('  return Result.succeed<Vector<DeclarationId>, Shared<Rejection>>(move visible)',trace('module','span.start','visible-end')+'  return Result.succeed<Vector<DeclarationId>, Shared<Rejection>>(move visible)'),
-          ])
-          p.write_text(s)
-          from pathlib import Path
-          p = Path('compiler/src/semantic/SourceUnit.silk')
-          s = p.read_text()
-          helper = r"""
-          pub effect fn b11EncodingTrace(index: usize, phase: &[u8]) -> ()
-          ! OutOfMemoryError ? &mut Allocator {
-            let tick = unsafe clock()
-            let mut message = run Bytes.copy(b"B11_PHASE fingerprint ")
-            run b11Decimal(&mut message, usize.toU64(index))
-            run Bytes.append(&mut message, b" ")
-            run Bytes.append(&mut message, phase)
-            run Bytes.append(&mut message, b" ")
-            run b11Decimal(&mut message, i64.toU64(tick))
-            run Bytes.append(&mut message, b"\n")
-            let mut nativeError = 0
-            let written = run NativeDescriptor.writeAll(2, Bytes.asSlice(&message), &mut nativeError)
-            return ()
-          }
-          """
-          assert s.count('impl SourceUnit {') == 1
-          s=s.replace('impl SourceUnit {',helper+'\nimpl SourceUnit {')
-          p.write_text(s)
-          p=Path('compiler/src/hir/Fingerprint.silk')
-          s=p.read_text();anchor='import silk.writer {Writer, WriterError}';assert s.count(anchor)==1
-          s=s.replace(anchor,anchor+'\nimport semantic.SourceUnit {b11EncodingTrace}')
-          start=s.index('effect fn ordinalsOf(');end=s.index('\n///',start+1)
-          part=s[start:end]
-          a='  let mut blank = Vector.make<usize>()';assert part.count(a)==1
-          part=part.replace(a,'  run b11EncodingTrace(id.index, b"ordinals-start")\n'+a)
-          a='  let mut state = run beginEncoding(Domain.Header, false, move blank)';assert part.count(a)==1
-          part=part.replace(a,'  run b11EncodingTrace(id.index, b"ordinals-fill-end")\n'+a)
-          a='  let EncodeState {bytes, ordinals, next: ignored1, emit: ignored2} = move state';assert part.count(a)==1
-          part=part.replace(a,'  run b11EncodingTrace(id.index, b"ordinals-walk-end")\n'+a)
-          s=s[:start]+part+s[end:];p.write_text(s)
-          p=Path('compiler/src/semantic/BodyInput.silk')
-          s=p.read_text();anchor='import silk.usize';assert s.count(anchor)==1
-          s=s.replace(anchor,anchor+'\nimport semantic.SourceUnit {b11EncodingTrace}')
-          a='    let span = Module.span(module, syntax)';assert s.count(a)==1
-          s=s.replace(a,'    run b11EncodingTrace(syntax.index, b"input-start")\n'+a)
-          a='    return BodyInput {';assert s.count(a)==1
-          s=s.replace(a,'    let copiedDeclaration = run DeclarationId.copy(declaration)\n    run b11EncodingTrace(syntax.index, b"input-header-start")\n    let capturedHeader = run Fingerprint.header(module, syntax)\n    run b11EncodingTrace(syntax.index, b"input-header-end")\n    let capturedBody = run Fingerprint.body(module, syntax)\n    run b11EncodingTrace(syntax.index, b"input-body-end")\n'+a)
-          s=s.replace('declaration: run DeclarationId.copy(declaration),','declaration: move copiedDeclaration,').replace('header: run Fingerprint.header(module, syntax),','header: move capturedHeader,').replace('body: run Fingerprint.body(module, syntax),','body: move capturedBody,')
-          p.write_text(s)
-          from pathlib import Path
-          p=Path('compiler/src/hir/Fingerprint.silk')
-          s=p.read_text()
-          a='struct EncodeState {';assert s.count(a)==1
-          s=s.replace(a,'struct NodeOrdinal {\n  id: HirId\n  ordinal: usize\n}\n\nimpl Copy for NodeOrdinal {}\n\n'+a)
-          assert s.count('Vector<usize>')==3,s.count('Vector<usize>')
-          s=s.replace('Vector<usize>','Vector<NodeOrdinal>')
-          s=s.replace('Vector.make<usize>()','Vector.make<NodeOrdinal>()')
-          a='    Vector.set<usize>(&mut state.ordinals, id.index, state.next)';assert s.count(a)==1
-          s=s.replace(a,'    run Vector.append<NodeOrdinal>(&mut state.ordinals, NodeOrdinal {id: id, ordinal: state.next})')
-          a='''  let mut index = usize.ZERO
-            while index < Module.length(module) {
-              run Vector.append<usize>(&mut blank, usize.ZERO)
-              index = index + usize.ONE
-            }
-          ''';assert s.count(a)==1
-          s=s.replace(a,'')
-          a='''  if reference.id.index >= Vector.length<usize>(&state.ordinals) {
-              return run encodeAbsent(&state.*)
-            }
-          '''
-          # Preserve last-visit semantics for any repeated child identities; absence stays absent.
-          start=s.index('effect fn encodeBinding(');end=s.index('\n///',start+1);part=s[start:end]
-          begin=part.index('  if reference.id.index >=');part=part[:begin]+'''  if !state.emit { return () }
-            let mut at = Vector.length<NodeOrdinal>(&state.ordinals)
-            while at > usize.ZERO {
-              at = at - usize.ONE
-              let entry = Vector.get<NodeOrdinal>(&state.ordinals, at)
-              if entry.id.index == reference.id.index {
-                return run encodeNumber(&mut state.*, usize.toU64(entry.ordinal))
-              }
-            }
-            return run encodeAbsent(&mut state.*)
-          }
-          '''
-          s=s[:start]+part+s[end:]
-          # The old comments describe the dense representation. Diagnostics use the intended sparse design.
-          s=s.replace('`ordinals` maps an arena index to its one-based preorder position within the declaration being\n/// encoded, and zero for a node the declaration does not reach.', '`ordinals` records reached arena identities and their one-based preorder positions within the\n/// declaration being encoded; unrecorded identities are absent.')
-          p.write_text(s)
-          PY
-      - name: Build self-hosted compiler CLI
-        run: node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml
+      # Temporary headroom until the bootstrap LLVM-emission memory fix lands (see memory handoff).
+      - name: Build both fixed compiler revisions on this runner
         env:
           NODE_OPTIONS: --max-old-space-size=8192
-      - name: Run existing HIR canonical-byte cases
-        run: |
-          set -o pipefail
-          mkdir -p "$RUNNER_TEMP/b11-integer-operator"
-          node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/hir/LoweringCases.silk --no-cache | tee "$RUNNER_TEMP/b11-integer-operator/hir-tests.log"
-          node .github/scripts/check-selfhost-test-times.mjs "$RUNNER_TEMP/b11-integer-operator/hir-tests.log"
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
-      - name: Prepare bounded integer operator probe
+          BASELINE_REVISION: 937416c9769858e5b247a91b91c5a2fc1e453a1c
+          MERGED_REVISION: 0c6665b48c53c7e7a8e0f3bc3840e647d68239b7
         run: |
           set -euo pipefail
+          git diff --exit-code "$BASELINE_REVISION" "$MERGED_REVISION" -- packages/ scripts/ config/ .github/actions/setup-linux-llvm/ package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json .npmrc .node-version
+          mkdir -p "$RUNNER_TEMP/b11-paired"
+          lscpu > "$RUNNER_TEMP/b11-paired/host.txt"
+          git checkout --detach "$BASELINE_REVISION"
           git rev-parse HEAD
-          echo "Diagnostic workflow head: ${{ github.event.pull_request.head.sha }}"
-          mkdir -p "$RUNNER_TEMP/b11-integer-operator" .scratch
-          cat > .scratch/b11-integer-operator.mjs <<'JS'
+          node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml
+          cp compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler "$RUNNER_TEMP/b11-paired/baseline-silkc"
+          git checkout --detach "$MERGED_REVISION"
+          git rev-parse HEAD
+          node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml
+          cp compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler "$RUNNER_TEMP/b11-paired/merged-silkc"
+          sha256sum "$RUNNER_TEMP/b11-paired/baseline-silkc" "$RUNNER_TEMP/b11-paired/merged-silkc" > "$RUNNER_TEMP/b11-paired/binaries.sha256"
+      - name: Prepare repeated fresh-process controls
+        run: |
+          set -euo pipefail
+          mkdir -p .scratch
+          cat > .scratch/b11-paired.mjs <<'JS'
           import { createHash } from 'node:crypto'
           import { performance } from 'node:perf_hooks'
           import { writeFileSync } from 'node:fs'
           import { join } from 'node:path'
           import { nativeCorpus } from '../packages/compiler/test/support/corpus.ts'
           import { runCase } from '../compiler/scripts/runSelfhostCorpus.ts'
-          const names = ['integer-operation-matrix']
+          const names = [
+            'sealed-scalar-intrinsics',
+            'branch-otherwise',
+            'branch-taken',
+            'branch-else',
+            'json-scanner',
+          ]
+          const revisions = {
+            baseline: '937416c9769858e5b247a91b91c5a2fc1e453a1c',
+            merged: '0c6665b48c53c7e7a8e0f3bc3840e647d68239b7',
+          }
+          const order = ['baseline', 'merged', 'merged', 'baseline']
+          const directory = process.env.B11_DIRECTORY
           const outcomes = []
-          for (const [ordinal, name] of names.entries()) {
+          const classification = (result) => JSON.stringify({
+            status: result.status,
+            code: result.code,
+            gaps: result.gaps?.map(({ code }) => code).sort(),
+          })
+          for (const name of names) {
             const program = nativeCorpus.find((entry) => entry.name === name)
             if (program === undefined) throw new Error(`Missing corpus case: ${name}`)
             const fixture = JSON.stringify({
               source: program.nativeSource ?? program.source,
               imports: program.nativeImports ?? {},
               libraries: program.nativeDynamicLibraries ?? [],
+              profiles: program.nativeProfiles ?? [],
               expected: program.expected,
+              runs: program.nativeRuns ?? [],
             })
             const fixtureSha256 = createHash('sha256').update(fixture).digest('hex')
-            writeFileSync(join(process.env.B11_DIRECTORY, `${ordinal}-${name}.json`), fixture)
-            // runCase launches a fresh compiler process and uses a fresh temporary project.
-            const started = performance.now()
-            const result = runCase(process.env.SILKC, program)
-            const outcome = {
-              label: process.env.B11_LABEL,
-              source: process.env.B11_SOURCE,
-              ordinal,
-              name,
-              fixtureSha256,
-              elapsedMs: Math.round(performance.now() - started),
-              result,
+            writeFileSync(join(directory, `${name}.json`), fixture)
+            for (const [ordinal, label] of order.entries()) {
+              // Every invocation launches a fresh native compiler and temporary project.
+              const started = performance.now()
+              const result = runCase(join(directory, `${label}-silkc`), program)
+              const outcome = {
+                name,
+                ordinal,
+                label,
+                source: revisions[label],
+                fixtureSha256,
+                elapsedMs: Math.round(performance.now() - started),
+                result,
+              }
+              outcomes.push(outcome)
+              console.log(`B11_PAIRED ${JSON.stringify(outcome)}`)
             }
-            outcomes.push(outcome)
-            console.log(`B11_TIMING ${JSON.stringify(outcome)}`)
           }
-          writeFileSync(join(process.env.B11_DIRECTORY, 'results.json'), JSON.stringify(outcomes, null, 2))
-          if (outcomes.some(({ result }) => result.status !== 'pass')) process.exitCode = 1
+          writeFileSync(join(directory, 'results.json'), JSON.stringify(outcomes, null, 2))
+          const inconsistent = names.some((name) => {
+            const results = outcomes.filter((outcome) => outcome.name === name)
+            return new Set(results.map(({ result }) => classification(result))).size !== 1
+          })
+          if (inconsistent || outcomes.some(({ result }) => result.status === 'fail')) process.exitCode = 1
           JS
-          cat > .scratch/b11-integer-wrapper.sh <<'SH'
-          #!/usr/bin/env bash
-          set -u
-          "$B11_REAL_SILKC" "$@" 2> >(tee "$B11_DIRECTORY/integer-operation-matrix.phases.log" | sed '/^B11_PHASE /d' >&2) &
-          compiler_pid=$!
-          cleanup() {
-            kill -TERM "$compiler_pid" 2>/dev/null || true
-            wait "$compiler_pid" 2>/dev/null || true
-          }
-          trap cleanup EXIT
-          trap 'exit 143' TERM INT
-          wait "$compiler_pid"
-          compiler_exit=$?
-          exit "$compiler_exit"
-          SH
-          chmod +x .scratch/b11-integer-wrapper.sh
-      - name: Measure remaining integer operator phases
-        continue-on-error: true
+      - name: Measure paired compiler controls with the original watchdog
+        env:
+          B11_DIRECTORY: ${{ runner.temp }}/b11-paired
         run: |
           set -o pipefail
-          pnpm --filter @silklang/compiler exec tsx ../../.scratch/b11-integer-operator.mjs | tee "$RUNNER_TEMP/b11-integer-operator/control.log"
-        env:
-          SILKC: ${{ github.workspace }}/.scratch/b11-integer-wrapper.sh
-          B11_REAL_SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler
-          B11_DIRECTORY: ${{ runner.temp }}/b11-integer-operator
-          B11_LABEL: integer-operator
-          B11_SOURCE: b34f2a4455c358b68f0e702037dcfdbaf904bc89
-      - name: Upload integer operator phase evidence
+          pnpm --filter @silklang/compiler exec tsx ../../.scratch/b11-paired.mjs | tee "$RUNNER_TEMP/b11-paired/control.log"
+      - name: Upload paired performance evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: b11-integer-operator-phases
-          path: ${{ runner.temp }}/b11-integer-operator
+          name: b11-paired-controls
+          path: |
+            ${{ runner.temp }}/b11-paired/*.json
+            ${{ runner.temp }}/b11-paired/*.log
+            ${{ runner.temp }}/b11-paired/*.txt
+            ${{ runner.temp }}/b11-paired/*.sha256
           retention-days: 3
