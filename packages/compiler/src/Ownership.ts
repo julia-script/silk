@@ -4940,20 +4940,30 @@ export const localSharedAccessBoundaryPlan = (
     Tir.TirFunction,
     ReadonlyArray<Extract<Tir.Expression, { readonly _tag: 'Call' | 'BuiltinCall' }>>
   >()
+  let hasAccessBoundary = false
   for (const fn of functions) {
     const calls: Array<Extract<Tir.Expression, { readonly _tag: 'Call' | 'BuiltinCall' }>> = []
     const collect = (expression: Tir.Expression): void => {
       if (
         expression._tag === 'Call' ||
         (expression._tag === 'BuiltinCall' && expression.operation === 'SharedWithMut')
-      )
+      ) {
         calls.push(expression)
+        if (expression._tag === 'BuiltinCall') hasAccessBoundary = true
+      }
       for (const child of Tir.expressionChildren(expression)) collect(child)
     }
     for (const statement of fn.statements)
       for (const expression of Tir.statementExpressions(statement)) collect(expression)
     callsByFunction.set(fn, calls)
   }
+  // With no sealed access operation, neither propagation can produce a boundary.
+  if (!hasAccessBoundary)
+    return {
+      _tag: 'LocalSharedAccessBoundaryPlan',
+      boundaries: new Map(),
+      resultBoundaries: new Map(),
+    }
   let changed = true
   while (changed) {
     changed = false
