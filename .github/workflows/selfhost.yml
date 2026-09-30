@@ -1,4 +1,4 @@
-name: B11 body and backend materialization diagnosis
+name: B11 repeated integer materialization diagnosis
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   silk:
-    name: B11 body and backend materialization
+    name: B11 repeated integer materialization
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -270,7 +270,7 @@ jobs:
           import { join } from 'node:path'
           import { nativeCorpus } from '../packages/compiler/test/support/corpus.ts'
           import { runCase } from '../compiler/scripts/runSelfhostCorpus.ts'
-          const names = ['integer-operation-matrix']
+          const names = Array.from({ length: 3 }, () => 'integer-operation-matrix')
           const outcomes = []
           for (const [ordinal, name] of names.entries()) {
             const program = nativeCorpus.find((entry) => entry.name === name)
@@ -286,6 +286,7 @@ jobs:
             const fixtureSha256 = createHash('sha256').update(fixture).digest('hex')
             writeFileSync(join(process.env.B11_DIRECTORY, `${ordinal}-${name}.json`), fixture)
             // runCase launches a fresh compiler process and uses a fresh temporary project.
+            process.env.B11_TRACE_ORDINAL = String(ordinal)
             const started = performance.now()
             const result = runCase(process.env.SILKC, program)
             const outcome = {
@@ -306,7 +307,7 @@ jobs:
           cat > .scratch/b11-integer-wrapper.sh <<'SH'
           #!/usr/bin/env bash
           set -u
-          "$B11_REAL_SILKC" "$@" 2> >(tee "$B11_DIRECTORY/integer-operation-matrix.phases.log" | sed -e '/^B11_PHASE /d' >&2) &
+          "$B11_REAL_SILKC" "$@" 2> >(tee "$B11_DIRECTORY/${B11_TRACE_ORDINAL}-integer-operation-matrix.phases.log" | sed -e '/^B11_PHASE /d' >&2) &
           compiler_pid=$!
           cleanup() {
             kill -TERM "$compiler_pid" 2>/dev/null || true
@@ -319,7 +320,7 @@ jobs:
           exit "$compiler_exit"
           SH
           chmod +x .scratch/b11-integer-wrapper.sh
-      - name: Measure body and backend materialization
+      - name: Repeat bounded body and backend measurements
         continue-on-error: true
         run: |
           set -o pipefail
@@ -334,6 +335,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: b11-integer-materialization
+          name: b11-integer-materialization-repeats
           path: ${{ runner.temp }}/b11-integer-body
           retention-days: 3
