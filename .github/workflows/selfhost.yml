@@ -95,113 +95,38 @@ jobs:
             console.log('[ROOT-PROBE]', JSON.stringify(row))
           }
 
-          // Reduce the snapshot stream without retaining its node/edge tables or string values.
-          // Only object constructor names and V8 array/native kind names are retained.
-          class SnapshotSummary {
-            state = 'header'
-            buffer = ''
-            number = ''
-            field = 0
-            node = []
-            nodes = 0
-            types = new Map()
-            kinds = new Map()
-            names = new Map()
-            ordinal = 0
-            inString = false
-            escaped = false
-            literal = ''
-            keep = false
-            feed(chunk) {
-              if (this.state === 'header' || this.state === 'skip') {
-                this.buffer += chunk
-                const marker = this.state === 'header' ? '"nodes":[' : '"strings":['
-                const offset = this.buffer.indexOf(marker)
-                if (offset < 0) {
-                  if (this.state === 'skip') this.buffer = this.buffer.slice(-32)
-                  return
-                }
-                if (this.state === 'header') {
-                  this.meta = JSON.parse(this.buffer.slice(0, offset) + '"nodes":[]}').snapshot
-                  this.fields = this.meta.meta.node_fields
-                  this.typeNames = this.meta.meta.node_types[0]
-                  this.typeField = this.fields.indexOf('type')
-                  this.nameField = this.fields.indexOf('name')
-                  this.sizeField = this.fields.indexOf('self_size')
-                  this.state = 'nodes'
-                } else this.state = 'strings'
-                chunk = this.buffer.slice(offset + marker.length)
-                this.buffer = ''
-              }
-              for (let index = 0; index < chunk.length; index += 1) {
-                const character = chunk[index]
-                if (this.state === 'nodes') {
-                  if (character >= '0' && character <= '9') this.number += character
-                  else {
-                    if (this.number) {
-                      this.node.push(Number(this.number))
-                      this.number = ''
-                      if (this.node.length === this.fields.length) {
-                        const type = this.typeNames[this.node[this.typeField]]
-                        const name = this.node[this.nameField]
-                        const bytes = this.node[this.sizeField]
-                        const total = this.types.get(type) ?? { count: 0, bytes: 0 }
-                        total.count += 1
-                        total.bytes += bytes
-                        this.types.set(type, total)
-                        if (type === 'object' || type === 'array' || type === 'native' || type === 'hidden') {
-                          const key = type + ':' + name
-                          const kind = this.kinds.get(key) ?? { type, name, count: 0, bytes: 0 }
-                          kind.count += 1
-                          kind.bytes += bytes
-                          this.kinds.set(key, kind)
-                          this.names.set(name, '')
-                        }
-                        this.nodes += 1
-                        this.node = []
-                      }
-                    }
-                    if (character === ']') {
-                      this.state = 'skip'
-                      this.feed(chunk.slice(index + 1))
-                      return
-                    }
-                  }
-                } else if (this.state === 'strings') {
-                  if (!this.inString) {
-                    if (character === '"') {
-                      this.inString = true
-                      this.keep = this.names.has(this.ordinal)
-                      this.literal = this.keep ? '"' : ''
-                    } else if (character === ']') this.state = 'done'
-                  } else {
-                    if (this.keep) this.literal += character
-                    if (this.escaped) this.escaped = false
-                    else if (character === '\\') this.escaped = true
-                    else if (character === '"') {
-                      if (this.keep) this.names.set(this.ordinal, JSON.parse(this.literal))
-                      this.ordinal += 1
-                      this.inString = false
-                      this.literal = ''
-                    }
-                  }
-                }
-              }
+          // Emit compact evidence to the job log as well as artifacts, so runner termination
+          // cannot erase already-completed CPU windows or the retained allocation checkpoint.
+          const cpuSummary = profile => {
+            const nodes = new Map(profile.nodes.map(node => [node.id, node.callFrame]))
+            const totals = new Map()
+            const samples = profile.samples ?? []
+            for (let index = 0; index < samples.length; index += 1) {
+              const frame = nodes.get(samples[index])
+              if (!frame) continue
+              const key = JSON.stringify(frame)
+              const entry = totals.get(key) ?? { ...frame, microseconds: 0 }
+              entry.microseconds += profile.timeDeltas?.[index] ?? 0
+              totals.set(key, entry)
             }
-            finish() {
-              if (this.state !== 'done' || this.nodes !== this.meta.node_count)
-                throw new Error('Incomplete heap snapshot stream: ' + this.state + '/' + this.nodes)
-              return {
-                nodeCount: this.nodes,
-                edgeCount: this.meta.edge_count,
-                types: [...this.types].map(([type, data]) => ({ type, ...data })).sort((a, b) => b.bytes - a.bytes),
-                kinds: [...this.kinds.values()].map(kind => ({ ...kind, name: this.names.get(kind.name) }))
-                  .sort((a, b) => b.bytes - a.bytes).slice(0, 80),
-              }
+            return [...totals.values()].sort((a, b) => b.microseconds - a.microseconds).slice(0, 30)
+          }
+          const allocationSummary = profile => {
+            const entries = []
+            const visit = (node, stack) => {
+              const frames = [...stack, node.callFrame]
+              if (node.selfSize) entries.push({ bytes: node.selfSize, frames: frames.slice(-10) })
+              for (const child of node.children ?? []) visit(child, frames)
+            }
+            visit(profile.head, [])
+            return {
+              sampledObjects: profile.samples?.length ?? 0,
+              estimatedBytes: entries.reduce((total, entry) => total + entry.bytes, 0),
+              sites: entries.sort((a, b) => b.bytes - a.bytes).slice(0, 40),
             }
           }
 
-          const child = spawn(process.execPath, ['--inspect=127.0.0.1:0', '--trace-gc-nvp', ...process.argv.slice(2)], {
+          const child = spawn(process.execPath, ['--inspect-brk=127.0.0.1:0', '--trace-gc-nvp', ...process.argv.slice(2)], {
             detached: true,
             env: { ...process.env, NODE_OPTIONS: '--max-old-space-size=6144' },
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -214,7 +139,6 @@ jobs:
           let socket
           let requestId = 0
           const pending = new Map()
-          let snapshot
           let captured = false
           let requested = ''
           let connected = false
@@ -239,7 +163,7 @@ jobs:
             try {
               const cpu = await command('Profiler.stop')
               write('cpu-' + rotation + '.cpuprofile', cpu.profile)
-              record('profile', { rotation })
+              record('profile', { rotation, sites: cpuSummary(cpu.profile) })
               rotation += 1
               lastRotation = elapsed()
               if (!shutdownStarted) await command('Profiler.start')
@@ -247,7 +171,7 @@ jobs:
           }
           const capture = async reason => {
             captured = true
-            record('snapshot-start', { reason })
+            record('allocation-checkpoint-start', { reason })
             await rotate()
             await command('Debugger.enable')
             const framePromise = new Promise(resolve => { paused = resolve })
@@ -256,21 +180,20 @@ jobs:
               framePromise,
               new Promise(resolve => setTimeout(() => resolve([]), 10_000)),
             ])
-            write('snapshot-stack.json', frames)
-            record('snapshot-stack', { frames: frames.slice(0, 12) })
+            write('checkpoint-stack.json', frames)
+            record('checkpoint-stack', { frames: frames.slice(0, 12) })
             if (!isPaused) await command('Debugger.disable')
-            const usage = await command('Runtime.getHeapUsage')
-            snapshot = new SnapshotSummary()
             try {
-              await command('HeapProfiler.takeHeapSnapshot', { reportProgress: false, captureNumericValue: false }, 900_000)
-              const summary = snapshot.finish()
-              write('snapshot-summary.json', { reason, seconds: elapsed(), before: usage, ...summary })
-              record('snapshot-complete', { nodeCount: summary.nodeCount, types: summary.types, kinds: summary.kinds.slice(0, 20) })
-              // This inspector method can request GC, so call it only after the deliberate snapshot.
+              const before = await command('Runtime.getHeapUsage')
+              // The sampling-profile read forces GC. Take one deliberate checkpoint only;
+              // avoid full snapshots: both first runners terminated during graph construction.
               const allocations = await command('HeapProfiler.getSamplingProfile')
-              write('snapshot-allocations.heapprofile', allocations.profile)
+              const after = await command('Runtime.getHeapUsage')
+              const summary = allocationSummary(allocations.profile)
+              write('checkpoint-allocations.heapprofile', allocations.profile)
+              write('checkpoint-summary.json', { reason, seconds: elapsed(), before, after, ...summary })
+              record('allocation-checkpoint-complete', { before, after, ...summary })
             } finally {
-              snapshot = undefined
               if (isPaused) {
                 await command('Debugger.resume')
                 isPaused = false
@@ -294,8 +217,7 @@ jobs:
                   if (message.error) waiter.reject(new Error(JSON.stringify(message.error)))
                   else waiter.resolve(message.result)
                 }
-              } else if (message.method === 'HeapProfiler.addHeapSnapshotChunk') snapshot?.feed(message.params.chunk)
-              else if (message.method === 'Debugger.scriptParsed') scripts.set(message.params.scriptId, message.params.url)
+              } else if (message.method === 'Debugger.scriptParsed') scripts.set(message.params.scriptId, message.params.url)
               else if (message.method === 'Debugger.paused') {
                 isPaused = true
                 paused?.(message.params.callFrames.map(frame => ({
@@ -318,6 +240,7 @@ jobs:
             await command('HeapProfiler.startSampling', { samplingInterval: 524288 })
             connected = true
             record('inspector-connected')
+            await command('Runtime.runIfWaitingForDebugger')
           }
           const fail = error => { record('probe-error', { message: String(error) }); fs.appendFileSync(path.join(directory, 'probe-errors.log'), String(error) + '\n') }
           let stdout = ''
@@ -330,8 +253,9 @@ jobs:
               if (/pause=.*gc=/.test(line) || jsonOffset >= 0) {
                 fs.appendFileSync(path.join(directory, 'gc.log'), line + '\n')
                 const json = jsonOffset >= 0 ? JSON.parse(line.slice(jsonOffset + 4)) : undefined
-                const after = json?.end_object_size ?? Number(line.match(/total_size_after=(\d+)/)?.[1] ?? 0)
+                const after = json?.end_object_size ?? Number(line.match(/(?:end_object_size|total_size_after)=(\d+)/)?.[1] ?? 0)
                 const major = json ? json.gc === 'ms' || json.gc === 'mc' : /gc=(?:ms|mc)\s/.test(line)
+                if (major) record('major-gc', { liveBytes: after })
                 if (!captured && major && after >= 4800 * 1024 * 1024)
                   requested = 'major-GC live bytes=' + after
               } else if (/Memory pool:|removed zone reservations:/.test(line)) {
@@ -367,7 +291,7 @@ jobs:
               const status = child.pid && fs.existsSync('/proc/' + child.pid + '/status')
                 ? fs.readFileSync('/proc/' + child.pid + '/status', 'utf8') : ''
               record('heap', { ...heap, rssKiB: Number(status.match(/VmRSS:\s+(\d+)/)?.[1] ?? 0) })
-              if (!captured && elapsed() >= Number(process.env.PROBE_SNAPSHOT_SECONDS ?? 540)) requested = 'fixed elapsed-time checkpoint'
+              if (!captured && elapsed() >= Number(process.env.PROBE_CHECKPOINT_SECONDS ?? 540)) requested = 'fixed elapsed-time checkpoint'
               if (requested && !captured) await capture(requested)
               else if (elapsed() - lastRotation >= 120) await rotate()
             } catch (error) { fail(error) }
