@@ -1607,7 +1607,7 @@ On unsupported targets or no-libc profiles, a reached call produces a compile-ti
 ## `connectResolved`
 
 ```silk
-pub effect<'env1> fn connectResolved<'env: 'env1, A, E, ?CallbackRequirements, 'life4: 'env1, 'env1>(endpoints: &'life4 [silk/network_address.Endpoint], options: ConnectOptions, deadline: silk/option.Option<silk/system_clock.Instant>, callback: for<'call> once fn<'env>(&'call mut silk/native_socket.Connection) -> once Effect<'call; A ! E ? CallbackRequirements>) -> A ! E | NativeSocketError ? CallbackRequirements | &mut MonotonicClock where CallbackRequirements in Without<CallbackRequirements, &ByteDuplex>
+pub effect<'env & 'life4> fn connectResolved<'env, A, E, ?CallbackRequirements, 'life4>(endpoints: &'life4 [silk/network_address.Endpoint], options: ConnectOptions, deadline: silk/option.Option<silk/system_clock.Instant>, callback: for<'call> once fn<'env>(&'call mut silk/native_socket.Connection) -> once Effect<'call; A ! E ? CallbackRequirements>) -> A ! E | NativeSocketError ? CallbackRequirements | &mut MonotonicClock where CallbackRequirements in Without<CallbackRequirements, &ByteDuplex>
 ```
 
 Connects an ordered nonempty numeric endpoint slice and lends the owned provider in one scope.
@@ -1621,7 +1621,7 @@ On unsupported targets or no-libc profiles, a reached call produces a compile-ti
 ## `connectUnix`
 
 ```silk
-pub effect<'env1> fn connectUnix<'env: 'env1, A, E, ?CallbackRequirements, 'life4: 'env1, 'env1>(path: &'life4 [u8], options: ConnectOptions, deadline: silk/option.Option<silk/system_clock.Instant>, callback: for<'call> once fn<'env>(&'call mut silk/native_socket.Connection) -> once Effect<'call; A ! E ? CallbackRequirements>) -> A ! E | NativeSocketError ? CallbackRequirements | &mut MonotonicClock where CallbackRequirements in Without<CallbackRequirements, &ByteDuplex>
+pub effect<'env & 'life4> fn connectUnix<'env, A, E, ?CallbackRequirements, 'life4>(path: &'life4 [u8], options: ConnectOptions, deadline: silk/option.Option<silk/system_clock.Instant>, callback: for<'call> once fn<'env>(&'call mut silk/native_socket.Connection) -> once Effect<'call; A ! E ? CallbackRequirements>) -> A ! E | NativeSocketError ? CallbackRequirements | &mut MonotonicClock where CallbackRequirements in Without<CallbackRequirements, &ByteDuplex>
 ```
 
 Connects one absolute pathname Unix socket and lends the owned provider in one scope.

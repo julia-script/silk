@@ -201,9 +201,10 @@ import silk.network_address {Endpoint}
 import silk.option {Option}
 import silk.system_clock {Instant}
 
-pub effect fn acquire(endpoints: &[Endpoint]) -> Connection
-! NativeSocketError ? &mut MonotonicClock {
-  return run connectResolvedOwned(endpoints, ConnectOptions.defaults(), Option.none<Instant>())
+pub fn main(endpoints: &[Endpoint]) -> i32 {
+  let pending = connectResolvedOwned(endpoints, ConnectOptions.defaults(), Option.none<Instant>())
+  drop pending
+  return 42
 }`
     const module = Stdlib.find('silk/native_socket') ?? unreachable('expected socket source')
     const text = new TextDecoder().decode(module.bytes)
@@ -214,7 +215,7 @@ pub effect fn acquire(endpoints: &[Endpoint]) -> Connection
       { target: 'wasm32-unknown-unknown' },
       { target: 'x86_64-unknown-linux-gnu', libc: 'none' },
     ] as const) {
-      const configuration = AnalysisFixture.configuration(sourceId, profile.target, ['acquire'])
+      const configuration = AnalysisFixture.configuration(sourceId, profile.target)
       const snapshot = yield* Analysis.makeRealized({
         root: sourceId,
         configuration: { ...configuration, profile: { ...configuration.profile, ...profile } },

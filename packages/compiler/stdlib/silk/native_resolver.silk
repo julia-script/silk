@@ -188,8 +188,7 @@ impl NativeSystemResolver {
       let mut current = head
       let mut ordinal = usize.ZERO
       while !Pointer.isNull<u8>(current) {
-        let pointer = unsafe Intrinsic.pointerRequalify<?*mut AddrInfo, *const AddrInfo>(current)
-        let entry = unsafe Pointer.read<AddrInfo>(pointer)
+        let entry = unsafe readEntry(current)
         run admitEntry(&entry, ordinal, request, &mut resolved)
         current = entry.next
         ordinal = ordinal + usize.ONE
