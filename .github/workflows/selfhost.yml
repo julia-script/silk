@@ -1,4 +1,4 @@
-name: B11 remaining integer query diagnosis
+name: B11 integer source construction diagnosis
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   silk:
-    name: B11 integer query counters
+    name: B11 integer source construction
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -59,7 +59,7 @@ jobs:
         run: pnpm --filter @silklang/compiler exec tsx --test ../../compiler/scripts/runSelfhostCorpus.test.ts
       - name: Build bootstrap CLI
         run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
-      - name: Add ephemeral query cost counters
+      - name: Add ephemeral source construction clocks
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -240,6 +240,92 @@ jobs:
           snapshots = '  if same(phase, b"body-start") {\n' + ''.join(f'    run b11Counter(b"{name}", resolver.b11.{name}Ticks, resolver.b11.{name}Count)\n' for name in fields) + '  }\n'
           s = s.replace(old, snapshots + old)
           p.write_text(s)
+
+          from pathlib import Path
+
+          helper = r"""
+          import silk.allocator {Allocator, OutOfMemoryError}
+          import silk.bytes {Bytes}
+          import silk.vector {Vector}
+          import silk.native_descriptor {NativeDescriptor}
+          import silk.i64
+          import silk.u64
+          import silk.usize
+
+          unsafe extern "C" fn clock() -> i64
+
+          pub fn tick() -> u64 {
+            return i64.toU64(unsafe clock())
+          }
+
+          effect fn decimal(output: &mut Bytes, value: u64) -> ()
+          ! OutOfMemoryError ? &mut Allocator {
+            let mut reversed = Vector.make<u8>()
+            let mut remaining = value
+            if remaining == 0 { return run Bytes.append(&mut output.*, b"0") }
+            while remaining > 0 {
+              run Vector.append<u8>(&mut reversed, u64.toU8(48 + u64.remainder(remaining, 10)))
+              remaining = u64.divide(remaining, 10)
+            }
+            let digits = Vector.asSlice<u8>(&reversed)
+            let mut at = digits.length
+            while at > usize.ZERO {
+              at = at - usize.ONE
+              run Bytes.append(&mut output.*, &[digits[at]])
+            }
+            return ()
+          }
+
+          pub effect fn record(stage: &[u8], ordinal: usize, started: u64) -> ()
+          ! OutOfMemoryError ? &mut Allocator {
+            let elapsed = tick() - started
+            let mut message = run Bytes.copy(b"B11_SOURCE_COST ")
+            run Bytes.append(&mut message, stage)
+            run Bytes.append(&mut message, b" ")
+            run decimal(&mut message, usize.toU64(ordinal))
+            run Bytes.append(&mut message, b" ")
+            run decimal(&mut message, elapsed)
+            run Bytes.append(&mut message, b"\n")
+            let mut nativeError = 0
+            let written = run NativeDescriptor.writeAll(2, Bytes.asSlice(&message), &mut nativeError)
+            return ()
+          }
+          """
+          Path('compiler/src/B11Probe.silk').write_text(helper)
+
+          p = Path('compiler/src/parser/Parser.silk'); s = p.read_text()
+          assert s.count('import lexer.Token {Token, TokenKind}') == 1
+          s = s.replace('import lexer.Token {Token, TokenKind}', 'import B11Probe\nimport lexer.Token {Token, TokenKind}')
+          a = '    let result = run Declaration.parse(move state)'; assert s.count(a) == 1
+          s = s.replace(a, '    let b11DeclarationStart = B11Probe.tick()\n' + a)
+          a = '    run Vector.append<Element>(&mut elements, Element.Node {id: node})'; assert s.count(a) == 1
+          s = s.replace(a, a + '\n    run B11Probe.record(b"parser-declaration", before, b11DeclarationStart)')
+          a = '  let endOfFile = run ParseState.expect('; assert s.count(a) == 1
+          s = s.replace(a, '  let b11RootStart = B11Probe.tick()\n' + a)
+          a = '  return move sourceFile'; assert s.count(a) == 1
+          s = s.replace(a, '  run B11Probe.record(b"parser-root", usize.ZERO, b11RootStart)\n' + a)
+          assert s.count('import silk.usize') == 0
+          s = s.replace('import silk.vector {Vector}', 'import silk.usize\nimport silk.vector {Vector}')
+          p.write_text(s)
+
+          p = Path('compiler/src/hir/Lower.silk'); s = p.read_text()
+          assert s.count('import hir.Draft\n') == 1
+          s = s.replace('import hir.Draft\n', 'import B11Probe\nimport hir.Draft\n')
+          a = '    let lowered = run LowerDeclaration.lowerDeclaration(&mut draft, tree, child, &mut scope)'; assert s.count(a) == 1
+          s = s.replace(a, '    let b11DeclarationStart = B11Probe.tick()\n' + a)
+          a = '    run Draft.pushChild(&mut draft, lowered)'; assert s.count(a) == 1
+          s = s.replace(a, a + '\n    run B11Probe.record(b"lower-declaration", index, b11DeclarationStart)')
+          p.write_text(s)
+
+          p = Path('compiler/src/semantic/ModuleIndex.silk'); s = p.read_text()
+          assert s.count('import hir.Hir ') == 1
+          s = s.replace('import hir.Hir ', 'import B11Probe\nimport hir.Hir ')
+          start=s.index('effect fn appendCandidate('); end=s.index('\neffect fn indexImport(',start); part=s[start:end]
+          a = '  let prior = Vector.asSlice<Candidate>(&index.candidates)'; assert part.count(a)==1
+          part = part.replace(a, '  let b11CandidateStart = B11Probe.tick()\n' + a)
+          a = '  run Vector.append<Candidate>(&mut index.candidates, move candidate)'; assert part.count(a)==1
+          part = part.replace(a, a + '\n  run B11Probe.record(b"index-candidate", second, b11CandidateStart)')
+          s=s[:start]+part+s[end:];p.write_text(s)
           PY
       - name: Build self-hosted compiler CLI
         run: node packages/cli/dist/bin.js build --manifest-path compiler/silk.toml
@@ -294,7 +380,7 @@ jobs:
           cat > .scratch/b11-integer-wrapper.sh <<'SH'
           #!/usr/bin/env bash
           set -u
-          "$B11_REAL_SILKC" "$@" 2> >(tee "$B11_DIRECTORY/integer-operation-matrix.phases.log" | sed -e '/^B11_PHASE /d' -e '/^B11_COUNTER /d' >&2) &
+          "$B11_REAL_SILKC" "$@" 2> >(tee "$B11_DIRECTORY/integer-operation-matrix.phases.log" | sed -e '/^B11_PHASE /d' -e '/^B11_COUNTER /d' -e '/^B11_SOURCE_COST /d' >&2) &
           compiler_pid=$!
           cleanup() {
             kill -TERM "$compiler_pid" 2>/dev/null || true
@@ -307,7 +393,7 @@ jobs:
           exit "$compiler_exit"
           SH
           chmod +x .scratch/b11-integer-wrapper.sh
-      - name: Measure remaining integer query counters
+      - name: Measure remaining integer source construction
         continue-on-error: true
         run: |
           set -o pipefail
@@ -316,12 +402,12 @@ jobs:
           SILKC: ${{ github.workspace }}/.scratch/b11-integer-wrapper.sh
           B11_REAL_SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler
           B11_DIRECTORY: ${{ runner.temp }}/b11-integer-body
-          B11_LABEL: integer-query-counters
+          B11_LABEL: integer-source-construction
           B11_SOURCE: 484302dcd15c0a1d88c09e963234a99edfd33ded
       - name: Upload integer query evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: b11-integer-query-counters
+          name: b11-integer-source-construction
           path: ${{ runner.temp }}/b11-integer-body
           retention-days: 3
