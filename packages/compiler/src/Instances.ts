@@ -2157,7 +2157,10 @@ export const discover = (
     }
     return memoized
   }
-  const cleanupSubtermTerminal = (candidate: RuntimeType, whole: RuntimeType): boolean | undefined => {
+  const cleanupSubtermTerminal = (
+    candidate: RuntimeType,
+    whole: RuntimeType,
+  ): boolean | undefined => {
     if (candidate.ordinal === whole.ordinal) return false
     const candidateDeclaration = nominalTypeText(candidate.type)
     const wholeDeclaration = nominalTypeText(whole.type)

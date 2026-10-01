@@ -840,8 +840,10 @@ it.effect('finds a late structural cleanup field behind recursive metadata sibli
   Effect.gen(function* () {
     // Borrowed Shared edges retain the recursive structural graph without demanding owned
     // payload cleanup or recursively deriving affinity through every metadata path.
-    const metadata = Array.from({ length: 18 }, (_, owner) =>
-      `struct Metadata${owner}<'a> {
+    const metadata = Array.from(
+      { length: 18 },
+      (_, owner) =>
+        `struct Metadata${owner}<'a> {
 ${Array.from({ length: 18 }, (_, field) =>
   field === owner ? '' : `  field${field}: &'a Shared<Metadata${field}<'a>>`,
 ).join('\n')}
@@ -849,8 +851,9 @@ ${Array.from({ length: 18 }, (_, field) =>
     ).join('\n')
     // Distinct scalar fields exercise discovery after its optional reachability pruning
     // gives way to the guarded search. Their contents require no cleanup specialization.
-    const padding = Array.from({ length: 513 }, (_, field) =>
-      `  field${field}: [u8; ${field}]`,
+    const padding = Array.from(
+      { length: 513 },
+      (_, field) => `  field${field}: [u8; ${field}]`,
     ).join('\n')
     const result = yield* snapshot(`import silk.vector { Vector }
 import silk.shared { Shared }
@@ -944,7 +947,10 @@ pub fn main() -> () {
       const targets = Array.from({ length: 18 }, (_, target) => target).filter(
         (target) => target !== owner,
       )
-      assert.deepEqual(fields.map(spelling), targets.map((target) => `field${target}`))
+      assert.deepEqual(
+        fields.map(spelling),
+        targets.map((target) => `field${target}`),
+      )
       for (const [position, target] of targets.entries()) {
         borrowedShared(
           fieldType(fields.at(position) ?? unreachable('expected metadata sibling')),
@@ -989,7 +995,8 @@ pub fn main() -> () {
           edge.target.declaration.name === 'Slot.dropValue'
         )
       }) ?? unreachable('expected releaseBuffer to call Slot.dropValue')
-    const releasedPayload = slotCall.owner.typeArguments.at(0) ?? unreachable('expected owner payload')
+    const releasedPayload =
+      slotCall.owner.typeArguments.at(0) ?? unreachable('expected owner payload')
     const storage = slotCall.target.typeArguments.at(0) ?? unreachable('expected storage lifetime')
     const slotPayload = slotCall.target.typeArguments.at(1) ?? unreachable('expected slot payload')
     if (!Lifetime.isLifetime(storage)) return unreachable('expected storage lifetime argument')
@@ -1036,7 +1043,11 @@ pub fn main() -> () {
     const declaredPayload = declaredSlot.arguments[1]
     if (!Type.isParameter(declaredPayload)) return unreachable('expected declared payload binder')
     assert.deepEqual(
-      { owner: declaredPayload.owner, ordinal: declaredPayload.ordinal, kind: declaredPayload.kind },
+      {
+        owner: declaredPayload.owner,
+        ordinal: declaredPayload.ordinal,
+        kind: declaredPayload.kind,
+      },
       { owner: slotOwner, ordinal: 1, kind: 'Value' },
     )
     const slotInstance =
