@@ -22,16 +22,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - variant: C-drop-glue
-            ref: dc9a0ecf05b5e32fc4f50db1ffcd434180bc6bf0
-          - variant: D-loan-endings
-            ref: 4491246f050c62129598bda32573112604cd4917
-          - variant: E-lifetime-memo
-            ref: 22a09d3ecf158800d374b1f47e43709d56d7a8c3
-          - variant: F-local-names
-            ref: 0f5d374b1e9d14ec819a1c96a3cbde558fdcc970
+          - variant: base
+            ref: 91b3e6552e0e8098dc2faf9b1756af3ad02adb70
           - variant: G-callable-index
             ref: 906b22fa922db6bee259657824a89d45eaa29366
+          - variant: H-diagnostic-dispatch
+            ref: 1f49783b6f1754cfcdbc48af2092f4a3d88dc94e
     steps:
       - uses: actions/checkout@v6
         with:
