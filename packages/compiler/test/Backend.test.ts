@@ -222,7 +222,7 @@ pub fn main() -> i32 {
     const address = artifact.ir.match(/%addr(\d+) = alloca/)
     const root = address?.at(1) ?? unreachable('expected address-taken local storage')
     assert.notMatch(artifact.ir, new RegExp(`%mut${root}_\\d+ = alloca`))
-    assert.match(artifact.ir, new RegExp(`load i32, ptr %addr${root}_lane0`))
+    assert.match(artifact.ir, new RegExp(`load i32, ptr %addr${root}(?!\\w)`))
   }),
 )
 
@@ -250,14 +250,14 @@ pub fn main() -> i32 {
     const lastCall = calls.at(-1) ?? unreachable('expected update calls')
     const before = artifact.ir.slice(0, lastCall.index)
     const after = artifact.ir.slice(lastCall.index)
-    assert.match(before, new RegExp(`load i32, ptr %addr${root}_lane0`))
-    assert.notMatch(after, new RegExp(`load i32, ptr %addr${root}_lane0`))
+    assert.match(before, new RegExp(`load i32, ptr %addr${root}(?!\\w)`))
+    assert.notMatch(after, new RegExp(`load i32, ptr %addr${root}(?!\\w)`))
     const second =
       [...artifact.ir.matchAll(/%addr(\d+) = alloca/g)].at(1)?.at(1) ??
       unreachable('expected the second borrowed local')
     assert.notMatch(
       artifact.ir,
-      new RegExp(`load i32, ptr %addr${second}_lane0\\n\\s*store i32 0, ptr %addr${second}_lane0`),
+      new RegExp(`load i32, ptr %addr${second}\\n\\s*store i32 0, ptr %addr${second}\\n`),
     )
   }),
 )
@@ -538,7 +538,7 @@ pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left:
     assert.notInclude(first.ir, 'select i1')
     assert.match(first.ir, /%owned_read\d+_stride0 = mul i64 %\w+, 8/)
     assert.match(first.ir, /getelementptr i8, ptr %addr0, i64 %owned_read\d+_stride0/)
-    assert.match(first.ir, /%project\w+ = load i32, ptr %owned_read\d+_field/)
+    assert.match(first.ir, /%project\w+ = load i32, ptr %owned_read\d+_element,/)
     assert.include(first.ir, '@llvm.trap()')
     assert.deepEqual(first.bitcode, second.bitcode)
     assert.strictEqual(first.ir, second.ir)
@@ -922,7 +922,7 @@ pub fn main() -> i32 {
     const call = lines.findIndex((line) => /call void @__silk_foreign_guard\.0\(ptr %/.test(line))
     assert.notStrictEqual(call, -1, artifact.ir)
     const reload = lines.findIndex(
-      (line, index) => index > call && / = load i32, ptr %addr\d+_lane0/.test(line),
+      (line, index) => index > call && / = load i32, ptr %addr\d+$/.test(line),
     )
     assert.notStrictEqual(reload, -1, artifact.ir)
     const loaded = lines.at(reload)?.trim().split(' = ')[0]

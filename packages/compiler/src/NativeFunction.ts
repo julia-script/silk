@@ -688,6 +688,17 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
                 })
           if (entry.suspendable && diagnosticScopes.size > 0 && coroutineFrame === undefined)
             throw new RangeError('Suspended diagnostic scope lost its persistent frame')
+          // Only lexical scopes rewrite the observer slot, and only recovery-keyed blocks select a
+          // cause other than the incoming one; otherwise both slots hold their arguments.
+          const recoveryKeyed = entry.linear.some(
+            (block) =>
+              block.recoveryBoundary !== undefined || (block.recoveryOutcomes?.length ?? 0) > 0,
+          )
+          if (diagnostic !== undefined)
+            NativeDiagnosticContext.pin(diagnostic, {
+              observer: diagnosticScopes.size === 0,
+              cause: !recoveryKeyed,
+            })
           let physicalParameter = 0
           for (let ordinal = 0; ordinal < entry.fn.parameterCount; ordinal += 1) {
             const logicalType = entry.fn.localTypes.at(ordinal)
@@ -1149,7 +1160,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             }
             for (const root of frameRoots) storageContext.blockRoots.add(root)
             Emitter.setInsertionPoint(body, blockHandle)
-            if (diagnostic !== undefined) {
+            if (diagnostic !== undefined && recoveryKeyed) {
               const recovered = block.recoveryOutcomes?.at(-1)
               const slot =
                 recovered === undefined ? undefined : diagnostic.outcomes.get(recovered.ordinal)
