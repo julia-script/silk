@@ -41,6 +41,7 @@ import * as NativeCall from './NativeCall.js'
 import type * as NativeDebug from './NativeDebug.js'
 import * as NativeDeclare from './NativeDeclare.js'
 import * as NativeExecutionOperation from './NativeExecutionOperation.js'
+import * as NativeDiagnosticDispatch from './NativeDiagnosticDispatch.js'
 import type * as NativeForeignOperation from './NativeForeignOperation.js'
 import * as NativeFunction from './NativeFunction.js'
 import type * as NativeLanePointer from './NativeLanePointer.js'
@@ -172,6 +173,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     request,
   )
   const termination = NativeTermination.make(request)
+  const diagnosticDispatch = NativeDiagnosticDispatch.make()
   yield* NativeFunction.emitBodies({
     termination,
     runtimeFeatures,
@@ -201,6 +203,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     ...(free === undefined ? {} : { free }),
     ...(executionStorage === undefined ? {} : { executionStorage }),
     ...(executionRelease === undefined ? {} : { executionRelease: executionRelease.handle }),
+    diagnosticDispatch,
     ...(memcmp === undefined ? {} : { memcmp }),
     foreignFunctions,
     foreignStatics,
@@ -232,8 +235,14 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         types: typeContext,
         lanePointers,
         helper: executionRelease,
+        diagnosticDispatch,
       }),
     )
+
+  // Defined after every body and helper that may dispatch a diagnostic event.
+  yield* Emitter.module(builder, (builder) =>
+    NativeDiagnosticDispatch.emitBody(diagnosticDispatch, builder),
+  )
 
   yield* Emitter.module(builder, (builder) =>
     NativeSuspension.emitThunks({

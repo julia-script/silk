@@ -9,6 +9,7 @@ import * as NativeFrame from './NativeFrame.js'
 import * as NativeDiagnosticOutcome from './NativeDiagnosticOutcome.js'
 import * as NativeDiagnosticFailure from './NativeDiagnosticFailure.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
+import type * as NativeDiagnosticDispatch from './NativeDiagnosticDispatch.js'
 import * as ContinuationTransfer from './ContinuationTransfer.js'
 import * as NativeExecutionStorage from './NativeExecutionStorage.js'
 import * as LlvmBlock from '@silklang/llvm/Block'
@@ -1376,6 +1377,7 @@ export interface ReleaseHelperContext {
   readonly types: NativeType.LoweringContext
   readonly lanePointers: NativeLanePointer.Context
   readonly helper: NativeLoweringContext.DeclaredFunction
+  readonly diagnosticDispatch: NativeDiagnosticDispatch.NativeDiagnosticDispatch
 }
 
 /**
@@ -1399,6 +1401,7 @@ export const emitReleaseHelper = (context: ReleaseHelperContext) => {
     types,
     lanePointers,
     helper,
+    diagnosticDispatch,
   } = context
   Emitter.buildBody(builder, helper.handle, (body) => {
     Emitter.block(body, 'entry')
@@ -1412,6 +1415,7 @@ export const emitReleaseHelper = (context: ReleaseHelperContext) => {
             pointer,
             i8,
             usizeType ?? Emitter.integerType(builder, program.layout.target.pointerSize * 8),
+            diagnosticDispatch,
             Emitter.argument(body, helper.diagnosticParameter),
             Emitter.argument(body, helper.diagnosticParameter + 1),
           )
