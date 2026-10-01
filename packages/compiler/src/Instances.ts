@@ -2157,13 +2157,10 @@ export const discover = (
     }
     return memoized
   }
-  const computeStrictCleanupSubterm = (
+  const cleanupSubtermTerminal = (
     candidate: RuntimeType,
     whole: RuntimeType,
-    unfolding: Unfolding,
-    reaching: ReadonlySet<number> | undefined,
-    memo: Map<string, boolean>,
-  ): boolean => {
+  ): boolean | undefined => {
     if (candidate.ordinal === whole.ordinal) return false
     const candidateDeclaration = nominalTypeText(candidate.type)
     const wholeDeclaration = nominalTypeText(whole.type)
@@ -2173,7 +2170,18 @@ export const discover = (
         Type.isNominal(whole.type) &&
         strictlyDescendsSameNominal(candidate.type, whole.type)
       )
-    if (isStrictRuntimeStructuralSubterm(candidate.type, whole.type)) return true
+    return isStrictRuntimeStructuralSubterm(candidate.type, whole.type) ? true : undefined
+  }
+  const computeStrictCleanupSubterm = (
+    candidate: RuntimeType,
+    whole: RuntimeType,
+    unfolding: Unfolding,
+    reaching: ReadonlySet<number> | undefined,
+    memo: Map<string, boolean>,
+  ): boolean => {
+    const terminal = cleanupSubtermTerminal(candidate, whole)
+    if (terminal !== undefined) return terminal
+    const transitions: Array<{ fields: ReadonlyArray<RuntimeType>; unfolding: Unfolding }> = []
     for (const { declaration, nominal } of nominalsIn(whole)) {
       const prior = unfolding.byDeclaration.get(declaration)
       if (
@@ -2188,13 +2196,16 @@ export const discover = (
       if (fields.some((field) => field.ordinal === candidate.ordinal)) return true
       const descend = fields.filter((field) => reaching?.has(field.ordinal) !== false)
       if (descend.length === 0) continue
-      const next = unfold(unfolding, declaration, nominal)
-      if (
-        descend.some((field) => strictCleanupSubtermUnder(candidate, field, next, reaching, memo))
-      )
-        return true
+      // A later sibling can already contain the payload structurally. Answer that same
+      // terminal question before exploring unrelated recursive metadata in an earlier field.
+      if (descend.some((field) => cleanupSubtermTerminal(candidate, field) === true)) return true
+      transitions.push({ fields: descend, unfolding: unfold(unfolding, declaration, nominal) })
     }
-    return false
+    return transitions.some((transition) =>
+      transition.fields.some((field) =>
+        strictCleanupSubtermUnder(candidate, field, transition.unfolding, reaching, memo),
+      ),
+    )
   }
   const coveredByCleanupMeasure = (measure: CleanupMeasure, candidate: Type.Type): boolean =>
     measure.roots.some(
