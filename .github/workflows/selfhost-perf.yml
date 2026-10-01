@@ -22,10 +22,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - variant: H-diagnostic-dispatch
-            ref: 1f49783b6f1754cfcdbc48af2092f4a3d88dc94e
           - variant: I-outcome-array
             ref: 1a430e8720e2455a8cc4525ad90dadad3bb5a877
+          - variant: J-key-memo
+            ref: 5953b00ebcbc7dcdbff758f49e99eef9ba762564
+          - variant: K-local-ordinals
+            ref: a6c6547c6f56e0eca72354ae3333ec53b1a0c94f
     steps:
       - uses: actions/checkout@v6
         with:
