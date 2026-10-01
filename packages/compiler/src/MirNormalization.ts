@@ -167,26 +167,60 @@ interface LocalUse {
 type LocalUseIndex = ReadonlyMap<number, ReadonlyArray<LocalUse>>
 
 /**
+ * Immutable MIR and type records whose reachable graph holds no local identity. Operations share
+ * large type graphs, and walking them again for every attribution entry dominated the use index.
+ */
+const localFree = new WeakSet<object>()
+
+interface LocalWalk {
+  readonly node: object
+  readonly children: ReadonlyArray<unknown>
+  next: number
+  free: boolean
+}
+
+/**
  * Collect all local identities in one attribution entry, including metadata. Identity tracking
  * deduplicates shared subgraphs and terminates cycles; it must not be shared between entries,
- * because the same object used by two operations represents two uses.
+ * because the same object used by two operations represents two uses. Subgraphs proven free of
+ * locals contribute nothing to any entry, so that proof is shared.
  */
 const localOrdinals = (value: unknown): Set<number> => {
   const ordinals = new Set<number>()
   const seen = new Set<object>()
-  const pending: Array<unknown> = [value]
-  while (pending.length > 0) {
-    const current = pending.pop()
-    if (typeof current !== 'object' || current === null || seen.has(current)) continue
-    seen.add(current)
-    if (
-      '_tag' in current &&
-      current._tag === 'Local' &&
-      'ordinal' in current &&
-      typeof current.ordinal === 'number'
-    )
-      ordinals.add(current.ordinal)
-    for (const entry of Object.values(current)) pending.push(entry)
+  const stack: Array<LocalWalk> = []
+  const enter = (node: object) => {
+    seen.add(node)
+    let free = true
+    if ('_tag' in node && node._tag === 'Local' && 'ordinal' in node) {
+      if (typeof node.ordinal === 'number') ordinals.add(node.ordinal)
+      free = false
+    }
+    stack.push({ node, children: Object.values(node), next: 0, free })
+  }
+  if (typeof value !== 'object' || value === null || localFree.has(value)) return ordinals
+  enter(value)
+  while (stack.length > 0) {
+    const top = stack[stack.length - 1]
+    if (top === undefined) break
+    const child = top.children[top.next]
+    if (top.next < top.children.length) {
+      top.next += 1
+      if (typeof child !== 'object' || child === null || localFree.has(child)) continue
+      // A visited child is either finished with locals or still open on a cycle; neither
+      // proves this node free.
+      if (seen.has(child)) top.free = false
+      else enter(child)
+      continue
+    }
+    stack.pop()
+    if (top.free) {
+      // Builders fill arrays in place; only immutable records carry the shared proof.
+      if (!Array.isArray(top.node)) localFree.add(top.node)
+    } else {
+      const parent = stack[stack.length - 1]
+      if (parent !== undefined) parent.free = false
+    }
   }
   return ordinals
 }
