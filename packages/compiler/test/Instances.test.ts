@@ -995,7 +995,21 @@ pub fn main() -> () {
     if (!Lifetime.isLifetime(storage)) return unreachable('expected storage lifetime argument')
     if (!Type.isTypeArgument(releasedPayload) || !Type.isTypeArgument(slotPayload))
       return unreachable('expected ordinary payload arguments')
+    assert.strictEqual(slotCall.target.typeArguments.length, 2)
     assert.strictEqual(Type.key(slotPayload), Type.key(releasedPayload))
+    const sameSlotArguments = (key: Instances.InstanceKey): boolean => {
+      const lifetime = key.typeArguments.at(0)
+      const payload = key.typeArguments.at(1)
+      return (
+        key.typeArguments.length === 2 &&
+        lifetime !== undefined &&
+        Lifetime.isLifetime(lifetime) &&
+        Lifetime.key(lifetime) === Lifetime.key(storage) &&
+        payload !== undefined &&
+        Type.isTypeArgument(payload) &&
+        Type.key(payload) === Type.key(slotPayload)
+      )
+    }
     const slotOwner = { module: 'silk/slot', name: 'Slot.dropValue' }
     const slotFact = DeclarationFacts.byCanonical(index, slotCall.target.declaration)
     if (slotFact?._tag !== 'FunctionDeclaration') return unreachable('expected slot declaration')
@@ -1027,7 +1041,9 @@ pub fn main() -> () {
     )
     const slotInstance =
       result.instances.instances.find(
-        (instance) => Instances.keyText(instance.key) === Instances.keyText(slotCall.target),
+        (instance) =>
+          Instances.keyText(instance.key) === Instances.keyText(slotCall.target) &&
+          sameSlotArguments(instance.key),
       ) ?? unreachable('expected recorded slot instance')
     const specializedSlot = Type.substitute(declaredSlot, slotInstance.substitution)
     if (!Type.isSlot(specializedSlot)) return unreachable('expected specialized slot type')
@@ -1038,6 +1054,7 @@ pub fn main() -> () {
         (edge) =>
           edge.kind === 'Cleanup' &&
           Instances.keyText(edge.owner) === Instances.keyText(slotCall.target) &&
+          sameSlotArguments(edge.owner) &&
           edge.target.declaration.module === 'silk/vector' &&
           edge.target.declaration.name === 'drop@impl#0' &&
           frameArguments(edge.target),
