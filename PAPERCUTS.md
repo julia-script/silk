@@ -275,3 +275,5 @@ HEAD...@{u}` before reporting a head, and confirm each claimed deliverable again
 
 - 2026-09-30 · Prepared compiler/docgen dist kept emitting stale lifetime signatures during B13 repairs · Use mise Node 24.18.1 with temporary current-source transform hooks for the canonical documentation script; focused Vitest uses current LLVM source aliases · B13 stdlib platform migration
 - 2026-09-30 · Full verification exported pinned LLVM 22 paths but Turbo strict environment filtering dropped SILK_TEST_CLANG and SILK_TEST_LLVM_AR, so NativeToolchain tests selected missing /usr/bin/llvm-ar and stopped before native acceptance · Declare both tool selections in the Turbo compiler test task environment so they reach tests and affect cache keys · CI toolchain
+
+- 2026-10-01 · A bounded cleanup probe found recursive metadata exploration before a late Vector<Frame> structural witness after a bootstrap memo-map crash · Check eligible sibling terminal witnesses before deeper descent; preserve growth guards and verify through realized discovery · compiler cleanup search

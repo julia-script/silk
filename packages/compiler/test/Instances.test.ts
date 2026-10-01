@@ -834,6 +834,58 @@ pub fn main() -> () {
   }),
 )
 
+it.effect('finds a late structural cleanup field behind recursive metadata siblings', () =>
+  Effect.gen(function* () {
+    // Metadata has finite, nongeneric recursive ownership. Its unrelated branches precede
+    // `active`, just as a semantic store precedes the active frames of a static machine.
+    const metadata = Array.from({ length: 18 }, (_, owner) =>
+      `struct Metadata${owner} {
+${Array.from({ length: 18 }, (_, field) =>
+  field === owner ? '' : `  field${field}: Shared<Metadata${field}>`,
+).join('\n')}
+}`,
+    ).join('\n')
+    // Distinct scalar fields exercise discovery after its optional reachability pruning
+    // gives way to the guarded search. Their contents require no cleanup specialization.
+    const padding = Array.from({ length: 513 }, (_, field) =>
+      `  field${field}: [u8; ${field}]`,
+    ).join('\n')
+    const result = yield* snapshot(`import silk.bytes { Bytes }
+import silk.shared { Shared }
+import silk.vector { Vector }
+${metadata}
+struct Padding {
+${padding}
+}
+struct Frame { name: Bytes }
+struct Machine {
+  padding: Padding
+  metadata: Shared<Metadata0>
+  active: Vector<Frame>
+}
+pub fn main() -> () {
+  let machines = Vector.make<Machine>()
+  drop machines
+  return ()
+}`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(result.instances.violations, [])
+    const main =
+      result.instances.instances.find((instance) => instance.key.declaration.name === 'main') ??
+      unreachable('expected cleanup root')
+    assert.deepEqual(Instances.executionClosure(result.instances, main.key).gaps, [])
+    assert.isTrue(
+      result.instances.instances.some(
+        (instance) =>
+          instance.key.declaration.module === 'silk/vector' &&
+          instance.key.declaration.name === 'drop@impl#0' &&
+          instance.key.typeArguments.map(Type.encodeGenericArgument).join(', ') ===
+            'golden/program.Frame',
+      ),
+    )
+  }),
+)
+
 it.effect('admits nested cleanup reached through a lexical service provider', () =>
   Effect.gen(function* () {
     const result = yield* snapshot(`import silk.effect { Effect }
