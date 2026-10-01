@@ -194,9 +194,11 @@ const exactEffect = (context: Context, package_: ExecutionPackage.Plan) => {
   const target =
     environment === undefined
       ? undefined
-      : FunctionIndex.nativeCandidates(
+      : FunctionIndex.nativeInstances(
           context.declared,
           Tir.effectRunnerId(environment.instance.declaration, environment.site),
+          environment.instance.typeArguments,
+          environment.instance.staticArguments,
         ).find((candidate) =>
           Mir.matchesEffectInstance(
             candidate.fn,
@@ -539,7 +541,12 @@ const runCancellationFinalizer = (
 ) => {
   if (finalizer === undefined) return new Set<number>()
   const { body, declared } = context
-  const target = FunctionIndex.nativeCandidates(declared, finalizer.runner).find((candidate) =>
+  const target = FunctionIndex.nativeInstances(
+    declared,
+    finalizer.runner,
+    finalizer.runnerTypeArguments,
+    finalizer.runnerStaticArguments,
+  ).find((candidate) =>
     Mir.matchesEffectInstance(
       candidate.fn,
       finalizer.runner,
@@ -572,10 +579,11 @@ const runCancellationFinalizer = (
     const releaseType = owner.localTypes.at(finalizer.release.ordinal)
     if (releaseType?._tag !== 'CallableValue')
       throw new RangeError('LLVM resource finalizer lost its release callable')
-    const releaseTarget = FunctionIndex.nativeCandidates(declared, finalizer.releaseTarget).find(
-      (candidate) =>
-        Mir.matchesInstance(candidate.fn, finalizer.releaseTarget, finalizer.releaseTypeArguments),
-    )
+    const releaseTarget = FunctionIndex.nativeInstances(
+      declared,
+      finalizer.releaseTarget,
+      finalizer.releaseTypeArguments,
+    ).at(0)
     if (releaseTarget === undefined)
       throw new RangeError('LLVM resource finalizer lost its release builder target')
     const releaseValues = materialize(finalizer.release)
