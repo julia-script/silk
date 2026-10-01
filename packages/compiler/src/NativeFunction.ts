@@ -40,6 +40,7 @@ import * as NativeValue from './NativeValue.js'
 import * as ValueStorage from './ValueStorage.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
 import type * as NativeDropGlue from './NativeDropGlue.js'
+import type * as NativeDiagnosticDispatch from './NativeDiagnosticDispatch.js'
 import * as NativeDiagnosticScope from './NativeDiagnosticScope.js'
 import * as NativeOutcomeStorage from './NativeOutcomeStorage.js'
 
@@ -325,6 +326,7 @@ export interface EmissionContext {
   readonly executionStorage?: NativeExecutionStorage.NativeExecutionStorage
   readonly executionRelease?: FunctionActor.Function
   readonly dropGlue?: NativeDropGlue.NativeDropGlue
+  readonly diagnosticDispatch: NativeDiagnosticDispatch.NativeDiagnosticDispatch
   readonly memcmp?: FunctionActor.Function
   readonly foreignIndirects: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly foreignFunctions: ReadonlyMap<string, NativeForeignOperation.Declaration>
@@ -381,6 +383,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
     executionStorage,
     executionRelease,
     dropGlue,
+    diagnosticDispatch,
     memcmp,
     foreignIndirects,
     foreignFunctions,
@@ -515,6 +518,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
                   pointer,
                   i8,
                   integerTypes.get(program.layout.target.pointerSize * 8) ?? i32,
+                  diagnosticDispatch,
                   Emitter.argument(body, entry.diagnosticParameter),
                   Emitter.argument(body, entry.diagnosticParameter + 1),
                 )
@@ -522,16 +526,20 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
           // resumable frame. Its outcome slots belong to this native invocation;
           // child results escape through the separate transfer result record.
           if (diagnostic !== undefined && invocationFrameStorage === undefined) {
-            for (const outcome of Mir.diagnosticOutcomeLocals(program, entry.fn)) {
-              const slot = {
-                storage: Emitter.alloca(
+            const outcomes = Mir.diagnosticOutcomeLocals(program, entry.fn)
+            if (outcomes.length > 0) {
+              NativeDiagnosticOutcome.bind(
+                diagnostic,
+                Emitter.alloca(
                   body,
-                  diagnostic.causeType,
-                  `diagnostic_outcome${outcome.ordinal}`,
+                  Emitter.arrayType(builder, diagnostic.causeType, outcomes.length),
+                  'diagnostic_outcomes',
                 ),
-              }
-              NativeDiagnosticOutcome.initialize(slot, diagnostic)
-              diagnostic.outcomes.set(outcome.ordinal, slot)
+                outcomes,
+                'diagnostic_outcome',
+              )
+              for (const slot of diagnostic.outcomes.values())
+                NativeDiagnosticOutcome.initialize(slot, diagnostic)
             }
           }
           const terminationContext: NativeTermination.FunctionContext = {
@@ -912,19 +920,20 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
                 invocationFrameStorage,
                 'suspend_selected_invocation_frame',
               )
-              if (diagnostic !== undefined) {
-                for (const field of coroutineFrame.diagnosticOutcomes) {
-                  diagnostic.outcomes.set(field.outcome.ordinal, {
-                    storage: NativeLanePointer.lanePointer(
-                      lanePointers,
-                      body,
-                      invocationFrame,
-                      field.offset,
-                      `suspend_diagnostic_outcome${field.outcome.ordinal}`,
-                    ),
-                  })
-                }
-              }
+              const firstOutcome = coroutineFrame.diagnosticOutcomes.at(0)
+              if (diagnostic !== undefined && firstOutcome !== undefined)
+                NativeDiagnosticOutcome.bind(
+                  diagnostic,
+                  NativeLanePointer.lanePointer(
+                    lanePointers,
+                    body,
+                    invocationFrame,
+                    firstOutcome.offset,
+                    'suspend_diagnostic_outcomes',
+                  ),
+                  coroutineFrame.diagnosticOutcomes.map((field) => field.outcome),
+                  'suspend_diagnostic_outcome',
+                )
               for (const field of coroutineFrame.diagnosticScopes) {
                 const scope = diagnosticScopes.get(field.scope.ordinal)
                 if (scope === undefined)
