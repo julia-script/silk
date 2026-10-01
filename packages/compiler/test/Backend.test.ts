@@ -257,7 +257,7 @@ pub fn main() -> i32 {
       unreachable('expected the second borrowed local')
     assert.notMatch(
       artifact.ir,
-      new RegExp(`load i32, ptr %addr${second}_lane0\\n\\s*store i32 0, ptr %addr${second}_lane0`),
+      new RegExp(`load i32, ptr %addr${second}\\n\\s*store i32 0, ptr %addr${second}\\n`),
     )
   }),
 )
