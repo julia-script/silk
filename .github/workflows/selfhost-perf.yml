@@ -1,0 +1,82 @@
+name: Selfhost CLI perf
+
+# Measures the TypeScript CLI commands of selfhost.yml for a baseline and cumulative candidates,
+# all compiling the same pinned compiler/ sources on separate ubuntu-latest runners.
+on:
+  push:
+    branches:
+      - julia/nifty-hawking-2ezsnv-selfhost-perf
+
+permissions:
+  contents: read
+
+env:
+  SOURCES: 91b3e6552e0e8098dc2faf9b1756af3ad02adb70
+
+jobs:
+  measure:
+    name: ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: base
+            ref: 91b3e6552e0e8098dc2faf9b1756af3ad02adb70
+          - variant: A-supply-digests
+            ref: e0ed7cc1b697edbb8918fa9a9097d1a238f975a5
+          - variant: B-diagnostic-pins
+            ref: deb71eea61ea4e6c09370ad546320b786435dc6f
+          - variant: C-drop-glue
+            ref: dc9a0ecf05b5e32fc4f50db1ffcd434180bc6bf0
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.ref }}
+          fetch-depth: 0
+      - uses: actions/checkout@v6
+        with:
+          path: .perf
+          sparse-checkout: .github/perf
+      - name: Pin compiler sources
+        run: |
+          git checkout "$SOURCES" -- compiler
+          git diff --quiet "$SOURCES" -- compiler
+          echo "variant=${{ matrix.variant }} head=$(git rev-parse HEAD) sources=$SOURCES"
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: ./.github/actions/setup-linux-llvm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build bootstrap CLI
+        run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
+      - name: Record runner
+        run: |
+          node --version
+          clang --version | head -1
+          nproc
+          free -m | head -2
+          grep -m1 'model name' /proc/cpuinfo
+      - name: Measure selfhost CLI workload
+        run: bash .perf/.github/perf/measure.sh | tee "$RUNNER_TEMP/measure.log"
+      - name: Run selfhost native corpus
+        run: |
+          set -o pipefail
+          pnpm --filter @silklang/compiler exec tsx ../../compiler/scripts/runSelfhostCorpus.ts | tee "$RUNNER_TEMP/selfhost-corpus.log"
+        env:
+          SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/release-with-debug/silk-compiler
+      - name: Check corpus baseline
+        run: node .perf/.github/perf/check-corpus.mjs "$RUNNER_TEMP/selfhost-corpus.log"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### ${{ matrix.variant }}"
+            echo '```'
+            grep -h -E '^SELFHOST_(CLI_TIMING|TEST_TIME_LIMIT_FAILED)' "$RUNNER_TEMP/measure.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
