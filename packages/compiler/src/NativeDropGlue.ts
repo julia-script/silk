@@ -9,6 +9,7 @@ import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeArgument from './NativeArgument.js'
 import * as NativeCall from './NativeCall.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
+import type * as NativeDiagnosticDispatch from './NativeDiagnosticDispatch.js'
 import * as NativeDiagnosticFailure from './NativeDiagnosticFailure.js'
 import type * as NativeExecutionStorage from './NativeExecutionStorage.js'
 import type * as NativeLanePointer from './NativeLanePointer.js'
@@ -39,6 +40,7 @@ export interface NativeDropGlue {
   readonly declared: ReadonlyArray<NativeLoweringContext.DeclaredFunction>
   readonly types: NativeType.LoweringContext
   readonly lanePointers: NativeLanePointer.Context
+  readonly diagnosticDispatch: NativeDiagnosticDispatch.NativeDiagnosticDispatch
   /** Helpers bucketed by a cheap key; members are distinguished by structural equality. */
   readonly helpers: Map<string, Array<Helper>>
   /** Declared helpers whose bodies are not yet emitted, in declaration order. */
@@ -335,6 +337,7 @@ const emitBody = (self: NativeDropGlue, builder: Emitter.Module, helper: Helper)
             pointer,
             i8,
             usizeType ?? Emitter.integerType(builder, program.layout.target.pointerSize * 8),
+            self.diagnosticDispatch,
             Emitter.argument(body, declared.diagnosticParameter),
             Emitter.argument(body, declared.diagnosticParameter + 1),
           )

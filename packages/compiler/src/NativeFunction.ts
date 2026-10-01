@@ -40,6 +40,7 @@ import * as NativeValue from './NativeValue.js'
 import * as ValueStorage from './ValueStorage.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
 import type * as NativeDropGlue from './NativeDropGlue.js'
+import type * as NativeDiagnosticDispatch from './NativeDiagnosticDispatch.js'
 import * as NativeDiagnosticScope from './NativeDiagnosticScope.js'
 import * as NativeOutcomeStorage from './NativeOutcomeStorage.js'
 
@@ -325,6 +326,7 @@ export interface EmissionContext {
   readonly executionStorage?: NativeExecutionStorage.NativeExecutionStorage
   readonly executionRelease?: FunctionActor.Function
   readonly dropGlue?: NativeDropGlue.NativeDropGlue
+  readonly diagnosticDispatch: NativeDiagnosticDispatch.NativeDiagnosticDispatch
   readonly memcmp?: FunctionActor.Function
   readonly foreignIndirects: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly foreignFunctions: ReadonlyMap<string, NativeForeignOperation.Declaration>
@@ -381,6 +383,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
     executionStorage,
     executionRelease,
     dropGlue,
+    diagnosticDispatch,
     memcmp,
     foreignIndirects,
     foreignFunctions,
@@ -515,6 +518,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
                   pointer,
                   i8,
                   integerTypes.get(program.layout.target.pointerSize * 8) ?? i32,
+                  diagnosticDispatch,
                   Emitter.argument(body, entry.diagnosticParameter),
                   Emitter.argument(body, entry.diagnosticParameter + 1),
                 )
