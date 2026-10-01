@@ -15,14 +15,25 @@ export interface NativeDiagnosticContext {
   readonly callbackType: LlvmType.Type
   readonly current: Value.Input
   readonly causeType: LlvmType.Type
+  readonly incomingObserver: Value.Input
   /** Borrowed input retained by the caller; copied by value, never a pointer to its stack slot. */
   readonly incomingCause: Value.Input
   readonly cause: Value.Input
+  /**
+   * Slots that provably hold their incoming argument wherever they are read, so reads use the
+   * argument directly instead of loading the private, non-escaping slot.
+   */
+  readonly pinned: Pinning
   readonly outcomes: Map<number, NativeDiagnosticOutcome.NativeDiagnosticOutcome>
   /** Interned artifact-lifetime text shared by repeated sites in this function. */
   readonly literals: Map<string, readonly [Value.Input, Value.Input]>
   /** Callback dispatch invalidates cached source values at the enclosing operation join. */
   readonly sourceState: { dirty: boolean }
+}
+
+export interface Pinning {
+  observer: boolean
+  cause: boolean
 }
 
 /** Creates the invocation-local slot initialized from the internal call ABI. */
@@ -63,23 +74,43 @@ export const make = (
     callbackType,
     current,
     causeType,
+    incomingObserver: initial,
     incomingCause,
     cause,
+    pinned: { observer: false, cause: false },
     outcomes: new Map<number, NativeDiagnosticOutcome.NativeDiagnosticOutcome>(),
     literals: new Map<string, readonly [Value.Input, Value.Input]>(),
     sourceState: { dirty: false },
   }
 }
 
-/** Borrows the selected cause for a nested call without creating an owned reference. */
-export const currentCause = (self: NativeDiagnosticContext) => {
-  return Emitter.load(self.body, self.causeType, self.cause, 'diagnostic_cause')
+/**
+ * Pins the slots that no lexical scope or recovery region of this invocation rewrites: such a slot
+ * holds its incoming argument at every read outside an explicit `unpin` region.
+ */
+export const pin = (self: NativeDiagnosticContext, pinning: Pinning): void => {
+  self.pinned.observer = pinning.observer
+  self.pinned.cause = pinning.cause
 }
 
-/** Loads the observer selected at this call site, including any intervening lexical scope. */
-export const current = (self: NativeDiagnosticContext) => {
-  return Emitter.load(self.body, self.pointer, self.current, 'diagnostic_observer')
+/** Releases both pins for code that temporarily installs another observer or cause. */
+export const unpin = (self: NativeDiagnosticContext): Pinning => {
+  const previous = { ...self.pinned }
+  pin(self, { observer: false, cause: false })
+  return previous
 }
+
+/** Borrows the selected cause for a nested call without creating an owned reference. */
+export const currentCause = (self: NativeDiagnosticContext): Value.Input =>
+  self.pinned.cause
+    ? self.incomingCause
+    : Emitter.load(self.body, self.causeType, self.cause, 'diagnostic_cause')
+
+/** Loads the observer selected at this call site, including any intervening lexical scope. */
+export const current = (self: NativeDiagnosticContext): Value.Input =>
+  self.pinned.observer
+    ? self.incomingObserver
+    : Emitter.load(self.body, self.pointer, self.current, 'diagnostic_observer')
 
 /** Borrows the selected failure for terminal observation; unrelated or absent contexts stay silent. */
 export const unhandled = (self: NativeDiagnosticContext) => {
