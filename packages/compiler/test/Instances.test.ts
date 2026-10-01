@@ -1179,7 +1179,18 @@ it.effect('lowers discovered instances deterministically to verifier-clean MIR',
         FunctionIndex.candidates(index, fn.id).find(matches),
         functions.find(matches),
       )
+      assert.deepEqual(
+        FunctionIndex.mirInstances(
+          index,
+          fn.id,
+          fn.instance.typeArguments,
+          fn.instance.staticArguments,
+        ),
+        functions.filter(matches),
+      )
     }
+    assert.deepEqual(FunctionIndex.mirInstances(index, original.id, ['i32']), [])
+    assert.deepEqual(FunctionIndex.mirInstances(index, { ...original.id, name: 'missing' }, []), [])
     assert.deepEqual(FunctionIndex.candidates(index, { ...original.id, name: 'missing' }), [])
     assert.strictEqual(
       FunctionIndex.candidates(index, original.id).find((fn) =>
