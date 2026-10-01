@@ -39,6 +39,7 @@ import * as NativeType from './NativeType.js'
 import * as NativeValue from './NativeValue.js'
 import * as ValueStorage from './ValueStorage.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
+import type * as NativeDropGlue from './NativeDropGlue.js'
 import * as NativeDiagnosticScope from './NativeDiagnosticScope.js'
 import * as NativeOutcomeStorage from './NativeOutcomeStorage.js'
 
@@ -323,6 +324,7 @@ export interface EmissionContext {
   readonly free?: FunctionActor.Function
   readonly executionStorage?: NativeExecutionStorage.NativeExecutionStorage
   readonly executionRelease?: FunctionActor.Function
+  readonly dropGlue?: NativeDropGlue.NativeDropGlue
   readonly memcmp?: FunctionActor.Function
   readonly foreignIndirects: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly foreignFunctions: ReadonlyMap<string, NativeForeignOperation.Declaration>
@@ -378,6 +380,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
     free,
     executionStorage,
     executionRelease,
+    dropGlue,
     memcmp,
     foreignIndirects,
     foreignFunctions,
@@ -1083,6 +1086,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             ...(free === undefined ? {} : { free }),
             ...(executionStorage === undefined ? {} : { executionStorage }),
             ...(executionRelease === undefined ? {} : { executionRelease }),
+            ...(dropGlue === undefined ? {} : { dropGlue }),
             declared,
             resumeThunks,
             types: nativeTypes,
