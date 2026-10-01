@@ -664,6 +664,8 @@ const dropFrames = (
     diagnostic === undefined ? undefined : NativeDiagnosticContext.current(diagnostic)
   const previousCause =
     diagnostic === undefined ? undefined : NativeDiagnosticContext.currentCause(diagnostic)
+  // Each cancelled frame's observer and cause are installed in the slots until `finish` restores.
+  const pinning = diagnostic === undefined ? undefined : NativeDiagnosticContext.unpin(diagnostic)
   const stateSlot = NativeLanePointer.lanePointer(
     lanePointers,
     body,
@@ -956,6 +958,8 @@ const dropFrames = (
     Emitter.store(body, previousObserver, diagnostic.current)
   if (diagnostic !== undefined && previousCause !== undefined)
     Emitter.store(body, previousCause, diagnostic.cause)
+  if (diagnostic !== undefined && pinning !== undefined)
+    NativeDiagnosticContext.pin(diagnostic, pinning)
   NativeExecutionStorage.destroy(
     { builder, body, pointer, usizeType, storage: executionStorage },
     stateSlot,

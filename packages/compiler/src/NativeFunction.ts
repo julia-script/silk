@@ -39,6 +39,7 @@ import * as NativeType from './NativeType.js'
 import * as NativeValue from './NativeValue.js'
 import * as ValueStorage from './ValueStorage.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
+import type * as NativeDropGlue from './NativeDropGlue.js'
 import type * as NativeDiagnosticDispatch from './NativeDiagnosticDispatch.js'
 import * as NativeDiagnosticScope from './NativeDiagnosticScope.js'
 import * as NativeOutcomeStorage from './NativeOutcomeStorage.js'
@@ -324,6 +325,7 @@ export interface EmissionContext {
   readonly free?: FunctionActor.Function
   readonly executionStorage?: NativeExecutionStorage.NativeExecutionStorage
   readonly executionRelease?: FunctionActor.Function
+  readonly dropGlue?: NativeDropGlue.NativeDropGlue
   readonly diagnosticDispatch: NativeDiagnosticDispatch.NativeDiagnosticDispatch
   readonly memcmp?: FunctionActor.Function
   readonly foreignIndirects: ReadonlyMap<string, NativeForeignOperation.Declaration>
@@ -380,6 +382,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
     free,
     executionStorage,
     executionRelease,
+    dropGlue,
     diagnosticDispatch,
     memcmp,
     foreignIndirects,
@@ -692,6 +695,17 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
                 })
           if (entry.suspendable && diagnosticScopes.size > 0 && coroutineFrame === undefined)
             throw new RangeError('Suspended diagnostic scope lost its persistent frame')
+          // Only lexical scopes rewrite the observer slot, and only recovery-keyed blocks select a
+          // cause other than the incoming one; otherwise both slots hold their arguments.
+          const recoveryKeyed = entry.linear.some(
+            (block) =>
+              block.recoveryBoundary !== undefined || (block.recoveryOutcomes?.length ?? 0) > 0,
+          )
+          if (diagnostic !== undefined)
+            NativeDiagnosticContext.pin(diagnostic, {
+              observer: diagnosticScopes.size === 0,
+              cause: !recoveryKeyed,
+            })
           let physicalParameter = 0
           for (let ordinal = 0; ordinal < entry.fn.parameterCount; ordinal += 1) {
             const logicalType = entry.fn.localTypes.at(ordinal)
@@ -1076,6 +1090,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             ...(free === undefined ? {} : { free }),
             ...(executionStorage === undefined ? {} : { executionStorage }),
             ...(executionRelease === undefined ? {} : { executionRelease }),
+            ...(dropGlue === undefined ? {} : { dropGlue }),
             declared,
             resumeThunks,
             types: nativeTypes,
@@ -1153,7 +1168,7 @@ export const emitBodies = Effect.fn('NativeFunction.emitBodies')(function* (
             }
             for (const root of frameRoots) storageContext.blockRoots.add(root)
             Emitter.setInsertionPoint(body, blockHandle)
-            if (diagnostic !== undefined) {
+            if (diagnostic !== undefined && recoveryKeyed) {
               const recovered = block.recoveryOutcomes?.at(-1)
               const slot =
                 recovered === undefined ? undefined : diagnostic.outcomes.get(recovered.ordinal)
