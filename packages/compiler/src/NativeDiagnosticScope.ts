@@ -112,8 +112,7 @@ export const emit = (
     throw new RangeError('Diagnostic scope lost its invocation storage')
   const { body, builder } = context
   if (operation._tag === 'LeaveDiagnosticScope') {
-    for (const outcome of diagnostic.outcomes.values())
-      NativeDiagnosticOutcome.releaseForObserver(outcome, diagnostic, scope.record)
+    NativeDiagnosticOutcome.releaseAll(diagnostic, scope.record)
 
     Emitter.store(
       body,

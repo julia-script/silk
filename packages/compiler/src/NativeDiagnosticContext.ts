@@ -18,7 +18,10 @@ export interface NativeDiagnosticContext {
   /** Borrowed input retained by the caller; copied by value, never a pointer to its stack slot. */
   readonly incomingCause: Value.Input
   readonly cause: Value.Input
+  /** Outcome slots by local ordinal; `NativeDiagnosticOutcome.bind` assigns them once. */
   readonly outcomes: Map<number, NativeDiagnosticOutcome.NativeDiagnosticOutcome>
+  /** Array whose consecutive elements are the outcome slots, in binding order. */
+  readonly outcomeArray: { storage: Value.Input | undefined }
   /** Interned artifact-lifetime text shared by repeated sites in this function. */
   readonly literals: Map<string, readonly [Value.Input, Value.Input]>
   /** Callback dispatch invalidates cached source values at the enclosing operation join. */
@@ -66,6 +69,7 @@ export const make = (
     incomingCause,
     cause,
     outcomes: new Map<number, NativeDiagnosticOutcome.NativeDiagnosticOutcome>(),
+    outcomeArray: { storage: undefined },
     literals: new Map<string, readonly [Value.Input, Value.Input]>(),
     sourceState: { dirty: false },
   }

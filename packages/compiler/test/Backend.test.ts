@@ -262,7 +262,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('joins return payloads before releasing diagnostic outcomes', () =>
+it.effect('joins return payloads before releasing diagnostic outcomes in one loop', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
       'golden/program',
@@ -288,6 +288,12 @@ pub fn main() -> i32 { return run observing((), observer, Effect.catchAll(choose
       artifact.ir.match(/define hidden [^\n]+@silk_golden_program_choose_effect[^]*?\n}/)?.at(0) ??
       unreachable('expected effect runner')
     assert.match(choose, /completion:\n\s+%completion_lane0 = phi/)
+    assert.match(choose, /%diagnostic_outcomes = alloca \[3 x \{[^\n]+\}\]/)
+    assert.match(choose, /completion:\n(?:[^\n]+\n)*?\s+br label %outcome_release_header\n/)
+    assert.match(
+      choose,
+      /%outcome_release_slot = getelementptr \{[^\n]+\}, ptr %diagnostic_outcomes, i64 %outcome_release_current/,
+    )
     const stored =
       choose.match(/store i32 7, ptr (%effect_outcome\w+)/)?.at(1) ??
       unreachable('expected the return payload in canonical storage')
