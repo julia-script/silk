@@ -38,9 +38,7 @@ export const prepare = (context: Context) => {
       type.storage?.realization.targetArguments ??
       type.typeArguments ??
       []
-    const target = FunctionIndex.nativeCandidates(context.declared, targetId).find((candidate) =>
-      Mir.matchesInstance(candidate.fn, targetId, arguments_),
-    )
+    const target = FunctionIndex.nativeInstances(context.declared, targetId, arguments_).at(0)
     if (target === undefined || target.suspendable || target.diagnosticParameter === undefined)
       throw new RangeError('Diagnostic observer lost its direct internal target')
     const callback = Emitter.declareFunction(

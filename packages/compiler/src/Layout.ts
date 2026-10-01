@@ -2817,7 +2817,56 @@ interface EffectEnvironmentState {
   readonly discovery: Instances.Discovery
   readonly callablePlans: ReadonlyArray<CallableEnvironment>
   readonly layouts: ReadonlyMap<string, Entry>
+  /** Every planned environment in planning order, repeated by each fixed-point pass. */
   readonly environments: Array<EffectEnvironment>
+  /** The first available environment planned at each exact site identity. */
+  readonly availableBySite: Map<string, PlannedEffectEnvironment>
+  /** The first available environment planned under each success alias. */
+  readonly availableBySuccess: Map<string, PlannedEffectEnvironment>
+  /** Distinct available environment keys; the fixed point stops once a pass adds none. */
+  readonly availableKeys: Set<string>
+}
+
+interface PlannedEffectEnvironment {
+  readonly ordinal: number
+  readonly environment: AvailableEffectEnvironment
+}
+
+/**
+ * Appends one planned environment and indexes it. Capture resolution asks for the first matching
+ * environment once per capture; scanning every planned environment made each pass quadratic.
+ */
+const recordEffectEnvironment = (
+  state: EffectEnvironmentState,
+  environment: EffectEnvironment,
+): void => {
+  const ordinal = state.environments.length
+  state.environments.push(environment)
+  if (environment._tag !== 'EffectEnvironment') return
+  const planned = { ordinal, environment }
+  const identity = Instances.effectIdentity(environment.instance, environment.site)
+  if (!state.availableBySite.has(identity)) state.availableBySite.set(identity, planned)
+  const success = environment.successEffectIdentity
+  if (success !== undefined && !state.availableBySuccess.has(success))
+    state.availableBySuccess.set(success, planned)
+  state.availableKeys.add(environmentKey(environment))
+}
+
+/** The first planned environment at `identity`, aliased by it, or at `alias`'s exact site. */
+const firstPlannedEffectEnvironment = (
+  state: EffectEnvironmentState,
+  identity: string,
+  alias: string | undefined,
+): AvailableEffectEnvironment | undefined => {
+  let first: PlannedEffectEnvironment | undefined
+  for (const planned of [
+    state.availableBySite.get(identity),
+    state.availableBySuccess.get(identity),
+    alias === undefined ? undefined : state.availableBySite.get(alias),
+  ])
+    if (planned !== undefined && (first === undefined || planned.ordinal < first.ordinal))
+      first = planned
+  return first?.environment
 }
 
 interface EffectBindings {
@@ -2854,24 +2903,24 @@ const planEffectEnvironments = Effect.fn('Layout.planEffectEnvironments')(functi
     entries.map((candidate) => [Type.runtimeKey(candidate.type), candidate] as const),
   )
   const environments: Array<EffectEnvironment> = []
-  const state: EffectEnvironmentState = { target, discovery, callablePlans, layouts, environments }
+  const state: EffectEnvironmentState = {
+    target,
+    discovery,
+    callablePlans,
+    layouts,
+    environments,
+    availableBySite: new Map(),
+    availableBySuccess: new Map(),
+    availableKeys: new Set(),
+  }
   // Effect parameters capture concrete environments supplied elsewhere in the instance graph.
   // Resolve those dependencies to a fixed point: breadth-first discovery is deterministic but is
   // not a topological order once combinators both consume and produce Effects.
   for (let pass = 0; pass <= discovery.instances.length; pass += 1) {
-    const availableBefore = new Set(
-      environments.flatMap((environment) =>
-        environment._tag === 'EffectEnvironment' ? [environmentKey(environment)] : [],
-      ),
-    ).size
+    const availableBefore = state.availableKeys.size
     for (const instance of [...discovery.instances].reverse())
       yield* planInstanceEnvironments(state, instance)
-    const availableAfter = new Set(
-      environments.flatMap((environment) =>
-        environment._tag === 'EffectEnvironment' ? [environmentKey(environment)] : [],
-      ),
-    ).size
-    if (availableAfter === availableBefore) break
+    if (state.availableKeys.size === availableBefore) break
   }
   const resolved = new Map<string, EffectEnvironment>()
   for (const environment of environments) {
@@ -3091,16 +3140,15 @@ const planEffectSite = Effect.fn('Layout.planEffectSite')(function* (
   bindings: EffectBindings,
   block: EffectSite,
 ): Effect.fn.Return<void> {
-  const { discovery, environments } = state
-
   const structuralEffect = Type.substitute(
     block.type,
     instance.substitution,
     instance.specialization.compatibility,
   )
   if (!Type.isEffect(structuralEffect)) return
-  const effectInstance = discovery.effects.find(
-    (candidate) => candidate.identity === Instances.effectIdentity(instance.key, block.site),
+  const effectInstance = firstEffectInstance(
+    state.discovery,
+    Instances.effectIdentity(instance.key, block.site),
   )
   const realizedSlots =
     effectInstance === undefined ? [] : FieldRealization.effectEnvironmentOf(effectInstance)
@@ -3138,7 +3186,7 @@ const planEffectSite = Effect.fn('Layout.planEffectSite')(function* (
     )
   }
   if (unavailable !== undefined) {
-    environments.push({
+    recordEffectEnvironment(state, {
       _tag: 'UnavailableEffectEnvironment',
       instance: instance.key,
       site: block.site,
@@ -3151,7 +3199,7 @@ const planEffectSite = Effect.fn('Layout.planEffectSite')(function* (
   const successEffectIdentity = (instance.effectSuccesses ?? []).find((success) =>
     Tir.sameExecutableSite(success.site, block.site),
   )?.identity
-  environments.push({
+  recordEffectEnvironment(state, {
     _tag: 'EffectEnvironment',
     instance: instance.key,
     site: block.site,
@@ -3343,22 +3391,10 @@ const resolveCapturedEffect = Effect.fn('Layout.resolveCapturedEffect')(function
   const capturedEffectEnvironment =
     capturedEffectIdentity === undefined
       ? undefined
-      : environments.find(
-          (
-            candidate,
-          ): candidate is Extract<
-            EffectEnvironment,
-            {
-              readonly _tag: 'EffectEnvironment'
-            }
-          > =>
-            candidate._tag === 'EffectEnvironment' &&
-            (Instances.effectIdentity(candidate.instance, candidate.site) ===
-              capturedEffectIdentity ||
-              candidate.successEffectIdentity === capturedEffectIdentity ||
-              (capturedEffectInstance !== undefined &&
-                Instances.effectIdentity(candidate.instance, candidate.site) ===
-                  capturedEffectInstance.identity)),
+      : firstPlannedEffectEnvironment(
+          state,
+          capturedEffectIdentity,
+          capturedEffectInstance?.identity,
         )
   const capturedCompositeRepresentation =
     parameterEffectRepresentation !== undefined &&
@@ -3398,7 +3434,7 @@ const planWitnessEffect = Effect.fn('Layout.planWitnessEffect')(function* (
 ): Effect.fn.Return<void> {
   yield* Effect.annotateCurrentSpan({ 'operands.count': witness.contract.operands.length })
 
-  const { environments, layouts } = state
+  const { layouts } = state
 
   const structuralEffect = Type.substitute(
     witness.expression.type,
@@ -3451,7 +3487,7 @@ const planWitnessEffect = Effect.fn('Layout.planWitnessEffect')(function* (
     structuralEffect.requirementRow,
   )
   if (unavailable !== undefined) {
-    environments.push({
+    recordEffectEnvironment(state, {
       _tag: 'UnavailableEffectEnvironment',
       instance: instance.key,
       site: witness.site,
@@ -3461,7 +3497,7 @@ const planWitnessEffect = Effect.fn('Layout.planWitnessEffect')(function* (
     return
   }
   const packed = placeEffectFields(fieldInputs)
-  environments.push({
+  recordEffectEnvironment(state, {
     _tag: 'EffectEnvironment',
     instance: instance.key,
     site: witness.site,
@@ -3706,6 +3742,27 @@ const sameVisibleOwner = (
       )
     })
   )
+}
+
+const firstEffectInstances = new WeakMap<
+  ReadonlyArray<Instances.EffectInstance>,
+  ReadonlyMap<string, Instances.EffectInstance>
+>()
+
+/** The first discovered Effect instance with one exact identity, indexed once per discovery. */
+const firstEffectInstance = (
+  discovery: Instances.Discovery,
+  identity: string,
+): Instances.EffectInstance | undefined => {
+  let index = firstEffectInstances.get(discovery.effects)
+  if (index === undefined) {
+    const built = new Map<string, Instances.EffectInstance>()
+    for (const effect of discovery.effects)
+      if (!built.has(effect.identity)) built.set(effect.identity, effect)
+    firstEffectInstances.set(discovery.effects, built)
+    index = built
+  }
+  return index.get(identity)
 }
 
 const effectInstanceByIdentity = (

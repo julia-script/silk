@@ -644,12 +644,11 @@ export const dropThroughPlan = (
       )
       Emitter.branch(body, following)
       Emitter.setInsertionPoint(body, last)
-      const helper = FunctionIndex.nativeCandidates(
+      const helper = FunctionIndex.nativeInstances(
         declared,
         LocalSharedPayloadCleanup.declaration,
-      ).find((candidate) =>
-        Mir.matchesInstance(candidate.fn, LocalSharedPayloadCleanup.declaration, [plan.element]),
-      )
+        [plan.element],
+      ).at(0)
       if (helper === undefined)
         throw new RangeError('LLVM local-shared cleanup lost its payload helper')
       NativeCall.callValues(
@@ -710,9 +709,7 @@ export const dropThroughPlan = (
       return
     }
     case 'HookCleanup': {
-      const target = FunctionIndex.nativeCandidates(declared, plan.hook).find((candidate) =>
-        Mir.matchesInstance(candidate.fn, plan.hook, plan.typeArguments),
-      )
+      const target = FunctionIndex.nativeInstances(declared, plan.hook, plan.typeArguments).at(0)
       if (target === undefined)
         throw new RangeError('LLVM cleanup cannot resolve its Drop hook instance')
       const layoutEntry = Layout.entry(program.layout, plan.type)

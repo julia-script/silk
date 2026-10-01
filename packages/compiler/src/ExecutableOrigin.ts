@@ -3506,6 +3506,15 @@ export const make = (operations: Operations) => {
       )
       return cleanupEffects.get(identity)
     }
+    // Without witness dependencies, a cleanup plan's hook calls depend on the interned plan alone.
+    const cleanupHooks = new Map<CleanupPlan.CleanupPlan, ReadonlyArray<CallTarget>>()
+    const cleanupHookCalls = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<CallTarget> => {
+      const cached = cleanupHooks.get(cleanup)
+      if (cached !== undefined) return cached
+      const calls = hookCalls(cleanup, index, false)
+      cleanupHooks.set(cleanup, calls)
+      return calls
+    }
     // A constructor carrying service Effects has no concrete argument identity until traversal
     // reaches it with a lexical provider. Keep that dependency so discovery can revisit the call.
     const deferredCalls = new Map<
@@ -4123,8 +4132,14 @@ export const make = (operations: Operations) => {
       }
 
       const cleanupRegions = new Map<number, string>()
-      const addCleanup = (cleanup: CleanupPlan.CleanupPlan, execution: string): void => {
-        for (const hook of hookCalls(cleanup, index, false)) {
+      // One instance drops the same interned cleanup plans at many statements; resolve each
+      // plan's hook instances once under this instance's substitution.
+      const cleanupHookNodes = new Map<CleanupPlan.CleanupPlan, ReadonlyArray<string>>()
+      const hookNodesOf = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<string> => {
+        const cached = cleanupHookNodes.get(cleanup)
+        if (cached !== undefined) return cached
+        const nodes: Array<string> = []
+        for (const hook of cleanupHookCalls(cleanup)) {
           const target = targetFunction(results, hook.declaration)
           if (target === undefined) continue
           const targetKey = keyOf(
@@ -4139,8 +4154,13 @@ export const make = (operations: Operations) => {
               ),
             ),
           )
-          addDependency(execution, instanceNode(targetKey))
+          nodes.push(instanceNode(targetKey))
         }
+        cleanupHookNodes.set(cleanup, nodes)
+        return nodes
+      }
+      const addCleanup = (cleanup: CleanupPlan.CleanupPlan, execution: string): void => {
+        for (const node of hookNodesOf(cleanup)) addDependency(execution, node)
       }
       const recordRegions = (statement: Tir.Statement, execution: string): void => {
         cleanupRegions.set(statement.region.ordinal, execution)
