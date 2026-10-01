@@ -25,7 +25,10 @@ export interface NativeDiagnosticContext {
    * argument directly instead of loading the private, non-escaping slot.
    */
   readonly pinned: Pinning
+  /** Outcome slots by local ordinal; `NativeDiagnosticOutcome.bind` assigns them once. */
   readonly outcomes: Map<number, NativeDiagnosticOutcome.NativeDiagnosticOutcome>
+  /** Array whose consecutive elements are the outcome slots, in binding order. */
+  readonly outcomeArray: { storage: Value.Input | undefined }
   /** Interned artifact-lifetime text shared by repeated sites in this function. */
   readonly literals: Map<string, readonly [Value.Input, Value.Input]>
   /** Callback dispatch invalidates cached source values at the enclosing operation join. */
@@ -83,6 +86,7 @@ export const make = (
     cause,
     pinned: { observer: false, cause: false },
     outcomes: new Map<number, NativeDiagnosticOutcome.NativeDiagnosticOutcome>(),
+    outcomeArray: { storage: undefined },
     literals: new Map<string, readonly [Value.Input, Value.Input]>(),
     sourceState: { dirty: false },
     dispatch,

@@ -851,18 +851,18 @@ const dropFrames = (
           )
           if (descriptor === undefined)
             throw new RangeError('Cancellation lost its diagnostic descriptor')
-          for (const field of frame?.diagnosticOutcomes ?? []) {
-            NativeDiagnosticOutcome.releaseForObserver(
-              {
-                storage: NativeLanePointer.lanePointer(
-                  lanePointers,
-                  body,
-                  head,
-                  field.offset,
-                  `${tag}_scope_outcome${field.outcome.ordinal}`,
-                ),
-              },
+          const firstOutcome = frame?.diagnosticOutcomes.at(0)
+          if (frame !== undefined && firstOutcome !== undefined)
+            NativeDiagnosticOutcome.releaseEach(
               diagnostic,
+              NativeLanePointer.lanePointer(
+                lanePointers,
+                body,
+                head,
+                firstOutcome.offset,
+                `${tag}_scope_outcomes`,
+              ),
+              frame.diagnosticOutcomes.length,
               NativeLanePointer.lanePointer(
                 lanePointers,
                 body,
@@ -871,7 +871,6 @@ const dropFrames = (
                 `${tag}_scope_observer`,
               ),
             )
-          }
           Emitter.store(
             body,
             Emitter.load(
@@ -925,18 +924,18 @@ const dropFrames = (
         Mir.matchesInstanceKey(owner, frame.function),
       )
       if (frame === undefined) throw new RangeError('Cancellation lost its outcome storage layout')
-      for (const field of frame.diagnosticOutcomes)
-        NativeDiagnosticOutcome.release(
-          {
-            storage: NativeLanePointer.lanePointer(
-              lanePointers,
-              body,
-              head,
-              field.offset,
-              `${tag}_release_outcome${field.outcome.ordinal}`,
-            ),
-          },
+      const firstOutcome = frame.diagnosticOutcomes.at(0)
+      if (firstOutcome !== undefined)
+        NativeDiagnosticOutcome.releaseEach(
           diagnostic,
+          NativeLanePointer.lanePointer(
+            lanePointers,
+            body,
+            head,
+            firstOutcome.offset,
+            `${tag}_release_outcomes`,
+          ),
+          frame.diagnosticOutcomes.length,
         )
     }
     Emitter.branch(body, released)
