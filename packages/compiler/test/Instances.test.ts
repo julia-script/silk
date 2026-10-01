@@ -973,11 +973,11 @@ pub fn main() -> () {
     assert.strictEqual(fieldType(frame.fields.at(0) ?? unreachable('expected frame value')), 'i32')
     const frameArguments = (key: Instances.InstanceKey): boolean =>
       key.typeArguments.map(Type.encodeGenericArgument).join(', ') === 'golden/program.Frame'
-    assert.isTrue(
-      result.instances.executionEdges.some((edge) => {
+    const slotCall =
+      result.instances.executionEdges.find((edge) => {
         const payload = edge.owner.typeArguments.at(0)
         return (
-          edge.kind === 'Cleanup' &&
+          edge.kind === 'Runtime' &&
           edge.owner.declaration.module === 'silk/vector' &&
           edge.owner.declaration.name === 'releaseBuffer' &&
           payload !== undefined &&
@@ -985,11 +985,63 @@ pub fn main() -> () {
           Type.isNominal(payload) &&
           payload.module === 'golden/program' &&
           payload.name === 'Machine' &&
+          edge.target.declaration.module === 'silk/slot' &&
+          edge.target.declaration.name === 'Slot.dropValue'
+        )
+      }) ?? unreachable('expected releaseBuffer to call Slot.dropValue')
+    const releasedPayload = slotCall.owner.typeArguments.at(0) ?? unreachable('expected owner payload')
+    const storage = slotCall.target.typeArguments.at(0) ?? unreachable('expected storage lifetime')
+    const slotPayload = slotCall.target.typeArguments.at(1) ?? unreachable('expected slot payload')
+    if (!Lifetime.isLifetime(storage)) return unreachable('expected storage lifetime argument')
+    if (!Type.isTypeArgument(releasedPayload) || !Type.isTypeArgument(slotPayload))
+      return unreachable('expected ordinary payload arguments')
+    assert.strictEqual(Type.key(slotPayload), Type.key(releasedPayload))
+    const slotOwner = { module: 'silk/slot', name: 'Slot.dropValue' }
+    const slotFact = DeclarationFacts.byCanonical(index, slotCall.target.declaration)
+    if (slotFact?._tag !== 'FunctionDeclaration') return unreachable('expected slot declaration')
+    assert.deepEqual(
+      slotFact.typeParameters.map(({ type }) => ({
+        owner: type.owner,
+        ordinal: type.ordinal,
+        kind: type.kind,
+      })),
+      [
+        { owner: slotOwner, ordinal: 0, kind: 'Lifetime' },
+        { owner: slotOwner, ordinal: 1, kind: 'Value' },
+      ],
+    )
+    const slotParameter = slotFact.parameters.at(0) ?? unreachable('expected slot parameter')
+    if (slotParameter.declaredType._tag !== 'Resolved')
+      return unreachable('expected resolved slot parameter')
+    const declaredSlot = slotParameter.declaredType.type
+    if (!Type.isSlot(declaredSlot)) return unreachable('expected declared slot type')
+    assert.strictEqual(
+      Lifetime.key(declaredSlot.arguments[0]),
+      Lifetime.key(Lifetime.bound(slotOwner, 0, 'storage')),
+    )
+    const declaredPayload = declaredSlot.arguments[1]
+    if (!Type.isParameter(declaredPayload)) return unreachable('expected declared payload binder')
+    assert.deepEqual(
+      { owner: declaredPayload.owner, ordinal: declaredPayload.ordinal, kind: declaredPayload.kind },
+      { owner: slotOwner, ordinal: 1, kind: 'Value' },
+    )
+    const slotInstance =
+      result.instances.instances.find(
+        (instance) => Instances.keyText(instance.key) === Instances.keyText(slotCall.target),
+      ) ?? unreachable('expected recorded slot instance')
+    const specializedSlot = Type.substitute(declaredSlot, slotInstance.substitution)
+    if (!Type.isSlot(specializedSlot)) return unreachable('expected specialized slot type')
+    assert.strictEqual(Lifetime.key(specializedSlot.arguments[0]), Lifetime.key(storage))
+    assert.strictEqual(Type.key(specializedSlot.arguments[1]), Type.key(slotPayload))
+    assert.isTrue(
+      result.instances.executionEdges.some(
+        (edge) =>
+          edge.kind === 'Cleanup' &&
+          Instances.keyText(edge.owner) === Instances.keyText(slotCall.target) &&
           edge.target.declaration.module === 'silk/vector' &&
           edge.target.declaration.name === 'drop@impl#0' &&
-          frameArguments(edge.target)
-        )
-      }),
+          frameArguments(edge.target),
+      ),
     )
     for (const [owner, target] of [
       ['drop@impl#0', 'releaseFull'],
