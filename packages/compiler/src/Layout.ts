@@ -2508,20 +2508,7 @@ const representedStorageLayout = (
     const callableIdentity = argument.identity
     const callableEnvironment = callableIdentity.environment
     if (callableEnvironment === undefined) return { size: 0, alignment: 1 }
-    const environment = callablePlans.find(
-      (
-        candidate,
-      ): candidate is Extract<
-        CallableEnvironment,
-        {
-          readonly _tag: 'CallableEnvironment'
-        }
-      > =>
-        candidate._tag === 'CallableEnvironment' &&
-        Type.runtimeCallableEnvironmentIdentityKey(
-          Instances.callableEnvironmentIdentity(candidate.callable),
-        ) === Type.runtimeCallableEnvironmentIdentityKey(callableEnvironment),
-    )
+    const environment = environmentsWithIdentity(callablePlans, callableEnvironment).at(0)
     return environment === undefined
       ? undefined
       : { size: environment.size, alignment: environment.alignment }
@@ -3216,20 +3203,9 @@ const planEffectCapture = Effect.fn('Layout.planEffectCapture')(function* (
       ? Instances.parameterCallableIdentity(instance.function, instance.key, ordinal)
       : undefined)
   const capturedCallableEnvironment =
-    capturedCallableIdentity?.environment === undefined
+    capturedCallableIdentity === undefined
       ? undefined
-      : callablePlans.find(
-          (
-            candidate,
-          ): candidate is Extract<
-            CallableEnvironment,
-            {
-              readonly _tag: 'CallableEnvironment'
-            }
-          > =>
-            candidate._tag === 'CallableEnvironment' &&
-            FieldRealization.matchesIdentity(capturedCallableIdentity, candidate.callable),
-        )
+      : environmentMatching(callablePlans, capturedCallableIdentity)
   const fieldType =
     capturedEffectEnvironment?.effect ??
     (capturedCompositeRepresentation === undefined
@@ -4221,18 +4197,7 @@ const executableEnvironmentFieldShape = Effect.fnUntraced(function* (
         laneCount: 0,
       }
     }
-    const environment = context.callableEnvironments.find(
-      (
-        candidate,
-      ): candidate is Extract<
-        CallableEnvironment,
-        {
-          readonly _tag: 'CallableEnvironment'
-        }
-      > =>
-        candidate._tag === 'CallableEnvironment' &&
-        FieldRealization.matchesIdentity(identity, candidate.callable),
-    )
+    const environment = environmentMatching(context.callableEnvironments, identity)
     if (environment === undefined)
       throw new RangeError(
         `callable environment ${Type.runtimeGenericArgumentKey(identity)} is unavailable to calling-shape planning`,
@@ -4637,7 +4602,8 @@ export const failurePayloadRepacking = (
   }
 }
 
-type AvailableCallableEnvironment = Extract<
+/** A callable environment the plan could place. */
+export type AvailableCallableEnvironment = Extract<
   CallableEnvironment,
   { readonly _tag: 'CallableEnvironment' }
 >
@@ -4647,9 +4613,16 @@ type AvailableEffectEnvironment = Extract<EffectEnvironment, { readonly _tag: 'E
 // Published plans never mutate their environment arrays. MIR/backend lane queries repeatedly
 // resolve the same identities; whole-array Effect scans consumed 4% of a cold selfhost profile window.
 // Key the indexes by the arrays so a derived plan replacing either frontier gets a fresh index.
+// Callable buckets keep every available environment in plan order, so a lookup that refines the
+// bucket with the caller's own predicate selects exactly what a whole-array scan would.
+interface CallableEnvironmentIndex {
+  readonly byIdentity: ReadonlyMap<string, ReadonlyArray<AvailableCallableEnvironment>>
+  readonly byOwner: ReadonlyMap<string, ReadonlyArray<AvailableCallableEnvironment>>
+}
+
 const callableEnvironmentIndexes = new WeakMap<
   ReadonlyArray<CallableEnvironment>,
-  ReadonlyMap<string, AvailableCallableEnvironment>
+  CallableEnvironmentIndex
 >()
 
 const effectEnvironmentIndexes = new WeakMap<
@@ -4657,33 +4630,80 @@ const effectEnvironmentIndexes = new WeakMap<
   ReadonlyMap<string, AvailableEffectEnvironment>
 >()
 
+const appendBucket = <A>(buckets: Map<string, Array<A>>, key: string, value: A): void => {
+  const bucket = buckets.get(key)
+  if (bucket === undefined) buckets.set(key, [value])
+  else bucket.push(value)
+}
+
+const callableEnvironmentIndex = (
+  environments: ReadonlyArray<CallableEnvironment>,
+): CallableEnvironmentIndex => {
+  const cached = callableEnvironmentIndexes.get(environments)
+  if (cached !== undefined) return cached
+  const byIdentity = new Map<string, Array<AvailableCallableEnvironment>>()
+  const byOwner = new Map<string, Array<AvailableCallableEnvironment>>()
+  for (const candidate of environments) {
+    if (candidate._tag !== 'CallableEnvironment') continue
+    appendBucket(
+      byIdentity,
+      Type.runtimeCallableEnvironmentIdentityKey(
+        Instances.callableEnvironmentIdentity(candidate.callable),
+      ),
+      candidate,
+    )
+    appendBucket(byOwner, Instances.keyText(candidate.callable.owner), candidate)
+  }
+  const built: CallableEnvironmentIndex = { byIdentity, byOwner }
+  callableEnvironmentIndexes.set(environments, built)
+  return built
+}
+
+const environmentsWithIdentity = (
+  environments: ReadonlyArray<CallableEnvironment>,
+  identity: Type.CallableEnvironmentIdentity,
+): ReadonlyArray<AvailableCallableEnvironment> =>
+  callableEnvironmentIndex(environments).byIdentity.get(
+    Type.runtimeCallableEnvironmentIdentityKey(identity),
+  ) ?? []
+
+const environmentMatching = (
+  environments: ReadonlyArray<CallableEnvironment>,
+  identity: Type.CallableIdentityArgument,
+): AvailableCallableEnvironment | undefined =>
+  identity.environment === undefined
+    ? undefined
+    : environmentsWithIdentity(environments, identity.environment).find((candidate) =>
+        FieldRealization.matchesIdentity(identity, candidate.callable),
+      )
+
 /** Resolves one canonical callable-environment identity in this target's runtime plan. */
 export const callableEnvironmentByIdentity = (
   self: Plan,
   identity: Type.CallableEnvironmentIdentity,
-):
-  | Extract<
-      CallableEnvironment,
-      {
-        readonly _tag: 'CallableEnvironment'
-      }
-    >
-  | undefined => {
-  let index = callableEnvironmentIndexes.get(self.callableEnvironments)
-  if (index === undefined) {
-    const built = new Map<string, AvailableCallableEnvironment>()
-    for (const candidate of self.callableEnvironments) {
-      if (candidate._tag !== 'CallableEnvironment') continue
-      const key = Type.runtimeCallableEnvironmentIdentityKey(
-        Instances.callableEnvironmentIdentity(candidate.callable),
-      )
-      if (!built.has(key)) built.set(key, candidate)
-    }
-    callableEnvironmentIndexes.set(self.callableEnvironments, built)
-    index = built
-  }
-  return index.get(Type.runtimeCallableEnvironmentIdentityKey(identity))
-}
+): AvailableCallableEnvironment | undefined =>
+  environmentsWithIdentity(self.callableEnvironments, identity).at(0)
+
+/** Every available environment with one canonical runtime identity, in plan order. */
+export const callableEnvironmentsByIdentity = (
+  self: Plan,
+  identity: Type.CallableEnvironmentIdentity,
+): ReadonlyArray<AvailableCallableEnvironment> =>
+  environmentsWithIdentity(self.callableEnvironments, identity)
+
+/** Every available environment whose callable is owned by one specialization, in plan order. */
+export const callableEnvironmentsByOwner = (
+  self: Plan,
+  owner: Instances.InstanceKey,
+): ReadonlyArray<AvailableCallableEnvironment> =>
+  callableEnvironmentIndex(self.callableEnvironments).byOwner.get(Instances.keyText(owner)) ?? []
+
+/** The first planned environment matching a retained callable identity's target and arguments. */
+export const callableEnvironmentMatching = (
+  self: Plan,
+  identity: Type.CallableIdentityArgument,
+): AvailableCallableEnvironment | undefined =>
+  environmentMatching(self.callableEnvironments, identity)
 
 /** Resolves the Effect environment a capture field's identity names, including success carriers. */
 export const effectEnvironmentByFieldIdentity = (
