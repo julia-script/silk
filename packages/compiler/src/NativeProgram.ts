@@ -41,6 +41,7 @@ import * as NativeCall from './NativeCall.js'
 import type * as NativeDebug from './NativeDebug.js'
 import * as NativeDeclare from './NativeDeclare.js'
 import * as NativeExecutionOperation from './NativeExecutionOperation.js'
+import * as NativeDropGlue from './NativeDropGlue.js'
 import type * as NativeForeignOperation from './NativeForeignOperation.js'
 import * as NativeFunction from './NativeFunction.js'
 import type * as NativeLanePointer from './NativeLanePointer.js'
@@ -172,6 +173,20 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     request,
   )
   const termination = NativeTermination.make(request)
+  const dropGlue = NativeDropGlue.make({
+    program,
+    i8,
+    i32,
+    pointer,
+    ...(usizeType === undefined ? {} : { usizeType }),
+    ...(free === undefined ? {} : { free }),
+    ...(executionStorage === undefined ? {} : { executionStorage }),
+    ...(executionRelease === undefined ? {} : { executionRelease: executionRelease.handle }),
+    resumeThunks,
+    declared,
+    types: typeContext,
+    lanePointers,
+  })
   yield* NativeFunction.emitBodies({
     termination,
     runtimeFeatures,
@@ -201,6 +216,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     ...(free === undefined ? {} : { free }),
     ...(executionStorage === undefined ? {} : { executionStorage }),
     ...(executionRelease === undefined ? {} : { executionRelease: executionRelease.handle }),
+    dropGlue,
     ...(memcmp === undefined ? {} : { memcmp }),
     foreignFunctions,
     foreignStatics,
@@ -233,6 +249,13 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         lanePointers,
         helper: executionRelease,
       }),
+    )
+
+  // Glue bodies may request glue for nested owners; drain until every helper is defined.
+  let pendingGlue = true
+  while (pendingGlue)
+    pendingGlue = yield* Emitter.module(builder, (builder) =>
+      NativeDropGlue.emitPending(dropGlue, builder),
     )
 
   yield* Emitter.module(builder, (builder) =>
