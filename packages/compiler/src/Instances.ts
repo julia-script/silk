@@ -1043,6 +1043,7 @@ const {
   effectSuccesses,
   concreteCallables,
   concreteEffects,
+  suspensionScan,
   suspensionGraph,
 } = ExecutableOrigin.make({
   specializeInstanceType: (type, owner, substitutions) =>
@@ -2724,7 +2725,9 @@ export const discover = (
     stopAt = Number.POSITIVE_INFINITY
     for (const root of roots) schedule(root)
   }
-  trace('Instances.expandWorklist', () => {
+  // The scan behind the final attempt's last graph. That graph covers exactly the instances the
+  // attempt reached, so the final graph reassembles it with checked ownership instead of rescanning.
+  const reachedScan = trace('Instances.expandWorklist', () => {
     while (true) {
       for (let cursor = 0; cursor < pending.length; cursor += 1) {
         // A family proved discriminating leaves the guards taken without its ancestry, so this
@@ -2866,8 +2869,11 @@ export const discover = (
       const currentInstances = [...prepared]
         .filter(([text]) => recordedContexts.has(text))
         .map(([, candidate]) => candidate.instance)
+      const scan = trace('Instances.scanSuspension', () =>
+        suspensionScan(currentInstances, results, index, [...recordedCallables.values()]),
+      )
       const currentGraph = trace('Instances.rebuildSuspensionGraph', () =>
-        suspensionGraph(currentInstances, results, index, [...recordedCallables.values()]),
+        suspensionGraph(scan, new Map()),
       )
       providerCalls.clear()
       for (const provided of currentGraph.providedTargets) {
@@ -2960,7 +2966,7 @@ export const discover = (
         }
       }
       if (!scheduledProvided) {
-        if (!discriminatingGrew && !cycleGrewAfterProjection()) break
+        if (!discriminatingGrew && !cycleGrewAfterProjection()) return scan
         restartDiscovery()
       }
     }
@@ -3087,7 +3093,10 @@ export const discover = (
     return unavailableOwnership
   })
   const finalGraph = trace('Instances.buildFinalSuspensionGraph', () =>
-    suspensionGraph(instances, results, index, [...recordedCallables.values()]),
+    suspensionGraph(
+      reachedScan,
+      new Map(instances.map((instance) => [keyText(instance.key), instance.ownership])),
+    ),
   )
   const summaries = trace('Instances.summarizeSuspension', () =>
     ExecutableOrigin.suspensionSummaries(finalGraph),
