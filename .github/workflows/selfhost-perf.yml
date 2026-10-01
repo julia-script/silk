@@ -1,7 +1,7 @@
 name: Selfhost CLI perf
 
-# Measures the TypeScript CLI commands of selfhost.yml for a baseline and cumulative candidates,
-# all compiling the same pinned compiler/ sources on separate ubuntu-latest runners.
+# Measures the TypeScript CLI commands of selfhost.yml for a baseline and a candidate on the same
+# ubuntu-latest runner, so the comparison shares hardware. Both compile the same pinned compiler/.
 on:
   push:
     branches:
@@ -15,41 +15,61 @@ env:
 
 jobs:
   measure:
-    name: ${{ matrix.variant }}
+    name: ${{ matrix.pair }}
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
         include:
-          - variant: L-discovery-graph
-            ref: 2fbb8d4165a1103c63a50c6e93a63e066cab9c41
-          - variant: M-suspension-reuse
-            ref: 109eff6ff55f1b6b160fea5cb534685ff2e10ef1
+          - pair: base-vs-M
+            base: 91b3e6552e0e8098dc2faf9b1756af3ad02adb70
+            candidate: 109eff6ff55f1b6b160fea5cb534685ff2e10ef1
+          - pair: I-vs-J
+            base: 1a430e8720e2455a8cc4525ad90dadad3bb5a877
+            candidate: 5953b00ebcbc7dcdbff758f49e99eef9ba762564
+          - pair: J-vs-K
+            base: 5953b00ebcbc7dcdbff758f49e99eef9ba762564
+            candidate: a6c6547c6f56e0eca72354ae3333ec53b1a0c94f
+          - pair: K-vs-L
+            base: a6c6547c6f56e0eca72354ae3333ec53b1a0c94f
+            candidate: 2fbb8d4165a1103c63a50c6e93a63e066cab9c41
+          - pair: L-vs-M
+            base: 2fbb8d4165a1103c63a50c6e93a63e066cab9c41
+            candidate: 109eff6ff55f1b6b160fea5cb534685ff2e10ef1
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ matrix.ref }}
-          fetch-depth: 0
+          ref: ${{ matrix.base }}
+          path: base
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ matrix.candidate }}
+          path: candidate
       - uses: actions/checkout@v6
         with:
           path: .perf
-          sparse-checkout: .github/perf
+          sparse-checkout: .github
       - name: Pin compiler sources
         run: |
-          git checkout "$SOURCES" -- compiler
-          git diff --quiet "$SOURCES" -- compiler
-          echo "variant=${{ matrix.variant }} head=$(git rev-parse HEAD) sources=$SOURCES"
+          for dir in base candidate; do
+            git -C $dir fetch --quiet origin "$SOURCES"
+            git -C $dir checkout "$SOURCES" -- compiler
+            git -C $dir diff --quiet "$SOURCES" -- compiler
+            echo "$dir head=$(git -C $dir rev-parse HEAD) sources=$SOURCES"
+          done
       - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: candidate/package.json
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
-      - uses: ./.github/actions/setup-linux-llvm
-      - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Build bootstrap CLI
-        run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
+      - uses: ./.perf/.github/actions/setup-linux-llvm
+      - name: Build bootstrap CLIs
+        run: |
+          for dir in base candidate; do
+            (cd $dir && pnpm install --frozen-lockfile && CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...)
+          done
       - name: Record runner
         run: |
           node --version
@@ -58,20 +78,23 @@ jobs:
           free -m | head -2
           grep -m1 'model name' /proc/cpuinfo
       - name: Measure selfhost CLI workload
-        run: bash .perf/.github/perf/measure.sh | tee "$RUNNER_TEMP/measure.log"
+        run: |
+          bash .perf/.github/perf/measure.sh base=base candidate=candidate -- semantic target build m1 hir \
+            | tee "$RUNNER_TEMP/measure.log"
       - name: Run selfhost native corpus
+        working-directory: candidate
         run: |
           set -o pipefail
           pnpm --filter @silklang/compiler exec tsx ../../compiler/scripts/runSelfhostCorpus.ts | tee "$RUNNER_TEMP/selfhost-corpus.log"
         env:
-          SILKC: ${{ github.workspace }}/compiler/build/llvm/x86_64-unknown-linux-gnu/release-with-debug/silk-compiler
+          SILKC: ${{ github.workspace }}/candidate/compiler/build/llvm/x86_64-unknown-linux-gnu/release-with-debug/silk-compiler
       - name: Check corpus baseline
         run: node .perf/.github/perf/check-corpus.mjs "$RUNNER_TEMP/selfhost-corpus.log"
       - name: Summary
         if: always()
         run: |
           {
-            echo "### ${{ matrix.variant }}"
+            echo "### ${{ matrix.pair }}"
             echo '```'
             grep -h -E '^SELFHOST_(CLI_TIMING|TEST_TIME_LIMIT_FAILED)' "$RUNNER_TEMP/measure.log" || true
             echo '```'
