@@ -13,6 +13,8 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as CleanupPlan from '../src/CleanupPlan.js'
+import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as Backend from '../src/Backend.js'
 import * as Layout from '../src/Layout.js'
 import * as Lifetime from '../src/Lifetime.js'
@@ -836,12 +838,12 @@ pub fn main() -> () {
 
 it.effect('finds a late structural cleanup field behind recursive metadata siblings', () =>
   Effect.gen(function* () {
-    // Metadata has finite, nongeneric recursive ownership. Its unrelated branches precede
-    // `active`, just as a semantic store precedes the active frames of a static machine.
+    // Borrowed Shared edges retain the recursive structural graph without demanding owned
+    // payload cleanup or recursively deriving affinity through every metadata path.
     const metadata = Array.from({ length: 18 }, (_, owner) =>
-      `struct Metadata${owner} {
+      `struct Metadata${owner}<'a> {
 ${Array.from({ length: 18 }, (_, field) =>
-  field === owner ? '' : `  field${field}: Shared<Metadata${field}>`,
+  field === owner ? '' : `  field${field}: &'a Shared<Metadata${field}<'a>>`,
 ).join('\n')}
 }`,
     ).join('\n')
@@ -850,22 +852,27 @@ ${Array.from({ length: 18 }, (_, field) =>
     const padding = Array.from({ length: 513 }, (_, field) =>
       `  field${field}: [u8; ${field}]`,
     ).join('\n')
-    const result = yield* snapshot(`import silk.bytes { Bytes }
+    const result = yield* snapshot(`import silk.vector { Vector }
 import silk.shared { Shared }
-import silk.vector { Vector }
 ${metadata}
 struct Padding {
+  marker: i32
 ${padding}
 }
-struct Frame { name: Bytes }
-struct Machine {
+struct Frame { value: i32 }
+struct Machine<'a> {
   padding: Padding
-  metadata: Shared<Metadata0>
+  metadata: &'a Shared<Metadata0<'a>>
   active: Vector<Frame>
 }
-pub fn main() -> () {
-  let machines = Vector.make<Machine>()
+fn hold<'a>(anchor: &'a i32) -> () {
+  let machines = Vector.make<Machine<'a>>()
   drop machines
+  return ()
+}
+pub fn main() -> () {
+  let anchor = 0
+  hold(&anchor)
   return ()
 }`)
     assert.deepEqual(Analysis.diagnostics(result), [])
@@ -883,6 +890,124 @@ pub fn main() -> () {
             'golden/program.Frame',
       ),
     )
+    const index = result.instances.declarationIndex ?? unreachable('expected declaration facts')
+    const struct = (name: string): DeclarationFacts.StructFact => {
+      const fact = DeclarationFacts.byCanonical(index, {
+        _tag: 'CanonicalDeclarationId',
+        module: 'golden/program',
+        name,
+      })
+      if (fact?._tag !== 'StructDeclaration') return unreachable('expected source struct')
+      return fact
+    }
+    const fieldType = (field: DeclarationFacts.FieldFact): Type.Type => {
+      if (field.declaredType._tag !== 'Resolved') return unreachable('expected resolved field')
+      return field.declaredType.type
+    }
+    const spelling = (field: DeclarationFacts.FieldFact): string =>
+      field.name._tag === 'Present' ? field.name.spelling : unreachable('expected named field')
+    const borrowedShared = (type: Type.Type, owner: string, target: string): void => {
+      if (!Type.isReference(type)) return unreachable('expected borrowed metadata')
+      const region = Lifetime.bound({ module: 'golden/program', name: owner }, 0, 'a')
+      assert.strictEqual(type.access, 'Shared')
+      assert.strictEqual(Lifetime.key(type.lifetime), Lifetime.key(region))
+      if (!Type.isNominal(type.target)) return unreachable('expected Shared referent')
+      assert.deepEqual(
+        { module: type.target.module, name: type.target.name },
+        { module: 'silk/shared', name: 'Shared' },
+      )
+      const payload = type.target.arguments.at(0) ?? unreachable('expected Shared payload')
+      if (!Type.isTypeArgument(payload) || !Type.isNominal(payload))
+        return unreachable('expected metadata payload')
+      assert.deepEqual(
+        { module: payload.module, name: payload.name },
+        { module: 'golden/program', name: target },
+      )
+      const argument = payload.arguments.at(0) ?? unreachable('expected referent lifetime')
+      if (!Lifetime.isLifetime(argument)) return unreachable('expected lifetime argument')
+      assert.strictEqual(Lifetime.key(argument), Lifetime.key(region))
+      assert.strictEqual(CleanupPlan.cleanupPlan(index, type)._tag, 'NoCleanup')
+    }
+    const machine = struct('Machine')
+    assert.deepEqual(machine.fields.map(spelling), ['padding', 'metadata', 'active'])
+    borrowedShared(
+      fieldType(machine.fields.at(1) ?? unreachable('expected metadata field')),
+      'Machine',
+      'Metadata0',
+    )
+    assert.strictEqual(
+      Type.encode(fieldType(machine.fields.at(2) ?? unreachable('expected active field'))),
+      'silk/vector.Vector<golden/program.Frame>',
+    )
+    for (let owner = 0; owner < 18; owner += 1) {
+      const fields = struct(`Metadata${owner}`).fields
+      const targets = Array.from({ length: 18 }, (_, target) => target).filter(
+        (target) => target !== owner,
+      )
+      assert.deepEqual(fields.map(spelling), targets.map((target) => `field${target}`))
+      for (const [position, target] of targets.entries()) {
+        borrowedShared(
+          fieldType(fields.at(position) ?? unreachable('expected metadata sibling')),
+          `Metadata${owner}`,
+          `Metadata${target}`,
+        )
+      }
+    }
+    const paddingFields = struct('Padding').fields
+    assert.deepEqual(paddingFields.map(spelling), [
+      'marker',
+      ...Array.from({ length: 513 }, (_, field) => `field${field}`),
+    ])
+    assert.strictEqual(
+      fieldType(paddingFields.at(0) ?? unreachable('expected padding marker')),
+      'i32',
+    )
+    for (let field = 0; field < 513; field += 1) {
+      const type = fieldType(paddingFields.at(field + 1) ?? unreachable('expected padding field'))
+      if (!Type.isFixedArray(type)) return unreachable('expected distinct array type')
+      assert.strictEqual(type.element, 'u8')
+      assert.strictEqual(type.length, field)
+    }
+    const frame = struct('Frame')
+    assert.deepEqual(frame.fields.map(spelling), ['value'])
+    assert.strictEqual(fieldType(frame.fields.at(0) ?? unreachable('expected frame value')), 'i32')
+    const frameArguments = (key: Instances.InstanceKey): boolean =>
+      key.typeArguments.map(Type.encodeGenericArgument).join(', ') === 'golden/program.Frame'
+    assert.isTrue(
+      result.instances.executionEdges.some((edge) => {
+        const payload = edge.owner.typeArguments.at(0)
+        return (
+          edge.kind === 'Cleanup' &&
+          edge.owner.declaration.module === 'silk/vector' &&
+          edge.owner.declaration.name === 'releaseBuffer' &&
+          payload !== undefined &&
+          Type.isTypeArgument(payload) &&
+          Type.isNominal(payload) &&
+          payload.module === 'golden/program' &&
+          payload.name === 'Machine' &&
+          edge.target.declaration.module === 'silk/vector' &&
+          edge.target.declaration.name === 'drop@impl#0' &&
+          frameArguments(edge.target)
+        )
+      }),
+    )
+    for (const [owner, target] of [
+      ['drop@impl#0', 'releaseFull'],
+      ['releaseFull', 'releaseBuffer'],
+    ]) {
+      assert.isTrue(
+        result.instances.executionEdges.some(
+          (edge) =>
+            edge.kind === 'Runtime' &&
+            edge.owner.declaration.module === 'silk/vector' &&
+            edge.owner.declaration.name === owner &&
+            frameArguments(edge.owner) &&
+            edge.target.declaration.module === 'silk/vector' &&
+            edge.target.declaration.name === target &&
+            frameArguments(edge.target),
+        ),
+      )
+    }
   }),
 )
 
