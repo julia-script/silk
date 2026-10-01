@@ -3506,15 +3506,6 @@ export const make = (operations: Operations) => {
       )
       return cleanupEffects.get(identity)
     }
-    // Without witness dependencies, a cleanup plan's hook calls depend on the interned plan alone.
-    const cleanupHooks = new Map<CleanupPlan.CleanupPlan, ReadonlyArray<CallTarget>>()
-    const cleanupHookCalls = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<CallTarget> => {
-      const cached = cleanupHooks.get(cleanup)
-      if (cached !== undefined) return cached
-      const calls = hookCalls(cleanup, index, false)
-      cleanupHooks.set(cleanup, calls)
-      return calls
-    }
     // A constructor carrying service Effects has no concrete argument identity until traversal
     // reaches it with a lexical provider. Keep that dependency so discovery can revisit the call.
     const deferredCalls = new Map<
@@ -3617,14 +3608,30 @@ export const make = (operations: Operations) => {
       target: string,
       diagnosticContext: 'Inherited' | 'Independent' = 'Inherited',
     ): void => {
-      const targets = dependencies.get(owner) ?? new Set<string>()
-      targets.add(target)
-      dependencies.set(owner, targets)
-      if (diagnosticContext === 'Inherited') {
-        const inherited = diagnosticDependencies.get(owner) ?? new Set<string>()
-        inherited.add(target)
-        diagnosticDependencies.set(owner, inherited)
+      let targets = dependencies.get(owner)
+      if (targets === undefined) {
+        targets = new Set()
+        dependencies.set(owner, targets)
       }
+      targets.add(target)
+      if (diagnosticContext === 'Inherited') {
+        let inherited = diagnosticDependencies.get(owner)
+        if (inherited === undefined) {
+          inherited = new Set()
+          diagnosticDependencies.set(owner, inherited)
+        }
+        inherited.add(target)
+      }
+    }
+    // Drop hooks of one cleanup plan; plans are cached per type, so many drops share an entry.
+    const cleanupHooks = new Map<CleanupPlan.CleanupPlan, ReadonlyArray<CallTarget>>()
+    const cleanupHooksOf = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<CallTarget> => {
+      let hooks = cleanupHooks.get(cleanup)
+      if (hooks === undefined) {
+        hooks = hookCalls(cleanup, index, false)
+        cleanupHooks.set(cleanup, hooks)
+      }
+      return hooks
     }
     // Callables by their runtime environment key, in `callables` order, so a callback resolves its
     // captured callable from one bucket instead of rekeying every callable per argument.
@@ -4132,16 +4139,14 @@ export const make = (operations: Operations) => {
       }
 
       const cleanupRegions = new Map<number, string>()
-      // One instance drops the same interned cleanup plans at many statements; resolve each
-      // plan's hook instances once under this instance's substitution.
-      const cleanupHookNodes = new Map<CleanupPlan.CleanupPlan, ReadonlyArray<string>>()
-      const hookNodesOf = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<string> => {
-        const cached = cleanupHookNodes.get(cleanup)
-        if (cached !== undefined) return cached
-        const nodes: Array<string> = []
-        for (const hook of cleanupHookCalls(cleanup)) {
+      // Hook instance nodes of one cleanup plan under this instance's substitution, in hook order.
+      const cleanupTargets = new Map<CleanupPlan.CleanupPlan, ReadonlyArray<string>>()
+      const cleanupTargetsOf = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<string> => {
+        let nodes = cleanupTargets.get(cleanup)
+        if (nodes !== undefined) return nodes
+        nodes = cleanupHooksOf(cleanup).flatMap((hook) => {
           const target = targetFunction(results, hook.declaration)
-          if (target === undefined) continue
+          if (target === undefined) return []
           const targetKey = keyOf(
             hook.declaration,
             target.contract,
@@ -4154,13 +4159,13 @@ export const make = (operations: Operations) => {
               ),
             ),
           )
-          nodes.push(instanceNode(targetKey))
-        }
-        cleanupHookNodes.set(cleanup, nodes)
+          return [instanceNode(targetKey)]
+        })
+        cleanupTargets.set(cleanup, nodes)
         return nodes
       }
       const addCleanup = (cleanup: CleanupPlan.CleanupPlan, execution: string): void => {
-        for (const node of hookNodesOf(cleanup)) addDependency(execution, node)
+        for (const node of cleanupTargetsOf(cleanup)) addDependency(execution, node)
       }
       const recordRegions = (statement: Tir.Statement, execution: string): void => {
         cleanupRegions.set(statement.region.ordinal, execution)
