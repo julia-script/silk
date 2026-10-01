@@ -22,10 +22,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - variant: K-local-ordinals
-            ref: a6c6547c6f56e0eca72354ae3333ec53b1a0c94f
           - variant: L-discovery-graph
             ref: 2fbb8d4165a1103c63a50c6e93a63e066cab9c41
+          - variant: M-suspension-reuse
+            ref: 109eff6ff55f1b6b160fea5cb534685ff2e10ef1
     steps:
       - uses: actions/checkout@v6
         with:
