@@ -22,12 +22,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - variant: base
-            ref: 91b3e6552e0e8098dc2faf9b1756af3ad02adb70
-          - variant: G-callable-index
-            ref: 906b22fa922db6bee259657824a89d45eaa29366
           - variant: H-diagnostic-dispatch
             ref: 1f49783b6f1754cfcdbc48af2092f4a3d88dc94e
+          - variant: I-outcome-array
+            ref: 1a430e8720e2455a8cc4525ad90dadad3bb5a877
     steps:
       - uses: actions/checkout@v6
         with:
