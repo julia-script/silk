@@ -733,6 +733,53 @@ pub effect fn main() -> i32 ! OutOfMemoryError {
   }),
 )
 
+it.effect('drops a stored owner at every exit through one shared glue function', () =>
+  Effect.gen(function* () {
+    const artifact = yield* emit(
+      `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.vector { Vector }
+struct Pair { left: Vector<i32> right: Vector<i32> }
+effect fn fill(values: &mut Vector<i32>, value: i32) -> () ! OutOfMemoryError ? &mut Allocator {
+  let appended = run Vector.append<i32>(move values, value)
+  return ()
+}
+pub effect fn main() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut pair = Pair { left: Vector.make<i32>(), right: Vector.make<i32>() }
+  run fill(&mut pair.left, 1) |> Effect.provideMut(&mut allocator)
+  run fill(&mut pair.right, 2) |> Effect.provideMut(&mut allocator)
+  return 1
+}`,
+      { mode: 'release' },
+    )
+    const bodies = new Map(
+      [...artifact.ir.matchAll(/^define[^\n]*@([\w.]+)\([^\n]*\n([\s\S]*?)^}/gm)].map((match) => [
+        match[1] ?? '',
+        match[2] ?? '',
+      ]),
+    )
+    const runner =
+      [...bodies].find(([name]) => name.startsWith('silk_golden_program_main_effect'))?.[1] ??
+      unreachable('expected the main Effect runner')
+    // Each exit that still owns `pair` releases it with one call, never an inline expansion.
+    const pairGlue = [...runner.matchAll(/call void @(silk_drop_glue_\d+)\(/g)].map(
+      (match) => match[1],
+    )
+    assert.isAtLeast(pairGlue.length, 2)
+    assert.lengthOf(new Set(pairGlue), 1)
+    assert.notMatch(runner, /vector_drop_impl|call void @free\(/)
+    // The Pair glue releases both fields through the shared Vector glue.
+    const pair = bodies.get(pairGlue[0] ?? '') ?? unreachable('expected the Pair glue body')
+    const fields = [...pair.matchAll(/call void @(silk_drop_glue_\d+)\(/g)].map((match) => match[1])
+    assert.lengthOf(fields, 2)
+    assert.lengthOf(new Set(fields), 1)
+    const vector = bodies.get(fields[0] ?? '') ?? unreachable('expected the Vector glue body')
+    assert.lengthOf(vector.match(/vector_drop_impl/g) ?? [], 1)
+    assert.lengthOf(vector.match(/call void @free\(/g) ?? [], 1)
+  }),
+)
+
 it.effect('declares each reachable foreign symbol once and calls through its unwind guard', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
