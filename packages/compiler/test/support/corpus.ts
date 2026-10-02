@@ -10018,6 +10018,19 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  // A static fixed-array argument is materialized where the callee reads it at runtime.
+  {
+    name: 'static-parameter-array',
+    source: `fn pick(static table: [i32; 3], index: usize) -> i32 {
+  let local = table
+  return local[index]
+}
+
+pub fn main() -> i32 {
+  return pick([5, 30, 7], 1) + pick([2, 4, 6], 2) + 6
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // Static enum and fixed-array arguments are materialized where the callee reads them at runtime.
   {
     name: 'static-parameter-aggregates',
