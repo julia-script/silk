@@ -16,7 +16,8 @@ const silkBytes = (bytes: Uint8Array): string =>
 
 interface Scenario {
   readonly id: number
-  readonly callback: string
+  /** Omitted when the program's witness slot handles the scenario before any exchange starts. */
+  readonly callback?: string
 }
 
 const protocol: ReadonlyArray<Scenario> = [
@@ -29,8 +30,8 @@ const protocol: ReadonlyArray<Scenario> = [
   { id: 7, callback: 'upgradeExchange' },
   { id: 11, callback: 'discardExchange' },
   { id: 17, callback: 'failExchange' },
-  { id: 22, callback: 'routedWrongName' },
-  { id: 23, callback: 'exchange' },
+  { id: 22 },
+  { id: 23 },
   { id: 24, callback: 'discardExchange' },
   { id: 25, callback: 'discardExchange' },
 ]
@@ -286,24 +287,47 @@ const boundaryHandler = `impl ConnectionHandler<TestTransport, i32, ClientError 
   }
 }`
 
+/**
+ * Optional source slots spliced into the shared client program. Named slots keep each fragment in
+ * its intended position; the transport hooks run inside the scripted `TestTransport` methods.
+ */
+interface ProgramSlots {
+  readonly imports?: string
+  readonly support?: string
+  readonly witness?: string
+  readonly transportFields?: string
+  readonly httpReadHook?: string
+  readonly httpWriteHook?: string
+  readonly httpCloseHook?: string
+  readonly byteWriteHook?: string
+  readonly byteReadHook?: string
+  readonly byteFlushHook?: string
+  readonly byteShutdownHook?: string
+  readonly byteCloseHook?: string
+  readonly extraSupport?: string
+  readonly main?: string
+}
+
 // Each program retains only its selected callback graph; provider and assertions stay shared.
 const sourceFor = (
   scenarios: ReadonlyArray<Scenario>,
   handler: string,
-  routeImports = '',
-  routeSupport = '',
-  routeWitness = '',
-  routeTransportFields = '',
-  routeHttpReadHook = '',
-  routeHttpWriteHook = '',
-  routeByteWriteHook = '',
-  routeByteReadHook = '',
-  routeByteFlushHook = '',
-  routeByteShutdownHook = '',
-  routeByteCloseHook = '',
-  extraSupport = '',
-  customMain = '',
-  routeHttpCloseHook = '',
+  {
+    imports: routeImports = '',
+    support: routeSupport = '',
+    witness: routeWitness = '',
+    transportFields: routeTransportFields = '',
+    httpReadHook: routeHttpReadHook = '',
+    httpWriteHook: routeHttpWriteHook = '',
+    httpCloseHook: routeHttpCloseHook = '',
+    byteWriteHook: routeByteWriteHook = '',
+    byteReadHook: routeByteReadHook = '',
+    byteFlushHook: routeByteFlushHook = '',
+    byteShutdownHook: routeByteShutdownHook = '',
+    byteCloseHook: routeByteCloseHook = '',
+    extraSupport = '',
+    main: customMain = '',
+  }: ProgramSlots = {},
 ): string => `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.effect {Effect}
@@ -745,10 +769,14 @@ effect<'call> fn dispatchExchange<'call, 'exchange: 'call>(
 ? &Scenario | &mut Allocator | &mut MonotonicClock | &mut Random {
   let scenario = run Scenario.selected()
 ${scenarios
-  .map(
-    ({ id, callback }) => `  if scenario == ${id} {
+  .flatMap(({ id, callback }) =>
+    callback === undefined
+      ? []
+      : [
+          `  if scenario == ${id} {
     return run ${callback}(&mut value.*)
   }`,
+        ],
   )
   .join('\n')}
   return 143
@@ -906,7 +934,7 @@ effect fn runCase(scenario: i32) -> i32 ! ClientError | RequestError | OutOfMemo
     shutdownCount: usize.ZERO,
     writeShutdown: false,
     closed: false,
-${routeTransportFields.length > 0 ? '    routeAudit: Option.none<Shared<RouteAudit>>,' : ''}
+${routeTransportFields.length > 0 ? '    routeAudit: Option.none<Shared<RouteAudit>>(),' : ''}
   }
 ${routeWitness}
   let handler = Handler {request: move request, scenario: scenario}
@@ -1621,6 +1649,58 @@ const routeByteCloseHook = `    if recordProxyConcreteClose(&self.routeAudit, se
       fail ByteIoError.Provider {operation: ByteIoOperation.Close, code: 811}
     }`
 
+// One scripted route acquisition shared by the routed client and redirect programs.
+const scriptedRouteClientSupport = `struct RouteWallClock {}
+
+impl RouteWallClock {
+  effect fn now(self: &mut Self) -> Instant {
+    return SystemClock.make(1789156800, 123456789)
+  }
+
+  effect fn resolution(self: &mut Self) -> u64 {
+    return u64.toU64(1)
+  }
+}
+
+impl SystemClock for RouteWallClock {
+  now: RouteWallClock.now
+  getResolution: RouteWallClock.resolution
+}
+
+enum RouteAcquisitionError { Failed }
+
+struct ScriptedRouteClient<A, E, ?R> {
+  provider: TestTransport
+  settingsValue: RouteSettings
+}
+
+impl<A, E, ?R> ScriptedRouteClient<A, E, R> {
+  fn settings(client: &Self) -> RouteSettings {
+    return client.settingsValue
+  }
+
+  effect<'env> fn acquire<'env>(client: Self, peer: Origin, deadline: Option<Instant>) -> A
+  ! E | RouteAcquisitionError
+  ? R | &mut AcquiredRouteContext<TestTransport, A, E ? R>
+  where R in Without<R, ByteDuplex>, R in Without<R, HttpTransport> {
+    drop peer
+    drop deadline
+    let ScriptedRouteClient<A, E, R> {provider, settingsValue} = move client
+    drop settingsValue
+    return run AcquiredRouteContext.use<TestTransport, A, E, R>(move provider)
+  }
+}
+
+impl<A, E, ?R> RouteClient<TestTransport, A, E, RouteAcquisitionError, never ? R> for ScriptedRouteClient<
+  A,
+  E,
+  R,
+> {
+  settings: ScriptedRouteClient.settings
+  acquire: ScriptedRouteClient.acquire
+}
+`
+
 const routeImports = `${httpProxyPolicyImports}
 import silk.https_identity {IdentityError}
 import silk.http_head {ParseLimitKind, ParseReason}
@@ -1636,6 +1716,7 @@ import silk.shared {Shared}
 import silk.tls_client {CertificateIdentityFailure, ClientLimits, TlsError}
 import silk.tls_connection as Tls {ConnectionError}
 import silk.trust_snapshot {TrustLoadLimits, TrustSnapshot, TrustSourceError}
+import silk.u8
 `
 
 const routeSupport = `${httpProxyPolicySupport}
@@ -1686,7 +1767,7 @@ fn recordRouteOutput(audit: &Option<Shared<RouteAudit>>, input: &[u8]) -> bool {
   return match & audit.* {
     Option.None => true
     Option.Some {value} => Shared.withMut<RouteAudit, bool>(&value, fn(state: &mut RouteAudit) -> bool {
-      return appendRouteOutput(state, input)
+      return appendRouteOutput(&mut state.*, input)
     })
   }
 }
@@ -1704,7 +1785,7 @@ fn recordRouteTlsOutput(
         return true
       }
       if !state.connectAccepted { return false }
-      return appendRouteOutput(state, input)
+      return appendRouteOutput(&mut state.*, input)
     })
   }
 }
@@ -1773,59 +1854,12 @@ fn recordRouteConnectAccepted(
   return ()
 }
 
-enum RouteAcquisitionError { Failed }
-
-struct ScriptedRouteClient {
-  provider: TestTransport
-  settingsValue: RouteSettings
-}
-
-impl<
-  A,
-  E,
-  ?R,
-  ?AcquisitionRequirements,
-  C: AcquiredRouteContext<TestTransport, A, E ? R>,
-> ScriptedRouteClient {
-  fn settings(self: &Self) -> RouteSettings {
-    return self.settingsValue
-  }
-
-  effect<'env> fn acquire<'env>(
-    client: Self,
-    peer: Origin,
-    deadline: Option<Instant>,
-    context: C,
-  ) -> A ! E | RouteAcquisitionError ? R | AcquisitionRequirements {
-    drop peer
-    drop deadline
-    let ScriptedRouteClient {provider, settingsValue} = move client
-    drop settingsValue
-    return run AcquiredRouteContext<TestTransport, A, E ? R>.use(move context, move provider)
-  }
-}
-
-impl<
-  A,
-  E,
-  ?R,
-  ?AcquisitionRequirements,
-  C: AcquiredRouteContext<TestTransport, A, E ? R>,
-> RouteClient<TestTransport, A, E, RouteAcquisitionError, R, AcquisitionRequirements, C>
-for ScriptedRouteClient {
-  settings: ScriptedRouteClient.settings
-  acquire: ScriptedRouteClient.acquire
-}
-
+${scriptedRouteClientSupport}
 struct RoutedNoop { audit: Option<Shared<RouteAudit>> }
 
-impl<'configuration> RoutedNoop {
-  effect<
-    'call,
-    'transport: 'call,
-    'provider: 'transport,
-    'tunnel: 'provider,
-  > fn handle<
+impl RoutedNoop {
+  effect<'call> fn handle<
+    'configuration,
     'call,
     'transport: 'call,
     'provider: 'transport,
@@ -1834,7 +1868,7 @@ impl<'configuration> RoutedNoop {
     handler: Self,
     route: Route<'configuration>,
     connection: &'call mut Connection<
-      RouteTransport<'transport, 'provider, 'tunnel, TestTransport>
+      RouteTransport<'transport, 'provider, 'tunnel, TestTransport>,
     >,
   ) -> i32 {
     if let Option.Some {value} = &handler.audit {
@@ -1850,8 +1884,7 @@ impl<'configuration> RoutedNoop {
   }
 }
 
-impl<'configuration> RouteHandler<'configuration, TestTransport, i32, never ? never>
-for RoutedNoop {
+impl<'configuration> RouteHandler<'configuration, TestTransport, i32, never ? never> for RoutedNoop {
   handle: RoutedNoop.handle
 }
 
@@ -1867,23 +1900,6 @@ impl Random for RouteRandom {
     self.filled = self.filled + output.length
     return ()
   }
-}
-
-struct RouteWallClock {}
-
-impl RouteWallClock {
-  effect fn now(self: &mut Self) -> Instant {
-    return SystemClock.make(1789156800, 123456789)
-  }
-
-  effect fn resolution(self: &mut Self) -> u64 {
-    return u64.toU64(1)
-  }
-}
-
-impl SystemClock for RouteWallClock {
-  now: RouteWallClock.now
-  getResolution: RouteWallClock.resolution
 }
 
 fn routeInput() -> &'static [u8] {
@@ -1928,10 +1944,14 @@ fn routedAuditPassed(state: &RouteAudit) -> bool {
 
 fn identityFailure(error: ConnectionError) -> bool {
   return match move error {
-    ConnectionError.Tls {error} => match move error {
-      TlsError.CertificateIdentity {
-        error: CertificateIdentityFailure.Match {error: IdentityError.NoMatch},
-      } => true
+    ConnectionError.Tls {error: tls} => match move tls {
+      TlsError.CertificateIdentity {error: certificate} => match move certificate {
+        CertificateIdentityFailure.Match {error: identity} => match move identity {
+          IdentityError.NoMatch => true
+          _ => false
+        }
+        _ => false
+      }
       _ => false
     }
     _ => false
@@ -2059,13 +2079,11 @@ effect<'call> fn exerciseProxyTunnel<'call, 'tunnel: 'call>(
   let original = match move first {
     Result.Success {value} => { return 173 }
     Result.Failure {error} => match move error {
-      CallbackFailure cause => {
-        if cause.code != 811 { return 174 }
-        cause
-      }
+      CallbackFailure cause => cause
       ClientError cause => { return 175 }
     }
   }
+  if original.code != 811 { return 174 }
   let repeated = run Effect.result(
     Tunnel.transferByteDuplex(&mut channel.*, unexpectedProxyPublication),
   )
@@ -2140,7 +2158,7 @@ impl ConnectionHandler<
   TestTransport,
   i32,
   ClientError | OutOfMemoryError | CallbackFailure
-    ? &mut Allocator | &mut MonotonicClock | &mut Random,
+    ? &mut Allocator | &mut MonotonicClock | &mut Random
 > for ProxyLifecycleHandler {
   handle: ProxyLifecycleHandler.handle
 }
@@ -2155,7 +2173,7 @@ fn proxyHeadLimitInput() -> &'static [u8] {
 
 fn proxyHeadFailure(error: ClientError) -> bool {
   return match move error {
-    ClientError.Head {error} => match move error.reason {
+    ClientError.Head {error: head} => match move head.reason {
       ParseReason.LimitExceeded {limit, allowed, attempted} => {
         return limit == ParseLimitKind.HeadBytes && allowed == 160 && attempted == 161
       }
@@ -2210,7 +2228,7 @@ impl ProxyHeadLimitHandler {
 impl ConnectionHandler<
   TestTransport,
   bool,
-  OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random,
+  OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random
 > for ProxyHeadLimitHandler {
   handle: ProxyHeadLimitHandler.handle
 }
@@ -2445,7 +2463,11 @@ effect fn routedWrongName() -> i32 ! OutOfMemoryError {
     Result<TrustSnapshot, TrustSourceError>.Success {value} => move value
     Result<TrustSnapshot, TrustSourceError>.Failure {error} => { return 156 }
   }
-  let client = ScriptedRouteClient {
+  let client = ScriptedRouteClient<
+    i32,
+    ProxyError | ClientError | ConnectionError | IdentityError | OutOfMemoryError,
+    &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random,
+  > {
     provider: move provider,
     settingsValue: RouteSettings {
       http: limits(),
@@ -2525,7 +2547,11 @@ effect fn typecheckRoute(transport: TestTransport) -> i32
     }
   }
   let route = selectRoute(&config, origin)
-  let client = ScriptedRouteClient {
+  let client = ScriptedRouteClient<
+    i32,
+    ProxyError | ClientError | ConnectionError | IdentityError | OutOfMemoryError,
+    &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random,
+  > {
     provider: move transport,
     settingsValue: RouteSettings {
       http: limits(),
@@ -2549,7 +2575,19 @@ effect fn typecheckRoute(transport: TestTransport) -> i32
 
 const routeWitness = `  // Compile-only witness: the runtime corpus does not select this scenario.
   if scenario == -1 {
-    return run typecheckRoute(move adapter)
+    let mut wall = RouteWallClock {}
+    let attempted = run Effect.result(typecheckRoute(move adapter))
+      |> Effect.provideMut<SystemClock>(&mut wall)
+      |> Effect.provideMut<Random>(&mut random)
+      |> Effect.provideMut<MonotonicClock>(&mut clock)
+      |> Effect.provideMut<Allocator>(&mut allocator)
+    return match move attempted {
+      Result.Success {value} => value
+      Result.Failure {error} => {
+        drop error
+        return 140
+      }
+    }
   }
   if scenario == 22 {
     drop adapter
@@ -2569,6 +2607,7 @@ import silk.http_redirect {
   Attempt,
   AttemptClient,
   AttemptRequest,
+  AttemptStep,
   BodyChunk,
   BodyDecision,
   BodyProducer,
@@ -2590,6 +2629,7 @@ import silk.http_redirect {
   RedirectError,
   RedirectLimit,
   RedirectReason,
+  SelectedBody,
   StatusDecision,
   admitOrigin,
   crossOriginHeaderPolicy,
@@ -2601,7 +2641,28 @@ import silk.http_redirect {
   withReplayResponse,
 }
 import silk.http_request {Authorization, BasicSecurity, HeaderControl}
-import silk.http_client {RouteTransport}
+import silk.http_client {
+  AcquiredRouteContext,
+  RouteClient,
+  RouteHandler,
+  RouteProtocol,
+  RouteSettings,
+  RouteTransport,
+}
+import silk.http_proxy {
+  BypassPolicy,
+  ProxyAuth,
+  ProxyAuthContextId,
+  ProxyConfig,
+  ProxyConfigId,
+  ProxyError,
+  Route,
+  selectRoute,
+}
+import silk.https_identity {IdentityError}
+import silk.tls_client {ClientLimits}
+import silk.tls_connection {ConnectionError}
+import silk.trust_snapshot {TrustSnapshot}
 import silk.http_transport as Transport
 import silk.shared {Shared}
 import silk.string {String}
@@ -2804,154 +2865,185 @@ fn copyRedirectDeadline(value: &Option<Instant>) -> Option<Instant> {
 fn expectedRedirectDeadline(value: &Option<Instant>) -> bool {
   return match &value.* {
     Option.None => false
-    Option.Some {value: present} => SystemClock.seconds(&present) == u64.toU64(20)
+    Option.Some {value: present} => SystemClock.seconds(&present) == 20
       && SystemClock.nanoseconds(&present) == 7
   }
 }
 
-struct RedirectExchangeHandler<'request, 'policy, A, HandlerError, ?HandlerRequirements> {
+${scriptedRouteClientSupport}
+fn redirectRouteSettings() -> RouteSettings {
+  let mut http = limits()
+  http.readCapacity = usize.ONE
+  return RouteSettings {
+    http: http,
+    request: valueLimits(),
+    maxRequestHeadBytes: 1024,
+    maxProxyCredentialBytes: 512,
+    protocol: RouteProtocol.OptionalHttp11,
+    tls: ClientLimits.defaults(),
+    handshakeDurationNanoseconds: u64.toU64(30000000000),
+  }
+}
+
+// Lends one routed exchange to the redirect attempt, mirroring the native redirect route bridge.
+struct RedirectRouteHandler<'configuration, 'request, 'policy, A, HandlerError, ?HandlerRequirements> {
+  routeWitness: Route<'configuration>
   request: &'request AttemptRequest<'policy>
   method: Method<'request>
   prepared: PreparedRequest
   options: RequestOptions
 }
 
-impl<
+impl<'configuration, 'request, 'policy, A, HandlerError, ?HandlerRequirements> RedirectRouteHandler<
+  'configuration,
   'request,
   'policy,
-  'provider,
   A,
   HandlerError,
-  ?HandlerRequirements,
-> RedirectExchangeHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
-  effect<'call> fn handle<'call>(
+  HandlerRequirements,
+> {
+  effect<'call> fn handle<'call, 'transport: 'call, 'provider: 'transport, 'tunnel: 'provider>(
     bridge: Self,
-    connection: &'call mut Connection<RouteTransport<'provider, 'provider, 'provider, TestTransport>>,
+    route: Route<'configuration>,
+    connection: &'call mut Connection<
+      RouteTransport<'transport, 'provider, 'tunnel, TestTransport>,
+    >,
   ) -> A
   ! HandlerError | ClientError | OutOfMemoryError
-  ? HandlerRequirements
-    | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
-    | &mut Allocator
-    | &mut MonotonicClock
-    | &mut Random {
-    let RedirectExchangeHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
-      request,
-      method,
-      prepared,
-      options,
-    } = move bridge
-    let use = effect<'exchangeCall, 'exchangeView: 'exchangeCall> fn(
-      exchange: &'exchangeCall mut Exchange<
-        'exchangeView,
-        RouteTransport<'provider, 'provider, 'provider, TestTransport>
-      >,
+  ? HandlerRequirements | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements> | &mut Allocator {
+    let RedirectRouteHandler<
+      'configuration,
+      'request,
+      'policy,
+      A,
+      HandlerError,
+      HandlerRequirements,
+    > {routeWitness, request, method, prepared, options} = move bridge
+    drop routeWitness
+    drop route
+    let use = effect fn(
+      exchange: &mut Exchange<RouteTransport<'transport, 'provider, 'tunnel, TestTransport>>,
     ) -> A
     ! HandlerError
-    ? HandlerRequirements | &mut Attempt<
-      'policy,
-      TestTransport,
-      A,
-      HandlerError ? HandlerRequirements
-    > {
-      return run Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>.handle(
+    ? HandlerRequirements | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements> {
+      return run Attempt.handle<'policy, TestTransport, A, HandlerError, HandlerRequirements>(
         request,
         method,
         move exchange,
       )
     }
-    return run Client.withExchange(connection, &prepared, move options, move use)
+    return run Client.withExchange(move connection, &prepared, move options, move use)
   }
 }
 
-impl<
-  'request,
-  'policy,
-  'provider,
-  A,
-  HandlerError,
-  ?HandlerRequirements,
-> ConnectionHandler<
-  RouteTransport<'provider, 'provider, 'provider, TestTransport>,
-  A,
-  HandlerError | ClientError | OutOfMemoryError
-    ? HandlerRequirements
-      | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
-      | &mut Allocator
-      | &mut MonotonicClock
-      | &mut Random,
-> for RedirectExchangeHandler<'request, 'policy, A, HandlerError, HandlerRequirements> {
-  handle: RedirectExchangeHandler.handle
-}
-
-effect fn runRedirectProvider<
-  'provider,
+impl<'configuration, 'request, 'policy, A, HandlerError, ?HandlerRequirements> RouteHandler<'configuration, TestTransport, A, HandlerError | ClientError | OutOfMemoryError ? HandlerRequirements | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements> | &mut Allocator> for RedirectRouteHandler<
+  'configuration,
   'request,
   'policy,
   A,
   HandlerError,
-  ?HandlerRequirements,
->(
-  provider: &'provider mut TestTransport,
-  origin: Origin,
-  request: &'request AttemptRequest<'policy>,
-  method: Method<'request>,
-  prepared: PreparedRequest,
-  deadline: Option<Instant>,
-) -> A
-! HandlerError | ClientError | OutOfMemoryError
-? HandlerRequirements
-  | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
-  | &mut Allocator
-  | &mut MonotonicClock
-  | &mut Random {
-  let loan = Transport.borrow(move provider)
-  let transport = RouteTransport<'provider, 'provider, 'provider, TestTransport>.Plain {
-    provider: move loan,
-  }
-  let bridge = RedirectExchangeHandler {
-    request: request,
-    method: method,
-    prepared: move prepared,
-    options: RequestOptions {
-      deadline: copyRedirectDeadline(&deadline),
-      continuePolicy: ContinuePolicy.Disabled,
-    },
-  }
-  let mut selectedLimits = limits()
-  selectedLimits.readCapacity = usize.ONE
-  return run Client.withOwned(
-    move transport,
-    origin,
-    request.version,
-    move selectedLimits,
-    move deadline,
-    move bridge,
-  )
+  HandlerRequirements,
+> {
+  handle: RedirectRouteHandler.handle
 }
 
-struct RedirectScriptClient { audit: Shared<RouteAudit> }
+// Every redirect attempt bypasses the configured proxy, so each scripted peer is a Direct route.
+effect fn redirectProxyConfig() -> ProxyConfig ! ProxyError | OutOfMemoryError ? &mut Allocator {
+  let origins = [redirectPeer("http://example.test/"), redirectPeer("http://other.test/")]
+  let bypass = match move run BypassPolicy.copy(&origins) {
+    Result.Success {value} => move value
+    Result.Failure {error} => { fail move error }
+  }
+  return match move ProxyConfig.fromUri(
+    ProxyConfigId.make(u64.toU64(7)),
+    "http://proxy.test:3128",
+    ProxyAuth.none(ProxyAuthContextId.make(u64.toU64(8))),
+    move bypass,
+    4096,
+  ) {
+    Result.Success {value} => move value
+    Result.Failure {error} => { fail move error }
+  }
+}
 
-struct RedirectAttemptLease {
-  provider: TestTransport
+fn redirectPeer(text: string) -> Origin {
+  let uri = match move Uri.parse(text) {
+    Result.Success {value} => value
+    Result.Failure {error} => {
+      let invalid = 1 / 0
+      return redirectPeer(text)
+    }
+  }
+  return match move Origin.fromUri(&uri) {
+    Result.Success {value} => value
+    Result.Failure {error} => {
+      let invalid = 1 / 0
+      return redirectPeer(text)
+    }
+  }
+}
+
+struct RedirectScriptClient<'configuration, 'policy, A, HandlerError, ?HandlerRequirements> {
   audit: Shared<RouteAudit>
+  route: Route<'configuration>
 }
 
-impl<
+struct RedirectAttemptLease { audit: Shared<RouteAudit> }
+
+fn recordRedirectAttemptRelease(state: &mut RouteAudit) -> () {
+  state.attemptReleases = state.attemptReleases + usize.ONE
+  return ()
+}
+
+// Names the replay and one-shot attempt contract the redirect cases drive through this client.
+fn redirectScriptClient<'configuration, 'policy>(
+  audit: &Shared<RouteAudit>,
+  route: Route<'configuration>,
+  policy: &'policy RedirectPolicy,
+) -> RedirectScriptClient<
+  'configuration,
+  'policy,
+  AttemptStep<'policy, i32>,
+  RedirectError | ValueError | RedirectSourceFailure | ClientError | CallbackFailure | OutOfMemoryError,
+  &mut SelectedBody<RedirectSourceFailure, never> | &mut Allocator | &mut MonotonicClock | &mut Random,
+> {
+  drop policy
+  return RedirectScriptClient<
+    'configuration,
+    'policy,
+    AttemptStep<'policy, i32>,
+    RedirectError | ValueError | RedirectSourceFailure | ClientError | CallbackFailure | OutOfMemoryError,
+    &mut SelectedBody<RedirectSourceFailure, never> | &mut Allocator | &mut MonotonicClock | &mut Random,
+  > {audit: Shared.clone<RouteAudit>(audit), route: route}
+}
+
+impl<'configuration, 'policy, A, HandlerError, ?HandlerRequirements> RedirectScriptClient<
+  'configuration,
   'policy,
   A,
   HandlerError,
-  ?HandlerRequirements,
-> RedirectScriptClient {
+  HandlerRequirements,
+> {
   effect fn withAttempt(
     client: &mut Self,
     request: AttemptRequest<'policy>,
     deadline: Option<Instant>,
   ) -> A
-  ! HandlerError | OriginError | ValueError | RequestError | ClientError | OutOfMemoryError
+  ! HandlerError
+    | OriginError
+    | ValueError
+    | RequestError
+    | ClientError
+    | ProxyError
+    | ConnectionError
+    | IdentityError
+    | RouteAcquisitionError
+    | OutOfMemoryError
   ? HandlerRequirements
     | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
     | &mut Allocator
     | &mut MonotonicClock
+    | &mut SystemClock
     | &mut Random
   where
     HandlerRequirements in Without<HandlerRequirements, ByteDuplex>,
@@ -2972,6 +3064,7 @@ impl<
       Result.Failure {error} => { fail move error }
       Result.Success {value} => value
     }
+    let route = Route.recompute(&client.route, origin)
     let method = match move Method.parse(
       String.view(&request.method),
       request.requestLimits.maxMethodBytes,
@@ -3004,51 +3097,79 @@ impl<
       closed: false,
       routeAudit: Option.some<Shared<RouteAudit>>(Shared.clone<RouteAudit>(&client.audit)),
     }
-    let lease = RedirectAttemptLease {
-      provider: move provider,
-      audit: Shared.clone<RouteAudit>(&client.audit),
+    let routeClient = ScriptedRouteClient<
+      A,
+      HandlerError | ClientError | OutOfMemoryError | ProxyError | ConnectionError | IdentityError,
+      HandlerRequirements
+        | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
+        | &mut Allocator
+        | &mut MonotonicClock
+        | &mut SystemClock
+        | &mut Random,
+    > {provider: move provider, settingsValue: redirectRouteSettings()}
+    let bridge = RedirectRouteHandler<A, HandlerError, HandlerRequirements> {
+      routeWitness: route,
+      request: &request,
+      method: method,
+      prepared: move prepared,
+      options: RequestOptions {
+        deadline: copyRedirectDeadline(&deadline),
+        continuePolicy: ContinuePolicy.Disabled,
+      },
     }
+    let lease = RedirectAttemptLease {audit: Shared.clone<RouteAudit>(&client.audit)}
     let use = effect fn(owned: &mut RedirectAttemptLease) -> A
-    ! HandlerError | ClientError | OutOfMemoryError
+    ! HandlerError | ClientError | ProxyError | ConnectionError | IdentityError | RouteAcquisitionError | OutOfMemoryError
     ? HandlerRequirements
       | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
       | &mut Allocator
       | &mut MonotonicClock
+      | &mut SystemClock
       | &mut Random {
-      return run runRedirectProvider(
-        &mut owned.provider,
-        origin,
-        &request,
-        method,
-        move prepared,
+      drop owned
+      return run Client.withRoute<
+        'configuration,
+        TestTransport,
+        A,
+        HandlerError | ClientError | OutOfMemoryError,
+        RouteAcquisitionError,
+        HandlerRequirements
+          | &mut Attempt<'policy, TestTransport, A, HandlerError ? HandlerRequirements>
+          | &mut Allocator,
+        never,
+      >(
+        move routeClient,
+        route,
+        Option.none<TrustSnapshot>(),
         move deadline,
+        move bridge,
       )
     }
     let release = effect fn(owned: &mut RedirectAttemptLease) -> () {
-      Shared.withMut<RouteAudit, ()>(&owned.audit, fn(state: &mut RouteAudit) -> () {
-        state.attemptReleases = state.attemptReleases + usize.ONE
-        return ()
-      })
+      Shared.withMut<RouteAudit, ()>(&owned.audit, recordRedirectAttemptRelease)
       return ()
     }
     return run Effect.useReleaseNonParking(move lease, move use, move release)
   }
 }
 
-impl<
-  'policy,
-  A,
-  HandlerError,
-  ?HandlerRequirements,
-> AttemptClient<
+impl<'configuration, 'policy, A, HandlerError, ?HandlerRequirements> AttemptClient<
   'policy,
   TestTransport,
   A,
   HandlerError,
-  OriginError | ValueError | RequestError | ClientError | OutOfMemoryError,
+  OriginError
+    | ValueError
+    | RequestError
+    | ClientError
+    | ProxyError
+    | ConnectionError
+    | IdentityError
+    | RouteAcquisitionError
+    | OutOfMemoryError,
+  &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random,
   HandlerRequirements,
-  &mut Allocator | &mut MonotonicClock | &mut Random,
-> for RedirectScriptClient {
+> for RedirectScriptClient<'configuration, 'policy, A, HandlerError, HandlerRequirements> {
   withAttempt: RedirectScriptClient.withAttempt
 }
 `
@@ -3142,13 +3263,7 @@ struct RedirectFinal {
 }
 
 impl RedirectFinal {
-  effect<
-    'call,
-    'exchangeView: 'call,
-    'transport: 'exchangeView,
-    'provider: 'transport,
-    'tunnel: 'provider,
-  > fn handle<
+  effect<'call> fn handle<
     'call,
     'exchangeView: 'call,
     'transport: 'exchangeView,
@@ -3174,11 +3289,11 @@ impl RedirectFinal {
     &mut TestTransport provides &ByteDuplex from &mut ByteDuplex {
     let head = run Exchange.head(&exchange.*)
     let status = head.status()
-    let valid = Status.code(&status) == 200 && if handler.outcome == 0 {
-      hop == 2 && Uri.format(&uri) == "http://other.test/final"
-    } else {
-      hop == usize.ZERO && Uri.format(&uri) == "http://example.test/start"
+    let mut valid = hop == usize.ZERO && Uri.format(&uri) == "http://example.test/start"
+    if handler.outcome == 0 {
+      valid = hop == 2 && Uri.format(&uri) == "http://other.test/final"
     }
+    valid = valid && Status.code(&status) == 200
     drop head
     if !valid { return 241 }
     if handler.outcome == 0 {
@@ -3203,7 +3318,7 @@ impl ResponseHandler<
   TestTransport,
   i32,
   ClientError | CallbackFailure | OutOfMemoryError
-    ? &mut Allocator | &mut MonotonicClock | &mut Random,
+    ? &mut Allocator | &mut MonotonicClock | &mut Random
 > for RedirectFinal {
   handle: RedirectFinal.handle
 }
@@ -3212,7 +3327,7 @@ fn redirectUri() -> Uri<'static> {
   return match move Uri.parse("http://example.test/start") {
     Result.Failure {error} => {
       drop error
-      redirectUri()
+      return redirectUri()
     }
     Result.Success {value} => value
   }
@@ -3280,14 +3395,16 @@ fn oneShotAuditPassed(state: &RouteAudit) -> bool {
 }
 
 effect fn replayRedirectCase() -> i32
-! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError
-? &mut Allocator | &mut MonotonicClock | &mut Random {
+! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError | ProxyError | ConnectionError | IdentityError | RouteAcquisitionError
+? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
   let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(0))
   let selectedPolicy = match move redirectPolicy() {
     Result.Failure {error} => { fail move error }
     Result.Success {value} => value
   }
-  let mut client = RedirectScriptClient {audit: Shared.clone<RouteAudit>(&audit)}
+  let config = run redirectProxyConfig()
+  let route = selectRoute(&config, redirectPeer("http://example.test/"))
+  let mut client = redirectScriptClient(&audit, route, &selectedPolicy)
   let mut scratch: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0]
   let entries = [
     run redirectHeader("Cookie", b"session=secret"),
@@ -3319,14 +3436,16 @@ fn isReplayUnavailable(error: RedirectError) -> bool {
 }
 
 effect fn oneShotRedirectCase() -> i32
-! ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError
-? &mut Allocator | &mut MonotonicClock | &mut Random {
+! ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError | ProxyError | ConnectionError | IdentityError | RouteAcquisitionError
+? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
   let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(1))
   let selectedPolicy = match move redirectPolicy() {
     Result.Failure {error} => { return 243 }
     Result.Success {value} => value
   }
-  let mut client = RedirectScriptClient {audit: Shared.clone<RouteAudit>(&audit)}
+  let config = run redirectProxyConfig()
+  let route = selectRoute(&config, redirectPeer("http://example.test/"))
+  let mut client = redirectScriptClient(&audit, route, &selectedPolicy)
   let mut scratch: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0]
   let entries = [
     run redirectHeader("Cookie", b"session=secret"),
@@ -3346,10 +3465,7 @@ effect fn oneShotRedirectCase() -> i32
     RedirectFinal {audit: Shared.clone<RouteAudit>(&audit), outcome: 0},
   ))
   let unavailable = match move attempted {
-    Result.Success {value} => {
-      drop value
-      false
-    }
+    Result.Success {value} => false
     Result.Failure {error} => match move error {
       RedirectError cause => isReplayUnavailable(move cause)
       OriginError cause => { fail move cause }
@@ -3359,6 +3475,10 @@ effect fn oneShotRedirectCase() -> i32
       RedirectSourceFailure cause => { fail move cause }
       CallbackFailure cause => { fail move cause }
       OutOfMemoryError allocation => { fail move allocation }
+      ProxyError cause => { fail move cause }
+      ConnectionError cause => { fail move cause }
+      IdentityError cause => { fail move cause }
+      RouteAcquisitionError cause => { fail move cause }
     }
   }
   if !unavailable { return 244 }
@@ -3378,12 +3498,18 @@ effect fn outcomeRedirect(
   | RedirectSourceFailure
   | CallbackFailure
   | OutOfMemoryError
-? &mut Allocator | &mut MonotonicClock | &mut Random {
+  | ProxyError
+  | ConnectionError
+  | IdentityError
+  | RouteAcquisitionError
+? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
   let selectedPolicy = match move redirectPolicy() {
     Result.Failure {error} => { fail move error }
     Result.Success {value} => value
   }
-  let mut client = RedirectScriptClient {audit: Shared.clone<RouteAudit>(&audit)}
+  let config = run redirectProxyConfig()
+  let route = selectRoute(&config, redirectPeer("http://example.test/"))
+  let mut client = redirectScriptClient(&audit, route, &selectedPolicy)
   let mut scratch: [u8; 8] = [0, 0, 0, 0, 0, 0, 0, 0]
   let entries: [Header<'static>; 0] = []
   let headers = match move Headers.make(&entries, valueLimits()) {
@@ -3413,15 +3539,15 @@ fn singleAttemptAuditPassed(state: &RouteAudit) -> bool {
 }
 
 effect fn typedFailureRedirectCase() -> i32
-! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | OutOfMemoryError
-? &mut Allocator | &mut MonotonicClock | &mut Random {
+! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | OutOfMemoryError | ProxyError | ConnectionError | IdentityError | RouteAcquisitionError
+? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
   let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(3))
   let attempted = run Effect.result(outcomeRedirect(
     Shared.clone<RouteAudit>(&audit),
     1,
   ))
   let preserved = match move attempted {
-    Result.Success {value} => { drop value false }
+    Result.Success {value} => false
     Result.Failure {error} => match move error {
       CallbackFailure cause => cause.code == 901
       RedirectError cause => { fail move cause }
@@ -3431,6 +3557,10 @@ effect fn typedFailureRedirectCase() -> i32
       ClientError cause => { fail move cause }
       RedirectSourceFailure cause => { fail move cause }
       OutOfMemoryError allocation => { fail move allocation }
+      ProxyError cause => { fail move cause }
+      ConnectionError cause => { fail move cause }
+      IdentityError cause => { fail move cause }
+      RouteAcquisitionError cause => { fail move cause }
     }
   }
   if !preserved { return 248 }
@@ -3452,6 +3582,11 @@ fn deadlineAuditPassed(state: &RouteAudit) -> bool {
     && state.callbacks == usize.ZERO
 }
 
+fn discardRedirectCallback(cause: CallbackFailure) -> bool {
+  drop cause
+  return false
+}
+
 fn redirectTimedOut(error: ClientError) -> bool {
   return match move error {
     ClientError.Timeout => true
@@ -3460,24 +3595,28 @@ fn redirectTimedOut(error: ClientError) -> bool {
 }
 
 effect fn deadlineRedirectCase() -> i32
-! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | OutOfMemoryError
-? &mut Allocator | &mut MonotonicClock | &mut Random {
+! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | OutOfMemoryError | ProxyError | ConnectionError | IdentityError | RouteAcquisitionError
+? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
   let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(2))
   let attempted = run Effect.result(outcomeRedirect(
     Shared.clone<RouteAudit>(&audit),
     3,
   ))
   let expired = match move attempted {
-    Result.Success {value} => { drop value false }
+    Result.Success {value} => false
     Result.Failure {error} => match move error {
       ClientError cause => redirectTimedOut(move cause)
-      CallbackFailure cause => { drop cause false }
+      CallbackFailure cause => discardRedirectCallback(move cause)
       RedirectError cause => { fail move cause }
       OriginError cause => { fail move cause }
       ValueError cause => { fail move cause }
       RequestError cause => { fail move cause }
       RedirectSourceFailure cause => { fail move cause }
       OutOfMemoryError allocation => { fail move allocation }
+      ProxyError cause => { fail move cause }
+      ConnectionError cause => { fail move cause }
+      IdentityError cause => { fail move cause }
+      RouteAcquisitionError cause => { fail move cause }
     }
   }
   if !expired { return 250 }
@@ -3504,24 +3643,28 @@ fn failedAttemptAuditPassed(
 }
 
 effect fn sourceFailureRedirectCase() -> i32
-! RedirectError | ValueError | OriginError | RequestError | ClientError | CallbackFailure | OutOfMemoryError
-? &mut Allocator | &mut MonotonicClock | &mut Random {
+! RedirectError | ValueError | OriginError | RequestError | ClientError | CallbackFailure | OutOfMemoryError | ProxyError | ConnectionError | IdentityError | RouteAcquisitionError
+? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
   let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(5))
   let attempted = run Effect.result(outcomeRedirect(
     Shared.clone<RouteAudit>(&audit),
     3,
   ))
   let preserved = match move attempted {
-    Result.Success {value} => { drop value false }
+    Result.Success {value} => false
     Result.Failure {error} => match move error {
       RedirectSourceFailure cause => cause.code == 902
-      CallbackFailure cause => { drop cause false }
+      CallbackFailure cause => discardRedirectCallback(move cause)
       RedirectError cause => { fail move cause }
       OriginError cause => { fail move cause }
       ValueError cause => { fail move cause }
       RequestError cause => { fail move cause }
       ClientError cause => { fail move cause }
       OutOfMemoryError allocation => { fail move allocation }
+      ProxyError cause => { fail move cause }
+      ConnectionError cause => { fail move cause }
+      IdentityError cause => { fail move cause }
+      RouteAcquisitionError cause => { fail move cause }
     }
   }
   if !preserved { return 254 }
@@ -3534,11 +3677,9 @@ effect fn sourceFailureRedirectCase() -> i32
 
 fn redirectTransportReadFailed(error: ClientError) -> bool {
   return match move error {
-    ClientError.Transport {error} => match move error {
+    ClientError.Transport {error: transport} => match move transport {
       TransportError.Plain {error: plain} => match move plain {
-        ByteIoError.Provider {operation, code} => {
-          operation == ByteIoOperation.Read && code == 232
-        }
+        ByteIoError.Provider {operation, code} => operation == ByteIoOperation.Read && code == 232
         _ => false
       }
       _ => false
@@ -3548,24 +3689,28 @@ fn redirectTransportReadFailed(error: ClientError) -> bool {
 }
 
 effect fn transportFailureRedirectCase() -> i32
-! RedirectError | ValueError | OriginError | RequestError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError
-? &mut Allocator | &mut MonotonicClock | &mut Random {
+! RedirectError | ValueError | OriginError | RequestError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError | ProxyError | ConnectionError | IdentityError | RouteAcquisitionError
+? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
   let audit = run Shared.make<RouteAudit>(emptyRedirectAudit(6))
   let attempted = run Effect.result(outcomeRedirect(
     Shared.clone<RouteAudit>(&audit),
     3,
   ))
   let preserved = match move attempted {
-    Result.Success {value} => { drop value false }
+    Result.Success {value} => false
     Result.Failure {error} => match move error {
       ClientError cause => redirectTransportReadFailed(move cause)
-      CallbackFailure cause => { drop cause false }
+      CallbackFailure cause => discardRedirectCallback(move cause)
       RedirectError cause => { fail move cause }
       OriginError cause => { fail move cause }
       ValueError cause => { fail move cause }
       RequestError cause => { fail move cause }
       RedirectSourceFailure cause => { fail move cause }
       OutOfMemoryError allocation => { fail move allocation }
+      ProxyError cause => { fail move cause }
+      ConnectionError cause => { fail move cause }
+      IdentityError cause => { fail move cause }
+      RouteAcquisitionError cause => { fail move cause }
     }
   }
   if !preserved { return 256 }
@@ -3584,11 +3729,17 @@ effect fn canceledRedirectBody(audit: Shared<RouteAudit>) -> i32
   | ClientError
   | RedirectSourceFailure
   | CallbackFailure
-  | OutOfMemoryError {
+  | OutOfMemoryError
+  | ProxyError
+  | ConnectionError
+  | IdentityError
+  | RouteAcquisitionError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
   let mut random = FixedRandom {}
+  let mut wall = RouteWallClock {}
   return run outcomeRedirect(move audit, 2)
+    |> Effect.provideMut<SystemClock>(&mut wall)
     |> Effect.provideMut<Random>(&mut random)
     |> Effect.provideMut<MonotonicClock>(&mut clock)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -3635,8 +3786,19 @@ effect fn cancellationRedirectCase() -> i32 ! OutOfMemoryError {
   return 0
 }
 
+effect fn redirectCase(selector: i32) -> i32
+! RedirectError | ValueError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError | ProxyError | ConnectionError | IdentityError | RouteAcquisitionError
+? &mut Allocator | &mut MonotonicClock | &mut SystemClock | &mut Random {
+  if selector == 0 { return run replayRedirectCase() }
+  if selector == 1 { return run oneShotRedirectCase() }
+  if selector == 3 { return run typedFailureRedirectCase() }
+  if selector == 5 { return run sourceFailureRedirectCase() }
+  if selector == 6 { return run transportFailureRedirectCase() }
+  return run deadlineRedirectCase()
+}
+
 effect fn redirectCases() -> i32
-! RedirectError | ValueError | RedirectParseError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError {
+! RedirectError | ValueError | RedirectParseError | OriginError | RequestError | ClientError | RedirectSourceFailure | CallbackFailure | OutOfMemoryError | ProxyError | ConnectionError | IdentityError | RouteAcquisitionError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let compileWitness = redirectPolicyCompileWitness()
   if compileWitness != 0 { return 254 }
@@ -3645,23 +3807,12 @@ effect fn redirectCases() -> i32
   if !behaviorWitness { return 255 }
   let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
   let mut random = FixedRandom {}
+  let mut wall = RouteWallClock {}
   let cases: [i32; 6] = [0, 1, 3, 5, 6, 2]
   let mut index = usize.ZERO
-  while index < cases.length {
-    let selected = if cases[index] == 0 {
-      replayRedirectCase()
-    } else if cases[index] == 1 {
-      oneShotRedirectCase()
-    } else if cases[index] == 3 {
-      typedFailureRedirectCase()
-    } else if cases[index] == 5 {
-      sourceFailureRedirectCase()
-    } else if cases[index] == 6 {
-      transportFailureRedirectCase()
-    } else {
-      deadlineRedirectCase()
-    }
-    let result = run move selected
+  while index < 6 {
+    let result = run redirectCase(cases[index])
+      |> Effect.provideMut<SystemClock>(&mut wall)
       |> Effect.provideMut<Random>(&mut random)
       |> Effect.provideMut<MonotonicClock>(&mut clock)
       |> Effect.provideMut<Allocator>(&mut allocator)
@@ -3681,7 +3832,11 @@ const redirectMain = `effect fn recoverRedirect(
     | ClientError
     | RedirectSourceFailure
     | CallbackFailure
-    | OutOfMemoryError,
+    | OutOfMemoryError
+    | ProxyError
+    | ConnectionError
+    | IdentityError
+    | RouteAcquisitionError,
 ) -> i32 {
   drop error
   return 246
@@ -3691,39 +3846,29 @@ pub fn main() -> i32 {
   return run Effect.catchAll(redirectCases(), recoverRedirect)
 }`
 
-export const httpClientAcceptanceSource = sourceFor(
-  protocol,
-  protocolHandler,
-  routeImports,
-  routeSupport,
-  routeWitness,
-  routeTransportFields,
-  routeHttpReadHook,
-  routeHttpWriteHook,
-  routeByteWriteHook,
-  routeByteReadHook,
-  routeByteFlushHook,
-  routeByteShutdownHook,
-  routeByteCloseHook,
-)
+export const httpClientAcceptanceSource = sourceFor(protocol, protocolHandler, {
+  imports: routeImports,
+  support: routeSupport,
+  witness: routeWitness,
+  transportFields: routeTransportFields,
+  httpReadHook: routeHttpReadHook,
+  httpWriteHook: routeHttpWriteHook,
+  byteWriteHook: routeByteWriteHook,
+  byteReadHook: routeByteReadHook,
+  byteFlushHook: routeByteFlushHook,
+  byteShutdownHook: routeByteShutdownHook,
+  byteCloseHook: routeByteCloseHook,
+})
 export const httpClientBoundariesAcceptanceSource = sourceFor(boundaries, boundaryHandler)
 export const httpClientOutputFailuresAcceptanceSource = sourceFor(outputFailures, boundaryHandler)
 
 /** One table-driven redirect program shared by native and LLVM-to-Wasm acceptance. */
-export const httpRedirectAcceptanceSource = sourceFor(
-  [],
-  redirectHandler,
-  redirectImports,
-  '',
-  '',
-  redirectTransportFields,
-  redirectHttpReadHook,
-  redirectHttpWriteHook,
-  '',
-  '',
-  '',
-  '',
-  redirectProgramSupport,
-  redirectMain,
-  redirectHttpCloseHook,
-)
+export const httpRedirectAcceptanceSource = sourceFor([], redirectHandler, {
+  imports: redirectImports,
+  transportFields: redirectTransportFields,
+  httpReadHook: redirectHttpReadHook,
+  httpWriteHook: redirectHttpWriteHook,
+  httpCloseHook: redirectHttpCloseHook,
+  extraSupport: redirectProgramSupport,
+  main: redirectMain,
+})

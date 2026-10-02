@@ -65,7 +65,7 @@ import { jsonReaderAcceptanceSource } from './jsonReaderAcceptance.js'
 import { jsonReflectAcceptanceSource } from './jsonReflectAcceptance.js'
 import { jsonValueAcceptanceSource } from './jsonValueAcceptance.js'
 import { jsonCodecAcceptanceSource } from './jsonCodecAcceptance.js'
-import { httpRequestAcceptanceSource } from './httpRequestAcceptance.js'
+import { httpRequestNativeAcceptanceSource } from './httpRequestAcceptance.js'
 import { httpClientOwnershipAcceptanceSource } from './httpClientOwnershipAcceptance.js'
 import {
   httpClientAcceptanceSource,
@@ -7394,7 +7394,7 @@ pub fn main() -> i32 { return run Effect.catchAll(verify(), recover) }`,
   },
   {
     name: 'http-client-request',
-    source: httpRequestAcceptanceSource,
+    source: httpRequestNativeAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
   },
   {
