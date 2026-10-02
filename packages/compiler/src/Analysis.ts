@@ -1301,11 +1301,8 @@ export const diagnostics = (self: FrontendSnapshot): ReadonlyArray<Diagnostic.Di
 export const phases = (self: FrontendSnapshot): ReadonlyArray<PhaseReport.PhaseReport> =>
   self.report
 
-/** Analysis orchestration options; verification is independent of backend emission. */
-export interface CodegenRequest extends Backend.CodegenRequest {
-  /** Run the optional compiler-invariant audit before emission. Defaults to false. */
-  readonly verifyMir?: boolean
-}
+/** Analysis orchestration options; `verifyIr` also audits the lowered MIR before emission. */
+export type CodegenRequest = Backend.CodegenRequest
 
 /** Emits the snapshot's lowered program through LLVM. */
 /** What backend emission reads from a realized program; editor indexes are not part of it. */
@@ -1335,7 +1332,7 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
   }
   const selected = LlvmBackend.LlvmBackend
   if (self.mir._tag === 'Unavailable') return yield* self.mir.error
-  if (request.verifyMir === true) yield* MirVerification.check(self.mir.value)
+  if (request.verifyIr === true) yield* MirVerification.check(self.mir.value)
   const availability = IntrinsicAvailability.select(
     self.instances.intrinsics,
     self.mir.value.layout.target,
@@ -1393,9 +1390,8 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
       reason: { _tag: 'UnsupportedMir', detail: 'Invalid support profile' },
     })
   }
-  const { verifyMir: _verifyMir, ...emission } = request
   return yield* Backend.emit(selected, self.mir.value, {
-    ...emission,
+    ...request,
     sources:
       request.sources ??
       new Map(
