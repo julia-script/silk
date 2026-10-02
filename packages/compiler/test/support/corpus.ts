@@ -1955,7 +1955,7 @@ effect fn check() -> i32 ! WideFailure {
 effect fn recover(error: WideFailure) -> i32 { return 1 }
 pub fn main() -> i32 { return run Effect.catchAll(check(), recover) }`
 
-export const corpus: ReadonlyArray<CorpusProgram> = [
+const corpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'scalar-reference-read',
     source: `fn read(value: &i32) -> i32 { return value.* }
