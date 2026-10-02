@@ -1,9 +1,4 @@
-import {
-  httpProxyPolicyCommonImports,
-  httpProxyPolicyImports,
-  httpProxyPolicySupport,
-  verifyProxyPolicy,
-} from './httpProxyAcceptance.js'
+import { httpProxyPolicyCommonImports } from './httpProxyAcceptance.js'
 
 const httpConnectionPoolPolicyImports = `import silk.http_connection_pool as Pool {
   Config as PoolConfig,
@@ -43,12 +38,9 @@ effect fn nativePoolCopyWitness(
 
 fn poolDeclarationsWitness() -> bool {
   let config = PoolConfig.defaults()
-  let origin = match move proxyCheckedOrigin("http://pool.example") {
-    Result.Failure {error} => {
-      drop error
-      return false
-    }
-    Result.Success {value} => value
+  let origin = match move redirectOrigin("http://pool.example") {
+    Option.None => { return false }
+    Option.Some {value} => value
   }
   let key = PoolConnectionKey.direct(origin)
   let selected = PoolConnectionKey.origin(&key)
@@ -1390,10 +1382,37 @@ const verifyRedirectPolicy = `pub effect fn verifyRedirectPolicy() -> bool
   return true
 }`
 
-/** Pure redirect-policy and allocation-backed behavior checks shared by analysis and runtime. */
-export const httpRedirectBehaviorSentinel = `${httpRedirectBehaviorSupport}
+/** Pure redirect-policy and allocation-backed behavior checks. */
+const httpRedirectBehaviorSentinel = `${httpRedirectBehaviorSupport}
 ${redirectPolicyCompileWitness}
 ${verifyRedirectPolicy}`
+
+/**
+ * The redirect policy program shared by native and LLVM-to-Wasm acceptance: admitted policy
+ * values, status and method transitions, origin and downgrade rules, location resolution, header
+ * sanitization, and bounded history, executed without acquiring a connection.
+ */
+export const httpRedirectAcceptanceSource = `${httpProxyPolicyCommonImports}
+import silk.http {Status}
+import silk.http_request {Authorization, BasicSecurity, HeaderControl}
+${httpRedirectPolicyImports}
+${httpRedirectBehaviorSentinel}
+
+effect fn recoverRedirectPolicy(
+  error: OutOfMemoryError | RedirectError | ValueError | RedirectParseError | RedirectOriginError,
+) -> bool {
+  drop error
+  return false
+}
+
+pub fn main() -> i32 {
+  if redirectPolicyCompileWitness() != 0 { return 1 }
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let verified = run Effect.catchAll(verifyRedirectPolicy(), recoverRedirectPolicy)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if !verified { return 2 }
+  return 0
+}`
 
 export const httpRedirectPolicySupport = `${httpRedirectOperationSupport}
 ${httpRedirectOperationContractSupport}
@@ -1551,10 +1570,18 @@ export const httpRedirectAffineDuplicationDiagnosticSource = `effect fn redirect
   )
 }`
 
-export const httpRedirectAffineDiagnosticSource = `${httpProxyPolicyCommonImports}
+/**
+ * One frontend snapshot for the redirect, pool, and fetch policy contracts: their witnesses must
+ * analyze cleanly while the three embedded escape and duplication programs are rejected.
+ */
+export const httpRedirectPolicyAnalysisSource = `${httpProxyPolicyCommonImports}
 import silk.http {Status}
 ${httpRedirectPolicyImports}
+${httpConnectionPoolPolicyImports}
+${httpFetchPolicyImports}
 ${httpRedirectPolicySupport}
+${httpConnectionPoolPolicySupport}
+${httpFetchPolicySupport}
 
 struct RedirectDiagnosticProducer {}
 
@@ -1565,237 +1592,3 @@ ${httpRedirectAffineEscapeDiagnosticSource}
 ${httpRedirectAffineDuplicationDiagnosticSource}
 
 pub fn main() -> i32 { return 42 }`
-
-export const httpRedirectPolicyFragments = `${httpRedirectPolicyImports}
-${httpRedirectOperationSupport}
-${httpRedirectOperationContractSupport}
-${httpRedirectBehaviorSentinel}`
-
-export const httpProxyRedirectPolicyMain = `struct RedirectFactoryRequirementProvider {}
-struct RedirectProducerRequirementProvider {}
-struct RedirectCallbackRequirementProvider {}
-struct RedirectAcquisitionRequirementProvider {}
-struct RedirectClockProvider {}
-struct RedirectRandomProvider {}
-
-impl RedirectFactoryRequirement for RedirectFactoryRequirementProvider {}
-impl RedirectProducerRequirement for RedirectProducerRequirementProvider {}
-impl RedirectCallbackRequirement for RedirectCallbackRequirementProvider {
-  effect fn accepted(self: &mut Self) -> bool { return true }
-}
-impl RedirectAcquisitionRequirement for RedirectAcquisitionRequirementProvider {
-  effect fn accepted(self: &mut Self) -> bool { return true }
-}
-impl MonotonicClock for RedirectClockProvider {
-  effect fn now(self: &mut Self) -> Instant { return SystemClock.make(0, 0) }
-  effect fn getResolution(self: &mut Self) -> u64 { return u64.toU64(1) }
-  effect fn waitUntil(self: &mut Self, when: Instant) -> () {
-    drop self
-    drop when
-    return ()
-  }
-  effect fn waitFor(self: &mut Self, duration: u64) -> () {
-    drop self
-    drop duration
-    return ()
-  }
-}
-impl Random for RedirectRandomProvider {
-  effect fn fillBytes(self: &mut Self, output: &mut [u8]) -> () {
-    drop self
-    let mut index = usize.ZERO
-    while index < output.length {
-      output[index] = 0
-      index = index + usize.ONE
-    }
-    return ()
-  }
-}
-
-effect fn recoverProxyPolicy(error: OutOfMemoryError) -> bool {
-  drop error
-  return false
-}
-
-effect fn recoverRedirectPolicy(
-  error: OutOfMemoryError | RedirectError | ValueError | RedirectParseError | RedirectOriginError,
-) -> bool {
-  drop error
-  return false
-}
-
-effect fn recoverRedirectReplay(
-  error: RedirectFactoryFailure | RedirectProducerFailure,
-) -> i32 {
-  drop error
-  return -1
-}
-
-effect fn recoverRedirectBaseContract(
-  error: RedirectError
-    | ValueError
-    | RedirectCallbackFailure
-    | ClientError
-    | OutOfMemoryError
-    | RedirectAcquisitionFailure,
-) -> i32 {
-  return match move error {
-    RedirectAcquisitionFailure cause => match move cause { RedirectAcquisitionFailure.Rejected => 17 }
-    _ => -1
-  }
-}
-
-effect fn recoverRedirectOneShotContract(
-  error: RedirectError
-    | ValueError
-    | RedirectProducerFailure
-    | RedirectCallbackFailure
-    | ClientError
-    | OutOfMemoryError
-    | RedirectAcquisitionFailure,
-) -> i32 {
-  return match move error {
-    RedirectAcquisitionFailure cause => match move cause { RedirectAcquisitionFailure.Rejected => 17 }
-    _ => -1
-  }
-}
-
-effect fn recoverRedirectReplayContract(
-  error: RedirectError
-    | ValueError
-    | RedirectFactoryFailure
-    | RedirectProducerFailure
-    | RedirectCallbackFailure
-    | ClientError
-    | OutOfMemoryError
-    | RedirectAcquisitionFailure,
-) -> i32 {
-  return match move error {
-    RedirectAcquisitionFailure cause => match move cause { RedirectAcquisitionFailure.Rejected => 17 }
-    _ => -1
-  }
-}
-
-pub fn main() -> i32 {
-  let poolWitness = poolDeclarationsWitness()
-  let compileWitness = redirectPolicyCompileWitness()
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let proxyWitness = run Effect.catchAll(
-    verifyProxyPolicy() |> Effect.provideMut<Allocator>(&mut allocator),
-    recoverProxyPolicy,
-  )
-  let redirectWitness = run Effect.catchAll(
-    verifyRedirectPolicy() |> Effect.provideMut<Allocator>(&mut allocator),
-    recoverRedirectPolicy,
-  )
-  let mut factory = RedirectFactory {}
-  let mut factoryRequirement = RedirectFactoryRequirementProvider {}
-  let mut producerRequirement = RedirectProducerRequirementProvider {}
-  let mut callbackRequirement = RedirectCallbackRequirementProvider {}
-  let mut acquisitionRequirement = RedirectAcquisitionRequirementProvider {}
-  let mut clock = RedirectClockProvider {}
-  let mut random = RedirectRandomProvider {}
-  let operationPolicy = RedirectPolicy.defaults()
-  let replay = redirectReplayRowWitness(&mut factory)
-    |> Effect.provideMut<RedirectFactoryRequirement>(&mut factoryRequirement)
-    |> Effect.provideMut<RedirectProducerRequirement>(&mut producerRequirement)
-  let replayWitness = run Effect.catchAll(move replay, recoverRedirectReplay)
-  let operationEntries: [Header<'static>; 0] = []
-  let operationHeaders = match move Headers.make(&operationEntries, redirectHeaderLimits()) {
-    Result.Failure {error} => {
-      drop error
-      return 0
-    }
-    Result.Success {value} => value
-  }
-  let operationUri = match move Uri.parse("https://example/a") {
-    Result.Failure {error} => {
-      drop error
-      return 0
-    }
-    Result.Success {value} => value
-  }
-  let mut operationClient = RedirectRejectingClient<never, never> {policy: &operationPolicy}
-  let mut operationScratch: [u8; 1] = [0]
-  let emptyContract = redirectEmptyContractWitness(
-    &mut operationClient,
-    redirectOperationRequest(operationUri, operationHeaders),
-    &operationPolicy,
-    &mut operationScratch,
-  )
-    |> Effect.provideMut<RedirectCallbackRequirement>(&mut callbackRequirement)
-    |> Effect.provideMut<RedirectAcquisitionRequirement>(&mut acquisitionRequirement)
-    |> Effect.provideMut<MonotonicClock>(&mut clock)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-    |> Effect.provideMut<Random>(&mut random)
-  let emptyWitness = run Effect.catchAll(move emptyContract, recoverRedirectBaseContract)
-  let bytesContract = redirectBytesContractWitness(
-    &mut operationClient,
-    redirectOperationRequest(operationUri, operationHeaders),
-    &operationPolicy,
-    b"x",
-    &mut operationScratch,
-  )
-    |> Effect.provideMut<RedirectCallbackRequirement>(&mut callbackRequirement)
-    |> Effect.provideMut<RedirectAcquisitionRequirement>(&mut acquisitionRequirement)
-    |> Effect.provideMut<MonotonicClock>(&mut clock)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-    |> Effect.provideMut<Random>(&mut random)
-  let bytesWitness = run Effect.catchAll(move bytesContract, recoverRedirectBaseContract)
-  let mut producerClient = RedirectRejectingClient<RedirectProducerFailure, &mut RedirectProducerRequirement> {policy: &operationPolicy}
-  let oneShotContract = redirectOneShotContractWitness(
-    &mut producerClient,
-    redirectOperationRequest(operationUri, operationHeaders),
-    &operationPolicy,
-    RedirectProducer {offset: usize.ZERO},
-    &mut operationScratch,
-  )
-    |> Effect.provideMut<RedirectProducerRequirement>(&mut producerRequirement)
-    |> Effect.provideMut<RedirectCallbackRequirement>(&mut callbackRequirement)
-    |> Effect.provideMut<RedirectAcquisitionRequirement>(&mut acquisitionRequirement)
-    |> Effect.provideMut<MonotonicClock>(&mut clock)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-    |> Effect.provideMut<Random>(&mut random)
-  let oneShotWitness = run Effect.catchAll(
-    move oneShotContract,
-    recoverRedirectOneShotContract,
-  )
-  let replayContract = redirectReplayContractWitness(
-    &mut producerClient,
-    redirectOperationRequest(operationUri, operationHeaders),
-    &operationPolicy,
-    RedirectFactory {},
-    &mut operationScratch,
-  )
-    |> Effect.provideMut<RedirectFactoryRequirement>(&mut factoryRequirement)
-    |> Effect.provideMut<RedirectProducerRequirement>(&mut producerRequirement)
-    |> Effect.provideMut<RedirectCallbackRequirement>(&mut callbackRequirement)
-    |> Effect.provideMut<RedirectAcquisitionRequirement>(&mut acquisitionRequirement)
-    |> Effect.provideMut<MonotonicClock>(&mut clock)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-    |> Effect.provideMut<Random>(&mut random)
-  let replayContractWitness = run Effect.catchAll(
-    move replayContract,
-    recoverRedirectReplayContract,
-  )
-  if poolWitness && proxyWitness && redirectWitness && compileWitness == 0 && replayWitness == 17
-    && emptyWitness == 17
-    && bytesWitness == 17
-    && oneShotWitness == 17
-    && replayContractWitness == 17 { return 42 }
-  return 0
-}`
-
-export const httpProxyRedirectPolicyAcceptanceSource = `${httpProxyPolicyCommonImports}
-${httpProxyPolicyImports}
-${httpConnectionPoolPolicyImports}
-${httpRedirectPolicyImports}
-${httpFetchPolicyImports}
-${httpProxyPolicySupport}
-${httpConnectionPoolPolicySupport}
-${httpRedirectOperationSupport}
-${httpFetchPolicySupport}
-${httpRedirectOperationContractSupport}
-${verifyProxyPolicy}
-${httpRedirectBehaviorSentinel}
-${httpProxyRedirectPolicyMain}`

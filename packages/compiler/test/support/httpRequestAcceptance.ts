@@ -36,7 +36,6 @@ import silk.http_client {
   Exchange,
   ClientError,
   ConnectionPhase,
-  ContinuePolicy,
   RequestOptions,
   Limits as ClientLimits,
 }
@@ -69,21 +68,12 @@ import silk.u64
 const nativeImports = `import silk.http_client_native {
   acquireOwned,
   acquireUnixOwned,
-  NativeRedirectClient,
-  NativeRouteProvider,
   Options,
   NativeClientError,
   preflight,
   preflightProxyRoute,
 }
 import silk.native_socket {NativeSocketError}
-import silk.http_redirect as Redirect {
-  AttemptStep,
-  Policy as RedirectPolicy,
-  RedirectError,
-  ResponseHandler,
-  SelectedBody,
-}
 import silk.http_proxy {
   BypassPolicy,
   ProxyAuth,
@@ -95,14 +85,7 @@ import silk.http_proxy {
   RouteMode,
   selectRoute,
 }
-import silk.trust_source {TrustSource}
-import silk.trust_snapshot {
-  TrustConfigurationReason,
-  TrustLoadLimits,
-  TrustSnapshot,
-  TrustSourceError,
-}
-import silk.http_client {RouteTransport}
+import silk.trust_snapshot {TrustSnapshot}
 `
 
 const portableSupport = `fn bytesEqual(left: &[u8], right: &[u8]) -> bool {
@@ -774,122 +757,17 @@ fn nativeOrigin(text: string) -> Origin {
   }
 }
 
-struct RedirectDeadlineResponse {}
+struct NativeWallClock {}
 
-impl RedirectDeadlineResponse {
-  effect<'call> fn handle<
-    'call,
-    'exchangeView: 'call,
-    'transport: 'exchangeView,
-    'provider: 'transport,
-    'tunnel: 'provider,
-  >(
-    handler: &mut Self,
-    uri: Uri<'call>,
-    hop: usize,
-    exchange: &'call mut Exchange<
-      'exchangeView,
-      RouteTransport<'transport, 'provider, 'tunnel, NativeRouteProvider>
-    >,
-  ) -> i32 {
-    drop handler
-    drop uri
-    drop hop
-    drop exchange
-    return 20
-  }
-}
-
-impl ResponseHandler<NativeRouteProvider, i32, never ? never> for RedirectDeadlineResponse {
-  handle: RedirectDeadlineResponse.handle
-}
-
-struct RedirectWallClock {}
-
-impl SystemClock for RedirectWallClock {
+impl SystemClock for NativeWallClock {
   effect fn now(self: &mut Self) -> Instant { return SystemClock.make(0, 0) }
   effect fn getResolution(self: &mut Self) -> u64 { return u64.toU64(1) }
 }
 
-struct RedirectTrustSource {}
-
-impl TrustSource for RedirectTrustSource {
-  effect fn load(
-    self: &mut Self,
-    limits: TrustLoadLimits,
-  ) -> TrustSnapshot
-  ! TrustSourceError | OutOfMemoryError
-  ? &mut Allocator {
-    drop self
-    drop limits
-    fail TrustSourceError.InvalidConfiguration {reason: TrustConfigurationReason.EmptyRoot}
-  }
-}
-
-fn expectedRedirectDeadline(error: NativeClientError) -> bool {
+fn expectedUnsupportedDeadline(error: NativeClientError) -> bool {
   return match move error {
     NativeClientError.UnsupportedDeadline => true
     _ => false
-  }
-}
-
-effect fn redirectAdapterDeadlineCheck<'configuration, 'policy>(
-  route: Route<'configuration>,
-  policy: &'policy RedirectPolicy,
-) -> i32 ! OutOfMemoryError ? &mut Allocator {
-  let uri = nativeUri("http://127.0.0.3/redirect-adapter")
-  let fields: [Header<'static>; 0] = []
-  let headers = match move Headers.make(&fields, limits()) {
-    Result.Success {value} => value
-    Result.Failure {error} => {
-      drop error
-      return 21
-    }
-  }
-  let request = Redirect.Request {
-    uri: uri,
-    method: Method.get(),
-    headers: headers,
-    headerPolicy: HeaderPolicy.defaults(),
-    version: Version.Http11,
-    continuePolicy: ContinuePolicy.Disabled,
-    limits: limits(),
-    maxHeadBytes: 4096,
-    maxCredentialBytes: 128,
-  }
-  let mut client = NativeRedirectClient<
-    'configuration,
-    'policy,
-    AttemptStep<'policy, i32>,
-    RedirectError | ValueError | ClientError | OutOfMemoryError,
-    &mut SelectedBody<never, never> | &mut MonotonicClock | &mut Allocator | &mut Random,
-  >.make(route, Options.defaults(), ClientLimits.defaults())
-  let mut scratch: [u8; 1] = [0]
-  let mut wall = RedirectWallClock {}
-  let mut clock = BudgetClock {}
-  let mut random = BudgetRandom {}
-  let mut trust = RedirectTrustSource {}
-  let attempted = run Effect.result(Redirect.withEmptyResponse(
-    &mut client,
-    move request,
-    policy,
-    Option.some<Instant>(SystemClock.make(7, 0)),
-    &mut scratch,
-    RedirectDeadlineResponse {},
-  ))
-    |> Effect.provideMut<TrustSource>(&mut trust)
-    |> Effect.provideMut<SystemClock>(&mut wall)
-    |> Effect.provideMut<Random>(&mut random)
-    |> Effect.provideMut<MonotonicClock>(&mut clock)
-  return match move attempted {
-    Result.Success {value} => 22
-    Result.Failure {error} => match move error {
-      NativeClientError cause => {
-        if expectedRedirectDeadline(move cause) { return 0 }
-        return 23
-      }
-      _ => 24
-    }
   }
 }
 
@@ -1171,13 +1049,12 @@ effect fn nativeProxyAdmissionChecks() -> i32 ! OutOfMemoryError ? &mut Allocato
     Result.Success {value} => { return 17 }
     Result.Failure {error} => match move error {
       NativeClientError cause => {
-        if !expectedRedirectDeadline(move cause) { return 18 }
+        if !expectedUnsupportedDeadline(move cause) { return 18 }
       }
       ProxyError cause => { return 19 }
     }
   }
-  let redirectPolicy = RedirectPolicy.defaults()
-  return run redirectAdapterDeadlineCheck(dnsRoute, &redirectPolicy)
+  return 0
 }
 
 effect fn recoverProxyAllocation(error: OutOfMemoryError) -> i32 {
@@ -1191,7 +1068,7 @@ const nativeChecks = `  let admitted = nativeAdmissionChecks()
     return 200 + admitted
   }
   let mut clock = BudgetClock {}
-  let mut wall = RedirectWallClock {}
+  let mut wall = NativeWallClock {}
   let mut random = BudgetRandom {}
   let ownedAdmitted = run nativeOwnedAcquisitionChecks()
     |> Effect.provideMut<Random>(&mut random)
@@ -1208,7 +1085,11 @@ const nativeChecks = `  let admitted = nativeAdmissionChecks()
   }
 `
 
-const sourceFor = (imports: string, support: string, checks: string): string => `${portableImports}${imports}
+const sourceFor = (
+  imports: string,
+  support: string,
+  checks: string,
+): string => `${portableImports}${imports}
 ${portableSupport}
 
 ${support}
@@ -1228,4 +1109,8 @@ ${checks}  return run Effect.catchAll(allPrograms(), recover)
 export const httpRequestAcceptanceSource = sourceFor('', '', '')
 
 /** The native program: the portable checks plus libc-backed acquisition and proxy admission. */
-export const httpRequestNativeAcceptanceSource = sourceFor(nativeImports, nativeSupport, nativeChecks)
+export const httpRequestNativeAcceptanceSource = sourceFor(
+  nativeImports,
+  nativeSupport,
+  nativeChecks,
+)
