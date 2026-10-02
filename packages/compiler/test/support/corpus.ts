@@ -9896,6 +9896,90 @@ pub fn main() -> i32 {
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  // Static parameters select one instance per value; runtime parameters keep their lanes.
+  {
+    name: 'static-parameter-instances',
+    source: `fn scaled(static factor: i32, value: i32) -> i32 {
+  return factor * value
+}
+
+fn words(static size: usize, total: usize) -> usize {
+  return total / size
+}
+
+pub fn main() -> i32 {
+  if words(8, 64) != 8 {
+    return 1
+  }
+  return scaled(2, 6) + scaled(3, 10)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // Changing static arguments close over finite self, mutual and two-value cyclic chains.
+  {
+    name: 'static-parameter-finite-chains',
+    source: `fn countdown(static n: i32) -> i32 {
+  static if n == 0 {
+    return 0
+  } else {
+    return countdown(n - 1) + 2
+  }
+}
+
+fn ping(static n: i32) -> i32 {
+  static if n == 0 {
+    return 10
+  } else {
+    return pong(n - 1) + 1
+  }
+}
+
+fn pong(static n: i32) -> i32 {
+  static if n == 0 {
+    return 20
+  } else {
+    return ping(n - 1) + 1
+  }
+}
+
+fn toggle(static flag: i32, depth: i32) -> i32 {
+  if depth == 0 {
+    return flag
+  }
+  return toggle(1 - flag, depth - 1)
+}
+
+pub fn main() -> i32 {
+  return countdown(5) + ping(3) + toggle(0, 5) + 8
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // Static enum and fixed-array arguments are materialized where the callee reads them at runtime.
+  {
+    name: 'static-parameter-aggregates',
+    source: `enum Mode { Fast, Slow }
+
+fn echo(static mode: Mode) -> Mode {
+  return mode
+}
+
+fn pick(static table: [i32; 3], index: usize) -> i32 {
+  let local = table
+  return local[index]
+}
+
+pub fn main() -> i32 {
+  let mode = echo(Mode.Slow)
+  if mode != Mode.Slow {
+    return 1
+  }
+  return match mode {
+    Mode.Fast => 2
+    Mode.Slow => pick([5, 30, 7], 1) + 12
+  }
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // Static-composition runtime parity belongs in the shared native differential rather than a
   // feature-local compile/link loop. Trapping Drop variants causally prove the three cleanup exits.
   ...staticCompositionCorpus,
