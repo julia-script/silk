@@ -34,6 +34,7 @@ export interface SymbolEntry {
   readonly symbol: string
 }
 
+/** How the LLVM backend lowers one linearized MIR block's terminator; a pure function of MIR. */
 export interface ControlProvenance {
   readonly _tag: 'BackendControlProvenance'
   readonly backend: 'LLVM'
@@ -98,7 +99,6 @@ interface ArtifactBase {
   readonly foreignExports: ReadonlyArray<ForeignExport>
   /** Imported and exported C data symbols, sorted by symbol and direction. */
   readonly foreignStatics: ReadonlyArray<ForeignStatic>
-  readonly control: ReadonlyArray<ControlProvenance>
 }
 
 export interface LlvmBitcodeArtifact extends ArtifactBase {

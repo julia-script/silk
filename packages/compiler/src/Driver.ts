@@ -156,7 +156,7 @@ const decodeCachedEmission = (
       return undefined
     if (header.foreignExports.some((entry) => entry.variadic)) return undefined
     const bitcode = bytes.slice(4 + jsonLength)
-    // The driver cache does not expose IR or control-flow inspection to callers.
+    // The driver cache does not expose IR inspection to callers.
     return {
       _tag: 'LlvmBitcodeArtifact',
       backend: 'llvm',
@@ -168,7 +168,6 @@ const decodeCachedEmission = (
       foreignImports: header.foreignImports,
       foreignExports: header.foreignExports,
       foreignStatics: header.foreignStatics,
-      control: [],
       bitcode,
       ir: '',
     }
