@@ -9,7 +9,8 @@ const ascii = (value: string): Uint8Array =>
  * SERV-009 / EFF-004: provision applies to one Effect layer. An `effect fn` whose success value is
  * an Effect carrying a requirement row hands that inner Effect out of `run` unprovided; the caller
  * provides it separately. The inner `read()` therefore observes the provider given to it, never the
- * one given to the outer execution.
+ * one given to the outer execution; the native corpus row `nested-effect-row-provide-each-layer`
+ * pins that runtime result.
  */
 const counter = `import silk.effect { Effect }
 service Counter {
