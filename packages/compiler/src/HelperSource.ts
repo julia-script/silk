@@ -3,8 +3,12 @@ import * as Analysis from './Analysis.js'
 import type * as Backend from './Backend.js'
 import * as CompilationProfile from './CompilationProfile.js'
 import * as HelperCapability from './HelperCapability.js'
+import * as LlvmBackend from './LlvmBackend.js'
 import * as Preparation from './Preparation.js'
 import * as SourceResolver from './SourceResolver.js'
+
+/** The backend {@link compile} emits helpers through (`Analysis.codegen` selects LLVM). */
+export const backend: Backend.Id = LlvmBackend.LlvmBackend.id
 
 /**
  * The restricted object profile helpers are realized under: the build's code-generation facts with

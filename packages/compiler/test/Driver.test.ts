@@ -711,7 +711,7 @@ it.effect(
       for (const [name, text] of [
         ['admission-first', source],
         ['admission-second', source],
-        ['admission-other', 'pub fn main() -> i32 { return 41 + 1 }'],
+        ['admission-other', 'pub fn main() -> i32 { return 41 }'],
       ] as const) {
         const outcome = yield* compileSource(name, text, { cache: true }).pipe(
           Effect.provideService(NativeToolchain.ArtifactStorage, artifactStorage),

@@ -1461,6 +1461,13 @@ it.effect(
       const target = yield* NativeToolchain.hostTarget()
       const profile = yield* profileFor(target)
       const selected = yield* NativeToolchain.resolveToolchain(toolchain, profile)
+      // A passed supply, not a stale tool spelling, selects the tools that run.
+      const reselected = yield* NativeToolchain.resolveToolchain(
+        { ...selected, clang: 'unvalidated-clang', llvmAr: 'unvalidated-llvm-ar' },
+        profile,
+      )
+      assert.strictEqual(reselected.clang, selected.supply?.compiler.command)
+      assert.strictEqual(reselected.llvmAr, selected.supply?.archiver.command)
       yield* NativeToolchain.withBuildScope(
         'supply-identities',
         Effect.fnUntraced(function* (scope) {
@@ -1881,12 +1888,14 @@ it.effect('keys a reusable helper object by every input that shapes it, and only
       facts: CompilationProfile.Facts,
       overrides: {
         readonly distribution?: string
+        readonly backend?: string
         readonly providers?: ReadonlyArray<HelperCapability.Provider>
         readonly compiler?: typeof compiler
       } = {},
     ) =>
       NativeToolchain.helperCacheKey(
         overrides.distribution ?? 'distribution',
+        overrides.backend ?? 'llvm',
         overrides.providers ?? [memcpy, memset],
         facts,
         overrides.compiler ?? compiler,
@@ -1898,6 +1907,7 @@ it.effect('keys a reusable helper object by every input that shapes it, and only
     const variants = [
       key(profile, { providers: [memcpy] }),
       key(profile, { distribution: 'other-distribution' }),
+      key(profile, { backend: 'other-backend' }),
       key({ ...profile, target: arm.target }),
       key({ ...profile, cpu: { ...profile.cpu, model: 'x86-64-v3' } }),
       key({ ...profile, cpu: { ...profile.cpu, features: ['+avx2'] } }),

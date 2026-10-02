@@ -217,7 +217,12 @@ export const resolveToolchain = Effect.fn('NativeToolchain.resolveToolchain')(fu
       toolchain.supply.archiver,
       ...toolchain.supply.files,
     ]).pipe(Effect.mapError(supplyError), Effect.provide(NodeServices.layer))
-    return toolchain
+    // Run exactly the validated tools: helper reuse keys objects by this compiler's digest.
+    return {
+      ...toolchain,
+      clang: toolchain.supply.compiler.command,
+      llvmAr: toolchain.supply.archiver.command,
+    }
   }
   const host = hostSelection()
   const supply = yield* PlatformSupplyResolver.resolveSupply(
@@ -1024,11 +1029,13 @@ export interface HelperObject {
 
 /**
  * Content address of one helper object. Helper realization depends only on the selected source
- * providers, the profile facts copied into the helper profile, and the compiler distribution (which
- * fixes the embedded standard-library sources); the object step adds the selected Clang binary.
+ * providers (whose identities include the build's libc), the profile facts copied into the helper
+ * profile, the emitting backend, and the compiler distribution (which fixes the embedded
+ * standard-library sources); the object step adds the selected Clang binary.
  */
 export const helperCacheKey = (
   distribution: string,
+  backend: string,
   providers: ReadonlyArray<HelperCapability.Provider>,
   profile: CompilationProfile.Facts,
   compiler: Pick<PlatformSupply.Tool, 'digest' | 'version'>,
@@ -1036,6 +1043,7 @@ export const helperCacheKey = (
   `helpers-${ToolchainIntegrity.contentDigest(
     Canonical.record('native-helpers-v1', [
       distribution,
+      backend,
       Canonical.array(
         providers
           .map((provider) => Canonical.record(provider.id, [provider.identity]))
@@ -1157,7 +1165,13 @@ export const compileHelpers = Effect.fn('NativeToolchain.compileHelpers')(functi
     cache._tag === 'ReadWrite'
       ? {
           store: cache.store,
-          key: helperCacheKey(cache.distribution, sources, profile, supply.compiler),
+          key: helperCacheKey(
+            cache.distribution,
+            HelperSource.backend,
+            sources,
+            profile,
+            supply.compiler,
+          ),
         }
       : undefined
   const record =
@@ -1186,6 +1200,7 @@ export const compileHelpers = Effect.fn('NativeToolchain.compileHelpers')(functi
       written.path,
       cached.object,
       cached.declarations,
+      // The Clang step that produced the reused object; its bitcode input is not rewritten.
       yield* objectPlan(toolchain, scope, helperProfile, 'helpers', true),
     )
     yield* verifyHelperObject(sources, object, profile)
