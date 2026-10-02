@@ -361,7 +361,8 @@ it('uses one binding contract for inventory, admission, and the proof-only post 
 it.effect('pairs every intrinsic presentation with accepted semantic analysis', () =>
   Effect.gen(function* () {
     // One project analyzes the shared standard-library closure once; each fixture stays its own
-    // root module, so a diagnostic names its fixture through `span.sourceId`.
+    // root module, so a diagnostic names its fixture through `span.sourceId`. Every root view
+    // carries the project-wide diagnostics and semantic occurrences, so any one view covers all.
     const fixtures = new Map(
       acceptedSources.map((source, ordinal) => [
         `intrinsic/accepted-${ordinal}`,
