@@ -100,12 +100,6 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
             turbo-${{ runner.os }}-
-      - uses: actions/cache@v4
-        if: matrix.llvm
-        with:
-          path: ~/.cache/silk-effect/native
-          key: silk-native-${{ runner.os }}-package-${{ matrix.name }}-${{ github.sha }}
-          restore-keys: silk-native-${{ runner.os }}-
       - uses: ./.github/actions/setup-linux-llvm
         if: matrix.llvm
       - run: pnpm install --frozen-lockfile
@@ -219,7 +213,8 @@ jobs:
             silk-native-${{ runner.os }}-na-${{ matrix.name }}-
             silk-native-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
-      - run: node scripts/turbo.mjs run build
+      # The corpus imports the CLI sources; the docs site builds only in validate.
+      - run: node scripts/turbo.mjs run build --filter=@silklang/cli...
       - run: pnpm --filter @silklang/compiler run test:native-acceptance
         env:
           # The bounded TLS programs peak just above V8's default ~4 GiB old-space limit. Keep the
@@ -253,15 +248,9 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
             turbo-${{ runner.os }}-
-      # Restore-only: the native-executable cache is populated by test:native-acceptance in
-      # validate; four shards saving the same key would race for nothing.
-      - uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/silk-effect/native
-          key: silk-native-${{ runner.os }}-${{ github.sha }}
-          restore-keys: silk-native-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
-      - run: node scripts/turbo.mjs run build
+      # Compiler tests import the compiler, docgen, and CLI outputs; docs build only in validate.
+      - run: node scripts/turbo.mjs run build --filter=@silklang/cli...
       # Select each file once by reviewed CI timings; the selector assigns new files a median cost.
       # Vitest treats positional file filters as substrings, so exclude every unassigned path
       # exactly. Invoke vitest directly because `pnpm --filter … run script -- args` drops the args.
@@ -318,7 +307,7 @@ jobs:
             turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
             turbo-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
-      - run: node scripts/turbo.mjs run build
+      - run: node scripts/turbo.mjs run build --filter=@silklang/compiler...
       - run: pnpm --filter @silklang/compiler run ${{ matrix.script }}
         env:
           NODE_OPTIONS: --max-old-space-size=6144
