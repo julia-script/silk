@@ -3141,6 +3141,71 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 2 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  // Match arms as statement blocks: a transfer from an arm inside an argument, statement-position
+  // matches, all-diverging arms, loop control from arms, whole-member bindings and a Copy bare match.
+  {
+    name: 'match-arm-blocks-and-bindings',
+    source: `struct Left { value: i32 }
+struct Right {}
+struct Token { value: i32 }
+impl Copy for Token {}
+fn identity(value: i32) -> i32 { return value }
+fn early(input: Left | Right) -> i32 {
+  return identity(match &input {
+    Left { value } => { return value }
+    Right {} => 0
+  }) + 100
+}
+fn statement(input: Left | Right) -> i32 {
+  let mut total = 0
+  match &input {
+    Left { value } => {
+      let doubled = value + value
+      total = doubled
+    }
+    Right {} => { total = 7 }
+  }
+  return total
+}
+fn diverging(input: Left | Right) -> i32 {
+  match &input {
+    Left { value } => { return value }
+    Right {} => { return 8 }
+  }
+}
+fn loops(limit: i32) -> i32 {
+  let mut count = 0
+  let mut sum = 0
+  while count < limit {
+    count = count + 1
+    match count {
+      _ if count == 1 => { continue }
+      _ if count == 4 => { break }
+      _ => { sum = sum + count }
+    }
+  }
+  return sum
+}
+fn whole(input: Left | Right) -> i32 {
+  return match move input {
+    Left held => held.value
+    Right _ => 0
+  }
+}
+fn copied(token: Token) -> i32 { return match token { Token { value } => value } }
+pub fn main() -> i32 {
+  if early(Left { value: 17 }) != 17 { return 1 }
+  if early(Right {}) != 100 { return 2 }
+  if statement(Left { value: 3 }) != 6 { return 3 }
+  if statement(Right {}) != 7 { return 4 }
+  if diverging(Left { value: 9 }) != 9 || diverging(Right {}) != 8 { return 5 }
+  if loops(10) != 5 { return 6 }
+  if whole(Left { value: 4 }) != 4 || whole(Right {}) != 0 { return 7 }
+  if copied(Token { value: 42 }) != 42 { return 8 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // Reference places without drops: a Copy read through a reference, an array element assigned
   // through an explicit dereference, reborrowed exclusive references, and borrows of dereferences.
   {
