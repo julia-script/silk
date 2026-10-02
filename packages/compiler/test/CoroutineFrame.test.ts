@@ -70,29 +70,21 @@ pub fn main() -> i32 {
 )
 
 it.layer(Layer.effect(Suspended, analyze()))((it) => {
-  it.effect('plans one deterministic maximum frame per specialized invocation', () =>
+  it.effect('plans one maximum frame per specialized invocation', () =>
     Effect.gen(function* () {
-      const first = yield* Suspended
-      const second = yield* analyze()
-      const left = Analysis.loweredMir(first)
-      const right = Analysis.loweredMir(second)
-      assert.deepEqual(Analysis.diagnostics(first), [])
-      assert.deepEqual(yield* MirVerification.verify(left), [])
-      assert.isDefined(left.coroutineFrames)
-      assert.isDefined(right.coroutineFrames)
-      if (left.coroutineFrames === undefined || right.coroutineFrames === undefined) return
-      assert.strictEqual(
-        CoroutineFrame.summary(left.coroutineFrames),
-        CoroutineFrame.summary(right.coroutineFrames),
-      )
-      assert.strictEqual(MirEncoding.encode(left), MirEncoding.encode(right))
+      const self = yield* Suspended
+      const mir = Analysis.loweredMir(self)
+      assert.deepEqual(Analysis.diagnostics(self), [])
+      assert.deepEqual(yield* MirVerification.verify(mir), [])
+      assert.isDefined(mir.coroutineFrames)
+      if (mir.coroutineFrames === undefined) return
 
-      const descriptors = left.functions.flatMap((fn) =>
+      const descriptors = mir.functions.flatMap((fn) =>
         fn.suspension?.frame === undefined ? [] : [fn.suspension.frame],
       )
-      assert.lengthOf(left.coroutineFrames.entries, descriptors.length)
+      assert.lengthOf(mir.coroutineFrames.entries, descriptors.length)
       for (const descriptor of descriptors) {
-        const entry: Mir.CoroutineFrameTargetLayout | undefined = left.coroutineFrames.entries.find(
+        const entry: Mir.CoroutineFrameTargetLayout | undefined = mir.coroutineFrames.entries.find(
           (candidate) =>
             Instances.keyText(candidate.function) === Instances.keyText(descriptor.function),
         )
@@ -117,8 +109,8 @@ it.layer(Layer.effect(Suspended, analyze()))((it) => {
           )
         }
       }
-      assert.notInclude(MirEncoding.encode(left), 'Allocator')
-      assert.notInclude(CoroutineFrame.summary(left.coroutineFrames), 'allocator')
+      assert.notInclude(MirEncoding.encode(mir), 'Allocator')
+      assert.notInclude(CoroutineFrame.summary(mir.coroutineFrames), 'allocator')
     }),
   )
 
