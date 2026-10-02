@@ -1736,20 +1736,37 @@ const withTrappingStaticCompositionDrop = (source: string): string =>
     return ()`,
   )
 
+const staticCompositionRequestUnion = sourceSection(
+  staticCompositionFixture,
+  'RunRequest | HelpRequest',
+  ' {\n  return RunRequest {value: 40}',
+)
+
+const camelCase = (name: string): string =>
+  name.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
+
+const staticCompositionSelector = (name: string): string => camelCase(`select-${name}-scenario`)
+
 // All completing scenarios share one compile: the fixture's request union is a runtime value and
 // every dispatch arm is compiled in each variant. The fixture's `main` is replaced by one that
-// dispatches each scenario's request through its named arm; scenario `n` (1-based, in table order)
-// fails with exit `n`, and an out-of-memory recovery exits 0.
+// selects each scenario's request through a selector returning that union, as the fixture's
+// `selectSuccess` does, and dispatches it through its named arm. Scenario `n` (1-based, in table
+// order) fails with exit `n`, and an out-of-memory recovery exits 0.
 const staticCompositionScenariosProgram = `${sourceSection(
   staticCompositionFixture,
   'import',
   'pub fn main() -> i32 {',
-)}effect fn scenarios() -> i32 ! OutOfMemoryError ? &mut Allocator {
-${staticCompositionScenarios
+)}${staticCompositionScenarios
   .map(
-    ({ selection, result }, index) => `  let scenario${index + 1} = run dispatch(${selection})
-  if scenario${index + 1} != ${result} { return ${index + 1} }`,
+    ({ name, selection }) =>
+      `fn ${staticCompositionSelector(name)}() -> ${staticCompositionRequestUnion} {\n  return ${selection}\n}\n\n`,
   )
+  .join('')}effect fn scenarios() -> i32 ! OutOfMemoryError ? &mut Allocator {
+${staticCompositionScenarios
+  .map(({ name, result }, index) => {
+    const binding = camelCase(`${name}-result`)
+    return `  let ${binding} = run dispatch(${staticCompositionSelector(name)}())\n  if ${binding} != ${result} { return ${index + 1} }`
+  })
   .join('\n')}
   return 42
 }
@@ -2013,6 +2030,8 @@ fn branchTaken() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }
 fn branchOtherwise() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }
 fn branchElse() -> i32 { if i32.lessThan(2, 1) { return 1 } else { return 42 } return 0 }
 fn boolNot() -> i32 { if bool.not(i32.equals(1, 2)) { return 42 } return 0 }
+// Imports never activate operators (modules-names-and-visibility.md), so the silk.bool and
+// silk.i32 imports above do not supply the ! and == used here.
 fn operatorBoolNot() -> i32 { if !(1 == 2) { return 42 } return 0 }
 fn boolThroughFunction() -> i32 { return check(i32.greaterOrEqual(3, 3)) }
 fn unaryBoolPipeline() -> i32 { if true |> bool.not { return 0 } return 42 }
