@@ -3115,7 +3115,7 @@ fn largest(values: &[Outer]) -> usize {
       let mut best = count
       let mut arm: usize = 0
       while arm < written.length {
-        let mut selected: usize = 9
+        let mut selected: usize = 0
         if let Selector.Selected { tag } = &written[arm].pattern { selected = tag }
         if selected > best { best = selected }
         arm = arm + 1
