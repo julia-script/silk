@@ -3141,6 +3141,70 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return 2 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  // Reference places without drops: a Copy read through a reference, an array element assigned
+  // through an explicit dereference, reborrowed exclusive references, and borrows of dereferences.
+  {
+    name: 'reference-projection-places',
+    source: `struct Empty {}
+impl Copy for Empty {}
+struct Buffer { values: [i32; 3] }
+struct Box { value: i32 }
+fn readEmpty(value: &Empty) -> Empty { return value.* }
+fn update(buffer: &mut Buffer, index: usize) -> i32 {
+  buffer.*.values[index] = 42
+  return buffer.*.values[index]
+}
+fn increment(box: &mut Box) -> () { box.value = box.value + 1 }
+fn observe(box: &Box) -> i32 { return box.value }
+fn read(value: &i32) -> i32 { return value.* }
+fn forwarded(value: &i32) -> i32 { return read(&value.*) }
+fn twice(box: &mut Box) -> i32 {
+  increment(&mut box)
+  increment(&mut box)
+  return observe(&box) + forwarded(&box.value)
+}
+pub fn main() -> i32 {
+  let empty = Empty {}
+  let copied = readEmpty(&empty)
+  let mut buffer = Buffer { values: [1, 2, 3] }
+  let index: usize = 1
+  if update(&mut buffer, index) != 42 { return 1 }
+  let mut box = Box { value: 20 }
+  if twice(&mut box) != 44 { return 2 }
+  if box.value != 22 { return 3 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // A three-member closed structural union of Copy records: injection at returns, a copied union
+  // value, and a consuming match with an empty-record arm.
+  {
+    name: 'structural-union-copy-members',
+    source: `struct Left { value: i32 }
+impl Copy for Left {}
+struct Right { marker: i32 value: i32 }
+impl Copy for Right {}
+struct EmptyEvent {}
+impl Copy for EmptyEvent {}
+fn left(value: i32) -> EmptyEvent | Left | Right { return Left { value: value } }
+fn right(marker: i32, value: i32) -> EmptyEvent | Left | Right {
+  return Right { marker: marker, value: value }
+}
+fn empty() -> EmptyEvent | Left | Right { return EmptyEvent {} }
+fn observed(input: EmptyEvent | Left | Right) -> i32 {
+  return match move input {
+    EmptyEvent {} => 5
+    Left { value } => value
+    Right { marker, value } => marker + value
+  }
+}
+pub fn main() -> i32 {
+  let first = left(23)
+  let copied = first
+  return observed(move copied) + observed(right(3, 11)) + observed(empty())
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // A non-generic nominal union: payload and unit variants, construction, call results, and shared
   // and consuming matches with a guard and a universal arm.
   {
