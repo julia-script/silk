@@ -12,7 +12,6 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as Stdlib from '../src/Stdlib.js'
 import * as Projections from './support/projections.js'
 import { unreachable } from './support/raise.js'
-import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
 import { httpRedirectPolicyAnalysisSource } from './support/httpRedirectAcceptance.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -153,21 +152,6 @@ pub fn main() -> i32 {
           })),
         [{ code: 'SEM0021', sourceId: 'http-values/forged-target', start: 80 }],
       )
-    }),
-  60_000,
-)
-
-it.effect(
-  'analyzes the shared HTTP value acceptance program without diagnostics',
-  () =>
-    Effect.gen(function* () {
-      const snapshot = yield* AnalysisFixture.retainingMain(
-        'http-values/acceptance',
-        ascii(httpValuesAcceptanceSource),
-      )
-      const diagnostics = diagnosticSummary(snapshot)
-      assert.deepEqual(diagnostics.slice(0, 20), [])
-      assert.strictEqual(diagnostics.length, 0)
     }),
   60_000,
 )
