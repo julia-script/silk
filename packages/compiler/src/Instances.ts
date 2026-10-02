@@ -1602,8 +1602,17 @@ export const discover = (
     /** Ordinary type arguments retained as the finite structural measure of a cleanup path. */
     readonly cleanupMeasure?: CleanupMeasure
   }
-  const declarationText = (key: InstanceKey): string =>
-    `${key.declaration.module}\u0000${key.declaration.name}`
+  // One retained text per key: the graph maps below look it up for every successor history, and a
+  // reused string keeps its cached hash.
+  const declarationTexts = new WeakMap<InstanceKey, string>()
+  const declarationText = (key: InstanceKey): string => {
+    let text = declarationTexts.get(key)
+    if (text === undefined) {
+      text = `${key.declaration.module}\u0000${key.declaration.name}`
+      declarationTexts.set(key, text)
+    }
+    return text
+  }
   const familiesByDeclaration = new Map<string, Set<string>>()
   const familyOfKey = new WeakMap<InstanceKey, string>()
   /** A provider's finite callable target selects which body can continue a generic call cycle. */
@@ -1680,12 +1689,25 @@ export const discover = (
     discriminatingGrew = true
     return true
   }
-  // One retained text per key without a structural provider. Ancestor values and contexts are
-  // long; reusing one string reuses its cached hash in every map keyed by it.
+  // One retained text per key and structural provider. Ancestor values are long; reusing one
+  // string reuses its cached hash in every map keyed by it.
   const unprovidedAncestorValues = new WeakMap<InstanceKey, string>()
+  const providedAncestorValues = new WeakMap<InstanceKey, Map<string, string>>()
   const ancestorValue = (ancestor: Ancestor): string => {
-    if (ancestor.structuralProvider !== undefined)
-      return JSON.stringify([keyText(ancestor.key), Type.key(ancestor.structuralProvider)])
+    if (ancestor.structuralProvider !== undefined) {
+      const provider = Type.key(ancestor.structuralProvider)
+      let values = providedAncestorValues.get(ancestor.key)
+      if (values === undefined) {
+        values = new Map()
+        providedAncestorValues.set(ancestor.key, values)
+      }
+      let value = values.get(provider)
+      if (value === undefined) {
+        value = JSON.stringify([keyText(ancestor.key), provider])
+        values.set(provider, value)
+      }
+      return value
+    }
     let value = unprovidedAncestorValues.get(ancestor.key)
     if (value === undefined) {
       value = JSON.stringify([keyText(ancestor.key), null])
@@ -2277,6 +2299,9 @@ export const discover = (
     roots: [...new Map(roots.map((root) => [Type.runtimeKey(root), root])).values()],
     frame,
   })
+  // Whether a measure admits a target without a selected hook depends on the two alone; every
+  // context visit and history branch reaching the same call asks it again.
+  const coveredTargets = new WeakMap<CleanupMeasure, WeakMap<InstanceKey, boolean>>()
   const cleanupTransition = (
     measure: CleanupMeasure | undefined,
     target: InstanceKey,
@@ -2309,16 +2334,23 @@ export const discover = (
         ? cleanupMeasureOf(measure.roots, typeArgumentsOf(target))
         : undefined
     }
-    const targetTypes = typeArgumentsOf(target)
-    return targetTypes.every(
-      (type) =>
-        coveredByCleanupMeasure(measure, type) ||
-        measure.frame.some(
-          (frame) => sameRuntimeType(type, frame) || isStrictCleanupSubterm(type, frame),
-        ),
-    )
-      ? measure
-      : undefined
+    let covered = coveredTargets.get(measure)
+    if (covered === undefined) {
+      covered = new WeakMap()
+      coveredTargets.set(measure, covered)
+    }
+    let admitted = covered.get(target)
+    if (admitted === undefined) {
+      admitted = typeArgumentsOf(target).every(
+        (type) =>
+          coveredByCleanupMeasure(measure, type) ||
+          measure.frame.some(
+            (frame) => sameRuntimeType(type, frame) || isStrictCleanupSubterm(type, frame),
+          ),
+      )
+      covered.set(target, admitted)
+    }
+    return admitted ? measure : undefined
   }
   const sameVisibleArguments = (left: InstanceKey, right: InstanceKey): boolean => {
     const leftVisible = left.typeArguments.filter(
