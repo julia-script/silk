@@ -559,18 +559,17 @@ it.effect('rejects bitcode that fails LLVM module verification at the object ste
     const target = yield* NativeToolchain.hostTarget()
     const profile = yield* profileFor(target)
     const artifact = yield* artifactFor(target, 'release')
-    const emit = (escapes: boolean) =>
-      Effect.gen(function* () {
-        const bitcode = yield* diamondBitcode(escapes)
-        return yield* NativeToolchain.withBuildScope('verifier-control', (scope) =>
-          ObjectEmission.materialize({
-            toolchain,
-            scope,
-            artifact: { ...artifact, bitcode },
-            profile,
-          }),
-        ).pipe(Effect.result)
-      })
+    const emit = Effect.fnUntraced(function* (escapes: boolean) {
+      const bitcode = yield* diamondBitcode(escapes)
+      return yield* NativeToolchain.withBuildScope('verifier-control', (scope) =>
+        ObjectEmission.materialize({
+          toolchain,
+          scope,
+          artifact: { ...artifact, bitcode },
+          profile,
+        }),
+      ).pipe(Effect.result)
+    })
     // The well-formed twin proves the encoding itself reaches codegen; only dominance differs.
     assert.strictEqual((yield* emit(false))._tag, 'Success')
     const rejected = yield* emit(true)

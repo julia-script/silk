@@ -1,6 +1,5 @@
 import * as AnalysisFixture from './support/AnalysisFixture.js'
-import { nativeCorpus, narrowEffectRecord } from './support/corpus.js'
-import { outputStorageSource } from './support/corpus.js'
+import { nativeCorpus, narrowEffectRecord, outputStorageSource } from './support/corpus.js'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
