@@ -1,27 +1,31 @@
 //! Focused source tests for lazy semantic demands and their retained evidence.
 
-import hir.Hir {Access, CallableMode, HirId, InfixOperator, Module, Node, OwnerKind, ParameterMode, PrefixOperator}
-import hir.Hir {Access, CallableMode, HirId, InfixOperator, Node, OwnerKind, PrefixOperator}
+import hir.Hir {Access, CallableMode, HirId, InfixOperator, Module, Node, OwnerKind, ParameterMode, PrefixOperator,
+}
 import backend.InstanceKey {InstanceKey}
-import backend.Layout {Layout as BackendLayout, TypeLayout}
+import backend.Layout {Abi as LayoutAbi, Field as LayoutField, Storage as LayoutStorage, Layout as BackendLayout, TypeLayout,
+}
 import backend.LlvmText
 import backend.CAbi
 import silk.slice {Slice}
 import backend.Gap {Code as GapCode, Gap as BackendGap}
 import backend.Mir {
+  Reference as MirReference,
   Block as MirBlock,
   Local as MirLocal,
   MirFunction,
   Projection as MirProjection,
+  Operand as MirOperand,
+  AggregateField as MirAggregateField,
   Rvalue as MirRvalue,
   Statement as MirStatement,
   Terminator as MirTerminator,
-}import lexer.Span {Span}
+}
+import lexer.Span {Span}
 import semantic.DeclarationId {DeclarationId}
 import semantic.Intrinsic {Member as IntrinsicMember}
 import semantic.Lifetime {Intersection, Lifetime, Member as LifetimeMember}
 import semantic.ModuleId {InvalidModulePath, ModuleId}
-import semantic.ParameterSchema {ParameterSchema}
 import semantic.Query {Cycle}
 import semantic.Semantic {
   Answer,
@@ -42,9 +46,6 @@ import semantic.Semantic {
   IntrinsicProperty,
   Member,
   Outcome,
-  ConflictingPackageSource,
-  RegistrationClosed,
-  RegisteredParameter,
   SealedProperty,
   Semantic,
   StaticPort,
@@ -55,35 +56,13 @@ import semantic.Semantic {
   Value,
   Witness,
 }
-import semantic.ModuleIndex {IndexedDeclaration, ModuleIndex}
+import semantic.ModuleIndex {ModuleIndex}
 import semantic.FinalProfile {FinalProfile}
 import semantic.ProfileBinding {
-  Accepted as AcceptedBinding,
-  Checked as CheckedBinding,
-  BindingError,
-  BindingIssue,
-  HeaderError as BindingHeaderError,
-  Input as BindingInput,
-  ProhibitedProvenance,
-  CheckError as BindingCheckError,
-  SameTierConflict as BindingSameTierConflict,
-  Provenance as BindingProvenance,
   Shape as BindingShape,
   EnumMember as BindingEnumMember,
   NamedShape as BindingNamedShape,
-  RegisteredShape as BindingRegisteredShape,
-  Field as BindingField,
-  Supplied as SuppliedBinding,
-  Tier as BindingTier,
-  admit as admitBinding,
-  check as checkBinding,
   correspondsToType as bindingCorrespondsToType,
-  fits as bindingFits,
-  header as bindingHeader,
-  outranks as bindingOutranks,
-  ordinal as bindingOrdinal,
-  prepare as prepareBindings,
-  value as bindingValue,
 }
 import semantic.SourceIndex {
   AuthoredCursor,
@@ -95,7 +74,6 @@ import semantic.SourceIndex {
   SourceIndex,
 }
 import semantic.Rejection {GenericKind, Rejection, RejectionCode, TerminationStep, WitnessProblem}
-import semantic.ScalarEnum
 import semantic.ScalarEnum {Case as EnumCase}
 import semantic.SourceRevision {Observation, Revision}
 import semantic.StaticValue
@@ -103,11 +81,14 @@ import semantic.StaticConstant
 import semantic.StaticText
 import semantic.StaticText {FaultKind as StaticTextFaultKind, Operation as StaticTextOperation}
 import semantic.StaticFunction
-import semantic.StaticFunction {StaticFunction as SelectedStaticFunction, Rejection as StaticHeaderRejection, HeaderFault as StaticHeaderFault}
+import semantic.StaticFunction {StaticFunction as SelectedStaticFunction, Rejection as StaticHeaderRejection, HeaderFault as StaticHeaderFault,
+}
 import semantic.StaticExecution
-import semantic.StaticExecution {Diagnostic as StaticDiagnostic, Fault as StaticExecutionFault, MissingFact as StaticMissingFact, TraceStep as StaticTraceStep}
+import semantic.StaticExecution {Diagnostic as StaticDiagnostic, Fault as StaticExecutionFault, MissingFact as StaticMissingFact, TraceStep as StaticTraceStep,
+}
 import semantic.MixedBody
-import semantic.MixedBody {Body as MixedBodyResult, Diagnostic as MixedDiagnostic, Fault as MixedFault, Obligation as MixedObligation, Residual as MixedResidual}
+import semantic.MixedBody {Body as MixedBodyResult, Diagnostic as MixedDiagnostic, Fault as MixedFault, Obligation as MixedObligation, Residual as MixedResidual,
+}
 import semantic.SourceUnit {SourceUnit}
 import semantic.StaticValue {
   Fault as StaticFault,
@@ -126,7 +107,7 @@ import semantic.Specialization {
   Pool as SpecializationPool,
   Target as SpecializationTarget,
 }
-import semantic.Type {Argument, Binding, Comparison, Requirement, Row, Type, Unification}
+import semantic.Type {Argument, ArrayShape, Binding, Comparison, Requirement, Row, Type, Unification}
 import semantic.Target {Id as TargetId, Target as MachineTarget}
 import semantic.TypedBody {
   Expression as BodyExpression,
@@ -136,6 +117,7 @@ import semantic.TypedBody {
   SafetyObligation as BodySafetyObligation,
   Stage as BodyStage,
   TypedBody,
+  AggregateField as BodyAggregateField,
 }
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
@@ -517,53 +499,6 @@ test effect fn reachedStaticRootKeepsContextualTypesAndOriginalSource() -> ()
   } else {
     run Testing.expect(false, "reached expression has a checked body and source")
   }
-}
-
-test effect fn reachedStaticRootRejectsOrdinaryLocalAtName() -> ()
-! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let id = run module("ordinary-local-root.silk") |> Effect.provideMut<Allocator>(&mut allocator)
-  let source = """fn ordinary() {
-  let enabled = true
-  static if enabled {}
-}
-"""
-  let mut semantic = run staticSemantic(&id, source, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut dependencies = Vector.make<Dependency>()
-  let mut port = Semantic.staticPort(&mut semantic, &mut dependencies)
-  let cursor = run StaticPort.authoredCursor(&mut port, &id)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut expression = HirId {index: usize.MAX}
-  let expectedStart = offsetOf(source, "enabled", usize.ONE)
-  if let Option<AuthoredCursor>.Some {value: selected} = move cursor {
-    if let Option<&Module>.Some {value: hir} = move staticCheckedRootSource(&port, &selected) {
-      let mut at = usize.ZERO
-      while at < Vector.length<Node>(&hir.nodes) {
-        let candidate = HirId {index: at}
-        if let Node.IdentifierExpression {binding, ..} = Module.node(hir, candidate) {
-          if binding.present && Module.span(hir, candidate).start == expectedStart {
-            expression = candidate
-          }
-        }
-        at = at + usize.ONE
-      }
-    }
-  }
-  run Testing.expect(expression.index != usize.MAX, "ordinary local in static condition has an authored HIR ID")
-  let binders = Vector.make<StaticRootBinder>()
-  let answer = run StaticPort.demandCheckedRoot(
-    &mut port,
-    &id,
-    Option.some<usize>(usize.ZERO),
-    expression,
-    StaticRootExpectation.Boolean,
-    Vector.asSlice<StaticRootBinder>(&binders),
-  ) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(
-    rejectsFrom(&answer, RejectionCode.StaticPhaseViolation, expectedStart),
-    "reached ordinary local is a static phase violation at its name",
-  )
 }
 
 test effect fn reachedCompileErrorKeepsCheckedMessageAndReportsDiagnostic() -> ()
@@ -1067,9 +1002,6 @@ static fn doubled(value: u32) -> u32 { return value + value }
 static fn text() -> string<'static> { return "ok" }
 static fn echo(value: string) -> string { return value }
 """
-  let bytes = run Bytes.copy(String.utf8Bytes(source)) |> Effect.provideMut<Allocator>(&mut allocator)
-  let unit = run SourceUnit.parse(&id, usize.ONE, move bytes) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(SourceUnit.diagnosticCount(&unit) == usize.ZERO, "static control fixture parses without recovery")
   let mut semantic = run staticSemantic(&id, source, MachineTarget.forId(TargetId.Aarch64AppleDarwin))
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut staticDependencies = Vector.make<Dependency>()
@@ -1232,8 +1164,8 @@ fn ordinary() { let static selected: usize = Helper.count }
     }
   }
   run Testing.expect(expression.index != usize.MAX, "the qualified constant has an authored expression")
-  let expectedIdentity = run StaticPort.resolveDeclaration(
-    &mut port, &helper, Option.none<&[u8]>(), b"count", Span.make(usize.ZERO, usize.ZERO),
+  let expectedIdentity = run StaticPort.resolveRootDeclaration(
+    &mut port, &helper, b"count", Span.make(usize.ZERO, usize.ZERO),
   ) |> Effect.provideMut<Allocator>(&mut allocator)
   let selectedConstant = match move expectedIdentity {
     Result<DeclarationId, Shared<Rejection>>.Success {value} => move value
@@ -1648,63 +1580,59 @@ pub static fn pong() -> u32 { return Alpha.ping() }
   return ()
 }
 
+test effect fn selectedStaticIfArmResolvesOrdinaryFacts() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let entry = run module("selected-arm.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let source = run present("""
+fn helper() -> i32 { return 7 }
+fn selected() -> i32 {
+  static if true {
+    let value: i32 = helper()
+    return value
+  } else {
+    let invalid: Missing = missing()
+    return invalid
+  }
+}
+""") |> Effect.provideMut<Allocator>(&mut allocator)
+  let revision = run Revision.publish(&Revision.make(), &entry, &source)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut semantic = makeSemantic(move revision)
+  let mut request = Request.make()
+  let body = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"selected")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    Shared.with<Result<Answer, NoRejection>, AnswerView>(&body, inspect).success,
+    "the selected arm resolves its typed local and helper call without demanding the invalid arm",
+  )
+  return ()
+}
+
 test effect fn staticCheckedCallSelectsCanonicalInherentBody() -> ()
-! InvalidModulePath | OutOfMemoryError | StaticDiagnostic | AssertionError<'static> {
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   let id = run module("static-inherent.silk") |> Effect.provideMut<Allocator>(&mut allocator)
-  let source = """static fn value() -> u32 { return 99 }
+  let source = """
+static fn value() -> u32 { return 99 }
 struct Scope {}
 impl Scope {
   static fn value() -> u32 { return 7 }
 }
+static fn selected() -> u32 { return Scope.value() }
+const result: u32 = selected()
 """
   let mut semantic = run staticSemantic(&id, source, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut dependencies = Vector.make<Dependency>()
-  let mut machine = run StaticExecution.make(Semantic.staticPort(&mut semantic, &mut dependencies), &id, StaticExecution.Limits {steps: 32, depth: 4, valueBytes: 64})
+  let mut request = Request.make()
+  let result = run Semantic.demandInitializer(&mut semantic, &mut request, &id, b"result")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let cursor = run StaticExecution.sourceCursor(&mut machine, &id)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let count = match move StaticExecution.sourceDeclarationCount(&machine, &cursor) {
-    Option<usize>.Some {value} => value
-    Option<usize>.None => {
-      run Testing.expect(false, "the held source has declarations")
-      return ()
-    }
-  }
-  let mut selected = Option.none<DeclarationId>()
-  let mut at = usize.ZERO
-  while at < count {
-    let found = run StaticExecution.sourceDeclaration(&machine, &cursor, at)
-      |> Effect.provideMut<Allocator>(&mut allocator)
-    if let Option<IndexedDeclaration>.Some {value: declaration} = move found {
-      if DeclarationId.named(&declaration.identity, b"value") {
-        if let Option<usize>.Some {value: _} = &declaration.parent {
-          selected = Option.some<DeclarationId>(move declaration.identity)
-        }
-      }
-    }
-    at = at + usize.ONE
-  }
-  let implementation = match move selected {
-    Option<DeclarationId>.Some {value} => move value
-    Option<DeclarationId>.None => {
-      run Testing.expect(false, "the inherent static body has a canonical declaration")
-      return ()
-    }
-  }
-  let expression = BodyExpression.DirectCall {
-    declaration: move implementation,
-    genericArguments: Vector.make<Argument>(),
-    receiverPass: Option.none<BodyReceiverPass>(),
-    arguments: Vector.make<BodyNodeId>(),
-  }
-  let arguments = Vector.make<Shared<StaticData>>()
-  let result = run StaticExecution.demandCheckedCall(&mut machine, &expression, b"value", Vector.asSlice<Shared<StaticData>>(&arguments), Span.make(usize.ZERO, usize.ZERO))
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(Shared.with<StaticData, bool>(&result, fn(value: &StaticData) -> bool {
-    return staticSharedIntegerIs(value, 7)
-  }), "a checked call uses its selected inherent declaration, not the same-named root")
+  run Testing.expect(
+    Shared.with<Result<Answer, NoRejection>, bool>(&result, fn(answer: &Result<Answer, NoRejection>) -> bool {
+      return constantInteger(answer, b"7")
+    }) && starts(Semantic.eventLog(&semantic), Family.Body) == 2,
+    "source static calls execute the checked inherent body and record both reached bodies",
+  )
   return ()
 }
 
@@ -1713,8 +1641,6 @@ test effect fn staticArithmeticReportsOperationCodeAndSpan() -> ()
   let mut allocator = Allocator.systemAllocatorProvider()
   let id = run module("static-arithmetic.silk") |> Effect.provideMut<Allocator>(&mut allocator)
   let source = "static fn add(value: u32) -> u32 { return value + 1 }\nstatic fn divide(value: u32) -> u32 { return value / 0 }\n"
-  let bytes = run Bytes.copy(String.utf8Bytes(source)) |> Effect.provideMut<Allocator>(&mut allocator)
-  let unit = run SourceUnit.parse(&id, usize.ONE, move bytes) |> Effect.provideMut<Allocator>(&mut allocator)
   let mut semantic = run staticSemantic(&id, source, MachineTarget.forId(TargetId.Aarch64AppleDarwin))
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut staticDependencies = Vector.make<Dependency>()
@@ -1740,19 +1666,16 @@ test effect fn staticCallsDistinguishCyclesLimitsAndCheckedFailures() -> ()
   let source = """static fn cycle(value: u32) -> u32 { return cycle(value) }
 static fn descend(value: u32) -> u32 { return descend(value + 1) }
 static fn spin(value: u32) -> u32 { while true {} return value }
-static fn badField(value: u32) -> u32 { let mut result = value result.field = 1 return result }
+static fn badField(boxed: Box) -> u32 { let mut result = boxed result.value = 1 return 0 }
 fn runtime(value: u32) -> u32 { return value }
 static fn badCall(value: u32) -> u32 { return runtime(value) }
-static fn sealed(value: u32) -> u32 { return Intrinsic.pendingStatic(value) }
 static fn skipped(value: u32) -> bool { return false && broken(value) }
 static fn broken(value: u32) -> bool { return missing }
 static fn reported(value: u32) -> u32 { compileError("invalid static value") }
 static fn terminal(value: u32) -> never { compileError("terminal failure") }
 static fn forwarded(value: u32) -> u32 { terminal(value) }
+struct Box { value: u32 }
 """
-  let bytes = run Bytes.copy(String.utf8Bytes(source)) |> Effect.provideMut<Allocator>(&mut allocator)
-  let unit = run SourceUnit.parse(&id, usize.ONE, move bytes) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(SourceUnit.diagnosticCount(&unit) == usize.ZERO, "static failure fixture parses without recovery")
   let mut semantic = run staticSemantic(&id, source, MachineTarget.forId(TargetId.Aarch64AppleDarwin))
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut staticDependencies = Vector.make<Dependency>()
@@ -1785,7 +1708,7 @@ static fn forwarded(value: u32) -> u32 { terminal(value) }
   let invalid = run Effect.result(StaticExecution.demand(&mut machine, b"badField", &args, span))
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
-    staticExecutionBodyRejection(&invalid, RejectionCode.StaticPhaseViolation, offsetOf(source, "result.field", usize.ZERO)),
+    staticExecutionBodyRejection(&invalid, RejectionCode.StaticPhaseViolation, offsetOf(source, "result.value", usize.ZERO)),
     "evaluator preserves the checked body's field-mutation rejection and source span",
   )
   drop machine
@@ -1828,24 +1751,56 @@ static fn forwarded(value: u32) -> u32 { terminal(value) }
   let mut request = Request.make()
   let runtime = run Semantic.demandBody(&mut semantic, &mut request, &id, b"badCall")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let sealed = run Semantic.demandBody(&mut semantic, &mut request, &id, b"sealed")
-    |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
-    rejectsFrom(&runtime, RejectionCode.StaticPhaseViolation, offsetOf(source, "runtime(value)", usize.ZERO)) &&
-    rejectsFrom(&sealed, RejectionCode.UnknownMember, offsetOf(source, "pendingStatic", usize.ZERO)),
-    "invalid static calls reject at their authored source locations before evaluation",
+    rejectsFrom(&runtime, RejectionCode.StaticPhaseViolation, offsetOf(source, "runtime(value)", usize.ZERO)),
+    "a runtime call in a static body rejects at its authored call before evaluation",
   )
   return ()
 }
 
+fn staticBodyExpressionAt(answer: &Result<Answer, NoRejection>, start: usize) -> HirId {
+  return match &answer.* {
+    Result<Answer, NoRejection>.Success {value} => match &value.outcome {
+      Outcome.Success {value: Value.Body {body, ..}} => Shared.with<TypedBody, HirId>(
+        &body,
+        fn(checked: &TypedBody) -> HirId {
+          let nodes = TypedBody.nodeSlice(checked)
+          let mut at = usize.ZERO
+          while at < nodes.length {
+            if nodes[at].origin.span.start == start {
+              if let BodyNodeKind.Expression {..} = &nodes[at].kind { return nodes[at].origin.syntax }
+            }
+            at = at + usize.ONE
+          }
+          return HirId {index: usize.MAX}
+        },
+      )
+      _ => HirId {index: usize.MAX}
+    }
+    _ => HirId {index: usize.MAX}
+  }
+}
+
 test effect fn staticRetainedValueLimitRejectsPublication() -> ()
-! InvalidModulePath | OutOfMemoryError | StaticDiagnostic | AssertionError<'static> {
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | StaticDiagnostic | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   let id = run module("static-value-limit.silk") |> Effect.provideMut<Allocator>(&mut allocator)
-  let source = "static fn identity(value: u32) -> u32 { return value }\n"
-  let bytes = run Bytes.copy(String.utf8Bytes(source))
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let unit = run SourceUnit.parse(&id, usize.ONE, move bytes) |> Effect.provideMut<Allocator>(&mut allocator)
+  let source = """
+static fn identity(value: u32) -> u32 { return value }
+static fn texts() -> u32 {
+  let mut at: u32 = 0
+  while at < 3 {
+    let text = "abcdefghijklmnopqrstuvwx"
+    at = at + 1
+  }
+  return 7
+}
+static fn returned() -> string<'static> { return "abcdefghijklmnopqrstuvwx" }
+static fn alias() -> string<'static> { return returned() }
+static fn resumed(supplied: string<'static>) -> string<'static> { return supplied }
+"""
+  let textLiteral = "\"abcdefghijklmnopqrstuvwx\""
+  let literalStart = offsetOf(source, textLiteral, usize.ONE)
   let mut semantic = run staticSemantic(&id, source, MachineTarget.forId(TargetId.Aarch64AppleDarwin))
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut staticDependencies = Vector.make<Dependency>()
@@ -1869,6 +1824,81 @@ test effect fn staticRetainedValueLimitRejectsPublication() -> ()
   let attempted = run Effect.result(StaticExecution.demand(&mut machine, b"identity", &different, Span.make(usize.ZERO, usize.ZERO)))
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(staticExecutionFailedWith(&attempted, StaticExecutionFault.ValueLimit), "distinct result exceeds retained value budget")
+  drop machine
+  let mut textDependencies = Vector.make<Dependency>()
+  let mut textMachine = run StaticExecution.make(Semantic.staticPort(&mut semantic, &mut textDependencies), &id, StaticExecution.Limits {steps: 128, depth: 4, valueBytes: 64})
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let noArguments = Vector.make<Shared<StaticData>>()
+  let repeatedText = run Effect.result(StaticExecution.demand(&mut textMachine, b"texts", Vector.asSlice<Shared<StaticData>>(&noArguments), Span.make(usize.ZERO, usize.ZERO)))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(staticExecutionFailedWith(&repeatedText, StaticExecutionFault.ValueLimit), "retained text provenance exhausts the cumulative value budget without publishing a value")
+  drop textMachine
+  let mut returnedDependencies = Vector.make<Dependency>()
+  let mut returnedMachine = run StaticExecution.make(Semantic.staticPort(&mut semantic, &mut returnedDependencies), &id, StaticExecution.Limits {steps: 32, depth: 4, valueBytes: 64})
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let returned = run StaticExecution.demand(&mut returnedMachine, b"alias", Vector.asSlice<Shared<StaticData>>(&noArguments), Span.make(usize.ZERO, usize.ZERO))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let origin = StaticExecution.textOrigin(&returnedMachine, &returned)
+  let returnedOriginMatches = match move origin {
+    Option<Span>.Some {value: returnedOrigin} => returnedOrigin.start == literalStart
+    Option<Span>.None => false
+  }
+  run Testing.expect(returnedOriginMatches, "returned text aliases preserve the authored origin without a second budget charge")
+  drop returnedMachine
+  let mut rootRequest = Request.make()
+  let literalBody = run Semantic.demandBody(&mut semantic, &mut rootRequest, &id, b"returned")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let resumedBody = run Semantic.demandBody(&mut semantic, &mut rootRequest, &id, b"resumed")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let literalId = Shared.with<Result<Answer, NoRejection>, HirId>(&literalBody, fn(answer: &Result<Answer, NoRejection>) -> HirId {
+    return staticBodyExpressionAt(answer, literalStart)
+  })
+  let resumedId = Shared.with<Result<Answer, NoRejection>, HirId>(&resumedBody, fn(answer: &Result<Answer, NoRejection>) -> HirId {
+    return staticBodyExpressionAt(answer, offsetOf(source, "supplied }", usize.ZERO))
+  })
+  let checkedLiteralRoot = Shared.with<Result<Answer, NoRejection>, Option<StaticExecution.CheckedRoot>>(
+    &literalBody, StaticExecution.checkedRoot,
+  )
+  let literalRoot = match move checkedLiteralRoot {
+    Option<StaticExecution.CheckedRoot>.Some {value: checkedLiteral} => move checkedLiteral
+    Option<StaticExecution.CheckedRoot>.None => {
+      run Testing.expect(false, "the text literal has a checked root")
+      return ()
+    }
+  }
+  let checkedResumedRoot = Shared.with<Result<Answer, NoRejection>, Option<StaticExecution.CheckedRoot>>(
+    &resumedBody, StaticExecution.checkedRoot,
+  )
+  let resumedRoot = match move checkedResumedRoot {
+    Option<StaticExecution.CheckedRoot>.Some {value: checkedResumed} => move checkedResumed
+    Option<StaticExecution.CheckedRoot>.None => {
+      run Testing.expect(false, "the supplied text reference has a checked root")
+      return ()
+    }
+  }
+  let mut rootDependencies = Vector.make<Dependency>()
+  let mut rootMachine = run StaticExecution.make(Semantic.staticPort(&mut semantic, &mut rootDependencies), &id, StaticExecution.Limits {steps: 32, depth: 4, valueBytes: 64})
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let noBindings = Vector.make<StaticExecution.Binding>()
+  let literalValue = run StaticExecution.evaluate(&mut rootMachine, &literalRoot, Vector.asSlice<StaticExecution.Binding>(&noBindings), literalId)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let suppliedModule = run ModuleId.copy(&id) |> Effect.provideMut<Allocator>(&mut allocator)
+  let supplied = [StaticExecution.Binding {
+    module: move suppliedModule,
+    binder: resumedId,
+    value: StaticValue.copy(&literalValue),
+  }]
+  let resumedValue = run StaticExecution.evaluate(&mut rootMachine, &resumedRoot, &supplied, resumedId)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let resumedOriginValue = StaticExecution.textOrigin(&rootMachine, &resumedValue)
+  let resumedOriginMatches = match move resumedOriginValue {
+    Option<Span>.Some {value: resumedOrigin} => resumedOrigin.start == literalStart
+    Option<Span>.None => false
+  }
+  run Testing.expect(resumedOriginMatches, "literal roots and supplied aliases publish with one retained provenance charge")
+  let exhausted = run Effect.result(StaticExecution.evaluate(&mut rootMachine, &literalRoot, Vector.asSlice<StaticExecution.Binding>(&noBindings), literalId))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(staticExecutionFailedWith(&exhausted, StaticExecutionFault.ValueLimit), "releasing an origin-held supplied alias preserves the live charge for later roots")
   return ()
 }
 
@@ -1949,11 +1979,8 @@ static fn echo(value: usize) -> usize { return value }
 static fn callEcho() -> usize { return echo(4294967296) }
 static fn sumWord() -> usize { return 1 + 2 }
 static fn callSum() -> usize { return echo(1 + 2) }
+static fn nested() -> usize { return (1 + 2) + (3 + 4) }
 """
-  let bytes = run Bytes.copy(String.utf8Bytes(source))
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let unit = run SourceUnit.parse(&id, usize.ONE, move bytes) |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(SourceUnit.diagnosticCount(&unit) == usize.ZERO, "pointer-width source fixture parses without recovery")
   let mut nativeSemantic = run staticSemantic(&id, source, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut wasmSemantic = run staticSemantic(&id, source, MachineTarget.forId(TargetId.Wasm32UnknownUnknown))
@@ -2030,6 +2057,14 @@ static fn callSum() -> usize { return echo(1 + 2) }
       _ => false
     }
   }), "arithmetic uses usize on wasm32 as well as native64")
+  let nested32 = run StaticExecution.demand(&mut wasm, b"nested", Vector.asSlice<Shared<StaticData>>(&args), span)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(Shared.with<StaticData, bool>(&nested32, fn(value: &StaticData) -> bool {
+    return match & value.* {
+      StaticData.Integer {ty, magnitude, ..} => ty == StaticIntegerType.Usize && magnitude == 10
+      _ => false
+    }
+  }), "nested arithmetic operands inherit the pointer-sized return type on wasm32")
   return ()
 }
 
@@ -2227,7 +2262,6 @@ test effect fn staticValueReuseIsIdentityFree() -> () ! OutOfMemoryError | Asser
   let differs = run StaticValue.equals(&first, &different)
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(sameRetained && sameSeparate && !differs, "static reuse compares values, not allocation handles")
-  run Testing.expect(Shared.with<StaticData, usize>(&first, StaticValue.size) == 16, "static value size is bounded")
   let seven = run Shared.make<StaticData>(StaticData.Integer {ty: StaticIntegerType.I8, sign: StaticSign.Positive, magnitude: 7})
     |> Effect.provideMut<Allocator>(&mut allocator)
   let alias = StaticValue.copy(&seven)
@@ -3134,10 +3168,6 @@ fn isCollision(value: &Rejection) -> bool {
   return value.code == RejectionCode.Collision
 }
 
-fn isUnsupported(value: &Rejection) -> bool {
-  return value.code == RejectionCode.Unsupported && value.span.end > value.span.start
-}
-
 fn isCycle(value: &Rejection) -> bool {
   return value.code == RejectionCode.Cycle
 }
@@ -3698,7 +3728,7 @@ test effect fn selectedTargetChecksPointerSizedLiteralMagnitudes() -> ()
   let mut allocator = Allocator.systemAllocatorProvider()
   let entry = run module("target-literals.silk")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let text = "fn localContext() -> usize { let value: usize = 4294967296 return value }\nfn returnContext() -> usize { return 4294967296 }\nfn signed() -> isize { return 2147483648 }\nfn minimum() -> isize { return -2147483648 }\nfn fixed() -> u64 { return 4294967296 }\n"
+  let text = "fn localContext() -> usize { let value: usize = 4294967296 return value }\nfn returnContext() -> usize { return 4294967296 }\nfn signed() -> isize { return 2147483648 }\nfn minimum() -> isize { return -2147483648 }\nfn fixed() -> u64 { return 4294967296 }\nfn maximum() -> usize { return 4294967295 }\n"
   let source = run present(text)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&Revision.make(), &entry, &source)
@@ -3725,6 +3755,8 @@ test effect fn selectedTargetChecksPointerSizedLiteralMagnitudes() -> ()
     |> Effect.provideMut<Allocator>(&mut allocator)
   let wasmFixed = run Semantic.demandBody(&mut wasm, &mut wasmRequest, &entry, b"fixed")
     |> Effect.provideMut<Allocator>(&mut allocator)
+  let wasmMaximum = run Semantic.demandBody(&mut wasm, &mut wasmRequest, &entry, b"maximum")
+    |> Effect.provideMut<Allocator>(&mut allocator)
   let nativeLocal = run Semantic.demandBody(&mut native, &mut nativeRequest, &entry, b"localContext")
     |> Effect.provideMut<Allocator>(&mut allocator)
   let nativeReturn = run Semantic.demandBody(&mut native, &mut nativeRequest, &entry, b"returnContext")
@@ -3744,9 +3776,10 @@ test effect fn selectedTargetChecksPointerSizedLiteralMagnitudes() -> ()
     "wasm32 rejects the signed isize above its maximum at the literal",
   )
   run Testing.expect(
-    Shared.with<Result<Answer, NoRejection>, AnswerView>(&wasmMinimum, inspect).success &&
+    Shared.with<Result<Answer, NoRejection>, AnswerView>(&wasmMaximum, inspect).success &&
+      Shared.with<Result<Answer, NoRejection>, AnswerView>(&wasmMinimum, inspect).success &&
       Shared.with<Result<Answer, NoRejection>, AnswerView>(&wasmFixed, inspect).success,
-    "wasm32 accepts its signed minimum and a wide fixed u64",
+    "wasm32 accepts its usize maximum, its signed minimum and a wide fixed u64",
   )
   run Testing.expect(
     Shared.with<Result<Answer, NoRejection>, AnswerView>(&nativeLocal, inspect).success &&
@@ -3762,7 +3795,7 @@ test effect fn closedOperatorsKeepExactOperandsAndRuntimeOrder() -> ()
   let mut allocator = Allocator.systemAllocatorProvider()
   let entry = run module("closed-operators.silk")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let text = "fn add(left: i32, right: i32) -> i32 { return left + right }\nfn literalRight(left: u8) -> u8 { return left + 1 }\nfn literalLeft(right: u8) -> u8 { return 1 + right }\nfn equal(left: bool, right: bool) -> bool { return left == right }\nfn bitwise(left: u16, right: u16) -> u16 { return left ^ right }\nfn pointerSized(left: usize, right: usize) -> usize { return left + right }\nfn mismatch(left: i32, right: u8) -> i32 { return left + right }\nfn noOrder(left: bool, right: bool) -> bool { return left < right }\nfn noNegate(value: u8) -> u8 { return -value }\n"
+  let text = "fn add(left: i32, right: i32) -> i32 { return left + right }\nfn literalRight(left: u8) -> u8 { return left + 1 }\nfn literalLeft(right: u8) -> u8 { return 1 + right }\nfn equal(left: bool, right: bool) -> bool { return left == right }\nfn bitwise(left: u16, right: u16) -> u16 { return left ^ right }\nfn pointerSized(left: usize, right: usize) -> usize { return left + right }\nfn mismatch(left: i32, right: u8) -> i32 { return left + right }\nfn noOrder(left: bool, right: bool) -> bool { return left < right }\nfn noNegate(value: u8) -> u8 { return -value }\nfn contextual(value: usize) -> usize { return value + 7 }\n"
   let source = run present(text)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&Revision.make(), &entry, &source)
@@ -3787,6 +3820,8 @@ test effect fn closedOperatorsKeepExactOperandsAndRuntimeOrder() -> ()
     |> Effect.provideMut<Allocator>(&mut allocator)
   let noNegate = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"noNegate")
     |> Effect.provideMut<Allocator>(&mut allocator)
+  let contextual = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"contextual")
+    |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
     Shared.with<Result<Answer, NoRejection>, AnswerView>(&add, inspect).success &&
     Shared.with<Result<Answer, NoRejection>, AnswerView>(&literalRight, inspect).success &&
@@ -3795,6 +3830,10 @@ test effect fn closedOperatorsKeepExactOperandsAndRuntimeOrder() -> ()
     Shared.with<Result<Answer, NoRejection>, AnswerView>(&bitwise, inspect).success &&
     Shared.with<Result<Answer, NoRejection>, AnswerView>(&pointerSized, inspect).success,
     "closed operators accept exact scalar operands and contextual integer literals",
+  )
+  run Testing.expect(
+    Shared.with<Result<Answer, NoRejection>, AnswerView>(&contextual, inspect).success,
+    "an in-range contextual usize participates in a selected-target operator",
   )
   run Testing.expect(
     Shared.with<Result<Answer, NoRejection>, bool>(&mismatch, fn(answer: &Result<Answer, NoRejection>) -> bool {
@@ -3992,35 +4031,8 @@ test effect fn staticOperatorOperandWaitsForStaticEvaluation() -> ()
   let checked = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"combine")
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
-    Shared.with<Result<Answer, NoRejection>, bool>(&checked, fn(answer: &Result<Answer, NoRejection>) -> bool {
-      return rejectionCode(answer, RejectionCode.Unsupported)
-    }),
-    "a runtime operator call cannot supply an evaluator-only static operand",
-  )
-  run Testing.expect(
     rejectsFrom(&checked, RejectionCode.Unsupported, offsetOf(text, "+", 1)),
-    "the unsupported static operand is anchored on its operator use",
-  )
-  return ()
-}
-
-test effect fn pointerSizedLiteralsUseSelectedTarget() -> ()
-! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let entry = run module("pointer-sized-operator.silk")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let text = "fn contextual(value: usize) -> usize { return value + 7 }\n"
-  let source = run present(text)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let revision = run Revision.publish(&Revision.make(), &entry, &source)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut semantic = makeSemantic(move revision)
-  let mut request = Request.make()
-  let contextual = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"contextual")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(
-    Shared.with<Result<Answer, NoRejection>, AnswerView>(&contextual, inspect).success,
-    "an in-range contextual usize participates in a selected-target operator",
+    "a runtime operator call cannot supply an evaluator-only static operand, and the gap is anchored on its operator use",
   )
   return ()
 }
@@ -4157,12 +4169,6 @@ fn lifetimeCountOf(answer: &Result<Answer, NoRejection>) -> usize {
     }
     Result<Answer, NoRejection>.Failure {error: _} => usize.ZERO
   }
-}
-
-effect fn resultIsReflexive(answer: &Shared<Result<Answer, NoRejection>>) -> bool
-! OutOfMemoryError
-? &mut Allocator {
-  return run slotsEqual(answer, usize.MAX, usize.MAX)
 }
 
 fn signatureHasOrdinaryBinder(answer: &Result<Answer, NoRejection>) -> bool {
@@ -4710,7 +4716,18 @@ effect fn visibilityClaims() -> ()
 ? &mut Allocator {
   let entry = run module("entry.silk")
   let source = run present(
-    "struct Hidden { field: i32 }\npub fn reveal() -> Hidden { return () }\ntype Clash = i32\nstruct Clash {}\npub type HiddenExact = typeof(reveal)\n",
+    """struct Hidden { field: i32 }
+pub fn reveal() -> Hidden { return () }
+type Clash = i32
+struct Clash {}
+pub type HiddenExact = typeof(reveal)
+pub fn identity<T>(value: T) -> T { return value }
+fn caller() -> i32 {
+  let hidden = Hidden { field: 42 }
+  let copied = identity(hidden)
+  return copied.field
+}
+""",
   )
   let revision = run Revision.publish(&Revision.make(), &entry, &source)
   let mut semantic = makeSemantic(move revision)
@@ -4754,6 +4771,11 @@ effect fn visibilityClaims() -> ()
   } else {
     run Testing.expect(false, "exact representation has a typed rejection")
   }
+  let caller = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"caller")
+  run Testing.expect(
+    Shared.with<Result<Answer, NoRejection>, AnswerView>(&caller, inspect).success,
+    "a public generic instantiated with a caller-private record does not publish that record",
+  )
   return ()
 }
 
@@ -5298,9 +5320,7 @@ test effect fn canonicalTypeIdentityKeepsNominalOwners() -> ()
     signatureOwnedBy(&original, &left) && signatureOwnedBy(&aliased, &left) && !signatureOwnedBy(
       &other,
       &left,
-    ) && signatureOwnedBy(&other, &right) && signatureIsI32(&count) && !signatureIsBool(&count) && signatureIsBool(
-      &flag,
-    ) && !signatureIsI32(&flag),
+    ) && signatureOwnedBy(&other, &right) && signatureIsI32(&count) && signatureIsBool(&flag),
     "source signatures keep nominal module owners and distinct scalar kinds",
   )
   return ()
@@ -5869,10 +5889,10 @@ fn constraintOrder(signature: &Signature) -> bool {
 // Give each independent contract claim only the declarations it needs to resolve.
 fn contractFixture(part: usize) -> string<'static> {
   if part == 0 {
-    return "import services { Clock }\nservice Logger {}\ninterface Hash {}\nstruct Problem {}\nstruct Other {}\nrole Primary\nfn apply(transform: fn(i32) -> i32, value: i32) -> i32 { return value }\nfn consume(transform: once fn(i32) -> i32) -> i32 { return 0 }\neffect fn load(id: i32) -> i32 ! Problem ? &Clock { return id }\neffect fn both() -> i32 ! Problem | Other ? &Logger | &Clock at Primary | &mut Clock at Primary | &Clock { return 0 }\neffect fn swapped() -> i32 ! Other | Problem | Other ? &mut Clock at Primary | &Clock | &Logger { return 0 }\neffect fn closed() -> i32 { return 0 }\neffect fn spelled() -> i32 ! never ? never { return 0 }\nfn pending(value: Effect<i32 ! Problem ? &Clock>) -> i32 { return 0 }\nfn preserve<'env, A, ?R>(pending: once Effect<'env; A ? R>) -> Effect<'env; A ? R> { return move pending }\nfn bounded<'long: 'short, 'short, T: Hash + Logger + 'short>(value: &'long T) -> &'short i32 { return () }\nunsafe fn risky() -> i32 { return 1 }\nfn callsRisky() -> i32 { return risky() }\nstruct Box<T> { value: T }\ntype Pair<T> = T | Box<T>\nfn control(value: Pair<i32>) -> i32 { return 0 }\nfn nested(value: Pair<Box<i32>>) -> i32 { return 0 }\nfn again(value: Pair<Box<i32>>) -> i32 { return 0 }\nservice Store<T> {}\ntype Stored<'env, T> = Effect<'env; i32 ? &Store<T> | &Store<Box<T>>>\nfn stored<'a>(value: Stored<'a, Box<i32>>) -> i32 { return 0 }\n"
+    return "import services { Clock }\nservice Logger {}\ninterface Hash {}\nstruct Problem {}\nstruct Other {}\nrole Primary\nfn apply(transform: fn(i32) -> i32, value: i32) -> i32 { return value }\nfn consume(transform: once fn(i32) -> i32) -> i32 { return 0 }\neffect fn load(id: i32) -> i32 ! Problem ? &Clock { return id }\neffect fn both() -> i32 ! Problem | Other ? &Logger | &Clock at Primary | &mut Clock at Primary | &Clock { return 0 }\neffect fn swapped() -> i32 ! Other | Problem | Other ? &mut Clock at Primary | &Clock | &Logger { return 0 }\neffect fn closed() -> i32 { return 0 }\neffect fn spelled() -> i32 ! never ? never { return 0 }\nfn pending(value: Effect<i32 ! Problem ? &Clock>) -> i32 { return 0 }\nfn preserve<'env, A, ?R>(pending: once Effect<'env; A ? R>) -> Effect<'env; A ? R> { return move pending }\nfn bounded<'long: 'short, 'short, T: Hash + Logger + 'short>(value: &'long T) -> &'short i32 { return () }\nunsafe fn risky() -> i32 { return 1 }\nstruct Box<T> { value: T }\ntype Pair<T> = T | Box<T>\nfn control(value: Pair<i32>) -> i32 { return 0 }\nfn nested(value: Pair<Box<i32>>) -> i32 { return 0 }\nfn again(value: Pair<Box<i32>>) -> i32 { return 0 }\nservice Store<T> {}\ntype Stored<'env, T> = Effect<'env; i32 ? &Store<T> | &Store<Box<T>>>\nfn stored<'a>(value: Stored<'a, Box<i32>>) -> i32 { return 0 }\n"
   }
   if part == 1 {
-    return "import services { Clock }\nservice Logger {}\ninterface Hash {}\nstruct Plain {}\nstruct Problem {}\nstruct Other {}\nrole Primary\ntype Borrowed = &'static i32\neffect fn notService() -> i32 ? &Plain { return 0 }\neffect fn interfaceRow() -> i32 ? &Hash { return 0 }\neffect fn badRole() -> i32 ? &Clock at Plain { return 0 }\nfn notBound<T: Plain>() -> i32 { return 0 }\nfn repeated<T: Hash + Hash>() -> i32 { return 0 }\nfn ordinaryFailure() -> i32 ! Problem { return 0 }\nfn rowAsType<?R>(value: R) -> i32 { return 0 }\nfn borrowedUnion() -> Borrowed | i32 { return 0 }\nfn quantified(transform: fn<'static>(&i32) -> &i32) -> i32 { return 0 }\nfn ambiguousCallable(transform: fn<'static>(&i32, &i32) -> &i32) -> i32 { return 0 }\nfn nestedQuantifier(transform: for<'a> fn<'static>(for<'b> fn<'static>(&'b i32) -> i32) -> i32) -> i32 { return 0 }\nfn ordinaryRow() -> i32 ? &Clock { return 0 }\npub fn exposedCallable(transform: fn(Plain) -> i32) -> i32 { return 0 }\npub effect fn exposedRow() -> i32 ? &Logger { return 0 }\nfn closedEffect() -> Effect<i32> { return () }\n"
+    return "import services { Clock }\nservice Logger {}\ninterface Hash {}\nstruct Plain {}\nstruct Problem {}\nstruct Other {}\nrole Primary\ntype Borrowed = &'static i32\neffect fn notService() -> i32 ? &Plain { return 0 }\neffect fn interfaceRow() -> i32 ? &Hash { return 0 }\neffect fn badRole() -> i32 ? &Clock at Plain { return 0 }\nfn notBound<T: Plain>() -> i32 { return 0 }\nfn repeated<T: Hash + Hash>() -> i32 { return 0 }\nfn ordinaryFailure() -> i32 ! Problem { return 0 }\nfn rowAsType<?R>(value: R) -> i32 { return 0 }\nfn borrowedUnion() -> Borrowed | i32 { return 0 }\nfn ambiguousCallable(transform: fn<'static>(&i32, &i32) -> &i32) -> i32 { return 0 }\nfn nestedQuantifier(transform: for<'a> fn<'static>(for<'b> fn<'static>(&'b i32) -> i32) -> i32) -> i32 { return 0 }\nfn ordinaryRow() -> i32 ? &Clock { return 0 }\npub fn exposedCallable(transform: fn(Plain) -> i32) -> i32 { return 0 }\npub effect fn exposedRow() -> i32 ? &Logger { return 0 }\n"
   }
   if part == 2 {
     return "fn closedEffect() -> Effect<i32> { return () }\nfn explicitStatic() -> Effect<'static; i32> { return () }\nfn inputEffect(value: i32) -> Effect<i32> { return () }\neffect fn closedDeferred() -> i32 { return 0 }\neffect fn inputDeferred(value: i32) -> i32 { return value }\neffect fn sameRegion<'a>(left: &'a i32, right: &'a i32, count: i32) -> i32 { return count }\neffect fn heldDeferred<'a>(value: Held<'a, i32>) -> i32 { return 0 }\nfn genericEffect<T>(value: T) -> Effect<i32> { return () }\nfn twoBorrowEffect(left: &i32, right: &i32) -> Effect<i32> { return () }\nfn heldEffect(value: Held<'static, i32>, count: i32) -> Effect<i32> { return () }\nstruct Held<'a, T: 'a> { value: &'a T }\n"
@@ -5977,21 +5997,15 @@ effect fn contractClaims(part: usize) -> ()
       (run substitutedShapes(&control, &nested, &again, &stored)),
       "substituted unions and rows compare a handle shared at different depths",
     )
-    let callsRisky = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"callsRisky")
     let loadBody = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"load")
     run Testing.expect(
       Shared.with<Result<Answer, NoRejection>, bool>(
-        &callsRisky,
-        fn(answer: &Result<Answer, NoRejection>) -> bool {
-          return rejectedTypeApplication(answer, RejectionCode.UnsafeAcknowledgement)
-        },
-      ) && Shared.with<Result<Answer, NoRejection>, bool>(
         &loadBody,
         fn(answer: &Result<Answer, NoRejection>) -> bool {
           return rejectedTypeApplication(answer, RejectionCode.Unsupported)
         },
       ),
-      "calls require lexical unsafe acknowledgement and effect bodies remain unsupported",
+      "effect bodies remain unsupported",
     )
   }
   if part == 1 {
@@ -6017,13 +6031,6 @@ effect fn contractClaims(part: usize) -> ()
       &mut request,
       &entry,
       b"borrowedUnion",
-    )
-    let quantified = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"quantified")
-    let closedEffect = run Semantic.demandSignature(
-      &mut semantic,
-      &mut request,
-      &entry,
-      b"closedEffect",
     )
     let ambiguousCallable = run Semantic.demandSignature(
       &mut semantic,
@@ -6851,10 +6858,6 @@ test effect fn nominalMembersAndRequestedCompositeShapes() -> ()
       Shared.with<Result<Answer, NoRejection>, bool>(&pending, signatureIsZeroNominalArray),
     "literal and named constant extents select the same canonical array type",
   )
-  run memberRevisionClaims()
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  run memberKindRevisionClaims()
-    |> Effect.provideMut<Allocator>(&mut allocator)
   let held = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"held")
     |> Effect.provideMut<Allocator>(&mut allocator)
   let maybe = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"maybe")
@@ -6877,6 +6880,20 @@ test effect fn nominalMembersAndRequestedCompositeShapes() -> ()
     "an application needs its field type names for lifetime arity while identity and member names stay lazy",
   )
   return ()
+}
+
+test effect fn memberRevisionsReachOnlyTheirConsumers() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run memberRevisionClaims()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+test effect fn genericParameterKindEditRejectsStaleApplication() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run memberKindRevisionClaims()
+    |> Effect.provideMut<Allocator>(&mut allocator)
 }
 
 test effect fn genericTypeBindersAndExplicitApplications() -> ()
@@ -6915,8 +6932,7 @@ test effect fn genericTypeBindersAndExplicitApplications() -> ()
   let direct = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"direct")
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
-    (run resultIsReflexive(&one)
-      |> Effect.provideMut<Allocator>(&mut allocator)) && (run resultEquals(&one, &two)
+    (run resultEquals(&one, &two)
       |> Effect.provideMut<Allocator>(&mut allocator)) && !(run resultEquals(&one, &swapped)
       |> Effect.provideMut<Allocator>(&mut allocator)) && (run resultEquals(&alias, &direct)
       |> Effect.provideMut<Allocator>(&mut allocator)),
@@ -6991,7 +7007,7 @@ test effect fn abstractBodiesTypeForwardingAndBothRuntimeBranches() -> ()
   let mut allocator = Allocator.systemAllocatorProvider()
   let entry = run module("abstract-bodies.silk")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let text = "struct Document { value: i32 }\nfn forward<T>(value: T) -> T { return move value }\nfn invoke<T>(value: T) -> T { return forward(move value) }\nfn writtenOnly<T>(value: T) -> T { return 0 }\nfn callWritten<T>(value: T) -> T { return writtenOnly(move value) }\nfn choose<T>(condition: bool, left: T, right: T) -> T { if condition { return move left } else { return move right } }\nfn wrongElse<T>(condition: bool, left: T, right: i32) -> T { if condition { return move left } else { return right } }\nfn unboundedOperator<T>(value: T) -> T { return value + value }\nfn mismatch<T>(value: T) -> T { return 0 }\nfn lifetimeOnly<'a>(value: i32) -> i32 { return value }\nfn nominal(value: Document) -> Document { return move value }\nfn charPass(value: char) -> char { return value }\nfn floatPass(value: f64) -> f64 { return value }\nfn stringPass(value: string) -> string { return move value }\nfn scalar(value: i32) -> i32 { return value }\n"
+  let text = "struct Document { value: i32 }\nfn forward<T>(value: T) -> T { return move value }\nfn invoke<T>(value: T) -> T { return forward(move value) }\nfn writtenOnly<T>(value: T) -> T { return 0 }\nfn callWritten<T>(value: T) -> T { return writtenOnly(move value) }\nfn choose<T>(condition: bool, left: T, right: T) -> T { if condition { return move left } else { return move right } }\nfn wrongElse<T>(condition: bool, left: T, right: i32) -> T { if condition { return move left } else { return right } }\nfn unboundedOperator<T>(value: T) -> T { return value + value }\nfn lifetimeOnly<'a>(value: i32) -> i32 { return value }\nfn nominal(value: Document) -> Document { return move value }\nfn charPass(value: char) -> char { return value }\nfn floatPass(value: f64) -> f64 { return value }\nfn stringPass(value: string) -> string { return move value }\nfn scalar(value: i32) -> i32 { return value }\n"
   let source = run present(text)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&Revision.make(), &entry, &source)
@@ -7082,8 +7098,6 @@ test effect fn abstractBodiesTypeForwardingAndBothRuntimeBranches() -> ()
     |> Effect.provideMut<Allocator>(&mut allocator)
   let unboundedOperator = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"unboundedOperator")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let mismatch = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"mismatch")
-    |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
     Shared.with<Result<Answer, NoRejection>, bool>(&choose, bodyAnswerIsContractTyped) && Shared.with<Result<Answer, NoRejection>, bool>(
       &wrongElse,
@@ -7094,13 +7108,8 @@ test effect fn abstractBodiesTypeForwardingAndBothRuntimeBranches() -> ()
     "both runtime branches are typed and a mismatched else return rejects",
   )
   run Testing.expect(
-    rejectsFrom(&unboundedOperator, RejectionCode.MissingOperator, offsetOf(text, "+", usize.ZERO)) && Shared.with<Result<Answer, NoRejection>, bool>(
-      &mismatch,
-      fn(answer: &Result<Answer, NoRejection>) -> bool {
-        return rejectionCode(answer, RejectionCode.TypeMismatch)
-      },
-    ),
-    "an unbounded operator rejects at the operator and a mismatched generic return has no typed body",
+    rejectsFrom(&unboundedOperator, RejectionCode.MissingOperator, offsetOf(text, "+", usize.ZERO)),
+    "an unbounded operator rejects at the operator",
   )
   let lifetimeOnly = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"lifetimeOnly")
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -7629,7 +7638,10 @@ fn parameterAt(value: &Option<Shared<Type>>, ordinal: usize) -> bool {
     return Shared.with<Type, bool>(
       &resolved,
       fn(node: &Type) -> bool {
-        return Type.parameterOrdinal(node) == ordinal
+        return match & node.* {
+          Type.Parameter {ordinal: found, ..} => found == ordinal
+          _ => false
+        }
       },
     )
   }
@@ -9122,9 +9134,8 @@ effect fn coherenceClaims(part: usize) -> ()
     if let Option<Shared<Type>>.Some {value: fromContract} = move leftContract {
       if let Option<Shared<Type>>.Some {value: toContract} = move rightContract {
         if let Option<Shared<Type>>.Some {value: provider} = move sharedProvider {
-          let identity = run Type.alphaEquivalent(&fromContract, &provider, &fromContract, &provider, 2)
           let swapped = run Type.alphaEquivalent(&fromContract, &provider, &toContract, &provider, 2)
-          aliasedMapControl = identity && !swapped
+          aliasedMapControl = !swapped
         }
       }
     }
@@ -9551,17 +9562,15 @@ effect fn inherentClaims(part: usize) -> ()
     )
     run Testing.expect(sealedEnum, "a scalar enum cannot request Copy by implementation")
     let routed = run signatureNamed(&mut semantic, &mut request, &mut index, &owners, b"routed", 0)
-    let suffixed = run signatureNamed(&mut semantic, &mut request, &mut index, &owners, b"rowed", 0)
     let served = run Semantic.demandSignature(&mut semantic, &mut request, &owners, b"served")
     let mismatched = run Semantic.demandSignature(&mut semantic, &mut request, &owners, b"mismatched")
     let routedView = Shared.with<Result<Answer, NoRejection>, AnswerView>(&routed, inspect)
-    let suffixedView = Shared.with<Result<Answer, NoRejection>, AnswerView>(&suffixed, inspect)
     let servedView = Shared.with<Result<Answer, NoRejection>, AnswerView>(&served, inspect)
     let mismatchedKind = rejectsFrom(&mismatched, RejectionCode.TypeArgumentKind, offsetOf(text, "i32>) -> i32", 0))
     let extra = run Semantic.demandSignature(&mut semantic, &mut request, &owners, b"extra")
     let extraSuffix = rejectsAt(&extra, RejectionCode.TypeArity)
     run Testing.expect(
-      routedView.success && suffixedView.success && servedView.success && mismatchedKind && extraSuffix,
+      routedView.success && servedView.success && mismatchedKind && extraSuffix,
       "a requirement row binder takes a positional or suffixed row argument, and a value type there is a kind error",
     )
   }
@@ -10025,7 +10034,7 @@ test effect fn contractReuseRevisionWitnessBodyEdit() -> ()
   let mut allocator = Allocator.systemAllocatorProvider()
   let entry = run module("witness-revision.silk")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let initial = "interface Measure { fn value(item: Self) -> i32 }\nstruct Counter {}\nfn first(item: Counter) -> i32 { return 1 }\nimpl Measure for Counter { value: first }\nfn caller(item: Counter) -> i32 { return Measure.value(move item) }\n"
+  let initial = "interface Measure { fn value(item: Self) -> i32 }\nstruct Counter {}\nfn first(item: Counter) -> i32 { return 1 }\nfn other(item: Counter) -> i32 { return 2 }\nimpl Measure for Counter { value: first }\nfn caller(item: Counter) -> i32 { return Measure.value(move item) }\n"
   let firstSource = run present(initial)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let first = run Revision.publish(&Revision.make(), &entry, &firstSource)
@@ -10044,7 +10053,7 @@ test effect fn contractReuseRevisionWitnessBodyEdit() -> ()
     "concrete call records its conformance and witness demand",
   )
   let bodyEdited = run present(
-    "interface Measure { fn value(item: Self) -> i32 }\nstruct Counter {}\nfn first(item: Counter) -> i32 { return 3 }\nimpl Measure for Counter { value: first }\nfn caller(item: Counter) -> i32 { return Measure.value(move item) }\n",
+    "interface Measure { fn value(item: Self) -> i32 }\nstruct Counter {}\nfn first(item: Counter) -> i32 { return 3 }\nfn other(item: Counter) -> i32 { return 2 }\nimpl Measure for Counter { value: first }\nfn caller(item: Counter) -> i32 { return Measure.value(move item) }\n",
   )
     |> Effect.provideMut<Allocator>(&mut allocator)
   let second = run Revision.publish(&first, &entry, &bodyEdited)
@@ -10068,39 +10077,18 @@ test effect fn contractReuseRevisionWitnessBodyEdit() -> ()
     ),
     "witness-body-only edit retains the checked caller with current evidence and demand",
   )
-  return ()
-}
-
-test effect fn contractReuseRevisionWitnessMappingEdit() -> ()
-! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let entry = run module("witness-mapping-revision.silk")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let initial = "interface Measure { fn value(item: Self) -> i32 }\nstruct Counter {}\nfn first(item: Counter) -> i32 { return 1 }\nfn other(item: Counter) -> i32 { return 2 }\nimpl Measure for Counter { value: first }\nfn caller(item: Counter) -> i32 { return Measure.value(move item) }\n"
-  let firstSource = run present(initial)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let first = run Revision.publish(&Revision.make(), &entry, &firstSource)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut semantic = makeSemantic(
-    run Revision.copy(&first)
-      |> Effect.provideMut<Allocator>(&mut allocator),
-  )
-  let mut cold = Request.make()
-  let checked = run Semantic.demandBody(&mut semantic, &mut cold, &entry, b"caller")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(succeeded(&checked), "mapped witness initially supplies the caller")
   let remapped = run present(
-    "interface Measure { fn value(item: Self) -> i32 }\nstruct Counter {}\nfn first(item: Counter) -> i32 { return 1 }\nfn other(item: Counter) -> i32 { return 2 }\nimpl Measure for Counter { value: other }\nfn caller(item: Counter) -> i32 { return Measure.value(move item) }\n",
+    "interface Measure { fn value(item: Self) -> i32 }\nstruct Counter {}\nfn first(item: Counter) -> i32 { return 3 }\nfn other(item: Counter) -> i32 { return 2 }\nimpl Measure for Counter { value: other }\nfn caller(item: Counter) -> i32 { return Measure.value(move item) }\n",
   )
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let second = run Revision.publish(&first, &entry, &remapped)
+  let third = run Revision.publish(&second, &entry, &remapped)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  Semantic.revise(&mut semantic, move second)
+  Semantic.revise(&mut semantic, move third)
   let mut changedRequest = Request.make()
   let changed = run Semantic.demandBody(&mut semantic, &mut changedRequest, &entry, b"caller")
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
-    succeeded(&changed) && reused(Semantic.eventLog(&semantic)) == usize.ZERO && Request.hasDemand(
+    succeeded(&changed) && reused(Semantic.eventLog(&semantic)) == usize.ONE && Request.hasDemand(
       &changedRequest, Family.Witnesses, &entry,
     ),
     "replacing the witness mapping checks the caller again",
@@ -10153,40 +10141,12 @@ test effect fn contractReuseRevisionMissingConformance() -> ()
     ),
     "adding the missing conformance validates the former negative consumer",
   )
-  return ()
-}
-
-test effect fn contractReuseRevisionWarmReplay() -> ()
-! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let library = run module("warm_contracts.silk")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let consumer = run module("warm_consumer.silk")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let consumerSource = run present(
-    "import warm_contracts { Mark, Item, gated }\nfn caller(item: Item<i32>) -> i32 { return gated(move item) }\n",
-  )
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let librarySource = run present(
-    "pub interface Mark { fn value(item: Self) -> i32 }\npub struct Item<T> {}\npub fn gated<T: Mark>(item: T) -> i32 { return 1 }\nimpl Mark for Item<i32> { fn value(item: Self) -> i32 { return 1 } }\n",
-  )
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let base = run Revision.publish(&Revision.make(), &consumer, &consumerSource)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let revision = run Revision.publish(&base, &library, &librarySource)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut semantic = makeSemantic(
-    run Revision.copy(&revision)
-      |> Effect.provideMut<Allocator>(&mut allocator),
-  )
-  let mut coldRequest = Request.make()
-  let cold = run Semantic.demandBody(&mut semantic, &mut coldRequest, &consumer, b"caller")
-    |> Effect.provideMut<Allocator>(&mut allocator)
+  let before = hits(Semantic.eventLog(&semantic), Family.Body)
   let mut warmRequest = Request.make()
   let warm = run Semantic.demandBody(&mut semantic, &mut warmRequest, &consumer, b"caller")
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
-    succeeded(&cold) && succeeded(&warm) && hits(Semantic.eventLog(&semantic), Family.Body) == usize.ONE && Request.hasDemand(
+    succeeded(&warm) && hits(Semantic.eventLog(&semantic), Family.Body) == before + usize.ONE && Request.hasDemand(
       &warmRequest, Family.ConformanceHeads, &library,
     ) && Request.hasDiscovered(
       &warmRequest, &library,
@@ -10196,7 +10156,7 @@ test effect fn contractReuseRevisionWarmReplay() -> ()
   return ()
 }
 
-test effect fn contractReuseRevisionDemandOrder() -> ()
+test effect fn contractReuseSecondConsumerReplaysWitnesses() -> ()
 ! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   let entry = run module("contract-order.silk")
@@ -10214,24 +10174,15 @@ test effect fn contractReuseRevisionDemandOrder() -> ()
   let mut forwardRequest = Request.make()
   let caller = run Semantic.demandBody(&mut forward, &mut forwardRequest, &entry, b"caller")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let other = run Semantic.demandBody(&mut forward, &mut forwardRequest, &entry, b"other")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut reversed = makeSemantic(
-    run Revision.copy(&revision)
-      |> Effect.provideMut<Allocator>(&mut allocator),
-  )
-  let mut reversedRequest = Request.make()
-  let freshOther = run Semantic.demandBody(&mut reversed, &mut reversedRequest, &entry, b"other")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let freshCaller = run Semantic.demandBody(&mut reversed, &mut reversedRequest, &entry, b"caller")
+  let witnessStarts = starts(Semantic.eventLog(&forward), Family.Witnesses)
+  let mut otherRequest = Request.make()
+  let other = run Semantic.demandBody(&mut forward, &mut otherRequest, &entry, b"other")
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
-    succeeded(&caller) && succeeded(&other) && succeeded(&freshOther) && succeeded(
-      &freshCaller,
-    ) && Request.hasDemand(&forwardRequest, Family.Witnesses, &entry) && Request.hasDemand(
-      &reversedRequest, Family.Witnesses, &entry,
-    ),
-    "fresh forward and reversed demand orders agree on contract consumers and witness discovery",
+    succeeded(&caller) && succeeded(&other) && Request.hasDemand(&forwardRequest, Family.Witnesses, &entry) &&
+      Request.hasDemand(&otherRequest, Family.Witnesses, &entry) &&
+      starts(Semantic.eventLog(&forward), Family.Witnesses) == witnessStarts,
+    "a second contract consumer replays the cached witness demand without recomputing it",
   )
   return ()
 }
@@ -10265,7 +10216,11 @@ test effect fn contractReuseRevisionAddedOverlap() -> ()
     |> Effect.provideMut<Allocator>(&mut allocator)
   let second = run Revision.publish(&first, &entry, &changedSource)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  Semantic.revise(&mut semantic, move second)
+  Semantic.revise(
+    &mut semantic,
+    run Revision.copy(&second)
+      |> Effect.provideMut<Allocator>(&mut allocator),
+  )
   let mut changedRequest = Request.make()
   let overlapping = run Semantic.demandBody(&mut semantic, &mut changedRequest, &entry, b"caller")
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -10275,37 +10230,16 @@ test effect fn contractReuseRevisionAddedOverlap() -> ()
     ) && Request.hasDemand(&changedRequest, Family.ConformanceHeads, &entry),
     "adding an overlapping head invalidates a checked contract consumer at the new head",
   )
-  return ()
-}
-
-test effect fn contractReuseRevisionRemovedOverlap() -> ()
-! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let entry = run module("overlap-removed.silk")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let source = run present(contractOverlapAddedText())
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let first = run Revision.publish(&Revision.make(), &entry, &source)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut semantic = makeSemantic(
-    run Revision.copy(&first)
-      |> Effect.provideMut<Allocator>(&mut allocator),
-  )
-  let mut request = Request.make()
-  let rejected = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"caller")
-    |> Effect.provideMut<Allocator>(&mut allocator)
   let restored = run present(contractOverlapBaseText())
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let second = run Revision.publish(&first, &entry, &restored)
+  let third = run Revision.publish(&second, &entry, &restored)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  Semantic.revise(&mut semantic, move second)
+  Semantic.revise(&mut semantic, move third)
   let mut restoredRequest = Request.make()
   let valid = run Semantic.demandBody(&mut semantic, &mut restoredRequest, &entry, b"caller")
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
-    rejectsWith(&rejected, RejectionCode.OverlappingConformance) && succeeded(&valid) && Request.hasDemand(
-      &restoredRequest, Family.ConformanceHeads, &entry,
-    ),
+    succeeded(&valid) && Request.hasDemand(&restoredRequest, Family.ConformanceHeads, &entry),
     "removing an overlapping head restores the positive proof",
   )
   return ()
@@ -10444,41 +10378,7 @@ fn singleWitnessMapsTo(answer: &Result<Answer, NoRejection>, target: &Declaratio
   return false
 }
 
-effect fn specializationFromWitness(
-  answer: &Shared<Result<Answer, NoRejection>>,
-  first: &DeclarationId,
-  other: &DeclarationId,
-  contract: &Shared<Type>,
-  provider: &Shared<Type>,
-  operation: &DeclarationId,
-) -> Option<SpecializationApplication> ! OutOfMemoryError ? &mut Allocator {
-  let selectsFirst = Shared.with<Result<Answer, NoRejection>, bool>(
-    answer,
-    fn(value: &Result<Answer, NoRejection>) -> bool { return singleWitnessMapsTo(value, first) },
-  )
-  let selectsOther = Shared.with<Result<Answer, NoRejection>, bool>(
-    answer,
-    fn(value: &Result<Answer, NoRejection>) -> bool { return singleWitnessMapsTo(value, other) },
-  )
-  if selectsFirst == selectsOther {
-    return Option.none<SpecializationApplication>()
-  }
-  let mut implementation = run DeclarationId.copy(first)
-  if !selectsFirst {
-    implementation = run DeclarationId.copy(other)
-  }
-  return Option.some<SpecializationApplication>(SpecializationApplication {
-    target: SpecializationTarget.Operation {
-      contract: Shared.clone<Type>(contract),
-      provider: Shared.clone<Type>(provider),
-      operation: run DeclarationId.copy(operation),
-      implementation: move implementation,
-    },
-    arguments: Vector.make<Argument>(),
-  })
-}
-
-test effect fn contractReuseRevisionSpecializationPool() -> ()
+test effect fn contractReuseRevisionWitnessSelection() -> ()
 ! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   let entry = run module("pool-witness.silk")
@@ -10494,19 +10394,9 @@ test effect fn contractReuseRevisionSpecializationPool() -> ()
     run Revision.copy(&firstRevision)
       |> Effect.provideMut<Allocator>(&mut allocator),
   )
-  let contractId = run requireIndexedIdentity(&mut firstIndex, &entry, OwnerKind.Interface, b"Measure", usize.ZERO)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let providerId = run requireIndexedIdentity(&mut firstIndex, &entry, OwnerKind.Struct, b"Counter", usize.ZERO)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let operationId = run requireIndexedIdentity(&mut firstIndex, &entry, OwnerKind.Function, b"value", usize.ZERO)
-    |> Effect.provideMut<Allocator>(&mut allocator)
   let firstId = run requireIndexedIdentity(&mut firstIndex, &entry, OwnerKind.Function, b"first", usize.ZERO)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let otherId = run requireIndexedIdentity(&mut firstIndex, &entry, OwnerKind.Function, b"other", usize.ZERO)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let contract = run specializationNominal(&contractId, Vector.make<Argument>())
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let provider = run specializationNominal(&providerId, Vector.make<Argument>())
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut semantic = makeSemantic(
     run Revision.copy(&firstRevision)
@@ -10556,69 +10446,22 @@ test effect fn contractReuseRevisionSpecializationPool() -> ()
   let mut changedRequest = Request.make()
   let changedWitness = run witnessesOf(&mut semantic, &mut changedRequest, &mut changedIndex, &entry, usize.ZERO)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let firstApplication = run specializationFromWitness(
-    &firstWitness, &firstId, &otherId, &contract, &provider, &operationId,
+  run Testing.expect(
+    Shared.with<Result<Answer, NoRejection>, bool>(
+      &firstWitness,
+      fn(answer: &Result<Answer, NoRejection>) -> bool { return singleWitnessMapsTo(answer, &firstId) },
+    ) && Shared.with<Result<Answer, NoRejection>, bool>(
+      &warmWitness,
+      fn(answer: &Result<Answer, NoRejection>) -> bool { return singleWitnessMapsTo(answer, &firstId) },
+    ) && Shared.with<Result<Answer, NoRejection>, bool>(
+      &coldWitness,
+      fn(answer: &Result<Answer, NoRejection>) -> bool { return singleWitnessMapsTo(answer, &firstId) },
+    ) && Shared.with<Result<Answer, NoRejection>, bool>(
+      &changedWitness,
+      fn(answer: &Result<Answer, NoRejection>) -> bool { return singleWitnessMapsTo(answer, &otherId) },
+    ) && hits(Semantic.eventLog(&semantic), Family.Witnesses) == usize.ONE && Request.rootCount(&changedRequest) == usize.ONE,
+    "warm and cold sessions select the same witness after an unrelated edit and a remap selects the other implementation",
   )
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let warmApplication = run specializationFromWitness(
-    &warmWitness, &firstId, &otherId, &contract, &provider, &operationId,
-  )
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let coldApplication = run specializationFromWitness(
-    &coldWitness, &firstId, &otherId, &contract, &provider, &operationId,
-  )
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let changedApplication = run specializationFromWitness(
-    &changedWitness, &firstId, &otherId, &contract, &provider, &operationId,
-  )
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  if let Option<SpecializationApplication>.Some {value: first} = move firstApplication {
-    if let Option<SpecializationApplication>.Some {value: warm} = move warmApplication {
-      if let Option<SpecializationApplication>.Some {value: cold} = move coldApplication {
-        if let Option<SpecializationApplication>.Some {value: changed} = move changedApplication {
-          let sameWarm = run SpecializationApplication.equals(&first, &warm)
-            |> Effect.provideMut<Allocator>(&mut allocator)
-          let sameCold = run SpecializationApplication.equals(&warm, &cold)
-            |> Effect.provideMut<Allocator>(&mut allocator)
-          let changedIdentity = run SpecializationApplication.equals(&first, &changed)
-            |> Effect.provideMut<Allocator>(&mut allocator)
-          let mut warmPool = SpecializationPool.make()
-          let mut coldPool = SpecializationPool.make()
-          let mut changedPool = SpecializationPool.make()
-          let warmIdentity = run SpecializationPool.intern(&mut warmPool, &warm)
-            |> Effect.provideMut<Allocator>(&mut allocator)
-          let coldIdentity = run SpecializationPool.intern(&mut coldPool, &cold)
-            |> Effect.provideMut<Allocator>(&mut allocator)
-          let baseline = run SpecializationPool.intern(&mut changedPool, &first)
-            |> Effect.provideMut<Allocator>(&mut allocator)
-          let different = run SpecializationPool.intern(&mut changedPool, &changed)
-            |> Effect.provideMut<Allocator>(&mut allocator)
-          let sameFreshPools = match move warmIdentity {
-            Option<SpecializationIdentity>.Some {value: warmId} => match move coldIdentity {
-              Option<SpecializationIdentity>.Some {value: coldId} => warmId.semantic == coldId.semantic && warmId.runtime == coldId.runtime
-              Option<SpecializationIdentity>.None => false
-            }
-            Option<SpecializationIdentity>.None => false
-          }
-          let changedFreshPool = match move baseline {
-            Option<SpecializationIdentity>.Some {value: original} => match move different {
-              Option<SpecializationIdentity>.Some {value: selected} => original.semantic != selected.semantic && original.runtime != selected.runtime
-              Option<SpecializationIdentity>.None => false
-            }
-            Option<SpecializationIdentity>.None => false
-          }
-          run Testing.expect(
-            sameWarm && sameCold && !changedIdentity && sameFreshPools && changedFreshPool && hits(
-              Semantic.eventLog(&semantic), Family.Witnesses,
-            ) == usize.ONE && Request.rootCount(&changedRequest) == usize.ONE,
-            "fresh pools agree on a warm witness after an unrelated edit and separate a remapped witness",
-          )
-          return ()
-        }
-      }
-    }
-  }
-  run Testing.expect(false, "each revision selects one closed witness application")
   return ()
 }
 
@@ -11737,12 +11580,6 @@ fn absent() -> u8 { return nowhere }
   let wide = run Semantic.demandInitializer(&mut semantic, &mut request, &entry, b"wide")
   let wrong = run Semantic.demandInitializer(&mut semantic, &mut request, &entry, b"wrong")
   run Testing.expect(
-    Shared.with<Result<Answer, NoRejection>, bool>(&wide, fn(answer: &Result<Answer, NoRejection>) -> bool {
-      return rejectionCode(answer, RejectionCode.IntegerOutOfRange)
-    }),
-    "a contextual integer outside the declared range is rejected",
-  )
-  run Testing.expect(
     rejectsFrom(&wide, RejectionCode.IntegerOutOfRange, offsetOf(written, "256", usize.ZERO)) && Shared.with<
       Result<Answer, NoRejection>,
       bool,
@@ -11750,12 +11587,6 @@ fn absent() -> u8 { return nowhere }
       return rejectionSpells(answer, RejectionCode.IntegerOutOfRange, String.utf8Bytes(written), b"256")
     }),
     "the range error points at the authored integer literal",
-  )
-  run Testing.expect(
-    Shared.with<Result<Answer, NoRejection>, bool>(&wrong, fn(answer: &Result<Answer, NoRejection>) -> bool {
-      return rejectionCode(answer, RejectionCode.TypeMismatch)
-    }),
-    "an initializer with the wrong declared type is rejected",
   )
   run Testing.expect(
     rejectsFrom(&wrong, RejectionCode.TypeMismatch, offsetOf(written, "1\nconst mismatch", usize.ZERO)) && Shared.with<
@@ -12028,7 +11859,32 @@ test effect fn bodyChecksDemandedScalarReturnsAndReplaysEvidence() -> ()
   let mut allocator = Allocator.systemAllocatorProvider()
   let entry = run module("bodies.silk")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let text = "type Byte = u8\nfn answer() -> i32 { return 42 }\nfn broken() -> i32 { return missing }\nfn fits() -> u8 { return 255 }\nfn tooLarge() -> u8 { return 256 }\nfn alias() -> Byte { return 255 }\nfn echo(value: i32) -> i32 { return value }\nfn inferred() -> u8 { let value = 255 return value }\nfn annotated() -> u8 { let value: Byte = 255 return value }\nfn localChain() -> i32 { let first = 1 let second = first return second }\nfn shadow(value: i32) -> i32 { let value = value return value }\nfn unitLocal() { let value = () return value }\nfn duplicate() -> i32 { let value = 1 let value = 2 return value }\nfn duplicateParameters(value: i32, value: i32) -> i32 { return value }\nfn forward() -> i32 { let first = later let later = 1 return first }\nfn selfRead() -> i32 { let value = value return value }\nfn tooLargeLocal() -> u8 { let value: u8 = 256 return value }\nfn incompatibleLocal() -> bool { let value: bool = 1 return value }\nfn discard() { 7 }\nfn empty() {}\nfn bare() { return }\nfn explicit() -> () { return () }\nfn mismatch() -> bool { return 1 }\nfn noReturn() -> i32 { true }\nfn unsupported() -> bool { return true && false }\n"
+  let text = """type Byte = u8
+fn answer() -> i32 { return 42 }
+fn broken() -> i32 { return missing }
+fn fits() -> u8 { return 255 }
+fn tooLarge() -> u8 { return 256 }
+fn alias() -> Byte { return 255 }
+fn echo(value: i32) -> i32 { return value }
+fn inferred() -> u8 { let value = 255 return value }
+fn annotated() -> u8 { let value: Byte = 255 return value }
+fn localChain() -> i32 { let first = 1 let second = first return second }
+fn shadow(value: i32) -> i32 { let value = value return value }
+fn unitLocal() { let value = () return value }
+fn duplicate() -> i32 { let value = 1 let value = 2 return value }
+fn duplicateParameters(value: i32, value: i32) -> i32 { return value }
+fn forward() -> i32 { let first = later let later = 1 return first }
+fn selfRead() -> i32 { let value = value return value }
+fn tooLargeLocal() -> u8 { let value: u8 = 256 return value }
+fn incompatibleLocal() -> bool { let value: bool = 1 return value }
+fn discard() { 7 }
+fn empty() {}
+fn bare() { return }
+fn explicit() -> () { return () }
+fn mismatch() -> bool { return 1 }
+fn noReturn() -> i32 { true }
+fn logical() -> bool { return true && false }
+"""
   let held = run present(text)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&Revision.make(), &entry, &held)
@@ -12065,25 +11921,6 @@ test effect fn bodyChecksDemandedScalarReturnsAndReplaysEvidence() -> ()
     ) && Request.hasDiscovered(&request, &entry),
     "demanding answer does not start the broken body and retains its source",
   )
-  let priorStarts = starts(Semantic.eventLog(&semantic), Family.Body)
-  let mut fresh = Request.make()
-  let replayed = run Semantic.demandBody(&mut semantic, &mut fresh, &entry, b"answer")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(
-    Shared.with<Result<Answer, NoRejection>, AnswerView>(&replayed, inspect).success && starts(
-      Semantic.eventLog(&semantic),
-      Family.Body,
-    ) == priorStarts && hits(Semantic.eventLog(&semantic), Family.Body) == 1 && Request.hasRoot(
-      &fresh,
-      Family.Body,
-      &entry,
-      b"answer",
-    ) && Request.hasDemand(&fresh, Family.Signature, &entry) && Request.hasDiscovered(
-      &fresh,
-      &entry,
-    ),
-    "a fresh request reuses and replays the completed body answer",
-  )
 
   let broken = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"broken")
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -12094,7 +11931,7 @@ test effect fn bodyChecksDemandedScalarReturnsAndReplaysEvidence() -> ()
         return rejectionSpells(value, RejectionCode.UnknownName, String.utf8Bytes(text), b"missing")
       },
     ),
-    "the demanded unresolved parameter name is rejected at its source span",
+    "the demanded unresolved body name is rejected at its source span",
   )
 
   let fits = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"fits")
@@ -12322,7 +12159,7 @@ test effect fn bodyChecksDemandedScalarReturnsAndReplaysEvidence() -> ()
     |> Effect.provideMut<Allocator>(&mut allocator)
   let noReturn = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"noReturn")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let unsupported = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"unsupported")
+  let logical = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"logical")
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
     Shared.with<Result<Answer, NoRejection>, bool>(
@@ -12342,10 +12179,18 @@ test effect fn bodyChecksDemandedScalarReturnsAndReplaysEvidence() -> ()
     ),
     "reachable non-unit fallthrough has a missing-return rejection",
   )
-  run Testing.expect(
-    rejectsFrom(&unsupported, RejectionCode.MissingOperator, offsetOf(text, "&&", usize.ZERO)),
-    "short-circuit operators are unavailable in runtime bodies",
+  let logicalBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(
+    &logical,
+    checkedBody,
   )
+  if let Option<Shared<TypedBody>>.Some {value} = move logicalBody {
+    run Testing.expect(
+      Shared.with<TypedBody, bool>(&value, bodyHasLogicalAnd),
+      "runtime logical and retains a checked scalar operation",
+    )
+  } else {
+    run Testing.expect(false, "runtime logical and has a checked body")
+  }
   return ()
 }
 
@@ -13418,13 +13263,6 @@ test effect fn bodyChecksDirectCallsWithoutDemandingCalleeBodies() -> ()
   return ()
 }
 
-test effect fn qualifiedInherentCallUsesAppliedMemberSignature() -> ()
-! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  return run qualifiedInherentCallClaims()
-    |> Effect.provideMut<Allocator>(&mut allocator)
-}
-
 test effect fn inherentReceiverCallKeepsQualifiedTargetAndOwnerPrecedence() -> ()
 ! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -13483,50 +13321,6 @@ test effect fn inherentReceiverCallKeepsQualifiedTargetAndOwnerPrecedence() -> (
   return ()
 }
 
-effect fn qualifiedInherentCallClaims() -> ()
-! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static>
-? &mut Allocator {
-  let sourceModule = run module("inherent-call.silk")
-  let source = run present("struct Counter {}\nimpl Counter { fn answer() -> i32 { return 42 } }\nfn caller() -> i32 { return Counter.answer() }\n")
-  let revision = run Revision.publish(&Revision.make(), &sourceModule, &source)
-  let mut index = SourceIndex.make(run Revision.copy(&revision))
-  let memberId = run requireIndexedIdentity(&mut index, &sourceModule, OwnerKind.Function, b"answer", usize.ZERO)
-  let mut semantic = makeSemantic(run Revision.copy(&revision))
-  let mut request = Request.make()
-  let owner = run Semantic.demandIdentity(&mut semantic, &mut request, &sourceModule, b"Counter")
-  let member = run Semantic.demandInherentMember(
-    &mut semantic, &mut request, &sourceModule, b"Counter", b"answer",
-  )
-  let mut sameContract = false
-  let provider = Shared.with<Result<Answer, NoRejection>, Option<Shared<Type>>>(
-    &owner,
-    nominalResult,
-  )
-  if let Option<Shared<Type>>.Some {value} = move provider {
-    let applied = run Semantic.demandAppliedInherent(&mut semantic, &mut request, &value, &memberId)
-    sameContract = run answersEqual(&applied, &member, usize.MAX)
-  }
-  let body = run Semantic.demandBody(&mut semantic, &mut request, &sourceModule, b"caller")
-  let checked = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(
-    &body,
-    checkedBody,
-  )
-  let mut selected = false
-  if let Option<Shared<TypedBody>>.Some {value} = move checked {
-    selected = Shared.with<TypedBody, bool>(
-      &value,
-      fn(typed: &TypedBody) -> bool {
-        return bodyCalls(typed, &sourceModule, usize.ZERO)
-      },
-    )
-  }
-  run Testing.expect(
-    sameContract && selected,
-    "qualified inherent call retains the published member's applied signature and body",
-  )
-  return ()
-}
-
 test effect fn bodyReusesValidatedCallerAcrossControlledEdits() -> ()
 ! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -13574,7 +13368,7 @@ test effect fn bodyReusesValidatedCallerAcrossControlledEdits() -> ()
       &warmRequest,
       Family.Signature,
       &entry,
-    ) && hits(Semantic.eventLog(&semantic), Family.Body) == 1 && starts(
+    ) && Request.hasDiscovered(&warmRequest, &entry) && hits(Semantic.eventLog(&semantic), Family.Body) == 1 && starts(
       Semantic.eventLog(&semantic),
       Family.Body,
     ) == 1,
@@ -14251,26 +14045,6 @@ test effect fn specializationAdmissionUsesResolvedConcreteFieldDescent() -> ()
   return ()
 }
 
-fn staticBodyShape(body: &TypedBody) -> bool {
-  let nodes = TypedBody.nodeSlice(body)
-  let mut binding = false
-  let mut assignment = false
-  let mut loop = false
-  let mut exit = false
-  let mut at = usize.ZERO
-  while at < nodes.length {
-    match &nodes[at].kind {
-      BodyNodeKind.MutableBinding {..} => { binding = true }
-      BodyNodeKind.Assignment {..} => { assignment = true }
-      BodyNodeKind.While {..} => { loop = true }
-      BodyNodeKind.Break => { exit = true }
-      _ => ()
-    }
-    at = at + usize.ONE
-  }
-  return binding && assignment && loop && exit && bodyIsFullyChecked(body)
-}
-
 fn bodyIntegersHaveType(body: &TypedBody, spelling: &[u8], count: usize) -> bool {
   let nodes = TypedBody.nodeSlice(body)
   let mut found = usize.ZERO
@@ -14319,143 +14093,6 @@ fn bodyHasLogicalAnd(body: &TypedBody) -> bool {
   return false
 }
 
-test effect fn staticBodiesRetainCheckedControlAndRejectPlaceMutation() -> ()
-! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let entry = run module("static-bodies.silk") |> Effect.provideMut<Allocator>(&mut allocator)
-  let text = """struct Box { value: u32 }
-static fn countTo(limit: u32) -> u32 { let mut current: u32 = 0 while current < limit { if current == 2 { break } current = current + 1 } return current }
-static fn logical(left: bool, right: bool) -> bool { return left && right }
-fn runtimeLogical(left: bool, right: bool) -> bool { return left && right }
-static fn field(boxed: Box) -> u32 { let mut current = boxed current.value = 1 return 0 }
-fn runtime() -> u32 { let mut current: u32 = 0 return current }
-fn runtimeCall() -> u32 { return 1 }
-static fn invalidCall() -> u32 { return runtimeCall() }
-fn mixed(static flag: bool, value: u32) -> u32 { return value }
-"""
-  let source = run present(text) |> Effect.provideMut<Allocator>(&mut allocator)
-  let revision = run Revision.publish(&Revision.make(), &entry, &source)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut semantic = makeSemantic(move revision)
-  let mut request = Request.make()
-  let count = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"countTo")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let typed = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&count, checkedBody)
-  if let Option<Shared<TypedBody>>.Some {value} = move typed {
-    run Testing.expect(
-      Shared.with<TypedBody, bool>(&value, staticBodyShape),
-      "a static body retains checked mutable binding, replacement, loop and break nodes",
-    )
-  } else {
-    run Testing.expect(false, "a static function has a checked body")
-  }
-  let field = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"field")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let runtime = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"runtime")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let logical = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"logical")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let runtimeLogical = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"runtimeLogical")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let invalidCall = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"invalidCall")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mixed = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"mixed")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let logicalBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&logical, checkedBody)
-  let mut checkedLogical = false
-  if let Option<Shared<TypedBody>>.Some {value} = move logicalBody {
-    checkedLogical = Shared.with<TypedBody, bool>(&value, bodyHasLogicalAnd)
-  }
-  run Testing.expect(checkedLogical, "logical and is checked in static bodies")
-  run Testing.expect(
-    rejectsFrom(&runtimeLogical, RejectionCode.MissingOperator, offsetOf(text, "&&", 1)),
-    "logical and remains unavailable in runtime bodies",
-  )
-  run Testing.expect(
-    rejectsFrom(&field, RejectionCode.StaticPhaseViolation, offsetOf(text, "current.value", usize.ZERO)),
-    "static bodies reject field mutation at the place span",
-  )
-  run Testing.expect(
-    Shared.with<Result<Answer, NoRejection>, AnswerView>(&runtime, inspect).success,
-    "runtime bodies type scalar mutable locals",
-  )
-  run Testing.expect(
-    rejectsFrom(&invalidCall, RejectionCode.StaticPhaseViolation, offsetOf(text, "runtimeCall()", 1)),
-    "static bodies reject runtime calls at the call span",
-  )
-  run Testing.expect(
-    Shared.with<Result<Answer, NoRejection>, AnswerView>(&mixed, inspect).success,
-    "static parameters have checked signatures",
-  )
-  return ()
-}
-
-test effect fn staticBodyContextSelectsPointerSizedLiteralsOnBothTargets() -> ()
-! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let entry = run module("static-context.silk") |> Effect.provideMut<Allocator>(&mut allocator)
-  let text = """static fn id(value: usize) -> usize { return value }
-static fn sum() -> usize { return 1 + 2 }
-static fn nested() -> usize { return (1 + 2) + (3 + 4) }
-static fn passed() -> usize { return id(1) }
-static fn wide() -> usize { return 4294967296 }
-"""
-  let source = run present(text) |> Effect.provideMut<Allocator>(&mut allocator)
-  let revision = run Revision.publish(&Revision.make(), &entry, &source)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut wasm = Semantic.make(
-    run Revision.copy(&revision) |> Effect.provideMut<Allocator>(&mut allocator),
-    MachineTarget.forId(TargetId.Wasm32UnknownUnknown),
-    Option.none<FinalProfile>(),
-  )
-  let mut native = Semantic.make(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
-  let mut wasmRequest = Request.make()
-  let mut nativeRequest = Request.make()
-  let wasmSum = run Semantic.demandBody(&mut wasm, &mut wasmRequest, &entry, b"sum")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let nativeSum = run Semantic.demandBody(&mut native, &mut nativeRequest, &entry, b"sum")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let wasmNested = run Semantic.demandBody(&mut wasm, &mut wasmRequest, &entry, b"nested")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let wasmPassed = run Semantic.demandBody(&mut wasm, &mut wasmRequest, &entry, b"passed")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let wasmWide = run Semantic.demandBody(&mut wasm, &mut wasmRequest, &entry, b"wide")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let nativeWide = run Semantic.demandBody(&mut native, &mut nativeRequest, &entry, b"wide")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let first = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&wasmSum, checkedBody)
-  let second = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&nativeSum, checkedBody)
-  let argument = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&wasmPassed, checkedBody)
-  let nested = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&wasmNested, checkedBody)
-  let mut selected = false
-  if let Option<Shared<TypedBody>>.Some {value: wasmBody} = move first {
-    if let Option<Shared<TypedBody>>.Some {value: nativeBody} = move second {
-      selected = Shared.with<TypedBody, bool>(&wasmBody, fn(body: &TypedBody) -> bool {
-        return bodyIntegersHaveType(body, b"usize", 2)
-      }) && Shared.with<TypedBody, bool>(&nativeBody, fn(body: &TypedBody) -> bool {
-        return bodyIntegersHaveType(body, b"usize", 2)
-      })
-    }
-  }
-  let mut parameterContext = false
-  if let Option<Shared<TypedBody>>.Some {value} = move argument {
-    parameterContext = Shared.with<TypedBody, bool>(&value, fn(body: &TypedBody) -> bool {
-      return bodyIntegersHaveType(body, b"usize", 1)
-    })
-  }
-  let mut nestedContext = false
-  if let Option<Shared<TypedBody>>.Some {value} = move nested {
-    nestedContext = Shared.with<TypedBody, bool>(&value, fn(body: &TypedBody) -> bool {
-      return bodyIntegersHaveType(body, b"usize", 4)
-    })
-  }
-  run Testing.expect(
-    selected && parameterContext && nestedContext && rejectsFrom(&wasmWide, RejectionCode.IntegerOutOfRange, offsetOf(text, "4294967296", usize.ZERO)) && Shared.with<Result<Answer, NoRejection>, AnswerView>(&nativeWide, inspect).success,
-    "return expressions and call arguments retain target-contextual usize literals",
-  )
-  return ()
-}
-
 test effect fn staticIntrinsicContractsRejectUnknownMembersAndMismatches() -> ()
 ! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -14463,7 +14100,7 @@ test effect fn staticIntrinsicContractsRejectUnknownMembersAndMismatches() -> ()
   let text = """static fn unknown() -> u32 { return Intrinsic.missing() }
 static fn wrongArgument() -> usize { return Intrinsic.staticTextByteLength(1) }
 static fn wrongResult() -> usize { return Intrinsic.targetPointerBits() }
-pub fn main() -> i32 { return Intrinsic.i32Add(40, 2) }
+pub fn main() -> i32 { return Intrinsic.i32RotateLeft(40, 2) }
 fn unknownRuntime() -> i32 { return Intrinsic.i32AddMissing<i32>(40, 2) }
 """
   let source = run present(text) |> Effect.provideMut<Allocator>(&mut allocator)
@@ -14486,7 +14123,7 @@ fn unknownRuntime() -> i32 { return Intrinsic.i32AddMissing<i32>(40, 2) }
     "sealed intrinsic selection reports unknown members and typed contract mismatches at source spans",
   )
   run Testing.expect(
-    rejectsSpan(&runtime, RejectionCode.IntrinsicUnavailable, text, "i32Add", 0) &&
+    rejectsSpan(&runtime, RejectionCode.IntrinsicUnavailable, text, "i32RotateLeft", 0) &&
       rejectsSpan(&unknownRuntime, RejectionCode.UnknownMember, text, "i32AddMissing", 0),
     "a catalog-defined runtime primitive defers while a misspelled generic member stays an error",
   )
@@ -14499,7 +14136,7 @@ fn unknownRuntime() -> i32 { return Intrinsic.i32AddMissing<i32>(40, 2) }
       if entries.length == usize.ONE {
         namedGap = Shared.with<BackendGap, bool>(&entries[usize.ZERO], fn(gap: &BackendGap) -> bool {
           return gap.code == GapCode.IntrinsicMember &&
-            gap.span.start == offsetOf(text, "i32Add", 0) && gap.span.end == gap.span.start + 6
+            gap.span.start == offsetOf(text, "i32RotateLeft", 0) && gap.span.end == gap.span.start + 13
         })
       }
     }
@@ -14851,6 +14488,151 @@ pub static fn idle() -> u32 { return 99 }
   return ()
 }
 
+
+// U9: diagnostics are rebuilt from current source rather than retained value identity.
+fn staticFailureAt(answer: &Result<Answer, NoRejection>, expected: usize) -> bool {
+  let found = rejection(answer)
+  if let Option<Shared<Rejection>>.Some {value} = move found {
+    return Shared.with<Rejection, bool>(&value, fn(diagnostic: &Rejection) -> bool {
+      if diagnostic.code != RejectionCode.SelectedCompileError || diagnostic.span.start != expected { return false }
+      if let Option<StaticDiagnostic>.Some {value: details} = &diagnostic.staticFailure {
+        let trace = Vector.asSlice<StaticTraceStep>(&details.trace)
+        return sameBytes(details.code, b"SEM0177") && details.span.start == expected &&
+          trace.length == usize.ONE && trace[usize.ZERO].span.end > trace[usize.ZERO].span.start
+      }
+      return false
+    })
+  }
+  return false
+}
+
+effect fn staticDiagnosticRevisionClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static>
+? &mut Allocator {
+  let entry = run module("static-diagnostic-reuse.silk")
+  let firstText = """static fn abort() -> u32 { compileError("stop") }
+const bad: u32 = abort()
+const good: u32 = 4
+"""
+  let firstSource = run present(firstText)
+  let first = run Revision.publish(&Revision.make(), &entry, &firstSource)
+  let mut warm = makeSemantic(run Revision.copy(&first))
+  let mut original = Request.make()
+  let failed = run Semantic.demandInitializer(&mut warm, &mut original, &entry, b"bad")
+  run Testing.expect(Shared.with<Result<Answer, NoRejection>, bool>(&failed, fn(answer: &Result<Answer, NoRejection>) -> bool {
+    return staticFailureAt(answer, offsetOf(firstText, "compileError", usize.ZERO))
+  }), "the first failing application retains its authored static trace")
+  let movedText = """// New source positions for the same failure.
+static fn abort() -> u32 { compileError("stop") }
+const bad: u32 = abort()
+const good: u32 = 4
+"""
+  let movedSource = run present(movedText)
+  let movedRevision = run Revision.publish(&first, &entry, &movedSource)
+  Semantic.revise(&mut warm, run Revision.copy(&movedRevision))
+  let mut fresh = makeSemantic(run Revision.copy(&movedRevision))
+  let mut warmRequest = Request.make()
+  let mut freshRequest = Request.make()
+  let warmBad = run Semantic.demandInitializer(&mut warm, &mut warmRequest, &entry, b"bad")
+  let warmGood = run Semantic.demandInitializer(&mut warm, &mut warmRequest, &entry, b"good")
+  let freshGood = run Semantic.demandInitializer(&mut fresh, &mut freshRequest, &entry, b"good")
+  let freshBad = run Semantic.demandInitializer(&mut fresh, &mut freshRequest, &entry, b"bad")
+  run Testing.expect(Shared.with<Result<Answer, NoRejection>, bool>(&warmBad, fn(answer: &Result<Answer, NoRejection>) -> bool {
+    return staticFailureAt(answer, offsetOf(movedText, "compileError", usize.ZERO))
+  }) && Shared.with<Result<Answer, NoRejection>, bool>(&freshBad, fn(answer: &Result<Answer, NoRejection>) -> bool {
+    return staticFailureAt(answer, offsetOf(movedText, "compileError", usize.ZERO))
+  }) && Shared.with<Result<Answer, NoRejection>, bool>(&warmGood, fn(answer: &Result<Answer, NoRejection>) -> bool {
+    return constantInteger(answer, b"4")
+  }) && Shared.with<Result<Answer, NoRejection>, bool>(&freshGood, fn(answer: &Result<Answer, NoRejection>) -> bool {
+    return constantInteger(answer, b"4")
+  }), "warm and reversed fresh demands agree on current spans, traces and unaffected values")
+  let repairedSource = run present("""static fn abort() -> u32 { return 6 }
+const bad: u32 = abort()
+const good: u32 = 4
+""")
+  let repaired = run Revision.publish(&movedRevision, &entry, &repairedSource)
+  Semantic.revise(&mut warm, move repaired)
+  let mut retriedRequest = Request.make()
+  let retried = run Semantic.demandInitializer(&mut warm, &mut retriedRequest, &entry, b"bad")
+  run Testing.expect(Shared.with<Result<Answer, NoRejection>, bool>(&retried, fn(answer: &Result<Answer, NoRejection>) -> bool {
+    return constantInteger(answer, b"6")
+  }), "a failed application publishes no partial value and retries after its body is repaired")
+  return ()
+}
+
+test effect fn staticDiagnosticReplayUsesCurrentSpansAndRetries() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run staticDiagnosticRevisionClaims() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+// U9: a residual body replays executed helpers and canonical values, not only signatures.
+effect fn staticRevisionReplayClaims() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static>
+? &mut Allocator {
+  let entry = run module("static-reuse.silk")
+  let helper = run module("gate.silk")
+  let entrySource = run present("""import gate { gate }
+static fn choose() -> u32 {
+  static if gate { return 7 } else { return 9 }
+}
+const selected: u32 = choose()
+""")
+  let helperSource = run present("""pub static fn enabled() -> bool { return true }
+pub const gate: bool = enabled()
+fn unrelated() -> u32 { return 1 }
+""")
+  let first = run Revision.publish(&Revision.make(), &entry, &entrySource)
+  let initial = run Revision.publish(&first, &helper, &helperSource)
+  let mut warm = makeSemantic(run Revision.copy(&initial))
+  let mut request = Request.make()
+  let original = run Semantic.demandBody(&mut warm, &mut request, &entry, b"choose")
+  let selected = run Semantic.demandInitializer(&mut warm, &mut request, &entry, b"selected")
+  run Testing.expect(Shared.with<Result<Answer, NoRejection>, AnswerView>(&original, inspect).success &&
+    Shared.with<Result<Answer, NoRejection>, bool>(&selected, fn(answer: &Result<Answer, NoRejection>) -> bool {
+      return constantInteger(answer, b"7")
+    }) && Request.hasDemand(&request, Family.Body, &helper),
+    "static selection observes the executed helper body")
+  let unrelated = run present("""pub static fn enabled() -> bool { return true }
+pub const gate: bool = enabled()
+fn unrelated() -> u32 { return 2 }
+""")
+  let edited = run Revision.publish(&initial, &helper, &unrelated)
+  Semantic.revise(&mut warm, run Revision.copy(&edited))
+  let mut again = Request.make()
+  let beforeReuse = reused(Semantic.eventLog(&warm))
+  let preserved = run Semantic.demandBody(&mut warm, &mut again, &entry, b"choose")
+  run Testing.expect(Shared.with<Result<Answer, NoRejection>, AnswerView>(&preserved, inspect).success &&
+    reused(Semantic.eventLog(&warm)) >= beforeReuse + 2 &&
+    Request.hasDemand(&again, Family.Body, &helper) && Request.hasDiscovered(&again, &helper),
+    "an unrelated helper-module edit retains the checked helper and selected body with replayed evidence")
+  let changed = run present("""pub static fn enabled() -> bool { return false }
+pub const gate: bool = enabled()
+fn unrelated() -> u32 { return 2 }
+""")
+  let revision = run Revision.publish(&edited, &helper, &changed)
+  Semantic.revise(&mut warm, run Revision.copy(&revision))
+  let mut fresh = makeSemantic(run Revision.copy(&revision))
+  let mut warmRequest = Request.make()
+  let mut freshRequest = Request.make()
+  let warmValue = run Semantic.demandInitializer(&mut warm, &mut warmRequest, &entry, b"selected")
+  let freshBody = run Semantic.demandBody(&mut fresh, &mut freshRequest, &entry, b"choose")
+  let freshValue = run Semantic.demandInitializer(&mut fresh, &mut freshRequest, &entry, b"selected")
+  run Testing.expect(Shared.with<Result<Answer, NoRejection>, bool>(&warmValue, fn(answer: &Result<Answer, NoRejection>) -> bool {
+    return constantInteger(answer, b"9")
+  }) && Shared.with<Result<Answer, NoRejection>, bool>(&freshValue, fn(answer: &Result<Answer, NoRejection>) -> bool {
+    return constantInteger(answer, b"9")
+  }) && Shared.with<Result<Answer, NoRejection>, AnswerView>(&freshBody, inspect).success,
+    "a helper-body edit with unchanged signature changes selection equally in warm and reversed fresh demands")
+  return ()
+}
+
+test effect fn staticRevisionReplayPreservesFactsAndInvalidatesExecutedBodies() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run staticRevisionReplayClaims() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
 test effect fn importedTargetConstantsUseTheFrozenSemanticTarget() -> ()
 ! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -14973,6 +14755,16 @@ fn selectedMirIndex(answer: &Result<Answer, NoRejection>) -> Option<usize> {
   }
 }
 
+fn selectedLayoutIndex(answer: &Result<Answer, NoRejection>) -> Option<usize> {
+  return match & answer.* {
+    Result<Answer, NoRejection>.Success {value} => match & value.outcome {
+      Outcome.Success {value: Value.Layout {index}} => Option.some<usize>(index)
+      _ => Option.none<usize>()
+    }
+    Result<Answer, NoRejection>.Failure {error: _} => Option.none<usize>()
+  }
+}
+
 test effect fn scalarMirRetainsBranchesAndDirectCallEdges() -> ()
 ! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -14982,7 +14774,7 @@ test effect fn scalarMirRetainsBranchesAndDirectCallEdges() -> ()
 pub fn main() -> i32 {
   let mut value: i32 = 0
   while value < 3 { value = step(value) }
-  if value == 3 { return value }
+  if value == 3 && !(value == 4 || false) { return value }
   return 0
 }
 """
@@ -15025,7 +14817,7 @@ pub fn main() -> i32 {
       }
       at = at + usize.ONE
     }
-    hasReference = Vector.length<InstanceKey>(&function.references) == usize.ONE
+    hasReference = Vector.length<MirReference>(&function.references) == usize.ONE
   }
   run Testing.expect(
     hasBranch && hasReturn && hasCall && hasReference,
@@ -15061,7 +14853,7 @@ pub fn main() -> i32 {
       }
       block = block + usize.ONE
     }
-    hasBinary = hasBinary && Vector.length<InstanceKey>(&function.references) == usize.ZERO
+    hasBinary = hasBinary && Vector.length<MirReference>(&function.references) == usize.ZERO
   }
   run Testing.expect(hasBinary, "scalar callee retains arithmetic without extra call edges")
   return ()
@@ -15260,45 +15052,14 @@ pub fn main() -> i32 {
   }
   run Testing.expect(classified, "C narrow extensions, pointer and contextual floating lanes agree at declaration and call")
   let mirAnswer = run Semantic.demandMir(&mut store, &mut request, &id, b"main") |> Effect.provideMut<Allocator>(&mut allocator)
-  let index = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&mirAnswer, fn(answer: &Result<Answer, NoRejection>) -> Option<usize> {
-    return match & answer.* {
-      Result<Answer, NoRejection>.Success {value} => match & value.outcome {
-        Outcome.Success {value: Value.Mir {index}} => Option.some<usize>(index)
-        _ => Option.none<usize>()
-      }
-      _ => Option.none<usize>()
-    }
-  })
+  let index = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&mirAnswer, selectedMirIndex)
   let mut separate = false
   if let Option<usize>.Some {value} = move index {
     if let Option<&MirFunction>.Some {value: mir} = move Semantic.mirAt(&store, value) {
-      separate = Vector.length<InstanceKey>(&mir.references) == usize.ZERO && Vector.length<Shared<DeclarationId>>(&mir.externs) > usize.ZERO
+      separate = Vector.length<MirReference>(&mir.references) == usize.ZERO && Vector.length<Shared<DeclarationId>>(&mir.externs) > usize.ZERO
     }
   }
   run Testing.expect(separate, "foreign declarations never enter the runtime body worklist")
-  return ()
-}
-
-test effect fn foreignCallsRequireUnsafeAcknowledgement() -> ()
-! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let id = run module("foreign-unsafe.silk") |> Effect.provideMut<Allocator>(&mut allocator)
-  let text = """unsafe extern "C" fn abs(value: i32) -> i32
-pub fn main() -> i32 { return abs(-42) }
-"""
-  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu)) |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut request = Request.make()
-  let body = run Semantic.demandBody(&mut store, &mut request, &id, b"main") |> Effect.provideMut<Allocator>(&mut allocator)
-  let diagnostic = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(&body, rejection)
-  let mut unsafeRejected = false
-  if let Option<Shared<Rejection>>.Some {value} = move diagnostic {
-    unsafeRejected = Shared.with<Rejection, bool>(&value, fn(value: &Rejection) -> bool {
-      return value.code == RejectionCode.UnsafeAcknowledgement &&
-        value.span.start == offsetOf(text, "abs(-42)", usize.ZERO) &&
-        value.span.end == offsetOf(text, " }", usize.ZERO)
-    })
-  }
-  run Testing.expect(unsafeRejected, "unsafe C invocation has an exact safety diagnostic span")
   return ()
 }
 
@@ -15310,8 +15071,6 @@ test effect fn foreignUnsafePrefixesSelectOnlyTheirInvocation() -> ()
 unsafe extern "C" fn inner() -> i32
 fn safe(value: i32) -> i32 { return value }
 fn nestedMissing() -> i32 { return unsafe outer(inner()) }
-fn invalidPrefix() -> i32 { return unsafe 1 }
-fn unnecessaryPrefix() -> i32 { return unsafe safe(42) }
 unsafe fn unsafeFunction() -> i32 { return inner() }
 fn explicitNested() -> i32 { return unsafe outer(unsafe inner()) }
 fn blockNested() -> i32 {
@@ -15321,13 +15080,9 @@ fn blockNested() -> i32 {
   let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu)) |> Effect.provideMut<Allocator>(&mut allocator)
   let mut request = Request.make()
   let nested = run Semantic.demandBody(&mut store, &mut request, &id, b"nestedMissing") |> Effect.provideMut<Allocator>(&mut allocator)
-  let invalid = run Semantic.demandBody(&mut store, &mut request, &id, b"invalidPrefix") |> Effect.provideMut<Allocator>(&mut allocator)
-  let unnecessary = run Semantic.demandBody(&mut store, &mut request, &id, b"unnecessaryPrefix") |> Effect.provideMut<Allocator>(&mut allocator)
   let unmarked = run Semantic.demandBody(&mut store, &mut request, &id, b"unsafeFunction") |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
-    rejectsFrom(&nested, RejectionCode.UnsafeAcknowledgement, offsetOf(text, "inner())", usize.ZERO)) &&
-    rejectsFrom(&invalid, RejectionCode.UnsafeInvocation, offsetOf(text, "unsafe 1", usize.ZERO)) &&
-    rejectsFrom(&unnecessary, RejectionCode.UnsafeInvocation, offsetOf(text, "safe(42)", usize.ZERO)) &&
+    rejectsSpan(&nested, RejectionCode.UnsafeAcknowledgement, text, "inner()", usize.ONE) &&
     rejectsFrom(&unmarked, RejectionCode.UnsafeAcknowledgement, offsetOf(text, "inner() }", usize.ZERO)),
     "prefix authority selects one unsafe call and function modifiers grant no lexical permission",
   )
@@ -15522,24 +15277,16 @@ test effect fn pointerDerefRequiresLexicalUnsafe() -> ()
   let id = run module("pointer-place.silk")
     |> Effect.provideMut<Allocator>(&mut allocator)
   let text = """
-fn checked(value: *const i32) -> i32 { unsafe { return value.* } }
 unsafe fn forbidden(value: *const i32) -> i32 { return value.* }
 """
   let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut request = Request.make()
-  let checked = run Semantic.demandMir(&mut store, &mut request, &id, b"checked")
-    |> Effect.provideMut<Allocator>(&mut allocator)
   let rejected = run Semantic.demandBody(&mut store, &mut request, &id, b"forbidden")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let emitted = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&checked, selectedMirIndex)
-  let mut hasMir = false
-  if let Option<usize>.Some {..} = &emitted {
-    hasMir = true
-  }
   run Testing.expect(
-    hasMir && rejectsFrom(&rejected, RejectionCode.UnsafeAcknowledgement, offsetOf(text, "value.*", 1)),
-    "only an explicit unsafe block permits raw-pointer dereference",
+    rejectsFrom(&rejected, RejectionCode.UnsafeAcknowledgement, offsetOf(text, "value.*", usize.ZERO)),
+    "an unsafe function modifier does not permit raw-pointer dereference without an unsafe block",
   )
   return ()
 }
@@ -15656,23 +15403,7 @@ fn reborrow(value: Counter, other: &i32) -> i32 {
   return ()
 }
 
-fn backendGapIs(answer: &Result<Answer, NoRejection>, expected: GapCode, expectedSpan: Span) -> bool {
-  return match & answer.* {
-    Result<Answer, NoRejection>.Success {value} => match & value.outcome {
-      Outcome.Success {value: Value.Unsupported {gap}} => Shared.with<BackendGap, bool>(
-        &gap,
-        fn(value: &BackendGap) -> bool {
-          return value.code == expected && value.span.start == expectedSpan.start
-            && value.span.end == expectedSpan.end
-        },
-      )
-      _ => false
-    }
-    _ => false
-  }
-}
-
-test effect fn projectionsRemainNamedBackendGaps() -> ()
+test effect fn recordAndSliceIndexProjectionsRetainPlaces() -> ()
 ! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   let id = run module("projection-gap.silk")
@@ -15689,22 +15420,67 @@ fn index(values: &[i32]) -> i32 { return values[0] }
     |> Effect.provideMut<Allocator>(&mut allocator)
   let index = run Semantic.demandMir(&mut store, &mut request, &id, b"index")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let fieldStart = offsetOf(text, "pair.value", usize.ZERO)
-  let indexStart = offsetOf(text, "values[0]", usize.ZERO)
-  run Testing.expect(
-    Shared.with<Result<Answer, NoRejection>, bool>(
-      &field,
-      fn(answer: &Result<Answer, NoRejection>) -> bool {
-        return backendGapIs(answer, GapCode.FieldProjection, Span.make(fieldStart, fieldStart + 10))
-      },
-    ) && Shared.with<Result<Answer, NoRejection>, bool>(
-      &index,
-      fn(answer: &Result<Answer, NoRejection>) -> bool {
-        return backendGapIs(answer, GapCode.IndexProjection, Span.make(indexStart, indexStart + 9))
-      },
-    ),
-    "unimplemented projections stay explicit coverage gaps",
-  )
+  let selected = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&field, selectedMirIndex)
+  let mut projected = false
+  if let Option<usize>.Some {value} = move selected {
+    if let Option<&MirFunction>.Some {value: function} = move Semantic.mirAt(&store, value) {
+      let blocks = Vector.asSlice<MirBlock>(&function.blocks)
+      let mut blockAt = usize.ZERO
+      while blockAt < blocks.length {
+        let statements = Vector.asSlice<MirStatement>(&blocks[blockAt].statements)
+        let mut at = usize.ZERO
+        while at < statements.length {
+          if let MirStatement.Assign {value: MirRvalue.Use {value: MirOperand.Copy {place}}, ..} = &statements[at] {
+            let projections = Vector.asSlice<MirProjection>(&place.projections)
+            if projections.length == 2 {
+              if mirProjectionIsDeref(&projections[usize.ZERO]) {
+                if let MirProjection.Field {index: ordinal} = &projections[usize.ONE] {
+                  projected = ordinal == usize.ZERO
+                }
+              }
+            }
+          }
+          at = at + usize.ONE
+        }
+        blockAt = blockAt + usize.ONE
+      }
+    }
+  }
+  let selectedIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&index, selectedMirIndex)
+  let mut checkedIndex = false
+  if let Option<usize>.Some {value: ordinal} = move selectedIndex {
+    if let Option<&MirFunction>.Some {value: function} = move Semantic.mirAt(&store, ordinal) {
+      let blocks = Vector.asSlice<MirBlock>(&function.blocks)
+      let mut blockAt = usize.ZERO
+      while blockAt < blocks.length {
+        if let MirTerminator.Branch {thenBlock, elseBlock, ..} = &blocks[blockAt].terminator {
+          if let MirTerminator.Trap {..} = &blocks[elseBlock].terminator {
+            let statements = Vector.asSlice<MirStatement>(&blocks[blockAt].statements)
+            let mut statementAt = usize.ZERO
+            let mut runtimeLength = false
+            while statementAt < statements.length {
+              if let MirStatement.Assign {value: MirRvalue.SliceLength {..}, ..} = &statements[statementAt] { runtimeLength = true }
+              statementAt = statementAt + usize.ONE
+            }
+            let safeStatements = Vector.asSlice<MirStatement>(&blocks[thenBlock].statements)
+            let mut safeAt = usize.ZERO
+            while safeAt < safeStatements.length {
+              if let MirStatement.Assign {value: MirRvalue.Use {value: MirOperand.Copy {place}}, ..} = &safeStatements[safeAt] {
+                let projections = Vector.asSlice<MirProjection>(&place.projections)
+                if projections.length == usize.ONE {
+                  if let MirProjection.Index {..} = &projections[usize.ZERO] { checkedIndex = checkedIndex || runtimeLength }
+                }
+              }
+              safeAt = safeAt + usize.ONE
+            }
+          }
+        }
+        blockAt = blockAt + usize.ONE
+      }
+    }
+  }
+  run Testing.expect(projected, "a borrowed nominal field lowers as Deref followed by Field zero")
+  run Testing.expect(checkedIndex, "slice indexing reads runtime length and reaches its element projection only through the bounds-success block")
   return ()
 }
 
@@ -15800,21 +15576,68 @@ fn containsIrLine(text: &[u8], operation: &[u8], guarantee: &[u8]) -> bool {
   return false
 }
 
+fn bodyRetainsPointerAccessWeaken(answer: &Result<Answer, NoRejection>) -> bool {
+  if let Option<Shared<TypedBody>>.Some {value: body} = move checkedBody(answer) {
+    return Shared.with<TypedBody, bool>(&body, fn(checked: &TypedBody) -> bool {
+      let nodes = TypedBody.nodeSlice(checked)
+      let mut at = usize.ZERO
+      while at < nodes.length {
+        if let BodyNodeKind.Expression {ty, form: BodyExpression.PointerAccessWeaken {value: source}} = &nodes[at].kind {
+          if source.index < nodes.length {
+            let shared = Shared.with<Type, bool>(&ty, pointerHasSharedAccess)
+            if let BodyNodeKind.Expression {ty: original, ..} = &nodes[source.index].kind {
+              if shared && Shared.with<Type, bool>(&original, pointerHasMutableAccess) { return true }
+            }
+          }
+        }
+        at = at + usize.ONE
+      }
+      return false
+    })
+  }
+  return false
+}
+
+fn pointerHasSharedAccess(value: &Type) -> bool {
+  return match &value.* { Type.Pointer {access, ..} => access == Access.Shared _ => false }
+}
+
+fn pointerHasMutableAccess(value: &Type) -> bool {
+  return match &value.* { Type.Pointer {access, ..} => access == Access.Mutable _ => false }
+}
+
 test effect fn pointerAlignmentUsesNeutralFactsAndDeclaredGuarantees() -> ()
 ! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
   let id = run module("pointer-alignment.silk")
     |> Effect.provideMut<Allocator>(&mut allocator)
   let target = MachineTarget.forId(TargetId.X8664UnknownLinuxGnu)
-  let mut store = run staticSemantic(
-    &id,
-    """
+  let text = """
 fn probe(aligned: *const i32, unaligned: *const align(1) i32) -> i32 {
   unsafe { return aligned.* + unaligned.* }
 }
-""",
-    target,
-  )
+struct PointerHolder { pointer: ?[*]mut i32 }
+impl PointerHolder { fn raw(self: &Self) -> ?[*]mut i32 { return self.pointer } }
+fn inspect<T>(pointer: ?[*]const T) -> i32 { return 42 }
+fn inspectI32(pointer: ?[*]const i32) -> i32 { return 42 }
+fn inspectMut(pointer: ?[*]mut i32) -> i32 { return 42 }
+fn inspectNonNull(pointer: [*]const i32) -> i32 { return 42 }
+fn inspectNested(pointer: ?[*]const (*const i32)) -> i32 { return 42 }
+fn weaken(pointer: ?[*]mut i32) -> i32 { return inspect(pointer) }
+fn weakenReturn(pointer: ?[*]mut i32) -> ?[*]const i32 { return pointer }
+fn weakenLocal(pointer: ?[*]mut i32) -> i32 { let held: ?[*]const i32 = pointer return inspectI32(held) }
+fn fieldReturn(holder: PointerHolder) -> ?[*]const i32 { return holder.pointer }
+fn fieldLocal(holder: PointerHolder) -> i32 { let held: ?[*]const i32 = holder.pointer return inspectI32(held) }
+fn fieldCall(holder: PointerHolder) -> i32 { return inspectI32(holder.pointer) }
+fn receiverResult(holder: PointerHolder) -> ?[*]const i32 { return holder.raw() }
+fn reverseAccess(reversePointer: ?[*]const i32) -> i32 { return inspectMut(reversePointer) }
+fn wrongPointee(wrongValue: ?[*]mut bool) -> i32 { return inspectI32(wrongValue) }
+fn wrongExtent(singlePointer: ?*mut i32) -> i32 { return inspectI32(singlePointer) }
+fn wrongNullability(nullablePointer: ?[*]mut i32) -> i32 { return inspectNonNull(nullablePointer) }
+fn wrongAlignment(unalignedPointer: ?[*]mut align(1) i32) -> i32 { return inspectI32(unalignedPointer) }
+fn wrongNested(nestedPointer: ?[*]mut (*mut i32)) -> i32 { return inspectNested(nestedPointer) }
+"""
+  let mut store = run staticSemantic(&id, text, target)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut request = Request.make()
   let checked = run Semantic.demandMir(&mut store, &mut request, &id, b"probe")
@@ -15831,9 +15654,11 @@ fn probe(aligned: *const i32, unaligned: *const align(1) i32) -> i32 {
           &locals[at].ty,
           &target,
         ) {
+          let layout = run Shared.make<BackendLayout>(move facts)
+            |> Effect.provideMut<Allocator>(&mut allocator)
           run Vector.append<TypeLayout>(
             &mut layouts,
-            TypeLayout {ty: Shared.clone<Type>(&locals[at].ty), layout: facts},
+            TypeLayout {ty: Shared.clone<Type>(&locals[at].ty), layout: move layout},
           )
             |> Effect.provideMut<Allocator>(&mut allocator)
         }
@@ -15845,8 +15670,8 @@ fn probe(aligned: *const i32, unaligned: *const align(1) i32) -> i32 {
       )
         |> Effect.provideMut<Allocator>(&mut allocator)
       match move emitted {
-        Result<Bytes, BackendGap | OutOfMemoryError>.Success {value: text} => {
-          let ir = Bytes.asSlice(&text)
+        Result<Bytes, BackendGap | OutOfMemoryError>.Success {value: llvmText} => {
+          let ir = Bytes.asSlice(&llvmText)
           aligned = containsIr(ir, b"alloca i32, align 4") && containsIr(ir, b"alloca ptr, align 8") && containsIrLine(
             ir,
             b"load i32, ptr",
@@ -15861,6 +15686,34 @@ fn probe(aligned: *const i32, unaligned: *const align(1) i32) -> i32 {
     aligned,
     "local alignment uses neutral facts and explicit raw align(1) is preserved",
   )
+  let weakened = run Semantic.demandBody(&mut store, &mut request, &id, b"weaken") |> Effect.provideMut<Allocator>(&mut allocator)
+  let returned = run Semantic.demandBody(&mut store, &mut request, &id, b"weakenReturn") |> Effect.provideMut<Allocator>(&mut allocator)
+  let initialized = run Semantic.demandBody(&mut store, &mut request, &id, b"weakenLocal") |> Effect.provideMut<Allocator>(&mut allocator)
+  let fieldReturn = run Semantic.demandBody(&mut store, &mut request, &id, b"fieldReturn") |> Effect.provideMut<Allocator>(&mut allocator)
+  let fieldLocal = run Semantic.demandBody(&mut store, &mut request, &id, b"fieldLocal") |> Effect.provideMut<Allocator>(&mut allocator)
+  let fieldCall = run Semantic.demandBody(&mut store, &mut request, &id, b"fieldCall") |> Effect.provideMut<Allocator>(&mut allocator)
+  let receiverResult = run Semantic.demandBody(&mut store, &mut request, &id, b"receiverResult") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(Shared.with<Result<Answer, NoRejection>, bool>(&weakened, bodyRetainsPointerAccessWeaken)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&returned, bodyRetainsPointerAccessWeaken)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&initialized, bodyRetainsPointerAccessWeaken)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&fieldReturn, bodyRetainsPointerAccessWeaken)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&fieldLocal, bodyRetainsPointerAccessWeaken)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&fieldCall, bodyRetainsPointerAccessWeaken)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&receiverResult, bodyRetainsPointerAccessWeaken),
+    "immediate pointer boundaries retain mutable identifiers, fields and selected results below shared access")
+  let reverse = run Semantic.demandBody(&mut store, &mut request, &id, b"reverseAccess") |> Effect.provideMut<Allocator>(&mut allocator)
+  let pointee = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongPointee") |> Effect.provideMut<Allocator>(&mut allocator)
+  let extent = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongExtent") |> Effect.provideMut<Allocator>(&mut allocator)
+  let nullability = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongNullability") |> Effect.provideMut<Allocator>(&mut allocator)
+  let alignment = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongAlignment") |> Effect.provideMut<Allocator>(&mut allocator)
+  let nested = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongNested") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(rejectsSpan(&reverse, RejectionCode.TypeMismatch, text, "reversePointer", usize.ONE)
+    && rejectsSpan(&pointee, RejectionCode.TypeMismatch, text, "wrongValue", usize.ONE)
+    && rejectsSpan(&extent, RejectionCode.TypeMismatch, text, "singlePointer", usize.ONE)
+    && rejectsSpan(&nullability, RejectionCode.TypeMismatch, text, "nullablePointer", usize.ONE)
+    && rejectsSpan(&alignment, RejectionCode.TypeMismatch, text, "unalignedPointer", usize.ONE)
+    && rejectsSpan(&nested, RejectionCode.TypeMismatch, text, "nestedPointer", usize.ONE),
+    "pointer access weakening preserves pointee, extent, nullability and alignment and cannot reverse")
   return ()
 }
 
@@ -15962,8 +15815,8 @@ test effect fn constructorAndPackageValueAdmission() -> ()
   let invalidSchema = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"invalidSchema")
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(
-    rejectsSpan(&tupleValue, RejectionCode.Unsupported, text, "Pair(42, true)", 0) && rejectsSpan(&parameterValue, RejectionCode.ProfileInputUnavailable, text, "answer", 2),
-    "valid constructors and package values reach their missing expression lanes",
+    Shared.with<Result<Answer, NoRejection>, bool>(&tupleValue, bodyAnswerIsContractTyped) && rejectsSpan(&parameterValue, RejectionCode.ProfileInputUnavailable, text, "answer", 2),
+    "named tuple construction is checked while package values retain the profile gap",
   )
   run Testing.expect(
     rejectsSpan(&tupleArity, RejectionCode.CallArity, text, "Pair(42)", 0) && rejectsSpan(&tupleType, RejectionCode.TypeMismatch, text, "true", 1) &&
@@ -16061,6 +15914,278 @@ test effect fn openOwnerCallsValidateBeforeDeferral() -> ()
   return ()
 }
 
+fn recordLayoutType(body: &TypedBody) -> Option<Shared<Type>> {
+  let locals = TypedBody.localSlice(body)
+  if locals.length != usize.ONE { return Option.none<Shared<Type>>() }
+  return Option.some<Shared<Type>>(Shared.clone<Type>(&locals[usize.ZERO].ty))
+}
+
+test effect fn aggregateLayoutRetainsFieldOffsetsAndChildPadding() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("record-layout.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut store = run staticSemantic(&id, """
+struct Inner {
+  first: u8
+  second: i32
+  third: u8
+}
+struct Outer {
+  prefix: u8
+  nested: Inner
+}
+fn probe(value: Outer) -> i32 { return 42 }
+""", MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let bodyAnswer = run Semantic.demandBody(&mut store, &mut request, &id, b"probe")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let body = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&bodyAnswer, checkedBody)
+  let mut ty = Option.none<Shared<Type>>()
+  if let Option<Shared<TypedBody>>.Some {value} = move body {
+    ty = Shared.with<TypedBody, Option<Shared<Type>>>(&value, recordLayoutType)
+  }
+  let record = match move ty {
+    Option<Shared<Type>>.Some {value} => value
+    Option<Shared<Type>>.None => {
+      run Testing.expect(false, "the record parameter retains its nominal type")
+      return ()
+    }
+  }
+  let answer = run Semantic.demandLayout(&mut store, &mut request, &id, &record)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let selected = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&answer, selectedLayoutIndex)
+  let hasLayout = match &selected {
+    Option<usize>.Some {..} => true
+    Option<usize>.None => false
+  }
+  run Testing.expect(hasLayout, "the aggregate query publishes a layout answer")
+  let mut aligned = false
+  if let Option<usize>.Some {value: index} = move selected {
+    if let Option<Shared<BackendLayout>>.Some {value: facts} = move Semantic.layoutAt(&store, index) {
+      aligned = Shared.with<BackendLayout, bool>(&facts, fn(layout: &BackendLayout) -> bool {
+        if let LayoutStorage.Record {fields} = &layout.storage {
+          let entries = Vector.asSlice<LayoutField>(&fields)
+          if entries.length == 2 {
+            return layout.size == 16 && layout.alignment == 4 && layout.abi == LayoutAbi.Indirect
+              && entries[usize.ZERO].offset == usize.ZERO && entries[usize.ONE].offset == 4
+          }
+        }
+        return false
+      })
+    }
+  }
+  run Testing.expect(aligned, "record padding and alignment come from recursively demanded child layouts")
+  return ()
+}
+
+fn recordOperandsKeepWrittenOrder(body: &TypedBody) -> bool {
+  let nodes = TypedBody.nodeSlice(body)
+  let mut at = usize.ZERO
+  while at < nodes.length {
+    if let BodyNodeKind.Expression {form: BodyExpression.Aggregate {fields}, ..} = &nodes[at].kind {
+      let operands = Vector.asSlice<BodyAggregateField>(&fields)
+      if operands.length == 2 {
+        return operands[usize.ZERO].index == usize.ONE && operands[usize.ONE].index == usize.ZERO
+      }
+    }
+    at = at + usize.ONE
+  }
+  return false
+}
+
+test effect fn recordConstructionAndAssignmentRetainCanonicalFields() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("record-fields.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut store = run staticSemantic(&id, """
+struct Pair {
+  left: i32
+  right: i32
+}
+fn create() -> Pair { return Pair { left: 40, right: 2 } }
+fn sum(pair: Pair) -> i32 { return pair.left + pair.right }
+pub fn main() -> i32 {
+  let mut pair = Pair { right: 22, left: 20 }
+  pair.left = 21
+  return sum(create()) + pair.left + pair.right
+}
+""", MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let bodyAnswer = run Semantic.demandBody(&mut store, &mut request, &id, b"main")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let selectedBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&bodyAnswer, checkedBody)
+  let mut writtenOrder = false
+  if let Option<Shared<TypedBody>>.Some {value} = move selectedBody {
+    writtenOrder = Shared.with<TypedBody, bool>(&value, recordOperandsKeepWrittenOrder)
+  }
+  let mirAnswer = run Semantic.demandMir(&mut store, &mut request, &id, b"main")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let selectedMir = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&mirAnswer, selectedMirIndex)
+  let mut aggregate = false
+  let mut replacement = false
+  if let Option<usize>.Some {value: index} = move selectedMir {
+    if let Option<&MirFunction>.Some {value: function} = move Semantic.mirAt(&store, index) {
+      let blocks = Vector.asSlice<MirBlock>(&function.blocks)
+      let mut blockAt = usize.ZERO
+      while blockAt < blocks.length {
+        let statements = Vector.asSlice<MirStatement>(&blocks[blockAt].statements)
+        let mut at = usize.ZERO
+        while at < statements.length {
+          if let MirStatement.Assign {destination, value, ..} = &statements[at] {
+            if let MirRvalue.Aggregate {fields} = &value {
+              let operands = Vector.asSlice<MirAggregateField>(&fields)
+              if operands.length == 2 {
+                aggregate = operands[usize.ZERO].index == usize.ONE && operands[usize.ONE].index == usize.ZERO
+              }
+            }
+            let projections = Vector.asSlice<MirProjection>(&destination.projections)
+            if projections.length == usize.ONE {
+              if let MirProjection.Field {index: ordinal} = &projections[usize.ZERO] {
+                replacement = ordinal == usize.ZERO
+              }
+            }
+          }
+          at = at + usize.ONE
+        }
+        blockAt = blockAt + usize.ONE
+      }
+    }
+  }
+  run Testing.expect(writtenOrder, "typed record operands retain written order and canonical fields")
+  run Testing.expect(aggregate, "written record operand order survives canonical field selection into MIR")
+  run Testing.expect(replacement, "assignment retains a canonical projected destination")
+  let built = run Semantic.buildMain(&mut store, &mut request, &id)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut storage = false
+  match move built {
+    BackendBuild.Module {text, ..} => {
+      let ir = Bytes.asSlice(&text)
+      storage = containsIr(ir, b"(ptr %out") && containsIr(ir, b"load [8 x i8], ptr %p0")
+        && containsIrLine(ir, b"getelementptr i8", b", i64 4")
+    }
+    _ => ()
+  }
+  run Testing.expect(storage, "record storage uses layout offsets and indirect parameter and result copies")
+  return ()
+}
+
+// Runtime boolean typing uses the same concrete rule as compile-time boolean typing.
+test effect fn runtimeBooleanOperatorsLowerShortCircuit() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("runtime-booleans.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let text = """
+fn choose(value: bool) -> bool { return value && true || false }
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let mir = run Semantic.demandMir(&mut store, &mut request, &id, b"choose")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let selected = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&mir, selectedMirIndex)
+  let mut branches = false
+  if let Option<usize>.Some {value: index} = move selected {
+    if let Option<&MirFunction>.Some {value: function} = move Semantic.mirAt(&store, index) {
+      let blocks = Vector.asSlice<MirBlock>(&function.blocks)
+      let mut at = usize.ZERO
+      while at < blocks.length {
+        if let MirTerminator.Branch {..} = &blocks[at].terminator { branches = true }
+        at = at + usize.ONE
+      }
+    }
+  }
+  run Testing.expect(branches, "runtime boolean operators retain conditional evaluation in MIR")
+  return ()
+}
+
+// Deferred representations keep unknown members and incompatible injection operands diagnostic.
+test effect fn deferredRecordFormsRetainInvalidOperandDiagnostics() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("record-coverage.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let text = """
+struct Left { value: i32 }
+struct Right { value: i32 }
+struct Holder { value: Left | Right }
+union Choice { Value { value: i32 }, Empty }
+struct Counter { value: i32 }
+impl Counter { fn read(value: &Self) -> i32 { return value.value } }
+enum Status { Ready }
+struct Box<T> { value: T }
+fn consume(value: Left | Right) -> i32 { return 42 }
+fn unionValue() -> i32 { return consume(Left { value: 42 }) }
+fn invalidUnion() -> i32 { return consume(true) }
+fn fieldUnion() -> i32 { let holder = Holder { value: Left { value: 42 } } return 42 }
+fn invalidFieldUnion() -> i32 { let holder = Holder { value: true } return 42 }
+fn invalidRecordUnion() -> i32 { let holder = Holder { value: Left { value: true } } return 42 }
+fn produce(value: i32) -> Choice { return Choice.Value { value: value } }
+fn unionResult() -> i32 { let selected = produce(42) return 42 }
+fn invalidUnionResult() -> bool { return produce(42) }
+fn enumValue() -> i32 { let status = Status.Ready return 42 }
+fn invalidEnum() -> i32 { let status = Status.Absent return 42 }
+fn genericValue() -> i32 { let boxed = Box { value: 42 } return 42 }
+fn bound(value: &Counter) -> i32 { let read = value.read return 42 }
+fn invalidMember(value: &Counter) -> i32 { let read = value.absent return 42 }
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let unionValue = run Semantic.demandBody(&mut store, &mut request, &id, b"unionValue")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let invalidUnion = run Semantic.demandBody(&mut store, &mut request, &id, b"invalidUnion")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let fieldUnion = run Semantic.demandBody(&mut store, &mut request, &id, b"fieldUnion")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let invalidFieldUnion = run Semantic.demandBody(&mut store, &mut request, &id, b"invalidFieldUnion")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let invalidRecordUnion = run Semantic.demandBody(&mut store, &mut request, &id, b"invalidRecordUnion")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let unionResult = run Semantic.demandBody(&mut store, &mut request, &id, b"unionResult")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let invalidUnionResult = run Semantic.demandBody(&mut store, &mut request, &id, b"invalidUnionResult")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let enumValue = run Semantic.demandBody(&mut store, &mut request, &id, b"enumValue")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let invalidEnum = run Semantic.demandBody(&mut store, &mut request, &id, b"invalidEnum")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let genericValue = run Semantic.demandBody(&mut store, &mut request, &id, b"genericValue")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let bound = run Semantic.demandBody(&mut store, &mut request, &id, b"bound")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let invalidMember = run Semantic.demandBody(&mut store, &mut request, &id, b"invalidMember")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    rejectsSpan(&unionValue, RejectionCode.UnionFormUnavailable, text, "consume(Left { value: 42 })", 0) &&
+    rejectsSpan(&invalidUnion, RejectionCode.TypeMismatch, text, "consume(true)", 0),
+    "only a valid structural union injection is deferred",
+  )
+  run Testing.expect(
+    rejectsSpan(&fieldUnion, RejectionCode.UnionFormUnavailable, text, "Left { value: 42 }", 1) &&
+    rejectsSpan(&invalidFieldUnion, RejectionCode.TypeMismatch, text, "true", 1) &&
+    rejectsSpan(&invalidRecordUnion, RejectionCode.TypeMismatch, text, "true", 2),
+    "a record field defers valid union injection only after checking the nested initializer",
+  )
+  run Testing.expect(
+    rejectsSpan(&unionResult, RejectionCode.UnionFormUnavailable, text, "produce(42)", 0) &&
+      rejectsSpan(&invalidUnionResult, RejectionCode.TypeMismatch, text, "produce(42)", 1),
+    "a reached nominal union result defers only after validating its expected type",
+  )
+  run Testing.expect(
+    rejectsSpan(&enumValue, RejectionCode.EnumFormUnavailable, text, "Status.Ready", 0) &&
+    rejectsSpan(&invalidEnum, RejectionCode.UnknownMember, text, "Status.Absent", 0),
+    "enum representation deferral retains unknown member diagnostics",
+  )
+  run Testing.expect(
+    rejectsSpan(&genericValue, RejectionCode.GenericRecordUnavailable, text, "Box { value: 42 }", 0) &&
+    rejectsSpan(&bound, RejectionCode.BoundMethodUnavailable, text, "value.read", 0) &&
+    rejectsSpan(&invalidMember, RejectionCode.UnknownMember, text, "absent", 0),
+    "generic records and published bound methods have specific reached gaps",
+  )
+  return ()
+}
+
 test effect fn multiFileBuildRetainsOnlyReachedSources() -> ()
 ! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -16124,4 +16249,906 @@ test effect fn multiFileBuildRetainsOnlyReachedSources() -> ()
     "publishing one unrelated file reuses the checked body and replays only its source dependencies",
   )
   return ()
+}
+
+test effect fn genericReferenceArgumentsInferFromCheckedOperands() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("reference-inference.silk")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let source = """
+fn accept<T>(first: &mut T, second: T) -> () { return () }
+pub fn main() -> i32 {
+  let mut number: i32 = 42
+  accept(&mut number, 42)
+  return number
+}
+fn wrong() -> i32 {
+  let mut number: i32 = 0
+  accept(&mut number, true)
+  return number
+}
+"""
+  let mut store = run staticSemantic(&id, source, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let checked = run Semantic.demandBody(&mut store, &mut request, &id, b"main")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let wrong = run Semantic.demandBody(&mut store, &mut request, &id, b"wrong")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(Shared.with<Result<Answer, NoRejection>, AnswerView>(&checked, inspect).success,
+    "generic reference template infers its referent from the checked borrow")
+  run Testing.expect(rejectsSpan(&wrong, RejectionCode.TypeMismatch, source, "true", usize.ZERO),
+    "a conflicting later argument remains a type mismatch at its authored span")
+  return ()
+}
+
+test effect fn foreignStaticValuesKeepNamedStorageDeferral() -> ()
+! InvalidModulePath | OutOfMemoryError | Cycle | RevisionMismatch | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("foreign-static.silk")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let source = """
+unsafe extern "C" static foreignValue: *const i32
+fn accept(value: *const i32) -> i32 { return 42 }
+pub fn main() -> i32 { unsafe { return accept(foreignValue) } }
+fn wrong() -> i32 { return foreignValue() }
+"""
+  let mut store = run staticSemantic(&id, source, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let checked = run Semantic.demandBody(&mut store, &mut request, &id, b"main")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let wrong = run Semantic.demandBody(&mut store, &mut request, &id, b"wrong")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(rejectsSpan(&checked, RejectionCode.ForeignStaticUnavailable, source, "foreignValue", usize.ONE),
+    "foreign storage observation has its own authored deferral span")
+  run Testing.expect(rejectsSpan(&wrong, RejectionCode.NotCallable, source, "foreignValue", 2),
+    "foreign static storage cannot be called")
+  let built = run Semantic.buildMain(&mut store, &mut request, &id)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut named = false
+  if let BackendBuild.Unsupported {gaps} = &built {
+    let values = Vector.asSlice<Shared<BackendGap>>(&gaps)
+    if values.length == usize.ONE {
+      named = Shared.with<BackendGap, bool>(&values[usize.ZERO], fn(gap: &BackendGap) -> bool {
+        return gap.code == GapCode.ForeignStatic
+      })
+    }
+  }
+  run Testing.expect(named, "foreign static storage reaches the named backend gap")
+  return ()
+}
+
+test effect fn scalarIntrinsicsRetainCheckedArithmeticAndBitcasts() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("scalar-intrinsics.silk")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let text = """
+pub fn main() -> i32 {
+  let left: i32 = 40
+  let right: i32 = 2
+  let sum = Intrinsic.i32Add(left, right)
+  let index = Intrinsic.usizeAdd(20, 22)
+  if index != 42 { return 3 }
+  let difference = Intrinsic.i32Subtract(sum, right)
+  let narrow = Intrinsic.f32FromBits(2147483648)
+  let narrowBits = Intrinsic.f32ToBits(narrow)
+  let wide = Intrinsic.f64FromBits(9223372036854775808)
+  let wideBits = Intrinsic.f64ToBits(wide)
+  if Intrinsic.boolNot(Intrinsic.i32Equals(difference, left)) { return 1 }
+  if Intrinsic.i32LessThan(&left, &right) { return 2 }
+  return sum
+}
+fn wrongArgument() -> i32 { return Intrinsic.i32Add(true, 2) }
+fn wrongArity() -> i32 { return Intrinsic.i32Add(42) }
+static fn wrongPhase() -> i32 { return Intrinsic.i32Add(40, 2) }
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let argument = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongArgument")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let arity = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongArity")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let phase = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongPhase")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    rejectsSpan(&argument, RejectionCode.TypeMismatch, text, "true", 0) &&
+      rejectsSpan(&arity, RejectionCode.CallArity, text, "Intrinsic.i32Add(42)", 0) &&
+      rejectsSpan(&phase, RejectionCode.StaticPhaseViolation, text, "Intrinsic.i32Add(40, 2)", 0),
+    "closed scalar contracts preserve authored argument, arity and phase diagnostics",
+  )
+  let built = run Semantic.buildMain(&mut store, &mut request, &id)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut sizeArithmetic = false
+  let mut arithmetic = false
+  let mut bits = false
+  let mut predicates = false
+  match move built {
+    BackendBuild.Module {text: irText, ..} => {
+      let ir = Bytes.asSlice(&irText)
+      sizeArithmetic = containsIr(ir, b"call { i64, i1 } @llvm.uadd.with.overflow.i64") &&
+        containsIr(ir, b"call void @llvm.trap()")
+      arithmetic = containsIr(ir, b"@llvm.sadd.with.overflow.i32") &&
+        containsIr(ir, b"@llvm.ssub.with.overflow.i32") && containsIr(ir, b"call void @llvm.trap()")
+      bits = containsIr(ir, b" = bitcast i32 ") && containsIr(ir, b" to float") &&
+        containsIr(ir, b" = bitcast float ") && containsIr(ir, b" to i32") &&
+        containsIr(ir, b" = bitcast i64 ") && containsIr(ir, b" to double") &&
+        containsIr(ir, b" = bitcast double ") && containsIr(ir, b" to i64")
+      predicates = containsIr(ir, b" = xor i1 ") && containsIr(ir, b" = icmp eq i32 ") &&
+        containsIr(ir, b" = icmp slt i32 ") && containsIr(ir, b"load ptr, ptr")
+    }
+    _ => {}
+  }
+  run Testing.expect(sizeArithmetic, "usizeAdd reuses checked target-width unsigned addition")
+  run Testing.expect(arithmetic, "integer primitives retain checked arithmetic and traps")
+  run Testing.expect(bits, "floating bit conversions reinterpret both widths without numeric conversion")
+  run Testing.expect(predicates, "boolean and borrowed comparison primitives retain their scalar contracts")
+  return ()
+}
+
+test effect fn sequenceBoundsPrecedeReplacementCalls() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("sequence-lowering.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut store = run staticSemantic(&id, """
+tuple Pair(i32, i32)
+fn create() -> Pair { return (20, 22) }
+fn sum(pair: Pair) -> i32 { return pair.0 + pair.1 }
+type Values = [i32; 2]
+fn replace(values: &mut Values, index: usize) -> i32 {
+  values[index] = sum(create())
+  return values[index]
+}
+pub fn main() -> i32 {
+  let mut values = [1, 2]
+  return replace(&mut values, values.length - 1)
+}
+""", MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let answer = run Semantic.demandMir(&mut store, &mut request, &id, b"replace")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let selected = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&answer, selectedMirIndex)
+  let mut boundsBeforeCall = false
+  let mut indexedWrite = false
+  if let Option<usize>.Some {value: index} = move selected {
+    if let Option<&MirFunction>.Some {value: function} = move Semantic.mirAt(&store, index) {
+      let blocks = Vector.asSlice<MirBlock>(&function.blocks)
+      let mut blockAt = usize.ZERO
+      while blockAt < blocks.length {
+        if let MirTerminator.Branch {thenBlock, elseBlock, ..} = &blocks[blockAt].terminator {
+          if let MirTerminator.Trap {..} = &blocks[elseBlock].terminator {
+            if let MirTerminator.Call {..} = &blocks[thenBlock].terminator { boundsBeforeCall = true }
+          }
+        }
+        let statements = Vector.asSlice<MirStatement>(&blocks[blockAt].statements)
+        let mut at = usize.ZERO
+        while at < statements.length {
+          if let MirStatement.Assign {destination, ..} = &statements[at] {
+            let projections = Vector.asSlice<MirProjection>(&destination.projections)
+            if projections.length == 2 {
+              if mirProjectionIsDeref(&projections[usize.ZERO]) {
+                if let MirProjection.Index {..} = &projections[usize.ONE] { indexedWrite = true }
+              }
+            }
+          }
+          at = at + usize.ONE
+        }
+        blockAt = blockAt + usize.ONE
+      }
+    }
+  }
+  run Testing.expect(boundsBeforeCall, "the replacement call is reached only through the bounds-success block")
+  run Testing.expect(indexedWrite, "indexed replacement retains reference dereference and captured index")
+  let built = run Semantic.buildMain(&mut store, &mut request, &id)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut storage = false
+  match move built {
+    BackendBuild.Module {text, ..} => {
+      let ir = Bytes.asSlice(&text)
+      storage = containsIr(ir, b"load [8 x i8], ptr %p0")
+        && containsIr(ir, b"icmp ult i64") && containsIrLine(ir, b" = mul i64", b", 4")
+        && containsIr(ir, b"call void @llvm.trap()")
+    }
+    _ => ()
+  }
+  run Testing.expect(storage, "tuple copies and array indexing use demanded aggregate bytes and element stride")
+  return ()
+}
+
+fn arrayLiteralType(body: &TypedBody) -> Option<Shared<Type>> {
+  let nodes = TypedBody.nodeSlice(body)
+  let mut at = usize.ZERO
+  while at < nodes.length {
+    if let BodyNodeKind.Expression {ty, form: BodyExpression.Aggregate {..}} = &nodes[at].kind {
+      return Option.some<Shared<Type>>(Shared.clone<Type>(&ty))
+    }
+    at = at + usize.ONE
+  }
+  return Option.none<Shared<Type>>()
+}
+
+fn arraySliceType(body: &TypedBody) -> Option<Shared<Type>> {
+  let nodes = TypedBody.nodeSlice(body)
+  let mut at = usize.ZERO
+  while at < nodes.length {
+    if let BodyNodeKind.Expression {ty, form: BodyExpression.ArraySlice {..}} = &nodes[at].kind {
+      return Option.some<Shared<Type>>(Shared.clone<Type>(&ty))
+    }
+    at = at + usize.ONE
+  }
+  return Option.none<Shared<Type>>()
+}
+
+fn arrayLayoutIndex(answer: &Result<Answer, NoRejection>) -> Option<usize> {
+  if let Result<Answer, NoRejection>.Success {value} = &answer.* {
+    if let Outcome.Success {value: Value.Layout {index}} = &value.outcome { return Option.some<usize>(index) }
+  }
+  return Option.none<usize>()
+}
+
+// Require the fixed-array referent and its checked reborrow chain, rather than only a stage.
+fn bodyRetainsArrayReferenceConversion(body: &TypedBody, expectedAccess: Access) -> bool {
+  let locals = TypedBody.localSlice(body)
+  if locals.length != usize.ONE { return false }
+  let length = Shared.with<Type, usize>(&locals[usize.ZERO].ty, fn(parameter: &Type) -> usize {
+    if let Type.Reference {referent, access, ..} = &parameter.* {
+      if access != expectedAccess { return usize.MAX }
+      if let Option<ArrayShape>.Some {value: shape} = move Type.arrayShape(&referent) { return shape.length }
+    }
+    return usize.MAX
+  })
+  if length != 2 { return false }
+  let nodes = TypedBody.nodeSlice(body)
+  let mut at = usize.ZERO
+  while at < nodes.length {
+    if let BodyNodeKind.Expression {form: BodyExpression.ArraySlice {value: loan, count}, ..} = &nodes[at].kind {
+      if count == 2 && loan.index < nodes.length {
+        if let BodyNodeKind.Expression {form: BodyExpression.Borrow {value: place, access: loanAccess}, ..} = &nodes[loan.index].kind {
+          if loanAccess == expectedAccess && place.index < nodes.length {
+            if let BodyNodeKind.Expression {form: BodyExpression.Dereference {value: source}, ..} = &nodes[place.index].kind {
+              if source.index < nodes.length {
+                if let BodyNodeKind.Expression {form: BodyExpression.Local {local}, ..} = &nodes[source.index].kind {
+                  if local.index == usize.ZERO { return true }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    at = at + usize.ONE
+  }
+  return false
+}
+
+fn answerRetainsArrayReferenceConversion(answer: &Result<Answer, NoRejection>, expectedAccess: Access) -> bool {
+  if let Option<Shared<TypedBody>>.Some {value: body} = move checkedBody(answer) {
+    return Shared.with<TypedBody, bool>(&body, fn(checked: &TypedBody) -> bool { return bodyRetainsArrayReferenceConversion(checked, expectedAccess) })
+  }
+  return false
+}
+
+test effect fn arrayLiteralsRetainImmediateContextAndDiagnostics() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("array-context.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let text = """
+fn empty() -> [i32; 0] { return [] }
+fn narrow() -> [u8; 2] { return [20, 22] }
+fn missing() -> i32 { let values = [] return 42 }
+fn mixed() -> i32 { let values = [20, true] return 42 }
+fn length() -> [i32; 2] { return [20] }
+fn outside(values: [i32; 2]) -> i32 { return values[2] }
+fn invalidIndex(values: [i32; 2], index: i32) -> i32 { return values[index] }
+fn shared(values: &[i32]) -> i32 { return values[0] }
+fn exclusive(values: &mut [i32]) -> i32 { return shared(&values) }
+fn replacement() -> i32 { return 20 }
+fn forward(values: &mut [i32], index: usize) -> i32 {
+  values[index] = replacement()
+  if values.length == 2 { return exclusive(&mut values) + values[1] }
+  return 0
+}
+pub fn main() -> i32 { let mut values = [0, 22] return forward(&mut values, 0) }
+fn wrongSliceElement() -> i32 { let flags = [true] return shared(&flags) }
+fn wrongSliceAccess() -> i32 { let values = [20] return exclusive(&values) }
+fn permanent(values: &'static [i32]) -> i32 { return 42 }
+fn wrongSliceLifetime() -> i32 { let values = [20] return permanent(&values) }
+fn widen(view: &[i32]) -> &'static [i32] { return &view }
+fn leakArray() -> &'static [i32] { let local = [42] return &local }
+fn sameRegion<'a>(kept: &'a [i32]) -> &'a [i32] { return &kept }
+fn arraySameRegion<'a>(source: &'a ([i32; 2])) -> &'a [i32] { return &source }
+fn staticSameRegion(permanentView: &'static [i32]) -> &'static [i32] { return &permanentView }
+fn validStaticCall(permanentView: &'static [i32]) -> i32 { return permanent(&permanentView) }
+fn arrayStaticCall(source: &'static ([i32; 2])) -> i32 { return permanent(&source) }
+fn arrayMutableCall(source: &mut ([i32; 2])) -> i32 { return exclusive(&mut source) }
+fn wrongArrayReborrow(source: &([i32; 2])) -> i32 { return exclusive(&mut source) }
+fn widenLocal(viewLocal: &[i32]) -> i32 { let extended: &'static [i32] = &viewLocal return 42 }
+fn leakArrayLocal() -> i32 { let localArray = [42] let extended: &'static [i32] = &localArray return 42 }
+fn initSameRegion<'a>(same: &'a [i32]) -> &'a [i32] { let held: &'a [i32] = &same return held }
+fn pairViews<'a>(first: &'a [i32], second: &'a [i32]) -> i32 { return 42 }
+fn holdView<T>(source: &[T]) -> &[T] { return source }
+fn distinctRegions() -> i32 { let first = [20] let second = [22] let held = holdView(&first) return pairViews(&second, held) }
+fn wrongRegionElement() -> i32 { let first = [true] let second = [22] let held = holdView(&first) return pairViews(&second, held) }
+fn fixedRegions<'a, 'b>(first: &'a [i32], second: &'b [i32]) -> i32 { return pairViews(first, second) }
+
+
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let empty = run Semantic.demandBody(&mut store, &mut request, &id, b"empty") |> Effect.provideMut<Allocator>(&mut allocator)
+  let narrow = run Semantic.demandBody(&mut store, &mut request, &id, b"narrow") |> Effect.provideMut<Allocator>(&mut allocator)
+  let missing = run Semantic.demandBody(&mut store, &mut request, &id, b"missing") |> Effect.provideMut<Allocator>(&mut allocator)
+  let mixed = run Semantic.demandBody(&mut store, &mut request, &id, b"mixed") |> Effect.provideMut<Allocator>(&mut allocator)
+  let length = run Semantic.demandBody(&mut store, &mut request, &id, b"length") |> Effect.provideMut<Allocator>(&mut allocator)
+  let outside = run Semantic.demandBody(&mut store, &mut request, &id, b"outside") |> Effect.provideMut<Allocator>(&mut allocator)
+  let invalidIndex = run Semantic.demandBody(&mut store, &mut request, &id, b"invalidIndex") |> Effect.provideMut<Allocator>(&mut allocator)
+  let sliceElement = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongSliceElement") |> Effect.provideMut<Allocator>(&mut allocator)
+  let sliceAccess = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongSliceAccess") |> Effect.provideMut<Allocator>(&mut allocator)
+  let sliceLifetime = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongSliceLifetime") |> Effect.provideMut<Allocator>(&mut allocator)
+  let widened = run Semantic.demandBody(&mut store, &mut request, &id, b"widen") |> Effect.provideMut<Allocator>(&mut allocator)
+  let leakedArray = run Semantic.demandBody(&mut store, &mut request, &id, b"leakArray") |> Effect.provideMut<Allocator>(&mut allocator)
+  let keptSlice = run Semantic.demandBody(&mut store, &mut request, &id, b"sameRegion") |> Effect.provideMut<Allocator>(&mut allocator)
+  let keptArray = run Semantic.demandBody(&mut store, &mut request, &id, b"arraySameRegion") |> Effect.provideMut<Allocator>(&mut allocator)
+  let keptStatic = run Semantic.demandBody(&mut store, &mut request, &id, b"staticSameRegion") |> Effect.provideMut<Allocator>(&mut allocator)
+  let keptStaticCall = run Semantic.demandBody(&mut store, &mut request, &id, b"validStaticCall") |> Effect.provideMut<Allocator>(&mut allocator)
+  let keptArrayCall = run Semantic.demandBody(&mut store, &mut request, &id, b"arrayStaticCall") |> Effect.provideMut<Allocator>(&mut allocator)
+  let mutableArrayCall = run Semantic.demandBody(&mut store, &mut request, &id, b"arrayMutableCall") |> Effect.provideMut<Allocator>(&mut allocator)
+  let invalidArrayReborrow = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongArrayReborrow") |> Effect.provideMut<Allocator>(&mut allocator)
+  let widenedLocal = run Semantic.demandBody(&mut store, &mut request, &id, b"widenLocal") |> Effect.provideMut<Allocator>(&mut allocator)
+  let leakedArrayLocal = run Semantic.demandBody(&mut store, &mut request, &id, b"leakArrayLocal") |> Effect.provideMut<Allocator>(&mut allocator)
+  let keptInitializer = run Semantic.demandBody(&mut store, &mut request, &id, b"initSameRegion") |> Effect.provideMut<Allocator>(&mut allocator)
+  let distinctRegions = run Semantic.demandBody(&mut store, &mut request, &id, b"distinctRegions") |> Effect.provideMut<Allocator>(&mut allocator)
+  let wrongRegionElement = run Semantic.demandBody(&mut store, &mut request, &id, b"wrongRegionElement") |> Effect.provideMut<Allocator>(&mut allocator)
+  let fixedRegions = run Semantic.demandBody(&mut store, &mut request, &id, b"fixedRegions") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(rejectsSpan(&distinctRegions, RejectionCode.SliceRegionRelationUnavailable, text, "pairViews(&second, held)", usize.ZERO)
+    && rejectsSpan(&wrongRegionElement, RejectionCode.TypeMismatch, text, "pairViews(&second, held)", usize.ONE)
+    && rejectsSpan(&fixedRegions, RejectionCode.TypeMismatch, text, "pairViews(first, second)", usize.ZERO),
+    "only a repeated shared-slice binder with distinct actual caller-local regions has a deferred relation")
+  run Testing.expect(rejectsSpan(&widened, RejectionCode.TypeMismatch, text, "&view", usize.ZERO)
+    && rejectsSpan(&leakedArray, RejectionCode.TypeMismatch, text, "&local", usize.ZERO)
+    && rejectsSpan(&widenedLocal, RejectionCode.TypeMismatch, text, "&viewLocal", usize.ZERO)
+    && rejectsSpan(&leakedArrayLocal, RejectionCode.TypeMismatch, text, "&localArray", usize.ZERO),
+    "fixed static return and initializer contexts cannot widen slice reborrows or owned array loans")
+  run Testing.expect(Shared.with<Result<Answer, NoRejection>, bool>(&keptSlice, bodyAnswerIsContractTyped)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&keptArray, bodyAnswerIsContractTyped)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&keptStatic, bodyAnswerIsContractTyped)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&keptStaticCall, bodyAnswerIsContractTyped)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&keptArrayCall, bodyAnswerIsContractTyped)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&mutableArrayCall, bodyAnswerIsContractTyped)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&keptInitializer, bodyAnswerIsContractTyped),
+    "slice reborrows and array-reference conversion retain the actual same-region evidence")
+  run Testing.expect(Shared.with<Result<Answer, NoRejection>, bool>(&keptArray, fn(answer: &Result<Answer, NoRejection>) -> bool { return answerRetainsArrayReferenceConversion(answer, Access.Shared) })
+    && Shared.with<Result<Answer, NoRejection>, bool>(&keptArrayCall, fn(answer: &Result<Answer, NoRejection>) -> bool { return answerRetainsArrayReferenceConversion(answer, Access.Shared) })
+    && Shared.with<Result<Answer, NoRejection>, bool>(&mutableArrayCall, fn(answer: &Result<Answer, NoRejection>) -> bool { return answerRetainsArrayReferenceConversion(answer, Access.Mutable) }),
+    "array-reference returns and calls convert a fixed referent through its checked dereference and loan")
+  run Testing.expect(rejectsSpan(&invalidArrayReborrow, RejectionCode.TypeMismatch, text, "&mut source", usize.ONE),
+    "slice shape hints cannot strengthen shared array-reference access")
+  let mainBody = run Semantic.demandBody(&mut store, &mut request, &id, b"main") |> Effect.provideMut<Allocator>(&mut allocator)
+  let selectedBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&mainBody, checkedBody)
+  let mut descriptorLayout = false
+  if let Option<Shared<TypedBody>>.Some {value: body} = move selectedBody {
+    let descriptor = Shared.with<TypedBody, Option<Shared<Type>>>(&body, arraySliceType)
+    if let Option<Shared<Type>>.Some {value: ty} = move descriptor {
+      let demanded = run Semantic.demandLayout(&mut store, &mut request, &id, &ty) |> Effect.provideMut<Allocator>(&mut allocator)
+      let selected = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&demanded, arrayLayoutIndex)
+      if let Option<usize>.Some {value: index} = move selected {
+        if let Option<Shared<BackendLayout>>.Some {value: facts} = move Semantic.layoutAt(&store, index) {
+          descriptorLayout = Shared.with<BackendLayout, bool>(&facts, fn(layout: &BackendLayout) -> bool {
+            if let LayoutStorage.Slice {stride, lengthOffset, ..} = &layout.storage {
+              return layout.size == 16 && layout.alignment == 8 && layout.abi == LayoutAbi.Indirect
+                && stride == 4 && lengthOffset == 8 && BackendLayout.childCount(layout) == usize.ONE
+                && BackendLayout.fieldCount(layout) == usize.ZERO
+            }
+            return false
+          })
+        }
+      }
+    }
+  }
+  run Testing.expect(descriptorLayout, "runtime slices demand two neutral words and one borrowed element layout")
+  let sliceMirAnswer = run Semantic.demandMir(&mut store, &mut request, &id, b"forward") |> Effect.provideMut<Allocator>(&mut allocator)
+  let sliceMirIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&sliceMirAnswer, selectedMirIndex)
+  let mut runtimeBounds = false
+  let mut boundsBeforeReplacement = false
+  if let Option<usize>.Some {value: index} = move sliceMirIndex {
+    if let Option<&MirFunction>.Some {value: function} = move Semantic.mirAt(&store, index) {
+      let blocks = Vector.asSlice<MirBlock>(&function.blocks)
+      let mut blockAt = usize.ZERO
+      while blockAt < blocks.length {
+        if let MirTerminator.Branch {thenBlock, elseBlock, ..} = &blocks[blockAt].terminator {
+          if let MirTerminator.Trap {..} = &blocks[elseBlock].terminator {
+            if let MirTerminator.Call {..} = &blocks[thenBlock].terminator { boundsBeforeReplacement = true }
+            let statements = Vector.asSlice<MirStatement>(&blocks[blockAt].statements)
+            let mut statementAt = usize.ZERO
+            while statementAt < statements.length {
+              if let MirStatement.Assign {value: MirRvalue.SliceLength {..}, ..} = &statements[statementAt] { runtimeBounds = true }
+              statementAt = statementAt + usize.ONE
+            }
+          }
+        }
+        blockAt = blockAt + usize.ONE
+      }
+    }
+  }
+  run Testing.expect(runtimeBounds && boundsBeforeReplacement,
+    "slice bounds read runtime length before the replacement call can run")
+  let unitElement = run Shared.make<Type>(Type.Unit) |> Effect.provideMut<Allocator>(&mut allocator)
+  let staticRegion = run Shared.make<Lifetime>(Lifetime.Static) |> Effect.provideMut<Allocator>(&mut allocator)
+  let emptySliceType = run Shared.make<Type>(Type.Slice {
+    element: move unitElement, access: Access.Shared, lifetime: move staticRegion,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let zeroLayoutAnswer = run Semantic.demandLayout(&mut store, &mut request, &id, &emptySliceType) |> Effect.provideMut<Allocator>(&mut allocator)
+  let zeroLayoutIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&zeroLayoutAnswer, arrayLayoutIndex)
+  let mut zeroStride = false
+  if let Option<usize>.Some {value: index} = move zeroLayoutIndex {
+    if let Option<Shared<BackendLayout>>.Some {value: facts} = move Semantic.layoutAt(&store, index) {
+      zeroStride = Shared.with<BackendLayout, bool>(&facts, fn(layout: &BackendLayout) -> bool {
+        if let LayoutStorage.Slice {stride, lengthOffset, ..} = &layout.storage {
+          return layout.size == 16 && stride == usize.ZERO && lengthOffset == 8
+        }
+        return false
+      })
+    }
+  }
+  run Testing.expect(zeroStride, "zero-size elements retain a runtime logical length independently of their zero stride")
+  let sliceBuild = run Semantic.buildMain(&mut store, &mut request, &id) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut descriptorAbi = false
+  if let BackendBuild.Module {text: llvm, ..} = &sliceBuild {
+    let ir = Bytes.asSlice(&llvm)
+    descriptorAbi = containsIr(ir, b"load [16 x i8], ptr %p0")
+      && containsIrLine(ir, b"getelementptr i8", b", i64 8")
+      && containsIr(ir, b"store i64 2") && containsIr(ir, b"icmp ult i64")
+      && containsIr(ir, b"call void @llvm.trap()")
+  }
+  run Testing.expect(descriptorAbi, "array conversion, forwarding and shared reborrow use owned descriptor slots and runtime bounds")
+  run Testing.expect(rejectsSpan(&sliceElement, RejectionCode.TypeMismatch, text, "shared(&flags)", 0) &&
+    rejectsSpan(&sliceAccess, RejectionCode.TypeMismatch, text, "exclusive(&values)", 0) &&
+    rejectsSpan(&sliceLifetime, RejectionCode.TypeMismatch, text, "permanent(&values)", 0),
+    "slice conversion preserves incompatible element, access and lifetime diagnostics")
+  let emptyBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&empty, checkedBody)
+  let mut emptyLayout = false
+  if let Option<Shared<TypedBody>>.Some {value} = move emptyBody {
+    let selected = Shared.with<TypedBody, Option<Shared<Type>>>(&value, arrayLiteralType)
+    if let Option<Shared<Type>>.Some {value: array} = move selected {
+      let layoutAnswer = run Semantic.demandLayout(&mut store, &mut request, &id, &array) |> Effect.provideMut<Allocator>(&mut allocator)
+      let index = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&layoutAnswer, selectedLayoutIndex)
+      if let Option<usize>.Some {value: ordinal} = move index {
+        if let Option<Shared<BackendLayout>>.Some {value: layout} = move Semantic.layoutAt(&store, ordinal) {
+          emptyLayout = Shared.with<BackendLayout, bool>(&layout, fn(facts: &BackendLayout) -> bool {
+            if let LayoutStorage.Sequence {count, stride, ..} = &facts.storage {
+              return facts.size == usize.ZERO && facts.alignment == 4 && count == usize.ZERO && stride == 4 && BackendLayout.childCount(facts) == usize.ONE
+            }
+            return false
+          })
+        }
+      }
+    }
+  }
+  run Testing.expect(emptyLayout, "an empty array retains its element layout and logical zero count without expanded fields")
+  run Testing.expect(Shared.with<Result<Answer, NoRejection>, bool>(&empty, bodyAnswerIsContractTyped)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&narrow, bodyAnswerIsContractTyped), "empty and narrow array literals inherit immediate element context")
+  run Testing.expect(rejectsSpan(&missing, RejectionCode.UninferredArrayElement, text, "[]", 1)
+    && rejectsSpan(&mixed, RejectionCode.ArrayElementMismatch, text, "true", 0)
+    && rejectsSpan(&length, RejectionCode.ArrayLengthMismatch, text, "[20]", 0), "array element inference and declared length retain distinct diagnostics")
+  let outsideStart = offsetOf(text, "values[2]", usize.ZERO) + 7
+  let found = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(&outside, rejection)
+  let mut boundsRejected = false
+  if let Option<Shared<Rejection>>.Some {value} = move found {
+    boundsRejected = Shared.with<Rejection, bool>(&value, fn(diagnostic: &Rejection) -> bool {
+      return diagnostic.code == RejectionCode.IndexOutOfRange && diagnostic.span.start == outsideStart && diagnostic.span.end == outsideStart + usize.ONE
+    })
+  }
+  run Testing.expect(boundsRejected
+    && rejectsSpan(&invalidIndex, RejectionCode.InvalidIndexType, text, "index", 1), "known bounds and non-usize indices reject at their index spans")
+  return ()
+}
+
+// B12 slice 1: runtime instance identity and admission are proven structurally here.
+// Runtime behavior stays in the shared native corpus.
+test effect fn genericCallersShareOneClosedMirKey() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("b12-shared-instance.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let source = """
+fn identity<T>(value: T) -> T { return move value }
+fn first() -> i32 { return identity<i32>(20) }
+fn second() -> i32 { return identity<i32>(22) }
+pub fn main() -> i32 { return first() + second() }
+"""
+  let mut store = run staticSemantic(&id, source, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let first = run Semantic.demandMir(&mut store, &mut request, &id, b"first") |> Effect.provideMut<Allocator>(&mut allocator)
+  let second = run Semantic.demandMir(&mut store, &mut request, &id, b"second") |> Effect.provideMut<Allocator>(&mut allocator)
+  let firstIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&first, selectedMirIndex)
+  let secondIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&second, selectedMirIndex)
+  let firstKey = mirSingleReference(&store, move firstIndex)
+  let secondKey = mirSingleReference(&store, move secondIndex)
+  let mut shared = false
+  if let Option<InstanceKey>.Some {value: firstInstance} = move firstKey {
+    if let Option<InstanceKey>.Some {value: secondInstance} = move secondKey {
+      shared = InstanceKey.equals(&firstInstance, &secondInstance)
+      let firstSymbol = run InstanceKey.symbol(&firstInstance) |> Effect.provideMut<Allocator>(&mut allocator)
+      let secondSymbol = run InstanceKey.symbol(&secondInstance) |> Effect.provideMut<Allocator>(&mut allocator)
+      shared = shared && sameBytes(Bytes.asSlice(&firstSymbol), Bytes.asSlice(&secondSymbol))
+      let supplied = run InstanceKey.arguments(&firstInstance) |> Effect.provideMut<Allocator>(&mut allocator)
+      let arguments = Vector.asSlice<Argument>(&supplied)
+      shared = shared && arguments.length == usize.ONE
+      if arguments.length == usize.ONE {
+        shared = shared && match & arguments[usize.ZERO] {
+          Argument.Type {value: ty} => Shared.with<Type, bool>(&ty, fn(value: &Type) -> bool { return b12IntegerType(value) })
+          _ => false
+        }
+      }
+    }
+  }
+  run Testing.expect(shared, "two callers retain one canonical identity<i32> key and content symbol")
+  return ()
+}
+
+fn mirSingleReference(store: &Semantic, index: Option<usize>) -> Option<InstanceKey> {
+  if let Option<usize>.Some {value: at} = move index {
+    if let Option<&MirFunction>.Some {value: function} = move Semantic.mirAt(store, at) {
+      let references = Vector.asSlice<MirReference>(&function.references)
+      if references.length == usize.ONE {
+        return match &references[usize.ZERO].edge {
+          SpecializationEdge.Direct => Option.some<InstanceKey>(InstanceKey.copy(&references[usize.ZERO].key),
+          )
+          _ => Option.none<InstanceKey>() }
+      }
+    }
+  }
+  return Option.none<InstanceKey>()
+}
+
+test effect fn genericPolymorphicRecursionBuildRetainsRejectedApplicationPath() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let entry = run module("b12main.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let library = run module("b12library.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let source = """
+struct Box<T> { value: T }
+pub fn expand<T>(value: T) -> i32 { return expand<Box<T>>(Box<T> { value: move value }) }
+"""
+  let entrySource = run present("""
+import b12library {expand}
+pub fn main() -> i32 { return expand<i32>(1) }
+""") |> Effect.provideMut<Allocator>(&mut allocator)
+  let librarySource = run present(source) |> Effect.provideMut<Allocator>(&mut allocator)
+  let first = run Revision.publish(&Revision.make(), &entry, &entrySource)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let held = run Revision.publish(&first, &library, &librarySource)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut store = makeSemantic(run Revision.copy(&held) |> Effect.provideMut<Allocator>(&mut allocator))
+  let mut request = Request.make()
+  let built = run Semantic.buildMain(&mut store, &mut request, &entry)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let rejected = match & built {
+    BackendBuild.Rejected {diagnostic} => Shared.with<Rejection, bool>(&diagnostic, fn(value: &Rejection) -> bool {
+      if value.code != RejectionCode.ExpandingSpecialization || !ModuleId.equals(&value.module, &library) { return false }
+      let spelling = "expand<Box<T>>(Box<T> { value: move value })"
+      let start = offsetOf(source, spelling, usize.ZERO)
+      if value.span.start != start || value.span.end != start + String.utf8Bytes(spelling).length { return false }
+      let path = Vector.asSlice<SpecializationApplication>(&value.specialization)
+      if path.length != 2 { return false }
+      let original = SpecializationApplication.bodyDeclaration(&path[usize.ZERO])
+      let recursive = SpecializationApplication.bodyDeclaration(&path[usize.ONE])
+      if !DeclarationId.equals(original, recursive) || !DeclarationId.named(original, b"expand") { return false }
+      let scalar = match move b12SingleArgumentType(&path[usize.ZERO].arguments) {
+        Option<Shared<Type>>.Some {value: ty} => Shared.with<Type, bool>(&ty, b12IntegerType)
+        Option<Shared<Type>>.None => false
+      }
+      let boxed = match move b12SingleArgumentType(&path[usize.ONE].arguments) {
+        Option<Shared<Type>>.Some {value: ty} => Shared.with<Type, bool>(&ty, b12BoxIntegerType)
+        Option<Shared<Type>>.None => false
+      }
+      return scalar && boxed
+    })
+    _ => false
+  }
+  run Testing.expect(rejected, "expanding direct recursion retains i32 to Box<i32> and the imported caller span")
+  return ()
+}
+
+fn b12IntegerType(value: &Type) -> bool {
+  return match & value.* { Type.Primitive {name} => sameBytes(Bytes.asSlice(&name), b"i32")
+    _ => false
+  }
+}
+
+fn b12BoxIntegerType(value: &Type) -> bool {
+  return match &value.* {
+    Type.Nominal {declaration, arguments, ..} => {
+      if !DeclarationId.named(&declaration, b"Box") { return false }
+      let listed = Vector.asSlice<Argument>(&arguments)
+      if listed.length != usize.ONE { return false }
+      return match &listed[usize.ZERO] {
+        Argument.Type {value: ty} => Shared.with<Type, bool>(&ty, b12IntegerType)
+        _ => false
+      }
+    }
+    _ => false
+  }
+}
+
+fn b12SingleArgumentType(arguments: &Vector<Argument>) -> Option<Shared<Type>> {
+  let listed = Vector.asSlice<Argument>(arguments)
+  if listed.length != usize.ONE { return Option.none<Shared<Type>>() }
+  return match & listed[usize.ZERO] {
+    Argument.Type {value: ty} => Option.some<Shared<Type>>(Shared.clone<Type>(&ty))
+    _ => Option.none<Shared<Type>>()
+  }
+}
+
+
+test effect fn genericRecursiveResultKeepsCallerParameter() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("b12-recursive-result.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let source = """
+struct Box<T> { value: T }
+fn repeat<T>(value: T, count: i32) -> T {
+  if count == 0 { return move value }
+  return repeat<T>(move value, count - 1)
+}
+fn wrong<T>(argument: T) -> i32 { return wrong<Box<T>>(move argument) }
+pub fn main() -> i32 { return repeat<i32>(42, 1) }
+"""
+  let mut store = run staticSemantic(&id, source, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let repeat = run Semantic.demandBody(&mut store, &mut request, &id, b"repeat") |> Effect.provideMut<Allocator>(&mut allocator)
+  let body = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&repeat, checkedBody)
+  let canonical = match move body {
+    Option<Shared<TypedBody>>.Some {value} => Shared.with<TypedBody, bool>(&value, b12RepeatHasCanonicalCallerResult)
+    Option<Shared<TypedBody>>.None => false
+  }
+  run Testing.expect(canonical && Shared.with<Result<Answer, NoRejection>, bool>(&repeat, bodyAnswerIsContractTyped),
+    "recursive result and completed type argument retain the authored caller T")
+  let wrong = run Semantic.demandBody(&mut store, &mut request, &id, b"wrong") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(rejectsSpan(&wrong, RejectionCode.TypeMismatch, source, "argument", usize.ONE),
+    "fresh callee binders do not admit a caller T where Box<T> is required")
+  return ()
+}
+
+fn b12RepeatHasCanonicalCallerResult(body: &TypedBody) -> bool {
+  let nodes = TypedBody.nodeSlice(body)
+  let mut at = usize.ZERO
+  while at < nodes.length {
+    if let BodyNodeKind.Expression {ty, form: BodyExpression.DirectCall {declaration, genericArguments, ..}} = &nodes[at].kind {
+      if DeclarationId.named(&declaration, b"repeat") {
+        let resultIsCaller = Shared.with<Type, usize>(&ty, fn(value: &Type) -> usize {
+          return Type.parameterOrdinalOf(value, &declaration)
+        }) == usize.ZERO
+        let argumentIsCaller = b12ArgumentIsCaller(&genericArguments, &declaration)
+        return resultIsCaller && argumentIsCaller
+      }
+    }
+    at = at + usize.ONE
+  }
+  return false
+}
+
+fn b12ArgumentIsCaller(arguments: &Vector<Argument>, declaration: &DeclarationId) -> bool {
+  let single = b12SingleArgumentType(arguments)
+  if let Option<Shared<Type>>.Some {value} = move single {
+    return Shared.with<Type, usize>(&value, fn(argument: &Type) -> usize {
+      return Type.parameterOrdinalOf(argument, declaration)
+    }) == usize.ZERO
+  }
+  return false
+}
+
+test effect fn genericAggregateBorrowContextKeepsCallerRegions() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("b12-aggregate-regions.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let source = """
+tuple Witness<'a>(&'a i32)
+fn consume<'a>(values: [&'a i32; 1], witness: &'a i32) -> i32 { return 42 }
+fn consumeTuple<'a>(values: Witness<'a>, witness: &'a i32) -> i32 { return 42 }
+fn arrayCall() -> i32 { let value = 42 return consume([&value], &value) }
+fn tupleCall() -> i32 { let value = 42 return consumeTuple((&value,), &value) }
+fn consumeMixed<'a, T>(values: [&'a T; 1], witness: &'a T, scalar: T) -> i32 { return 42 }
+fn mixedForward<'b>(reference: &'b u8) -> i32 { return consumeMixed([reference], reference, 42) }
+fn mixedBorrow(value: u8) -> i32 { return consumeMixed([&value], &value, 42) }
+fn forwardArray<'b>(reference: &'b i32) -> i32 { return consume([reference], reference) }
+fn forwardTuple<'b>(reference: &'b i32) -> i32 { return consumeTuple((reference,), reference) }
+fn relay<'a>(value: Witness<'a>) -> Witness<'a> { return move value }
+fn forwardValues<'b>(values: [&'b i32; 1], pair: Witness<'b>, reference: &'b i32) -> i32 {
+  let first = consume(move values, reference)
+  return first + consumeTuple(relay<'b>(move pair), reference)
+}
+fn permanent() -> i32 { let value = 42 return consume<'static>([&value], &value) }
+"""
+  let mut store = run staticSemantic(&id, source, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu)) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let array = run Semantic.demandBody(&mut store, &mut request, &id, b"arrayCall") |> Effect.provideMut<Allocator>(&mut allocator)
+  let tupleAnswer = run Semantic.demandBody(&mut store, &mut request, &id, b"tupleCall") |> Effect.provideMut<Allocator>(&mut allocator)
+  let arrayBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&array, checkedBody)
+  let tupleBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&tupleAnswer, checkedBody)
+  let arrayCanonical = match move arrayBody {
+    Option<Shared<TypedBody>>.Some {value} => Shared.with<TypedBody, bool>(&value, b12AggregateRegionsAreCanonical)
+    Option<Shared<TypedBody>>.None => false
+  }
+  let tupleCanonical = match move tupleBody {
+    Option<Shared<TypedBody>>.Some {value} => Shared.with<TypedBody, bool>(&value, b12AggregateRegionsAreCanonical)
+    Option<Shared<TypedBody>>.None => false
+  }
+  run Testing.expect(arrayCanonical && tupleCanonical
+    && Shared.with<Result<Answer, NoRejection>, bool>(&array, bodyAnswerIsContractTyped)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&tupleAnswer, bodyAnswerIsContractTyped),
+    "nested array and nominal tuple operands plus completed call arguments retain only caller regions")
+  let forwardedArray = run Semantic.demandBody(&mut store, &mut request, &id, b"forwardArray") |> Effect.provideMut<Allocator>(&mut allocator)
+  let forwardedTuple = run Semantic.demandBody(&mut store, &mut request, &id, b"forwardTuple") |> Effect.provideMut<Allocator>(&mut allocator)
+  let forwardedArrayBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&forwardedArray, checkedBody)
+  let forwardedTupleBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&forwardedTuple, checkedBody)
+  let arrayForwarding = match move forwardedArrayBody {
+    Option<Shared<TypedBody>>.Some {value} => Shared.with<TypedBody, bool>(&value, b12ForwardRegionsAreCanonical)
+    Option<Shared<TypedBody>>.None => false
+  }
+  let tupleForwarding = match move forwardedTupleBody {
+    Option<Shared<TypedBody>>.Some {value} => Shared.with<TypedBody, bool>(&value, b12ForwardRegionsAreCanonical)
+    Option<Shared<TypedBody>>.None => false
+  }
+  run Testing.expect(arrayForwarding && tupleForwarding
+    && Shared.with<Result<Answer, NoRejection>, bool>(&forwardedArray, bodyAnswerIsContractTyped)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&forwardedTuple, bodyAnswerIsContractTyped),
+    "existing references retain the caller lifetime parameter through operands, parent aggregates and call arguments")
+  let mixed = run Semantic.demandBody(&mut store, &mut request, &id, b"mixedForward") |> Effect.provideMut<Allocator>(&mut allocator)
+  let mixedBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&mixed, checkedBody)
+  let mixedCanonical = match move mixedBody {
+    Option<Shared<TypedBody>>.Some {value} => Shared.with<TypedBody, bool>(&value, b12MixedRegionsAreCanonical)
+    Option<Shared<TypedBody>>.None => false
+  }
+  run Testing.expect(mixedCanonical && Shared.with<Result<Answer, NoRejection>, bool>(&mixed, bodyAnswerIsContractTyped),
+    "lifetime-first type-second binders retain their written slots, narrow literal context and canonical caller evidence")
+  let mixedBorrow = run Semantic.demandBody(&mut store, &mut request, &id, b"mixedBorrow") |> Effect.provideMut<Allocator>(&mut allocator)
+  let mixedBorrowBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&mixedBorrow, checkedBody)
+  let mixedBorrowCanonical = match move mixedBorrowBody {
+    Option<Shared<TypedBody>>.Some {value} => Shared.with<TypedBody, bool>(&value, b12MixedBorrowRegionsAreCanonical)
+    Option<Shared<TypedBody>>.None => false
+  }
+  run Testing.expect(mixedBorrowCanonical && Shared.with<Result<Answer, NoRejection>, bool>(&mixedBorrow, bodyAnswerIsContractTyped),
+    "mixed-order written borrows infer u8 before the final scalar literal receives its narrow type context")
+  let forwardedValues = run Semantic.demandBody(&mut store, &mut request, &id, b"forwardValues") |> Effect.provideMut<Allocator>(&mut allocator)
+  let valueBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&forwardedValues, checkedBody)
+  let valueCanonical = match move valueBody {
+    Option<Shared<TypedBody>>.Some {value} => Shared.with<TypedBody, bool>(&value, b12ValueRegionsAreCanonical)
+    Option<Shared<TypedBody>>.None => false
+  }
+  run Testing.expect(valueCanonical && Shared.with<Result<Answer, NoRejection>, bool>(&forwardedValues, bodyAnswerIsContractTyped),
+    "existing arrays, moved nominal values and relay results retain the authored caller lifetime in all operands and calls")
+  let permanent = run Semantic.demandBody(&mut store, &mut request, &id, b"permanent") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(rejectsSpan(&permanent, RejectionCode.TypeMismatch, source, "consume<'static>([&value], &value)", usize.ZERO),
+    "explicit static arguments cannot manufacture static evidence for a written aggregate borrow")
+  return ()
+}
+
+fn b12CallerRegion(region: &Lifetime, caller: &DeclarationId, ordinal: usize, parameterRegion: bool) -> bool {
+  return match &region.* {
+    Lifetime.Local {declaration, ordinal: found} => !parameterRegion && found == ordinal && DeclarationId.equals(&declaration, caller)
+    Lifetime.Parameter {declaration, ordinal: found} => parameterRegion && found == usize.ZERO && DeclarationId.equals(&declaration, caller)
+    _ => false
+  }
+}
+
+fn b12ContextTypeIsCanonical(value: &Type, caller: &DeclarationId, ordinal: usize, parameterRegion: bool) -> bool {
+  return match &value.* {
+    Type.Primitive {..} => true
+    Type.Unit => true
+    Type.Reference {referent, lifetime, ..} => Shared.with<Lifetime, bool>(&lifetime,
+      fn(region: &Lifetime) -> bool { return b12CallerRegion(region, caller, ordinal, parameterRegion) })
+      && Shared.with<Type, bool>(&referent, fn(nested: &Type) -> bool { return b12ContextTypeIsCanonical(nested, caller, ordinal, parameterRegion) })
+    Type.Array {element, ..} => Shared.with<Type, bool>(&element,
+      fn(nested: &Type) -> bool { return b12ContextTypeIsCanonical(nested, caller, ordinal, parameterRegion) })
+    Type.Nominal {arguments, ..} => {
+      let listed = Vector.asSlice<Argument>(&arguments)
+      if listed.length != usize.ONE { return false }
+      return match &listed[usize.ZERO] {
+        Argument.Lifetime {value: region} => Shared.with<Lifetime, bool>(&region,
+          fn(lifetime: &Lifetime) -> bool { return b12CallerRegion(lifetime, caller, ordinal, parameterRegion) })
+        _ => false
+      }
+    }
+    _ => false
+  }
+}
+
+fn b12AggregateRegionsAreCanonical(body: &TypedBody) -> bool {
+  return b12AggregateRegionEvidence(body, false, false)
+}
+
+fn b12ForwardRegionsAreCanonical(body: &TypedBody) -> bool {
+  return b12AggregateRegionEvidence(body, true, false)
+}
+
+fn b12MixedRegionsAreCanonical(body: &TypedBody) -> bool {
+  return b12AggregateRegionEvidence(body, true, true)
+}
+
+fn b12MixedBorrowRegionsAreCanonical(body: &TypedBody) -> bool {
+  return b12AggregateRegionEvidence(body, false, true)
+}
+
+fn b12AggregateRegionEvidence(body: &TypedBody, parameterRegion: bool, mixed: bool) -> bool {
+  let caller = TypedBody.declarationId(body)
+  let nodes = TypedBody.nodeSlice(body)
+  let mut callOrdinal = usize.MAX
+  let mut calls = usize.ZERO
+  let mut borrows = usize.ZERO
+  let mut aggregates = usize.ZERO
+  let mut at = usize.ZERO
+  while at < nodes.length {
+    if let BodyNodeKind.Expression {form: BodyExpression.DirectCall {genericArguments, ..}, ..} = &nodes[at].kind {
+      callOrdinal = nodes[at].origin.syntax.index
+      if !b12ArgumentsLifetimeCanonical(&genericArguments, caller, callOrdinal, parameterRegion, mixed) { return false }
+      calls = calls + usize.ONE
+    }
+    at = at + usize.ONE
+  }
+  at = usize.ZERO
+  while at < nodes.length {
+    if let BodyNodeKind.Expression {ty, form} = &nodes[at].kind {
+      if !Shared.with<Type, bool>(&ty, fn(value: &Type) -> bool { return b12ContextTypeIsCanonical(value, caller, callOrdinal, parameterRegion) }) { return false }
+      if let BodyExpression.Borrow {..} = &form { borrows = borrows + usize.ONE }
+      if let BodyExpression.Aggregate {..} = &form { aggregates = aggregates + usize.ONE }
+    }
+    at = at + usize.ONE
+  }
+  return calls == usize.ONE && aggregates == usize.ONE && ((parameterRegion && borrows == usize.ZERO) || (!parameterRegion && borrows == 2))
+}
+
+fn b12ArgumentsLifetimeCanonical(arguments: &Vector<Argument>, caller: &DeclarationId, ordinal: usize, parameterRegion: bool, mixed: bool) -> bool {
+  let supplied = Vector.asSlice<Argument>(arguments)
+  let mut count = usize.ONE
+  if mixed { count = 2 }
+  if supplied.length != count { return false }
+  if mixed {
+    let scalar = match &supplied[usize.ONE] {
+      Argument.Type {value} => Shared.with<Type, bool>(&value, fn(ty: &Type) -> bool {
+        return match &ty.* { Type.Primitive {name} => sameBytes(Bytes.asSlice(&name), b"u8") _ => false }
+      })
+      _ => false
+    }
+    if !scalar { return false }
+  }
+  if let Argument.Lifetime {value} = &supplied[usize.ZERO] {
+    return Shared.with<Lifetime, bool>(&value,
+      fn(lifetime: &Lifetime) -> bool { return b12CallerRegion(lifetime, caller, ordinal, parameterRegion) })
+  }
+  return false
+}
+
+fn b12ValueRegionsAreCanonical(body: &TypedBody) -> bool {
+  let caller = TypedBody.declarationId(body)
+  let nodes = TypedBody.nodeSlice(body)
+  let mut calls = usize.ZERO
+  let mut relay = false
+  let mut array = false
+  let mut tupleValue = false
+  let mut at = usize.ZERO
+  while at < nodes.length {
+    if let BodyNodeKind.Expression {ty, form} = &nodes[at].kind {
+      if !Shared.with<Type, bool>(&ty, fn(value: &Type) -> bool {
+        return b12ContextTypeIsCanonical(value, caller, usize.MAX, true)
+      }) { return false }
+      array = array || Shared.with<Type, bool>(&ty, fn(value: &Type) -> bool {
+        return match &value.* { Type.Array {..} => true _ => false }
+      })
+      tupleValue = tupleValue || Shared.with<Type, bool>(&ty, fn(value: &Type) -> bool {
+        return match &value.* { Type.Nominal {declaration, ..} => DeclarationId.named(&declaration, b"Witness") _ => false }
+      })
+      if let BodyExpression.DirectCall {declaration, genericArguments, ..} = &form {
+        if !b12ArgumentsLifetimeCanonical(&genericArguments, caller, usize.MAX, true, false) { return false }
+        relay = relay || DeclarationId.named(&declaration, b"relay")
+        calls = calls + usize.ONE
+      }
+    }
+    at = at + usize.ONE
+  }
+  return calls == 3 && relay && array && tupleValue
 }

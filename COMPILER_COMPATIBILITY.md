@@ -22,7 +22,7 @@ diagnosis, and it may be a real bug.
 | Compiler                       | Location                                                        | Role today                                                                                                                                                                                                                                                                                     |
 | ------------------------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | TypeScript bootstrap (stage 0) | `packages/compiler`, `packages/cli`                             | Builds and checks every Silk program today: the standard library in `packages/compiler/stdlib`, examples, and the self-hosted compiler's own sources. Repairs start from `main` (see the [development branches and bootstrap](compiler/README.md#development-branches-and-bootstrap) section). |
-| Self-hosted native frontend    | `compiler/` (developed on `selfhost` and `selfhost-*` branches) | Lexer, parser, HIR lowering, and demanded semantic queries. Its semantic coverage is incomplete and it is not wired into the CLI. Source compiled with `silk build`, `check`, or `test` never goes through it. [compiler/README.md](compiler/README.md) lists what it supports.                |
+| Self-hosted native frontend    | `compiler/` (developed on `selfhost` and `selfhost-*` branches) | Lexer, parser, HIR lowering, demanded semantic queries, and native `silkc build` for the documented closed-body subset. Its semantic and backend coverage is incomplete. The TypeScript CLI commands `silk build`, `check`, and `test` still use the bootstrap. [compiler/README.md](compiler/README.md) lists what it supports.                |
 
 Consequences:
 
@@ -47,11 +47,18 @@ validated facts; cached Pool or instance answers are outside M2.3. See
 coverage ledger (workspace note `fc5536e2-4ce3-4989-8600-43c96f4104d5`). A `ContractTyped`
 body still carries ownership, lifetime, cleanup, and Effect safety obligations for M2.5. This
 does not claim borrow checking or general executable support. The selfhost build CLI currently
-lowers a closed scalar/reference subset through demanded MIR and LLVM text. It emits a
+lowers closed scalar, reference, record and sequence forms through demanded MIR and LLVM text. It emits a
 `SILK_GAP borrow-check` summary when reached bodies retain safety obligations. Field/index
-projections and slice layouts remain named coverage gaps until backend roadmap step 4; ownership,
-lifetime, and cleanup checking remains step 14. The TypeScript bootstrap still builds the native
-compiler and remains the complete language oracle.
+projections now use neutral record/sequence layouts in backend roadmap step 4. Runtime slice
+descriptors and checked element places use the same internal aggregate slots; subrange primitives
+remain a named `intrinsic-member` gap. A repeated inferred shared-slice lifetime with distinct
+actual Local regions of the same caller requires the deferred common-validity proof and reports
+`slice-region-relation`; this does not admit fixed Static, incompatible access/element, or foreign
+owner evidence. That gap exits through the later checked caller-region/outlives stage. Immediate
+raw pointer mutation-capability weakening preserves invariant pointee/extent and identical other
+qualifiers; it does not implement reverse access, nested pointee covariance, or other qualifier
+conversions. Ownership, lifetime, and cleanup checking remains step 14. The TypeScript bootstrap
+still builds the native compiler and remains the complete language oracle.
 
 ## Entry format
 
@@ -248,6 +255,16 @@ confirmed that acceptance. The self-hosted frontend correctly rejects those unpu
 The fixture now declares both functions in `impl Vector`, retaining its expected result of 42.
 The bootstrap is frozen during backend development; retire this entry when it enforces the
 same owner lookup rule.
+
+### Struct declaration fields use whitespace separators
+
+STRUCT-002 and GEN-002 show whitespace/newline-separated declaration fields. The TypeScript
+bootstrap currently accepts commas between struct declaration fields; the self-hosted parser
+previously stopped after the first field without preserving the remaining declaration.
+B10 diagnoses an authored comma as `UnexpectedToken` with its exact byte span and recovers to
+continue parsing fields. Struct literal initializers still use commas. The bootstrap is frozen;
+its comma acceptance is an intentional recorded divergence until a separately authorized repair.
+The structured parser assertion lives in `hir/LoweringCases.structFieldCommaReportsAuthoredSyntax`.
 
 ## Maintaining this file
 

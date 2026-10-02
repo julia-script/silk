@@ -14,10 +14,15 @@ pub enum Code {
   ForeignContract,
   ForeignExport,
   ForeignAbi,
+  ForeignStatic,
   IntegerLiteral,
   FloatLiteral,
   MissingCallArgument,
   TypedForm,
+  UnionForm,
+  EnumForm,
+  GenericRecord,
+  BoundMethod,
   IntrinsicMember,
   ProfileInput,
   ExpectedExpression,
@@ -26,6 +31,7 @@ pub enum Code {
   FieldProjection,
   IndexProjection,
   SliceLayout,
+  SliceRegionRelation,
   BreakOutsideLoop,
   ContinueOutsideLoop,
   MissingBlockStatement,
@@ -35,6 +41,8 @@ pub enum Code {
   UnitParameter,
   EntrySignature,
   CalleeModule,
+  OpenInstance,
+  EffectInstance,
 }
 
 /// A reached form that the current backend cannot compile.
@@ -60,11 +68,16 @@ impl Gap {
       Code.ForeignContract => b"foreign-contract"
       Code.ForeignExport => b"foreign-export"
       Code.ForeignAbi => b"foreign-abi"
+      Code.ForeignStatic => b"foreign-static"
       Code.ScalarLayout => b"scalar-layout"
       Code.FloatLiteral => b"float-literal"
       Code.IntegerLiteral => b"integer-literal"
       Code.MissingCallArgument => b"missing-call-argument"
       Code.TypedForm => b"typed-form"
+      Code.UnionForm => b"union-form"
+      Code.EnumForm => b"enum-form"
+      Code.GenericRecord => b"generic-record"
+      Code.BoundMethod => b"bound-method"
       Code.IntrinsicMember => b"intrinsic-member"
       Code.ProfileInput => b"profile-input"
       Code.ExpectedExpression => b"expected-expression"
@@ -73,6 +86,7 @@ impl Gap {
       Code.FieldProjection => b"field-projection"
       Code.IndexProjection => b"index-projection"
       Code.SliceLayout => b"slice-layout"
+      Code.SliceRegionRelation => b"slice-region-relation"
       Code.BreakOutsideLoop => b"break-outside-loop"
       Code.ContinueOutsideLoop => b"continue-outside-loop"
       Code.MissingBlockStatement => b"missing-block-statement"
@@ -82,6 +96,8 @@ impl Gap {
       Code.UnitParameter => b"unit-parameter"
       Code.EntrySignature => b"entry-signature"
       Code.CalleeModule => b"callee-module"
+      Code.OpenInstance => b"open-instance"
+      Code.EffectInstance => b"effect-instance"
     }
   }
 }

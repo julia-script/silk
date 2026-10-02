@@ -2,6 +2,7 @@ import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { performance } from 'node:perf_hooks'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   nativeCorpus,
@@ -135,11 +136,6 @@ const unsupportedFixture = (program: CorpusProgram): ReadonlyArray<Gap> => {
       code: 'CORPUS_NATIVE_LINK_INPUT',
       reason: 'the build CLI cannot link corpus C objects or libraries beyond libc/libm yet',
     })
-  if (program.nativeProfiles?.some((profile) => profile.optimization !== 'speed' || profile.debug))
-    gaps.push({
-      code: 'CORPUS_BUILD_PROFILE',
-      reason: 'the build CLI cannot select the corpus debug or unoptimized profile yet',
-    })
   return gaps
 }
 
@@ -208,39 +204,43 @@ export const runCase = (silkc: string, program: CorpusProgram): CaseResult => {
   try {
     writeProgram(directory, program)
     const executable = join(directory, 'program')
-    const built = spawnSync(silkc, [
-      'build', 'main.silk', '-o', 'program', '--stdlib',
-      fileURLToPath(new URL('../../packages/compiler/stdlib', import.meta.url)),
-    ], {
-      cwd: directory,
-      encoding: 'utf8',
-      timeout: processTimeoutMs,
-      maxBuffer: 4 * 1024 * 1024,
-    })
-    if (built.error !== undefined || built.status !== 0 || built.signal !== null) {
-      const gaps = built.error === undefined ? parseUnsupported(text(built.stderr)) : undefined
-      const diagnostic =
-        built.error === undefined ? parseBuildDiagnostic(text(built.stderr)) : undefined
-      return gaps === undefined
-        ? {
+    const profiles = program.nativeProfiles ?? [{ name: 'optimized', optimization: 'speed', debug: false }]
+    for (const profile of profiles) {
+      const built = spawnSync(silkc, [
+        'build', 'main.silk', '-o', 'program', '--stdlib',
+        fileURLToPath(new URL('../../packages/compiler/stdlib', import.meta.url)),
+        '--optimization', profile.optimization, '--debug', String(profile.debug),
+      ], {
+        cwd: directory,
+        encoding: 'utf8',
+        timeout: processTimeoutMs,
+        maxBuffer: 4 * 1024 * 1024,
+      })
+      if (built.error !== undefined || built.status !== 0 || built.signal !== null) {
+        const gaps = built.error === undefined ? parseUnsupported(text(built.stderr)) : undefined
+        const diagnostic =
+          built.error === undefined ? parseBuildDiagnostic(text(built.stderr)) : undefined
+        return gaps === undefined
+          ? {
+              name: program.name,
+              status: 'fail',
+              code: diagnostic?.code ?? 'BUILD_PROCESS_FAILURE',
+              ...(diagnostic === undefined ? {} : { span: diagnostic.span }),
+              reason: `profile ${profile.name}: build: ${processFailure(built)}`,
+            }
+          : { name: program.name, status: 'unsupported', gaps }
+      }
+
+      for (const [ordinal, invocation] of (program.nativeRuns ?? [{}]).entries()) {
+        const mismatch = compareRun(program, invocation, runExecutable(executable, invocation))
+        if (mismatch !== undefined)
+          return {
             name: program.name,
             status: 'fail',
-            code: diagnostic?.code ?? 'BUILD_PROCESS_FAILURE',
-            ...(diagnostic === undefined ? {} : { span: diagnostic.span }),
-            reason: `build: ${processFailure(built)}`,
+            code: 'RUNTIME_MISMATCH',
+            reason: `profile ${profile.name}: run ${ordinal + 1}: ${mismatch}`,
           }
-        : { name: program.name, status: 'unsupported', gaps }
-    }
-
-    for (const [ordinal, invocation] of (program.nativeRuns ?? [{}]).entries()) {
-      const mismatch = compareRun(program, invocation, runExecutable(executable, invocation))
-      if (mismatch !== undefined)
-        return {
-          name: program.name,
-          status: 'fail',
-          code: 'RUNTIME_MISMATCH',
-          reason: `run ${ordinal + 1}: ${mismatch}`,
-        }
+      }
     }
     return { name: program.name, status: 'pass' }
   } catch (error) {
@@ -307,7 +307,14 @@ const main = (): void => {
     throw new Error('SILK_SELFHOST_CORPUS_CASES names a program absent from nativeCorpus')
   const track = selfhostTrack.filter((name) => selectedSet === undefined || selectedSet.has(name))
   const executable = silkc.includes('/') ? resolve(silkc) : silkc
-  const results = programs.map((program) => runCase(executable, program))
+  const results = programs.map((program) => {
+    const started = performance.now()
+    const result = runCase(executable, program)
+    process.stdout.write(
+      `SELFHOST_CASE_TIMING=${JSON.stringify({ name: program.name, elapsedMs: Math.round(performance.now() - started) })}\n`,
+    )
+    return result
+  })
   for (const result of results) {
     let detail = ''
     if (result.status === 'fail')

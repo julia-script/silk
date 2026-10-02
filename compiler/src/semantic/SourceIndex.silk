@@ -9,6 +9,7 @@
 //! answers. Events record actual query starts, hits, finishes, and source map reads.
 
 import semantic.ModuleId {ModuleId}
+import semantic.BodyInput {BodyInput}
 import semantic.ModuleIndex {ModuleIndex, NameObservation}
 import semantic.Query {Cycle, Query}
 import semantic.SourceRevision {Observation, Revision}
@@ -32,6 +33,15 @@ pub struct IndexedSource {
   observation: Observation
   unit: SourceUnit
   index: ModuleIndex
+  bodyInputs: Vector<Option<Shared<BodyInput>>>
+}
+
+/// One stable source-store slot whose parsed payload may be invalidated.
+///
+/// The slot owns its optional source, including that source's lazy declaration inputs.
+/// A changed observation clears the payload while completed answers retain the slot number.
+pub struct SourceSlot {
+  source: Option<IndexedSource>
 }
 
 /// An owned address for short reads of one exact parsed source observation.
@@ -81,7 +91,7 @@ pub union SourceResult {
 
 /// A source append that is retained only if its query answer becomes complete.
 struct SourcePublication<'a, 'b> {
-  sources: &'a mut Vector<IndexedSource>
+  sources: &'a mut Vector<SourceSlot>
   query: &'b mut Query<Word, SourceResult, NoRejection>
   key: Word
   base: usize
@@ -89,7 +99,7 @@ struct SourcePublication<'a, 'b> {
 
 effect fn demandSource(
   query: &mut Query<Word, SourceResult, NoRejection>,
-  sources: &mut Vector<IndexedSource>,
+  sources: &mut Vector<SourceSlot>,
   events: &mut Vector<Event>,
   revision: &Revision,
   id: &ModuleId,
@@ -115,9 +125,13 @@ effect fn demandSource(
           observation: run Observation.copy(&observed),
           unit: move unit,
           index: move index,
+          bodyInputs: Vector.make<Option<Shared<BodyInput>>>(),
         }
-        let slot = Vector.length<IndexedSource>(&sources.*)
-        run Vector.append<IndexedSource>(&mut sources.*, move source)
+        let slot = Vector.length<SourceSlot>(&sources.*)
+        run Vector.append<SourceSlot>(
+          &mut sources.*,
+          SourceSlot {source: Option.some<IndexedSource>(move source)},
+        )
         return Result.succeed<SourceResult, NoRejection>(
           SourceResult.Present {slot: slot, observation: move observed},
         )
@@ -130,7 +144,7 @@ effect fn demandSource(
 }
 
 effect fn withPublication<'a, 'b, 'c, 'd, 'e>(
-  sources: &'a mut Vector<IndexedSource>,
+  sources: &'a mut Vector<SourceSlot>,
   query: &'b mut Query<Word, SourceResult, NoRejection>,
   events: &'c mut Vector<Event>,
   revision: &'d Revision,
@@ -138,7 +152,7 @@ effect fn withPublication<'a, 'b, 'c, 'd, 'e>(
   number: usize,
   key: Word,
 ) -> Shared<Result<SourceResult, NoRejection>> ! Cycle | OutOfMemoryError ? &mut Allocator {
-  let base = Vector.length<IndexedSource>(&sources.*)
+  let base = Vector.length<SourceSlot>(&sources.*)
   let publication = SourcePublication {
     sources: move sources,
     query: move query,
@@ -163,7 +177,7 @@ effect fn withPublication<'a, 'b, 'c, 'd, 'e>(
     let selected = resource.key
     let original = resource.base
     if !Query.isComplete(&mut resource.query.*, selected) {
-      Vector.truncate<IndexedSource>(&mut resource.sources.*, original)
+      Vector.truncate<SourceSlot>(&mut resource.sources.*, original)
     }
     return ()
   }
@@ -229,7 +243,7 @@ pub struct SourceIndex {
   environment: Environment
   revision: Revision
   keys: Vector<ModuleId>
-  sources: Vector<IndexedSource>
+  sources: Vector<SourceSlot>
   cursorToken: Option<Shared<CursorStamp>>
   query: Query<Word, SourceResult, NoRejection>
   events: Vector<Event>
@@ -291,12 +305,39 @@ effect fn keyFor(store: &mut SourceIndex, id: &ModuleId) -> Word ! OutOfMemoryEr
   return Hash.word(usize.toU64(next))
 }
 
+// Source slot identities never move while completed answers can retain them. Invalidating a
+// content observation drops its parsed source and leaves only an empty slot identity.
+fn sourceAtSlot<'a>(sources: &'a [SourceSlot], slot: usize) -> Option<&'a IndexedSource> {
+  if slot < sources.length {
+    if let Option<IndexedSource>.Some {value} = &sources[slot].source {
+      return Option.some<&IndexedSource>(&value)
+    }
+  }
+  return Option.none<&IndexedSource>()
+}
+
+fn answerMatches(answer: &Result<SourceResult, NoRejection>, revision: &Revision) -> bool {
+  return match &answer.* {
+    Result<SourceResult, NoRejection>.Success {value} => match &value {
+      SourceResult.Present {observation, ..} => Observation.matches(&observation, revision)
+      SourceResult.Absent {observation} => Observation.matches(&observation, revision)
+    }
+    Result<SourceResult, NoRejection>.Failure {..} => false
+  }
+}
+
+fn answerSlot(answer: &Result<SourceResult, NoRejection>) -> usize {
+  return match &answer.* {
+    Result<SourceResult, NoRejection>.Success {value: SourceResult.Present {slot, ..}} => slot
+    _ => usize.MAX
+  }
+}
+
 fn selectName(
   answer: &Result<SourceResult, NoRejection>,
-  sources: &[IndexedSource],
+  sources: &[SourceSlot],
   id: &ModuleId,
   held: &Revision,
-  number: usize,
   name: &[u8],
 ) -> NameSelection {
   return match & answer.* {
@@ -310,8 +351,18 @@ fn selectName(
             found: Option.none<Shared<NameObservation>>(),
           }
         }
-        let source = &sources[slot]
-        if !ModuleId.equals(&source.unit.id, id) || source.unit.revision != number || !Observation.equals(
+        let source = match move sourceAtSlot(sources, slot) {
+          Option<&IndexedSource>.Some {value: indexed} => indexed
+          Option<&IndexedSource>.None => {
+            return NameSelection {
+              valid: false,
+              present: false,
+              slot: usize.ZERO,
+              found: Option.none<Shared<NameObservation>>(),
+            }
+          }
+        }
+        if !ModuleId.equals(&source.unit.id, id) || !Observation.equals(
           &observation,
           &source.observation,
         ) || !Observation.matches(&observation, held) {
@@ -354,6 +405,38 @@ fn selectName(
   }
 }
 
+effect fn bodyInputOf(indexed: &mut IndexedSource, ordinal: usize) -> Option<Shared<BodyInput>>
+! OutOfMemoryError ? &mut Allocator {
+  let declarations = ModuleIndex.listDeclarations(&indexed.index)
+  if ordinal >= declarations.length {
+    return Option.none<Shared<BodyInput>>()
+  }
+  while Vector.length<Option<Shared<BodyInput>>>(&indexed.bodyInputs) <= ordinal {
+    run Vector.append<Option<Shared<BodyInput>>>(
+      &mut indexed.bodyInputs,
+      Option.none<Shared<BodyInput>>(),
+    )
+  }
+  let inputs = Vector.asSlice<Option<Shared<BodyInput>>>(&indexed.bodyInputs)
+  if let Option<Shared<BodyInput>>.Some {value: cached} = &inputs[ordinal] {
+    return Option.some<Shared<BodyInput>>(Shared.clone<BodyInput>(&cached))
+  }
+  let declaration = &declarations[ordinal]
+  let input = run Shared.make<BodyInput>(run BodyInput.make(
+    &indexed.unit.authored,
+    &declaration.identity,
+    declaration.local,
+    declaration.ambiguous,
+    SourceUnit.bytes(&indexed.unit),
+  ))
+  Vector.set<Option<Shared<BodyInput>>>(
+    &mut indexed.bodyInputs,
+    ordinal,
+    Option.some<Shared<BodyInput>>(Shared.clone<BodyInput>(&input)),
+  )
+  return Option.some<Shared<BodyInput>>(move input)
+}
+
 impl IndexedSource {
   /// Borrows the exact present-path observation captured on the source-query miss.
   pub fn sourceObservation(self: &Self) -> &Observation {
@@ -380,18 +463,20 @@ impl SourceIndex {
       environment: Environment.Final,
       revision: move revision,
       keys: Vector.make<ModuleId>(),
-      sources: Vector.make<IndexedSource>(),
+      sources: Vector.make<SourceSlot>(),
       cursorToken: Option.none<Shared<CursorStamp>>(),
       query: Query.make<Word, SourceResult, NoRejection>(),
       events: Vector.make<Event>(),
     }
   }
-  /// Selects another immutable revision and releases the previous parsed source units.
+  /// Selects another immutable revision, retaining source queries whose exact content agrees.
   ///
   /// # Details
   ///
-  /// Semantic answers can be validated separately against this revision. A source demand in
-  /// the new revision parses its own retained bytes; no old source slot crosses the boundary.
+  /// Unchanged present sources keep their parsed syntax, authored HIR, name index, and stable
+  /// source slots. Changed or removed sources release those values and invalidate their query;
+  /// a newly present path invalidates its absent answer. Content observations, rather than paths
+  /// or revision numbers, decide reuse. Every previously issued authored cursor is invalidated.
   pub fn revise(self: &mut Self, revision: Revision) -> () {
     if let Option<Shared<CursorStamp>>.Some {value} = &self.cursorToken {
       Shared.withMut<CursorStamp, ()>(&value, fn(stamp: &mut CursorStamp) -> () {
@@ -399,10 +484,29 @@ impl SourceIndex {
         return ()
       })
     }
+    let mut at = usize.ZERO
+    while at < Vector.length<ModuleId>(&self.keys) {
+      let key = Hash.word(usize.toU64(at))
+      let completed = Query.completed(&mut self.query, key)
+      if let Option<Shared<Result<SourceResult, NoRejection>>>.Some {value} = move completed {
+        let valid = Shared.with<Result<SourceResult, NoRejection>, bool>(
+          &value,
+          fn(answer: &Result<SourceResult, NoRejection>) -> bool {
+            return answerMatches(answer, &revision)
+          },
+        )
+        if !valid {
+          let slot = Shared.with<Result<SourceResult, NoRejection>, usize>(&value, answerSlot)
+          if slot < Vector.length<SourceSlot>(&self.sources) {
+            let mut sources = Vector.asMutSlice<SourceSlot>(&mut self.sources)
+            sources[slot].source = Option.none<IndexedSource>()
+          }
+          Query.forget(&mut self.query, key)
+        }
+      }
+      at = at + usize.ONE
+    }
     self.revision = move revision
-    self.keys = Vector.make<ModuleId>()
-    self.sources = Vector.make<IndexedSource>()
-    self.query = Query.make<Word, SourceResult, NoRejection>()
     self.events = Vector.make<Event>()
     return ()
   }
@@ -417,10 +521,6 @@ impl SourceIndex {
   /// Borrows the demand, source-read, and name-bucket events recorded by this store.
   pub fn eventLog(self: &Self) -> &[Event] {
     return Vector.asSlice<Event>(&self.events)
-  }
-  /// Returns the held revision number for this store.
-  pub fn revisionNumber(self: &Self) -> usize {
-    return Revision.revisionNumber(&self.revision)
   }
   /// Copies the held revision's exact present or absent mapping for a demanded path.
   ///
@@ -482,11 +582,11 @@ impl SourceIndex {
   ) -> Option<Shared<NameObservation>> ! RevisionMismatch | OutOfMemoryError ? &mut Allocator {
     let held = &self.revision
     let number = Revision.revisionNumber(held)
-    let sources = Vector.asSlice<IndexedSource>(&self.sources)
+    let sources = Vector.asSlice<SourceSlot>(&self.sources)
     let selected = Shared.with<Result<SourceResult, NoRejection>, NameSelection>(
       answer,
       fn(value: &Result<SourceResult, NoRejection>) -> NameSelection {
-        return selectName(value, sources, id, held, number, name)
+        return selectName(value, sources, id, held, name)
       },
     )
     if !selected.valid {
@@ -519,18 +619,41 @@ impl SourceIndex {
     &IndexedSource,
   > {
     let held = &self.revision
-    let number = Revision.revisionNumber(held)
-    let sources = Vector.asSlice<IndexedSource>(&self.sources)
+    let sources = Vector.asSlice<SourceSlot>(&self.sources)
     let selected = Shared.with<Result<SourceResult, NoRejection>, NameSelection>(
       answer,
       fn(value: &Result<SourceResult, NoRejection>) -> NameSelection {
-        return selectName(value, sources, id, held, number, b"")
+        return selectName(value, sources, id, held, b"")
       },
     )
     if !selected.valid || !selected.present {
       return Option.none<&IndexedSource>()
     }
-    return Option.some<&IndexedSource>(&sources[selected.slot])
+    return sourceAtSlot(sources, selected.slot)
+  }
+  /// Returns shared declaration inputs on demand, or `None` if the source or declaration is absent.
+  ///
+  /// # Details
+  ///
+  /// Unchanged source content retains the handle across revisions. Changed source content drops
+  /// the cache with its parsed source. A foreign or stale source answer returns `None`.
+  pub effect fn bodyInput(
+    self: &mut Self,
+    answer: &Shared<Result<SourceResult, NoRejection>>,
+    id: &ModuleId,
+    ordinal: usize,
+  ) -> Option<Shared<BodyInput>> ! OutOfMemoryError ? &mut Allocator {
+    let available = run SourceIndex.authoredCursor(&mut self.*, answer, id)
+    let slot = match move available {
+      Option<AuthoredCursor>.Some {value: cursor} => cursor.slot
+      Option<AuthoredCursor>.None => { return Option.none<Shared<BodyInput>>() }
+    }
+    let mut sources = Vector.asMutSlice<SourceSlot>(&mut self.sources)
+    let mut selected = &mut sources[slot]
+    if let Option<IndexedSource>.Some {value: indexed} = &mut selected.source {
+      return run bodyInputOf(&mut indexed, ordinal)
+    }
+    return Option.none<Shared<BodyInput>>()
   }
   /// Authenticates an exact present source once, then retains a zero-copy cursor to its HIR.
   pub effect fn authoredCursor(
@@ -616,7 +739,8 @@ impl SourceIndex {
 }
 
 // A cloned token keeps its allocation live, so its payload address is an exact store identity
-// without an ABA reuse. Revising the store advances the generation before releasing old sources.
+// without an ABA reuse. Revising the store advances the generation even when parsed content
+// is retained.
 fn cursorSource(self: &SourceIndex, cursor: &AuthoredCursor) -> Option<&IndexedSource> {
   if let Option<Shared<CursorStamp>>.Some {value: held} = &self.cursorToken {
     let owner = Shared.with<CursorStamp, usize>(&held, stampAddress)
@@ -630,9 +754,9 @@ fn cursorSource(self: &SourceIndex, cursor: &AuthoredCursor) -> Option<&IndexedS
     if generation != cursor.generation {
       return Option.none<&IndexedSource>()
     }
-    let sources = Vector.asSlice<IndexedSource>(&self.sources)
+    let sources = Vector.asSlice<SourceSlot>(&self.sources)
     if cursor.slot < sources.length {
-      return Option.some<&IndexedSource>(&sources[cursor.slot])
+      return sourceAtSlot(sources, cursor.slot)
     }
   }
   return Option.none<&IndexedSource>()
