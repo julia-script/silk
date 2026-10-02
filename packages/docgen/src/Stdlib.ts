@@ -18,17 +18,15 @@ import type * as Sources from './Sources.js'
 export const sources: Sources.Lookup = (sourceId) => CompilerStdlib.sources.get(sourceId)
 
 /**
- * Builds documentation for every module of a standard-library manifest, private declarations
- * included. The manifest defaults to the one the compiler ships.
+ * Builds documentation for every standard-library module, private declarations included.
  *
  * Private declarations are documented here because a doctest cares about whether an example
  * compiles, not about whether its declaration is part of the published surface.
  */
 export const documentation = Effect.fn('Stdlib.documentation')(function* (
   target: string,
-  manifest: ReadonlyArray<CompilerStdlib.Module> = CompilerStdlib.manifest,
 ): Effect.fn.Return<DocumentationProject.Project, ModuleClosure.ModuleClosureError> {
-  const roots = manifest.map((entry) => entry.module)
+  const roots = CompilerStdlib.manifest.map((entry) => entry.module)
   const analysis = yield* ProjectAnalysis.make(roots, {
     configuration: { profile: { target } },
   }).pipe(Effect.provide(SourceResolver.empty))

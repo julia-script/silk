@@ -1062,7 +1062,7 @@ it.live(
   Timeouts.nativeBuild,
 )
 
-it.live('keeps watching after a compilation that reports a diagnostic', () =>
+it.live('keeps watching after a pass that returns a nonzero status', () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
     const root = yield* fileSystem.makeTempDirectoryScoped()

@@ -103,5 +103,5 @@ it.effect('refuses an input that is missing, malformed, or absent altogether', (
 )
 
 // `--stdlib` is deliberately not exercised here. The `documentation:examples` script runs
-// `silk doctest --stdlib` over the whole shipped standard library in CI, and docgen's
-// `Stdlib.test.ts` covers `Stdlib.documentation` on a small manifest slice.
+// `silk doctest --stdlib` over the whole shipped standard library in CI, which covers this branch
+// and `Stdlib.documentation` on the real manifest.
