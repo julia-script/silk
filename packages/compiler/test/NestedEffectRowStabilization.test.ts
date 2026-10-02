@@ -1,26 +1,9 @@
-import * as Layer from 'effect/Layer'
-import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import * as NativeToolchain from '../src/NativeToolchain.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
-import * as Driver from './support/TestDriver.js'
-import * as TestToolchain from './support/TestToolchain.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-
-const runtimeObjectCache = NativeToolchain.makeRuntimeObjectCache()
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-nested-effect-row-stabilization-'))
-
-afterAll(() => {
-  rmSync(destinationRoot, { recursive: true, force: true })
-})
 
 /**
  * SERV-009 / EFF-004: provision applies to one Effect layer. An `effect fn` whose success value is
@@ -38,18 +21,6 @@ impl Cell {
 }
 impl Counter for Cell { get: Cell.getImpl }
 effect fn read() -> i32 ? &Counter { return run Counter.get() }`
-
-/** The outer execution is itself provided; the inner Effect still needs its own provider. */
-const provideEachLayer = `${counter}
-effect fn outer() -> Effect<'static; i32 ? &Counter> ? &Counter {
-  return read()
-}
-pub fn main() -> i32 {
-  let a = Cell { n: 1 }
-  let b = Cell { n: 2 }
-  let inner = run Effect.provide<Counter>(outer(), &a)
-  return run Effect.provide<Counter>(move inner, &b)
-}`
 
 /** Providing the outer layer does not close the inner Effect's requirement row. */
 const innerNotClosed = `${counter}
@@ -73,33 +44,4 @@ it.effect('reports SEM0071 when only the outer layer is provided', () =>
       ['SEM0071'],
     )
   }),
-)
-
-it.effect(
-  'provides each Effect layer separately on native',
-  () =>
-    Effect.gen(function* () {
-      const compiled = yield* Driver.compile({
-        compilation: {
-          root: 'effect-typing/provide-each-layer',
-        },
-        toolchain: { ...(yield* TestToolchain.configured), runtimeObjectCache },
-        optimization: 'release',
-        artifactKind: 'NativeExecutable',
-        destination: join(destinationRoot, 'provide-each-layer'),
-      }).pipe(
-        Effect.provide(
-          SourceResolver.overlay([
-            SourceFile.make('effect-typing/provide-each-layer', ascii(provideEachLayer)),
-          ]).pipe(Layer.provideMerge(SourceResolver.empty)),
-        ),
-      )
-
-      assert.strictEqual(compiled._tag, 'Compiled')
-      if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
-      assert.strictEqual(run.signal, null, run.stderr)
-      assert.strictEqual(run.status, 2, run.stderr)
-    }),
-  180_000,
 )

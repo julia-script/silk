@@ -9323,6 +9323,84 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     source: inflateAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
   },
+  // One million suspended recursive frames must complete without growing the machine stack; an
+  // unbounded native frame protocol overflows it and dies on a signal.
+  {
+    name: 'suspension-million-native-frames',
+    source: `import silk.effect { Effect }
+struct Owner { value: i32 }
+effect fn count(value: i32) -> i32 {
+  if value == 0 { return 0 }
+  let next = run Effect.suspend(effect { return value - 1 })
+  let inner = run count(next)
+  return inner + 1
+}
+effect fn retainOwner(owner: &mut Owner, value: i32) -> i32 {
+  let answer = run count(value)
+  return owner.value + answer - answer + 1
+}
+pub fn main() -> i32 {
+  let mut owner = Owner { value: 41 }
+  return run retainOwner(&mut owner, 1000000)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // The unit-valued sibling of `suspension-retry-failure`: a resumed unit suspend, one retry and
+  // a payload-free failure still reach the handler.
+  {
+    name: 'suspension-retry-unit-failure',
+    source: `import silk.effect { Effect }
+struct Problem {}
+effect fn attempt() -> i32 ! Problem {
+  let resumed = run Effect.suspend(effect { return () })
+  fail Problem {}
+}
+effect fn recover(error: Problem) -> i32 { return 7 }
+pub fn main() -> i32 {
+  return run Effect.catchAll(
+    attempt() |> Effect.retry(1),
+    recover
+  )
+}`,
+    expected: { _tag: 'Completes', result: 7 },
+  },
+  // SERV-009 / EFF-004: provision applies to one Effect layer, so the inner Effect returned by a
+  // provided outer execution observes its own provider (2), never the outer one (1).
+  {
+    name: 'nested-effect-row-provide-each-layer',
+    source: `import silk.effect { Effect }
+service Counter {
+  effect fn get() -> i32 ? &Counter
+}
+struct Cell { n: i32 }
+impl Cell {
+  effect fn getImpl(self: &Self) -> i32 { return self.n }
+}
+impl Counter for Cell { get: Cell.getImpl }
+effect fn read() -> i32 ? &Counter { return run Counter.get() }
+effect fn outer() -> Effect<'static; i32 ? &Counter> ? &Counter {
+  return read()
+}
+pub fn main() -> i32 {
+  let a = Cell { n: 1 }
+  let b = Cell { n: 2 }
+  let inner = run Effect.provide<Counter>(outer(), &a)
+  return run Effect.provide<Counter>(move inner, &b)
+}`,
+    expected: { _tag: 'Completes', result: 2 },
+  },
+  // A usize literal beyond 2^53 survives exactly through a native i64 call. Wasm rejects the
+  // same program with LAY0001 (Usize.test.ts), so this row is native-only by contract.
+  {
+    name: 'usize-exact-native-i64-call',
+    source: `import silk.usize
+fn increment(value: usize) -> usize { return usize.add(value, 1) }
+pub fn main() -> i32 {
+  if increment(9007199254740993) == 9007199254740994 { return 42 }
+  return 0
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   ...corpus,
   ...algorithmExamples,
   algorithmicCompilerFold,
