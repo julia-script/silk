@@ -361,8 +361,7 @@ it('uses one binding contract for inventory, admission, and the proof-only post 
 it.effect('pairs every intrinsic presentation with accepted semantic analysis', () =>
   Effect.gen(function* () {
     // One project analyzes the shared standard-library closure once; each fixture stays its own
-    // root module, so a diagnostic names its fixture through `span.sourceId`. Every root view
-    // carries the project-wide diagnostics and semantic occurrences, so any one view covers all.
+    // root module, so a diagnostic names its fixture through `span.sourceId`.
     const fixtures = new Map(
       acceptedSources.map((source, ordinal) => [
         `intrinsic/accepted-${ordinal}`,
@@ -372,11 +371,13 @@ it.effect('pairs every intrinsic presentation with accepted semantic analysis', 
     const project = yield* ProjectAnalysis.make([...fixtures.keys()]).pipe(
       Effect.provide(SourceResolver.memory(fixtures)),
     )
-    const view =
-      ProjectAnalysis.view(project, 'intrinsic/accepted-0') ??
-      unreachable('expected the first accepted fixture view')
-    assert.deepEqual(Analysis.diagnostics(view), [])
-    const observed = new Set(operationKeys(view))
+    const observed = new Set<string>()
+    for (const fixture of fixtures.keys()) {
+      const view =
+        ProjectAnalysis.view(project, fixture) ?? unreachable(`expected a view for ${fixture}`)
+      assert.deepEqual(Analysis.diagnostics(view), [], fixture)
+      for (const operation of operationKeys(view)) observed.add(operation)
+    }
     const catalog = Intrinsic.all().flatMap((actor) =>
       actor.operations.flatMap((operation) =>
         operation.rule._tag === 'EnumValueRule' || operation.phase !== 'Runtime'
