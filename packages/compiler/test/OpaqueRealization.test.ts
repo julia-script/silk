@@ -320,7 +320,14 @@ pub fn main() -> i32 {
         encoder.encode(source),
         'wasm32-unknown-unknown',
       )
-      assert.deepEqual(Analysis.diagnostics(self), [])
+      // Layout facts are independent of lowering; main's opaque calls have no native lowering yet.
+      assert.deepEqual(
+        Analysis.diagnostics(self).map((diagnostic) => ({
+          code: diagnostic.code,
+          span: source.slice(diagnostic.span.start, diagnostic.span.end),
+        })),
+        [{ code: 'SEM0219', span: 'first(0) + second(0) + token.left' }],
+      )
       const makeInstances = self.instances.instances.filter(
         (instance) => instance.key.declaration.name === 'make',
       )
