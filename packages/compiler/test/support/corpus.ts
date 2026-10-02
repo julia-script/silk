@@ -10174,37 +10174,17 @@ pub fn main() -> i32 {
   ...staticCompositionCorpus,
 ]
 
-/** Invalid generic programs that must stop before target layout and MIR. */
+/**
+ * Invalid generic programs that must stop before target layout and MIR. One frontend rejection
+ * proves the stop precedes instance discovery; polymorphic recursion is rejected by instance
+ * discovery itself. TypeGenerics owns each generic diagnostic at the analysis tier.
+ */
 export const invalidGenericCorpus: ReadonlyArray<InvalidCorpusProgram> = [
   {
     name: 'generic-explicit-arity',
     source:
       'fn identity<T>(value: T) -> T { return move value }\npub fn main() -> i32 { return identity<i32, bool>(42) }',
     codes: ['SEM0051'],
-  },
-  {
-    name: 'generic-explicit-arity-past-prefix',
-    source:
-      'fn pair<A, B>(left: A, right: B) -> A { return move left }\npub fn main() -> i32 { return pair<i32, bool, u8>(1, true) }',
-    codes: ['SEM0051'],
-  },
-  {
-    name: 'generic-uninferred-prefix-remainder',
-    source:
-      'fn phantom<A, B>(value: A) -> A { return move value }\npub fn main() -> i32 { return phantom<i32>(1) }',
-    codes: ['SEM0099'],
-  },
-  {
-    name: 'generic-contradicted-prefix',
-    source:
-      'fn pair<A, B>(left: A, right: B) -> A { return move left }\npub fn main() -> i32 { return pair<bool>(1, true) }',
-    codes: ['SEM0100'],
-  },
-  {
-    name: 'generic-conflicting-inference',
-    source:
-      'fn same<T>(left: T, right: T) -> T { return move left }\npub fn main() -> i32 { return same(1, true) }',
-    codes: ['SEM0052'],
   },
   {
     name: 'generic-polymorphic-recursion',
