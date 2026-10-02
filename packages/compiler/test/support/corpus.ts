@@ -3105,6 +3105,7 @@ pub fn main() -> i32 { return inspect(Right { value: 0 }) }`,
 fn make(kind: i32) -> Shape {
   if kind == 0 { return Shape.Circle { radius: 3 } }
   if kind == 1 { return Shape.Rect { width: 4, height: 5 } }
+  if kind == 3 { return Shape.Rect { width: 12, height: 9 } }
   return Shape.Empty
 }
 fn area(shape: &Shape) -> i32 {
@@ -3125,7 +3126,7 @@ pub fn main() -> i32 {
   let circle = make(0)
   let rect = make(1)
   let empty = make(2)
-  return area(&circle) + area(&rect) + area(&empty) - tall(make(1)) + tall(move empty) - 1
+  return area(&circle) + area(&rect) + area(&empty) - tall(make(1)) + tall(make(3)) + tall(move empty) - 1
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
