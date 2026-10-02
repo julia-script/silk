@@ -3097,6 +3097,50 @@ fn inspect(input: Left | Right) -> i32 {
 pub fn main() -> i32 { return inspect(Right { value: 0 }) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  // A local copied from a shared pattern binding owns the borrowed value; the nested shared
+  // selection keeps the copy's storage valid while it is updated.
+  {
+    name: 'borrowed-binding-local-copy',
+    source: `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.vector { Vector }
+union Selector { Unit, Selected { tag: usize } }
+struct Arm { pattern: Selector }
+union Outer { Other, Pair { count: usize, items: Vector<Arm> } }
+fn largest(values: &[Outer]) -> usize {
+  let mut at: usize = 0
+  while at < values.length {
+    if let Outer.Pair { count, items } = &values[at] {
+      let written = Vector.asSlice<Arm>(&items)
+      let mut best = count
+      let mut arm: usize = 0
+      while arm < written.length {
+        let mut selected: usize = 0
+        if let Selector.Selected { tag } = &written[arm].pattern { selected = tag }
+        if selected > best { best = selected }
+        arm = arm + 1
+      }
+      return best
+    }
+    at = at + 1
+  }
+  return 0
+}
+effect fn build() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut items = Vector.make<Arm>()
+  run Vector.append<Arm>(&mut items, Arm { pattern: Selector.Selected { tag: 1 } }) |> Effect.provideMut(&mut allocator)
+  run Vector.append<Arm>(&mut items, Arm { pattern: Selector.Unit }) |> Effect.provideMut(&mut allocator)
+  run Vector.append<Arm>(&mut items, Arm { pattern: Selector.Selected { tag: 7 } }) |> Effect.provideMut(&mut allocator)
+  let mut values = Vector.make<Outer>()
+  run Vector.append<Outer>(&mut values, Outer.Pair { count: 3, items: move items }) |> Effect.provideMut(&mut allocator)
+  if largest(Vector.asSlice<Outer>(&values)) == 7 { return 42 }
+  return 1
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 2 }
+pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // A non-generic nominal union: payload and unit variants, construction, call results, and shared
   // and consuming matches with a guard and a universal arm.
   {
@@ -9849,6 +9893,90 @@ fn weight<T>() -> i32 {
 
 pub fn main() -> i32 {
   return weight<Named>() + weight<Pair>()
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // Static parameters select one instance per value; runtime parameters keep their lanes.
+  {
+    name: 'static-parameter-instances',
+    source: `fn scaled(static factor: i32, value: i32) -> i32 {
+  return factor * value
+}
+
+fn words(static size: usize, total: usize) -> usize {
+  return total / size
+}
+
+pub fn main() -> i32 {
+  if words(8, 64) != 8 {
+    return 1
+  }
+  return scaled(2, 6) + scaled(3, 10)
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // Changing static arguments close over finite self, mutual and two-value cyclic chains.
+  {
+    name: 'static-parameter-finite-chains',
+    source: `fn countdown(static n: i32) -> i32 {
+  static if n == 0 {
+    return 0
+  } else {
+    return countdown(n - 1) + 2
+  }
+}
+
+fn ping(static n: i32) -> i32 {
+  static if n == 0 {
+    return 10
+  } else {
+    return pong(n - 1) + 1
+  }
+}
+
+fn pong(static n: i32) -> i32 {
+  static if n == 0 {
+    return 20
+  } else {
+    return ping(n - 1) + 1
+  }
+}
+
+fn toggle(static flag: i32, depth: i32) -> i32 {
+  if depth == 0 {
+    return flag
+  }
+  return toggle(1 - flag, depth - 1)
+}
+
+pub fn main() -> i32 {
+  return countdown(5) + ping(3) + toggle(0, 5) + 8
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  // Static enum and fixed-array arguments are materialized where the callee reads them at runtime.
+  {
+    name: 'static-parameter-aggregates',
+    source: `enum Mode { Fast, Slow }
+
+fn echo(static mode: Mode) -> Mode {
+  return mode
+}
+
+fn pick(static table: [i32; 3], index: usize) -> i32 {
+  let local = table
+  return local[index]
+}
+
+pub fn main() -> i32 {
+  let mode = echo(Mode.Slow)
+  if mode != Mode.Slow {
+    return 1
+  }
+  return match mode {
+    Mode.Fast => 2
+    Mode.Slow => pick([5, 30, 7], 1) + 12
+  }
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
