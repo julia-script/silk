@@ -1966,9 +1966,9 @@ ${integerParsingRanges
   return 42
 }`
 
-// Formerly one corpus row per feature: each check keeps its own named function and exit code so a
-// regression still names the feature, while every check shares one native compile.
-// `forwardCall` stays declared after `main`.
+// Trivial language-feature checks share one native compile. Each keeps its own named function and
+// exit code so a failure names the feature; `forwardCall` is declared after `main` to keep the
+// forward reference.
 const trivialFeatures = `import silk.bool
 import silk.i32
 
