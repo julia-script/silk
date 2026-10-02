@@ -744,8 +744,9 @@ it.effect(
       assert.strictEqual(writes.filter((key) => key.startsWith('native-')).length, 2)
       assert.strictEqual(writes.filter((key) => key.startsWith('helpers-')).length, 1)
     }),
-  // Cold emission, cache reuse and a rejected supply took 39.9s locally on 2026-09-23;
-  // the three complete source runtime pipelines exceeded 120s in CI shard 4.
+  // Cold emission, a second program reusing the helper object, cache reuse and a rejected
+  // supply took 21s locally on 2026-10-02; the complete source runtime pipelines exceeded 120s
+  // in CI shard 4 before helper reuse.
   240_000,
 )
 
