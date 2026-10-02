@@ -1788,23 +1788,6 @@ fn recordRouteConnectAccepted(
   return ()
 }
 
-struct RouteWallClock {}
-
-impl RouteWallClock {
-  effect fn now(self: &mut Self) -> Instant {
-    return SystemClock.make(1789156800, 123456789)
-  }
-
-  effect fn resolution(self: &mut Self) -> u64 {
-    return u64.toU64(1)
-  }
-}
-
-impl SystemClock for RouteWallClock {
-  now: RouteWallClock.now
-  getResolution: RouteWallClock.resolution
-}
-
 enum RouteAcquisitionError { Failed }
 
 struct ScriptedRouteClient<A, E, ?R> {
@@ -1883,6 +1866,23 @@ impl Random for RouteRandom {
     self.filled = self.filled + output.length
     return ()
   }
+}
+
+struct RouteWallClock {}
+
+impl RouteWallClock {
+  effect fn now(self: &mut Self) -> Instant {
+    return SystemClock.make(1789156800, 123456789)
+  }
+
+  effect fn resolution(self: &mut Self) -> u64 {
+    return u64.toU64(1)
+  }
+}
+
+impl SystemClock for RouteWallClock {
+  now: RouteWallClock.now
+  getResolution: RouteWallClock.resolution
 }
 
 fn routeInput() -> &'static [u8] {
