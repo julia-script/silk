@@ -39,10 +39,12 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
+import * as Clock from 'effect/Clock'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Option from 'effect/Option'
+import * as TestClock from 'effect/testing/TestClock'
 import * as Analysis from '../src/Analysis.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
@@ -1764,16 +1766,33 @@ it.effect(
       const changed = yield* Effect.result(PlatformSupplyResolver.validateFiles([selected]))
       assert.strictEqual(changed._tag, 'Failure')
       if (changed._tag === 'Failure') assert.strictEqual(changed.failure.code, 'ChangedInput')
-      // A settled file's digest is reused only while its stat identity holds.
+      // A settled file's digest is reused while its stat identity holds, even across an
+      // identity-preserving rewrite, and is re-read once the identity changes.
       const settled = join(root, 'usr/lib/settled')
       writeFileSync(settled, 'old bytes')
       utimesSync(settled, 0, 0)
       const snapshot = yield* PlatformSupplyResolver.file(settled, 'library', 'settled', root)
+      writeFileSync(settled, 'new bytes')
+      utimesSync(settled, 0, 0)
       yield* PlatformSupplyResolver.validateFiles([snapshot])
       writeFileSync(settled, 'new bytes')
       const rewritten = yield* Effect.result(PlatformSupplyResolver.validateFiles([snapshot]))
       assert.strictEqual(rewritten._tag, 'Failure')
       if (rewritten._tag === 'Failure') assert.strictEqual(rewritten.failure.code, 'ChangedInput')
+      // Settledness follows the host clock that stamps mtime, not the fiber Clock: a file modified
+      // in the host's future is never memoized, however far the TestClock runs ahead.
+      const future = join(root, 'usr/lib/future')
+      const hostNow = yield* TestClock.withLive(Clock.currentTimeMillis)
+      const futureSeconds = hostNow / 1000 + 60
+      writeFileSync(future, 'old bytes')
+      utimesSync(future, futureSeconds, futureSeconds)
+      yield* TestClock.setTime(hostNow + 120_000)
+      const pending = yield* PlatformSupplyResolver.file(future, 'library', 'future', root)
+      writeFileSync(future, 'new bytes')
+      utimesSync(future, futureSeconds, futureSeconds)
+      const unsettled = yield* Effect.result(PlatformSupplyResolver.validateFiles([pending]))
+      assert.strictEqual(unsettled._tag, 'Failure')
+      if (unsettled._tag === 'Failure') assert.strictEqual(unsettled.failure.code, 'ChangedInput')
       symlinkSync('loop', join(root, 'usr/lib/loop'))
       const cycle = yield* Effect.result(
         PlatformSupplyResolver.physicalPath(join(root, 'lib/loop'), root),
