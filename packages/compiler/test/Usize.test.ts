@@ -1,4 +1,5 @@
 import { unreachable } from './support/raise.js'
+import { nativeCorpus } from './support/corpus.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -13,12 +14,9 @@ const ascii = (value: string): Uint8Array =>
 const source = (text: string, target: string) =>
   Analysis.ofSourceRealized('usize/program', ascii(text), target)
 
-const nativeExact = `import silk.usize
-fn increment(value: usize) -> usize { return usize.add(value, 1) }
-pub fn main() -> i32 {
-  if increment(9007199254740993) == 9007199254740994 { return 42 }
-  return 0
-}`
+const nativeExact =
+  nativeCorpus.find((program) => program.name === 'usize-exact-native-i64-call')?.source ??
+  unreachable('expected the usize-exact-native-i64-call native corpus case')
 
 const sharedUnsigned = `import silk.usize
 fn maximum() -> usize { return 4294967293 |> usize.add(2) }

@@ -9386,7 +9386,8 @@ pub fn main() -> i32 {
     expected: { _tag: 'Completes', result: 2 },
   },
   // A usize literal beyond 2^53 survives exactly through a native i64 call. Wasm rejects the
-  // same program with LAY0001 (Usize.test.ts), so this row is native-only by contract.
+  // same program with LAY0001, so this row is native-only by contract. Usize.test.ts reads this
+  // source for its layout, lowering and Wasm-rejection analyses.
   {
     name: 'usize-exact-native-i64-call',
     source: `import silk.usize

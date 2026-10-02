@@ -29,8 +29,9 @@ afterAll(() => {
  * named at the call site — `release` when the caller wants the failure, `releaseIgnored` when it is
  * being handed to `Effect.ensuring`, whose finalizer is typed `! never`.
  *
- * The three scenarios share one executable: each is its own function, so each keeps its own cleanup
- * shape under optimization, and each reports its failures in its own exit-status band.
+ * The three scenarios share one executable. Each is its own function, so Silk emits each cleanup
+ * shape per function in the IR and verifies it in-process, and each reports its failures in its
+ * own exit-status band.
  *
  * The program reads its confined root from SILK_TEST_ROOT at runtime instead of baking the test
  * run's mkdtemp path into the source text. A per-run path in the source made every compilation
