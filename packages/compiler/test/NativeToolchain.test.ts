@@ -1799,6 +1799,49 @@ it.effect(
     }),
 )
 
+it.effect('keys a reusable helper object by every input that shapes it, and only those', () =>
+  Effect.gen(function* () {
+    const profile = yield* CompilationProfile.normalize({ target: 'x86_64-unknown-linux-gnu' })
+    const arm = yield* CompilationProfile.normalize({ target: 'aarch64-unknown-linux-gnu' })
+    const memcpy = yield* HelperCapability.provider('memcpy', profile)
+    const memset = yield* HelperCapability.provider('memset', profile)
+    const compiler = { digest: 'clang-digest', version: 'clang version 22.1.8' }
+    const key = (
+      facts: CompilationProfile.Facts,
+      overrides: {
+        readonly distribution?: string
+        readonly providers?: ReadonlyArray<HelperCapability.Provider>
+        readonly compiler?: typeof compiler
+      } = {},
+    ) =>
+      NativeToolchain.helperCacheKey(
+        overrides.distribution ?? 'distribution',
+        overrides.providers ?? [memcpy, memset],
+        facts,
+        overrides.compiler ?? compiler,
+      )
+    const base = key(profile)
+    // Provider order and program-only facts do not split the cache across programs.
+    assert.strictEqual(key(profile, { providers: [memset, memcpy] }), base)
+    assert.strictEqual(key({ ...profile, safety: 'unchecked', artifact: 'loadable-module' }), base)
+    const variants = [
+      key(profile, { providers: [memcpy] }),
+      key(profile, { distribution: 'other-distribution' }),
+      key({ ...profile, target: arm.target }),
+      key({ ...profile, cpu: { ...profile.cpu, model: 'x86-64-v3' } }),
+      key({ ...profile, cpu: { ...profile.cpu, features: ['+avx2'] } }),
+      key({ ...profile, deployment: '12.0.0' }),
+      key({ ...profile, relocation: profile.relocation === 'pic' ? 'static' : 'pic' }),
+      key({ ...profile, codeModel: profile.codeModel === 'small' ? 'large' : 'small' }),
+      key({ ...profile, optimization: profile.optimization === 'none' ? 'speed' : 'none' }),
+      key({ ...profile, debug: !profile.debug }),
+      key(profile, { compiler: { ...compiler, digest: 'other-clang-digest' } }),
+      key(profile, { compiler: { ...compiler, version: 'clang version 22.1.9' } }),
+    ]
+    assert.strictEqual(new Set([base, ...variants]).size, variants.length + 1)
+  }),
+)
+
 it.effect(
   'accounts emitted helper ABIs separately from source foreign calls and runtime contracts',
   () =>
