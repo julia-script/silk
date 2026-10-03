@@ -667,7 +667,7 @@ it('packs committed bodies without changing their data', () => {
         result: 1,
         sourceType: 2 ** 40,
         base: { _tag: 'Local', value: 0 },
-        indices: [{ _tag: 'Constant', constant: -3 }],
+        indices: [{ _tag: 'Constant', constant: 3 }],
         inbounds: true,
         inrange: undefined,
       },
