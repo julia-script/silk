@@ -8120,8 +8120,12 @@ service SchemaService {
 }
 struct InterfaceSchema {}
 struct ServiceSchema {}
-fn interfaceWidth(value: &InterfaceSchema) -> i32 { return 32 }
-fn serviceWidth(value: &ServiceSchema) -> i32 { return 32 }
+impl InterfaceSchema {
+  fn interfaceWidth(value: &Self) -> i32 { return 32 }
+}
+impl ServiceSchema {
+  fn serviceWidth(value: &Self) -> i32 { return 32 }
+}
 impl SchemaInterface for InterfaceSchema {
   fn decode(value: &Self) -> i32 { return 42 }
   width: InterfaceSchema.interfaceWidth
