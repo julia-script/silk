@@ -68,7 +68,7 @@ void test('development watcher refreshes identity and terminates with its compil
     env: { PATH: `${join(root, 'bin')}:${Effect.runSync(Config.String('PATH'))}` },
     stdio: ['ignore', 'pipe', 'inherit'],
   })
-  t.after(() => child.kill('SIGKILL'))
+  t.after(() => child.kill('SIGTERM'))
   await once(child.stdout, 'data')
   for (const file of [source, encoder]) {
     const original = await readFile(output, 'utf8')
