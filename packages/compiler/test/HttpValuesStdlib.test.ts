@@ -280,7 +280,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 )
 
 it.effect(
-  'analyzes redirect, pool, and fetch policy witnesses and rejects escaping or duplicated redirect loans',
+  'analyzes native pool and fetch witnesses and rejects escaping or duplicated redirect loans',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* AnalysisFixture.frontend(

@@ -1106,11 +1106,7 @@ ${checks}  return run Effect.catchAll(allPrograms(), recover)
 `
 
 /** The target-neutral request program shared by native and LLVM-to-Wasm acceptance. */
-export const httpRequestAcceptanceSource = sourceFor('', '', '')
+export const httpRequestPortableAcceptanceSource = sourceFor('', '', '')
 
 /** The native program: the portable checks plus libc-backed acquisition and proxy admission. */
-export const httpRequestNativeAcceptanceSource = sourceFor(
-  nativeImports,
-  nativeSupport,
-  nativeChecks,
-)
+export const httpRequestAcceptanceSource = sourceFor(nativeImports, nativeSupport, nativeChecks)
