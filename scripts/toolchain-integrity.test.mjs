@@ -9,11 +9,15 @@ import { test } from 'node:test'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 
+// Mirrors the workspace layout the generator reads: compiler sources and the sibling built
+// `@silklang/llvm` JavaScript.
 const fixture = async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'silk-toolchain-'))
-  t.after(() => rm(root, { recursive: true, force: true }))
-  await mkdir(join(root, 'src'))
+  const workspace = await mkdtemp(join(tmpdir(), 'silk-toolchain-'))
+  t.after(() => rm(workspace, { recursive: true, force: true }))
+  const root = join(workspace, 'compiler')
+  await mkdir(join(root, 'src'), { recursive: true })
   await mkdir(join(root, 'scripts'))
+  await mkdir(join(workspace, 'llvm', 'dist'), { recursive: true })
   for (const script of ['generate-toolchain-integrity.mjs', 'watch-toolchain.mjs'])
     await copyFile(
       new URL(`../packages/compiler/scripts/${script}`, import.meta.url),
@@ -21,6 +25,8 @@ const fixture = async (t) => {
     )
   const source = join(root, 'src', 'Compiler.ts')
   await writeFile(source, 'export const version = 1\n')
+  const encoder = join(workspace, 'llvm', 'dist', 'Encoder.js')
+  await writeFile(encoder, 'export const version = 1\n')
   const output = join(root, 'src', 'ToolchainIntegrity.generated.ts')
   const generate = (...args) =>
     execFileSync(
@@ -28,26 +34,29 @@ const fixture = async (t) => {
       [join(root, 'scripts/generate-toolchain-integrity.mjs'), ...args],
       { stdio: 'pipe' },
     )
-  return { root, source, output, generate }
+  return { root, source, encoder, output, generate }
 }
 
-void test('identity bootstraps, stays untouched when current, and detects source changes', async (t) => {
-  const { source, output, generate } = await fixture(t)
+void test('identity bootstraps, stays untouched when current, and detects distribution changes', async (t) => {
+  const { source, encoder, output, generate } = await fixture(t)
   generate()
-  const original = await readFile(output, 'utf8')
   const metadata = await stat(output)
   generate()
   assert.equal((await stat(output)).mtimeMs, metadata.mtimeMs)
   generate('--check')
-  await writeFile(source, 'export const version = 2\n')
-  assert.throws(() => generate('--check'), /Generated toolchain identity is stale/)
-  generate()
-  assert.notEqual(await readFile(output, 'utf8'), original)
-  generate('--check')
+  const identities = [await readFile(output, 'utf8')]
+  for (const file of [source, encoder]) {
+    await writeFile(file, 'export const version = 2\n')
+    assert.throws(() => generate('--check'), /Generated toolchain identity is stale/)
+    generate()
+    identities.push(await readFile(output, 'utf8'))
+    generate('--check')
+  }
+  assert.equal(new Set(identities).size, identities.length)
 })
 
 void test('development watcher refreshes identity and terminates with its compiler', async (t) => {
-  const { root, source, output, generate } = await fixture(t)
+  const { root, source, encoder, output, generate } = await fixture(t)
   await mkdir(join(root, 'bin'))
   const executable = join(root, 'bin', 'tsc')
   await writeFile(
@@ -61,14 +70,16 @@ void test('development watcher refreshes identity and terminates with its compil
   })
   t.after(() => child.kill('SIGKILL'))
   await once(child.stdout, 'data')
-  const original = await readFile(output, 'utf8')
-  await writeFile(source, 'export const version = 2\n')
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if ((await readFile(output, 'utf8')) !== original) break
-    await setTimeout(50)
+  for (const file of [source, encoder]) {
+    const original = await readFile(output, 'utf8')
+    await writeFile(file, 'export const version = 2\n')
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if ((await readFile(output, 'utf8')) !== original) break
+      await setTimeout(50)
+    }
+    assert.notEqual(await readFile(output, 'utf8'), original)
+    generate('--check')
   }
-  assert.notEqual(await readFile(output, 'utf8'), original)
-  generate('--check')
   const exited = once(child, 'exit')
   child.kill('SIGTERM')
   assert.deepEqual(await exited, [null, 'SIGTERM'])

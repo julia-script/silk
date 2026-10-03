@@ -6,13 +6,20 @@ const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const generator = fileURLToPath(new URL('./generate-toolchain-integrity.mjs', import.meta.url))
 const generate = () => execFileSync(process.execPath, [generator], { stdio: 'inherit' })
 
-// Refresh the identity before startup and on source edits. Writing only changed output keeps
-// the generated module's own filesystem event from causing a watch loop.
+// Refresh the identity before startup, on compiler source edits, and when the `@silklang/llvm`
+// watch build rewrites its `dist`. Writing only changed output keeps the generated module's own
+// filesystem event from causing a watch loop. Directory additions/removals can also change a
+// recursive inventory.
 generate()
-const watcher = watch(new URL('../src/', import.meta.url), { recursive: true }, (_event, name) => {
-  // Directory additions/removals can also change the recursive source inventory.
-  if (name !== 'ToolchainIntegrity.generated.ts') generate()
-})
+const watchers = [
+  watch(new URL('../src/', import.meta.url), { recursive: true }, (_event, name) => {
+    if (name !== 'ToolchainIntegrity.generated.ts') generate()
+  }),
+  watch(new URL('../../llvm/dist/', import.meta.url), { recursive: true }, generate),
+]
+const closeWatchers = () => {
+  for (const watcher of watchers) watcher.close()
+}
 const compiler = spawn('tsc', ['-p', 'tsconfig.json', '--watch', '--preserveWatchOutput'], {
   cwd: packageRoot,
   stdio: 'inherit',
@@ -20,18 +27,18 @@ const compiler = spawn('tsc', ['-p', 'tsconfig.json', '--watch', '--preserveWatc
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
-    watcher.close()
+    closeWatchers()
     compiler.kill(signal)
   })
 }
 process.on('exit', () => compiler.kill())
 compiler.on('error', (error) => {
-  watcher.close()
+  closeWatchers()
   process.stderr.write(`${error}\n`)
   process.exitCode = 1
 })
 compiler.on('exit', (code, signal) => {
-  watcher.close()
+  closeWatchers()
   if (signal !== null) {
     process.removeAllListeners(signal)
     process.kill(process.pid, signal)
