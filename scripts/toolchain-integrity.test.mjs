@@ -3,7 +3,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { chmod, copyFile, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { setTimeout } from 'node:timers/promises'
 import { test } from 'node:test'
 import * as Config from 'effect/Config'
@@ -66,20 +66,33 @@ void test('development watcher refreshes identity and terminates with its compil
   await chmod(executable, 0o755)
   const child = spawn(process.execPath, [join(root, 'scripts/watch-toolchain.mjs')], {
     env: { PATH: `${join(root, 'bin')}:${Effect.runSync(Config.String('PATH'))}` },
-    stdio: ['ignore', 'pipe', 'inherit'],
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
   t.after(() => child.kill('SIGTERM'))
-  await once(child.stdout, 'data')
-  for (const file of [source, encoder]) {
+  let diagnostics = ''
+  child.stderr.setEncoding('utf8').on('data', (text) => (diagnostics += text))
+  const eventually = async (condition) => {
+    for (let attempt = 0; attempt < 100 && !(await condition()); attempt++) await setTimeout(50)
+    assert.ok(await condition())
+  }
+  const refreshes = async (edit) => {
     const original = await readFile(output, 'utf8')
-    await writeFile(file, 'export const version = 2\n')
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if ((await readFile(output, 'utf8')) !== original) break
-      await setTimeout(50)
-    }
-    assert.notEqual(await readFile(output, 'utf8'), original)
+    await edit()
+    await eventually(async () => (await readFile(output, 'utf8')) !== original)
     generate('--check')
   }
+  await once(child.stdout, 'data')
+  await refreshes(() => writeFile(source, 'export const version = 2\n'))
+  await refreshes(() => writeFile(encoder, 'export const version = 2\n'))
+  // An llvm build cleans `dist` before re-emitting it: the failed refresh is reported, the session
+  // survives, and the recreated directory is watched again.
+  await refreshes(async () => {
+    await rm(dirname(encoder), { recursive: true })
+    await eventually(() => diagnostics.includes('Toolchain identity not refreshed'))
+    await mkdir(dirname(encoder))
+    await writeFile(encoder, 'export const version = 3\n')
+  })
+  assert.equal(child.exitCode, null)
   const exited = once(child, 'exit')
   child.kill('SIGTERM')
   assert.deepEqual(await exited, [null, 'SIGTERM'])
