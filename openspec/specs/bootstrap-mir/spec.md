@@ -185,11 +185,6 @@ structural verifier and SHALL encode deterministically, gated by committed golde
 - **WHEN** a body binding `first` and `second` and returning a call result is lowered
 - **THEN** each binding occupies one typed local, and the return exit carries generated `Drop` operations for `second` then `first` before the return terminator, each with its causative span and generated marker
 
-#### Scenario: Lower an ownership violation to a trap
-
-- **WHEN** a discovered instance's ownership verdict is a violation
-- **THEN** its lowered function is a single block ending in a generated trap carrying the violation diagnostic's span
-
 ### Requirement: Binary arithmetic is a trapping MIR operation
 
 MIR SHALL represent arithmetic as one binary operation carrying the closed operator (`Add`,
