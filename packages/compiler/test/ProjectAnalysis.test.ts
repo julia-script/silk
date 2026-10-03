@@ -40,17 +40,6 @@ const make = (requestedRoots: Arr.NonEmptyReadonlyArray<SourceFile.SourceFile> =
     ),
   )
 
-// The test typecheck owns this proof: each directive fails once its call accepts zero roots.
-it('cannot express a project analysis with zero roots', () => {
-  const requests = [
-    // @ts-expect-error a project analysis needs at least one root
-    () => ProjectAnalysis.make([]),
-    // @ts-expect-error a revised project analysis needs at least one root
-    (previous: ProjectAnalysis.ProjectAnalysis) => ProjectAnalysis.revise(previous, []),
-  ]
-  assert.lengthOf(requests, 2)
-})
-
 it.effect(
   'isolates selected surfaces by profile while reusing parsed syntax and ignoring unloaded edits',
   () =>
@@ -660,6 +649,12 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
     if (left === undefined || right === undefined) return
     assertProjectViewNotRealizable(left)
     assert.deepEqual(project.roots, ['app/A', 'app/B'])
+    assert.strictEqual(project.primary, left)
+    // Zero roots are unrepresentable; the test typecheck fails once either call accepts them.
+    // @ts-expect-error a project analysis needs at least one root
+    void ProjectAnalysis.make([])
+    // @ts-expect-error a revised project analysis needs at least one root
+    void ProjectAnalysis.revise(project, [])
     assert.strictEqual(project.semanticInvalidation.totals.modules, 3)
     assert.strictEqual(project.semanticInvalidation.totals.recomputed, 3)
     assert.strictEqual(project.semanticInvalidation.totals.reasons.Fresh, 3)

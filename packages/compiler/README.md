@@ -236,10 +236,11 @@ compiler core.
 
 `ProjectAnalysis` analyzes the union closure of synchronized roots once and returns immutable root
 views that share syntax, declaration, semantic, tooling, and diagnostic facts. Its root list is
-non-empty by type, and `primary` holds the first root's view for whole-project consumers such as
-documentation and source catalogs. Revising a project reuses byte-identical syntax and authored
-artifacts; semantic facts are reused per body when their authored content, scope and dependencies
-are unchanged and recomputed otherwise.
+non-empty by type. `primary` is a view of the shared project-wide facts, rooted at the first
+canonical root (not the configured application); every view carries the same project facts, so
+documentation and source catalogs read it directly. Revising a project reuses byte-identical
+syntax and authored artifacts; semantic facts are reused per body when their authored content,
+scope and dependencies are unchanged and recomputed otherwise.
 
 ## Editor and documentation facts
 

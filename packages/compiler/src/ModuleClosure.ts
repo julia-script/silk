@@ -43,7 +43,7 @@ export interface CompilationRequest {
 export interface ProjectRequest {
   readonly application?: string
   readonly configuration?: CompilationRequest['configuration']
-  readonly roots: ReadonlyArray<string>
+  readonly roots: Arr.NonEmptyReadonlyArray<string>
   /** Composition roots retain recoverable absence/failure facts. */
   readonly additionalRoots?: ReadonlyArray<string>
   /** Prior loaded facts whose unchanged modules keep their syntax and authored artifacts. */
@@ -136,7 +136,6 @@ export class ModuleClosureError extends Data.TaggedError('ModuleClosureError')<{
   readonly operation: 'ModuleClosure.loadProject'
   readonly message: string
   readonly reason:
-    | { readonly _tag: 'EmptyRoots' }
     | { readonly _tag: 'InvalidRoot'; readonly module: string }
     | { readonly _tag: 'MissingRoot'; readonly module: string }
     | { readonly _tag: 'MissingDiscoverySource'; readonly module: string }
@@ -155,16 +154,9 @@ const compareText = (left: string, right: string): number => {
 
 /** Validates the entire request before any source is accessed. */
 export const validateRoots = Effect.fn('ModuleClosure.validateRoots')(function* (
-  roots: ReadonlyArray<string>,
+  roots: Arr.NonEmptyReadonlyArray<string>,
   additionalRoots: ReadonlyArray<string> = [],
 ): Effect.fn.Return<Arr.NonEmptyReadonlyArray<string>, ModuleClosureError> {
-  const canonical = [...new Set(roots)].sort()
-  if (!Arr.isReadonlyArrayNonEmpty(canonical))
-    return yield* new ModuleClosureError({
-      operation: 'ModuleClosure.loadProject',
-      message: 'Project analysis requires at least one root module',
-      reason: { _tag: 'EmptyRoots' },
-    })
   for (const module of [...new Set([...roots, ...additionalRoots])].sort())
     if (!SourceResolver.isCanonicalModule(module))
       return yield* new ModuleClosureError({
@@ -172,7 +164,7 @@ export const validateRoots = Effect.fn('ModuleClosure.validateRoots')(function* 
         message: `Root module identity ${module} is not canonical`,
         reason: { _tag: 'InvalidRoot', module },
       })
-  return canonical
+  return Arr.sort(Arr.dedupe(roots), Order.String)
 })
 
 interface ParsedModule {
@@ -547,7 +539,7 @@ export const load = Effect.fn('ModuleClosure.load')(function* (
   additionalRoots: ReadonlyArray<string> = [],
   previous?: Facts,
 ): Effect.fn.Return<Closure, ModuleClosureError, SourceResolver.SourceResolver> {
-  const requiredRoots = [
+  const requiredRoots: Arr.NonEmptyReadonlyArray<string> = [
     request.root,
     ...(request.discovery === undefined ? [] : [request.discovery.root]),
   ]

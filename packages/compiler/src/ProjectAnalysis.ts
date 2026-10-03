@@ -56,7 +56,10 @@ export interface ProjectAnalysis {
   readonly _tag: 'ProjectAnalysis'
   readonly roots: Arr.NonEmptyReadonlyArray<string>
   readonly closure: ModuleClosure.ProjectClosure
-  /** The first canonical root's view, for consumers of the shared project-wide facts. */
+  /**
+   * A view of the shared project-wide facts, rooted at the first canonical root (not the configured
+   * application); every view carries the same project facts.
+   */
   readonly primary: View
   readonly views: ReadonlyMap<string, View>
   readonly syntaxRevisions: ReadonlyMap<string, SyntaxRevision>
