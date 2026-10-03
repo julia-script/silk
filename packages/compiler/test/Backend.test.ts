@@ -1,4 +1,5 @@
 import * as MirVerification from '../src/MirVerification.js'
+import * as MirLinearization from '../src/MirLinearization.js'
 import * as Result from 'effect/Result'
 import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as Option from 'effect/Option'
@@ -61,7 +62,7 @@ const emit = Effect.fnUntraced(function* (text: string, request: Backend.Codegen
     ascii(text),
     'aarch64-apple-darwin',
   )
-  return yield* Analysis.codegen(snapshot, { ...request, verifyMir: true })
+  return yield* Analysis.codegen(snapshot, { ...request, verifyIr: true })
 })
 
 const golden = (name: string): string =>
@@ -91,9 +92,11 @@ it.effect('traces discovery, lowering, and optional verification separately from
       Effect.withTracer(tracer),
     )
     assert.isFalse(spans.some((span) => span.name.startsWith('MirVerification.')))
-    const verified = yield* Analysis.codegen(snapshot, { mode: 'release', verifyMir: true }).pipe(
+    assert.isFalse(spans.some((span) => span.name === 'NativeProgram.verifyModule'))
+    const verified = yield* Analysis.codegen(snapshot, { mode: 'release', verifyIr: true }).pipe(
       Effect.withTracer(tracer),
     )
+    assert.isTrue(spans.some((span) => span.name === 'NativeProgram.verifyModule'))
     assert.deepEqual(artifact.bitcode, ordinary.bitcode)
     assert.deepEqual(artifact.bitcode, verified.bitcode)
     const rejected = yield* Effect.result(MirVerification.check({ ...program, functions: [] }))
@@ -546,22 +549,26 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('publishes native branch provenance back to canonical loop regions', () =>
+it.effect('maps native branch provenance back to canonical loop regions', () =>
   Effect.gen(function* () {
-    const artifact = yield* emit(
-      'pub fn main() -> i32 { let mut value = 0 while value < 2 { value = value + 1 } return value }',
-      { mode: 'release' },
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'golden/program',
+      ascii(
+        'pub fn main() -> i32 { let mut value = 0 while value < 2 { value = value + 1 } return value }',
+      ),
+      'aarch64-apple-darwin',
     )
+    const control = MirLinearization.llvmControl(Analysis.loweredMir(snapshot))
     assert.strictEqual(
-      artifact.control.every((entry) => entry.backend === 'LLVM'),
+      control.every((entry) => entry.backend === 'LLVM'),
       true,
     )
     assert.strictEqual(
-      artifact.control.some((entry) => entry.construct === 'LlvmBranch'),
+      control.some((entry) => entry.construct === 'LlvmBranch'),
       true,
     )
     assert.strictEqual(
-      artifact.control.some(
+      control.some(
         (entry) =>
           entry.construct === 'LlvmJump' &&
           entry.targets.some((target) => target.ordinal <= entry.region.ordinal),

@@ -93,7 +93,7 @@ const analyze = Effect.fnUntraced(function* (
       ...(options.configuration === undefined ? {} : { configuration: options.configuration }),
       ...(previous === undefined ? {} : { previous: previous.closure }),
     },
-    {},
+    { tooling: true },
     previous === undefined
       ? undefined
       : {

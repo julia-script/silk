@@ -34,9 +34,9 @@ import * as SourceResolver from '../src/SourceResolver.js'
 import { httpRedirectCorpusProgram, nativeCorpus, type NativeRun } from './support/corpus.js'
 import { checkedConversionPrograms } from './support/checkedConversions.js'
 import { base64AcceptanceSource } from './support/base64Acceptance.js'
-import { httpClientAcceptanceSource } from './support/httpClientAcceptance.js'
+import { httpClientPortableAcceptanceSource } from './support/httpClientAcceptance.js'
 import { httpClientContentAcceptanceSource } from './support/httpClientContentAcceptance.js'
-import { httpRequestAcceptanceSource } from './support/httpRequestAcceptance.js'
+import { httpRequestPortableAcceptanceSource } from './support/httpRequestAcceptance.js'
 import { bufferedByteIoWasmAcceptanceSource } from './support/bufferedByteIoAcceptance.js'
 import { httpHeadAcceptanceSource } from './support/httpHeadAcceptance.js'
 import { httpBodyAcceptanceSource } from './support/httpBodyAcceptance.js'
@@ -335,11 +335,11 @@ const portableWasmCorpus = [
   },
   {
     name: 'http-proxy-routed-preparation-and-scripted-tunnel-portability',
-    source: httpClientAcceptanceSource,
+    source: httpClientPortableAcceptanceSource,
     expected: 0,
   },
   { name: 'http-client-content', source: httpClientContentAcceptanceSource, expected: 0 },
-  { name: 'http-client-request', source: httpRequestAcceptanceSource, expected: 0 },
+  { name: 'http-client-request', source: httpRequestPortableAcceptanceSource, expected: 0 },
   { name: 'http-values', source: httpValuesAcceptanceSource, expected: 0 },
   { name: 'http-head-parsing', source: httpHeadAcceptanceSource, expected: 42 },
   { name: 'http-body-framing', source: httpBodyAcceptanceSource, expected: 42 },

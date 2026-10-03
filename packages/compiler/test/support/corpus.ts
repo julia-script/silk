@@ -71,8 +71,8 @@ import {
   httpClientAcceptanceSource,
   httpClientBoundariesAcceptanceSource,
   httpClientOutputFailuresAcceptanceSource,
-  httpRedirectAcceptanceSource,
 } from './httpClientAcceptance.js'
+import { httpRedirectAcceptanceSource } from './httpRedirectAcceptance.js'
 import { httpClientContentAcceptanceSource } from './httpClientContentAcceptance.js'
 import { httpTransportAcceptanceSource } from './httpTransportAcceptance.js'
 import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
@@ -3191,7 +3191,10 @@ pub fn main() -> i32 {
     name: 'pattern-conditionals-and-destructuring',
     source: `struct Left { value: i32 }
 struct Right {}
-struct Point { x: i32, y: i32 }
+struct Point {
+  x: i32
+  y: i32
+}
 struct Token { value: i32 }
 impl Copy for Token {}
 union Shape { Circle { radius: i32 }, Empty }
