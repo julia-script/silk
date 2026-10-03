@@ -17855,7 +17855,205 @@ fn receiverCallNode(body: &TypedBody) -> Option<BodyNodeId> {
   return Option.none<BodyNodeId>()
 }
 
-fn receiverApplicationMatchesBody(body: &TypedBody, application: &SpecializationApplication, node: BodyNodeId) -> bool {
+fn directCallNode(body: &TypedBody, ordinal: usize) -> Option<BodyNodeId> {
+  let nodes = TypedBody.nodeSlice(body)
+  let mut found = usize.ZERO
+  let mut at = usize.ZERO
+  while at < nodes.length {
+    if let BodyNodeKind.Expression {form: BodyExpression.DirectCall {..}, ..} = &nodes[at].kind {
+      if found == ordinal {
+        return Option.some<BodyNodeId>(BodyNodeId {index: at})
+      }
+      found = found + usize.ONE
+    }
+    at = at + usize.ONE
+  }
+  return Option.none<BodyNodeId>()
+}
+
+effect fn directApplicationAt(answer: &Shared<Result<Answer, NoRejection>>, ordinal: usize) -> Option<
+  SpecializationApplication,
+> ! OutOfMemoryError ? &mut Allocator {
+  let selected = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(
+    answer,
+    checkedBody,
+  )
+  if let Option<Shared<TypedBody>>.Some {value: body} = move selected {
+    let node = Shared.with<TypedBody, Option<BodyNodeId>>(
+      &body,
+      fn(value: &TypedBody) -> Option<BodyNodeId> {
+        return directCallNode(value, ordinal)
+      },
+    )
+    if let Option<BodyNodeId>.Some {value} = move node {
+      let found = TypedBody.directApplication(&body, value)
+      if let Option<Shared<SpecializationApplication>>.Some {value: application} = move found {
+        return Option.some<SpecializationApplication>(
+          run SpecializationApplication.copyShared(&application),
+        )
+      }
+    }
+  }
+  return Option.none<SpecializationApplication>()
+}
+
+fn applicationArgumentIs(argument: &Argument, spelling: &[u8]) -> bool {
+  return match & argument.* {
+    Argument.Type {value} => Shared.with<Type, bool>(
+      &value,
+      fn(ty: &Type) -> bool {
+        return witnessPrimitive(ty, spelling)
+      },
+    )
+    _ => false
+  }
+}
+
+fn genericInherentApplication(value: &SpecializationApplication, owner: &[u8], ownType: &[u8]) -> bool {
+  if !DeclarationId.named(SpecializationApplication.bodyDeclaration(value), b"choose") {
+    return false
+  }
+  let ownArguments = Vector.asSlice<Argument>(&value.arguments)
+  let ownOrdinals = Vector.asSlice<usize>(&value.argumentOrdinals)
+  let scopes = Vector.asSlice<ScopeBinding>(&value.scopes)
+  if ownArguments.length != usize.ONE || ownOrdinals.length != usize.ONE || ownOrdinals[usize.ZERO] != usize.ZERO || !applicationArgumentIs(
+    &ownArguments[usize.ZERO],
+    ownType,
+  ) || scopes.length != usize.ONE {
+    return false
+  }
+  let scoped = Vector.asSlice<Argument>(&scopes[usize.ZERO].arguments)
+  let scopedOrdinals = Vector.asSlice<usize>(&scopes[usize.ZERO].argumentOrdinals)
+  return scoped.length == usize.ONE && scopedOrdinals.length == usize.ONE && scopedOrdinals[usize.ZERO] == usize.ZERO && applicationArgumentIs(
+    &scoped[usize.ZERO],
+    owner,
+  )
+}
+
+fn genericReceiverApplication(value: &SpecializationApplication, owner: &[u8]) -> bool {
+  if !DeclarationId.named(SpecializationApplication.bodyDeclaration(value), b"take") || Vector.length<
+    Argument,
+  >(&value.arguments) != usize.ZERO || Vector.length<usize>(&value.argumentOrdinals) != usize.ZERO {
+    return false
+  }
+  let scopes = Vector.asSlice<ScopeBinding>(&value.scopes)
+  if scopes.length != usize.ONE {
+    return false
+  }
+  let scoped = Vector.asSlice<Argument>(&scopes[usize.ZERO].arguments)
+  let ordinals = Vector.asSlice<usize>(&scopes[usize.ZERO].argumentOrdinals)
+  return scoped.length == usize.ONE && ordinals.length == usize.ONE && ordinals[usize.ZERO] == usize.ZERO && applicationArgumentIs(
+    &scoped[usize.ZERO],
+    owner,
+  )
+}
+
+test effect fn genericInherentMembersPublishCompleteApplications() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("generic-inherent-members.silk")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let source = """
+struct Box<T> { value: T }
+impl<T> Box<T> {
+  fn choose<U>(left: T, right: U) -> T { drop right return move left }
+  fn take(self: Self) -> T { return move self.value }
+}
+fn calls() -> i32 {
+  let prefixed = Box.choose(42, true)
+  let applied = Box<i32>.choose<bool>(42, true)
+  let distinct = Box.choose(true, 42)
+  let boxed = Box<i32> { value: 42 }
+  let received = boxed.take()
+  if distinct { return prefixed + applied + received }
+  return 0
+}
+"""
+  let mut store = run staticSemantic(
+    &id,
+    source,
+    MachineTarget.forId(TargetId.X8664UnknownLinuxGnu),
+  )
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let calls = run Semantic.demandBody(&mut store, &mut request, &id, b"calls")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    succeeded(&calls),
+    "generic inherent associated and receiver calls check from ordinary source",
+  )
+  let prefixApplication = run directApplicationAt(&calls, usize.ZERO)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let appliedApplication = run directApplicationAt(&calls, usize.ONE)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let distinctApplication = run directApplicationAt(&calls, 2)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let receiverApplication = run directApplicationAt(&calls, 3)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let receiverComplete = match move receiverApplication {
+    Option<SpecializationApplication>.Some {value} => genericReceiverApplication(&value, b"i32")
+    Option<SpecializationApplication>.None => false
+  }
+  run Testing.expect(
+    receiverComplete,
+    "a direct receiver call retains the complete generic owner in its application scope",
+  )
+  let mut canonical = false
+  let mut separated = false
+  if let Option<SpecializationApplication>.Some {value: prefix} = move prefixApplication {
+    if let Option<SpecializationApplication>.Some {value: fixed} = move appliedApplication {
+      if let Option<SpecializationApplication>.Some {value: other} = move distinctApplication {
+        let prefixCopy = run SpecializationApplication.copy(&prefix)
+          |> Effect.provideMut<Allocator>(&mut allocator)
+        let fixedCopy = run SpecializationApplication.copy(&fixed)
+          |> Effect.provideMut<Allocator>(&mut allocator)
+        let otherCopy = run SpecializationApplication.copy(&other)
+          |> Effect.provideMut<Allocator>(&mut allocator)
+        let prefixKey = run InstanceKey.function(move prefixCopy)
+          |> Effect.provideMut<Allocator>(&mut allocator)
+        let fixedKey = run InstanceKey.function(move fixedCopy)
+          |> Effect.provideMut<Allocator>(&mut allocator)
+        let otherKey = run InstanceKey.function(move otherCopy)
+          |> Effect.provideMut<Allocator>(&mut allocator)
+        let prefixSymbol = run InstanceKey.symbol(&prefixKey)
+          |> Effect.provideMut<Allocator>(&mut allocator)
+        let fixedSymbol = run InstanceKey.symbol(&fixedKey)
+          |> Effect.provideMut<Allocator>(&mut allocator)
+        let otherSymbol = run InstanceKey.symbol(&otherKey)
+          |> Effect.provideMut<Allocator>(&mut allocator)
+        let sameApplication = run SpecializationApplication.equals(&prefix, &fixed)
+          |> Effect.provideMut<Allocator>(&mut allocator)
+        canonical = genericInherentApplication(&prefix, b"i32", b"bool") && genericInherentApplication(
+          &fixed,
+          b"i32",
+          b"bool",
+        ) && sameApplication && InstanceKey.equals(&prefixKey, &fixedKey) && sameBytes(
+          Bytes.asSlice(&prefixSymbol),
+          Bytes.asSlice(&fixedSymbol),
+        )
+        separated = genericInherentApplication(&other, b"bool", b"i32") && !InstanceKey.equals(
+          &prefixKey,
+          &otherKey,
+        ) && !sameBytes(Bytes.asSlice(&prefixSymbol), Bytes.asSlice(&otherSymbol))
+      }
+    }
+  }
+  run Testing.expect(
+    canonical,
+    "prefix and applied-owner syntax publish the same owner scope, member arguments, key and symbol",
+  )
+  run Testing.expect(
+    separated,
+    "a different complete generic owner publishes a distinct inherent-member key and symbol",
+  )
+  return ()
+}
+
+fn receiverApplicationMatchesBody(
+  body: &TypedBody,
+  application: &SpecializationApplication,
+  node: BodyNodeId,
+) -> bool {
   let nodes = TypedBody.nodeSlice(body)
   if node.index < nodes.length {
     if let BodyNodeKind.Expression {form: BodyExpression.DirectCall {declaration, arguments, ..}, ..} = &nodes[node.index].kind {
@@ -18507,6 +18705,223 @@ fn probe(value: Outer) -> i32 { return 42 }
   return ()
 }
 
+fn genericRecordLayout(layout: &BackendLayout, size: usize, alignment: usize, valueOffset: usize) -> bool {
+  if let LayoutStorage.Record {fields} = &layout.storage {
+    let entries = Vector.asSlice<LayoutField>(&fields)
+    return entries.length == 2 && layout.size == size && layout.alignment == alignment
+      && entries[usize.ZERO].offset == usize.ZERO && entries[usize.ONE].offset == valueOffset
+  }
+  return false
+}
+
+test effect fn genericRecordInstancesInferAndLayoutSeparately() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("generic-record-instances.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut store = run staticSemantic(&id, """
+struct Cell<T> {
+  marker: u8
+  value: T
+}
+fn small(value: u8) -> u8 {
+  let cell = Cell { marker: 1, value: value }
+  return cell.value
+}
+fn wide(value: i64) -> i64 {
+  let cell = Cell { marker: 1, value: value }
+  return cell.value
+}
+fn matched(value: Cell<i64>) -> i64 {
+  return match move value {
+    Cell<i64> { value, .. } => value
+  }
+}
+struct View<'data, A> { items: &'data [A] }
+fn sliced() -> i32 {
+  let values = [42]
+  let view = View { items: &values }
+  return view.items[0]
+}
+struct Borrowed<'data> { left: &'data i32 right: &'data i32 }
+fn borrowed() -> i32 {
+  let left = 20
+  let right = 22
+  let value = Borrowed { left: &left, right: &right }
+  return value.left.* + value.right.*
+}
+""", MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let smallAnswer = run Semantic.demandBody(&mut store, &mut request, &id, b"small")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let wideAnswer = run Semantic.demandBody(&mut store, &mut request, &id, b"wide")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let slicedAnswer = run Semantic.demandBody(&mut store, &mut request, &id, b"sliced")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let matchedAnswer = run Semantic.demandMir(&mut store, &mut request, &id, b"matched")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let borrowedAnswer = run Semantic.demandBody(&mut store, &mut request, &id, b"borrowed")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let smallType = match move bodyLocalType(&smallAnswer, usize.ONE) {
+    Option<Shared<Type>>.Some {value} => value
+    Option<Shared<Type>>.None => {
+      run Testing.expect(false, "the inferred Cell<u8> local retains its complete nominal type")
+      return ()
+    }
+  }
+  let wideType = match move bodyLocalType(&wideAnswer, usize.ONE) {
+    Option<Shared<Type>>.Some {value} => value
+    Option<Shared<Type>>.None => {
+      run Testing.expect(false, "the inferred Cell<i64> local retains its complete nominal type")
+      return ()
+    }
+  }
+  let complete = nominalOfKind(&smallType, OwnerKind.Struct)
+    && nominalOfKind(&wideType, OwnerKind.Struct)
+    && !Type.hasOpenParameters(&smallType)
+    && !Type.hasOpenParameters(&wideType)
+  let distinct = !(run Type.equalsShared(&smallType, &wideType)
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  let matched = match move Shared.with<Result<Answer, NoRejection>, Option<usize>>(&matchedAnswer, selectedMirIndex) {
+    Option<usize>.Some {..} => true
+    Option<usize>.None => false
+  }
+  run Testing.expect(
+    complete,
+    "bare generic record literals infer complete nominal applications",
+  )
+  run Testing.expect(distinct, "different initializer types infer distinct generic record applications")
+  run Testing.expect(
+    matched,
+    "a complete generic record pattern binds its substituted field in MIR",
+  )
+  run Testing.expect(
+    Shared.with<Result<Answer, NoRejection>, bool>(&slicedAnswer, bodyAnswerIsContractTyped),
+    "an inferred slice field lowers a borrowed array through the shared slice conversion",
+  )
+  run Testing.expect(
+    succeeded(&borrowedAnswer),
+    "one inferred lifetime is shared by every written borrow in a generic record literal",
+  )
+  let smallLayout = run Semantic.demandLayout(&mut store, &mut request, &id, &smallType)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let repeatedLayout = run Semantic.demandLayout(&mut store, &mut request, &id, &smallType)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let wideLayout = run Semantic.demandLayout(&mut store, &mut request, &id, &wideType)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let smallIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&smallLayout, selectedLayoutIndex)
+  let repeatedIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&repeatedLayout, selectedLayoutIndex)
+  let wideIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&wideLayout, selectedLayoutIndex)
+  let mut interned = false
+  let mut laidOut = false
+  if let Option<usize>.Some {value: small} = move smallIndex {
+    if let Option<usize>.Some {value: repeated} = move repeatedIndex {
+      if let Option<usize>.Some {value: wide} = move wideIndex {
+        interned = small == repeated && small != wide
+        let smallFacts = Semantic.layoutAt(&store, small)
+        let wideFacts = Semantic.layoutAt(&store, wide)
+        if let Option<Shared<BackendLayout>>.Some {value: narrow} = move smallFacts {
+          if let Option<Shared<BackendLayout>>.Some {value: broad} = move wideFacts {
+            laidOut = Shared.with<BackendLayout, bool>(&narrow, fn(layout: &BackendLayout) -> bool {
+              return genericRecordLayout(layout, 2, usize.ONE, usize.ONE)
+            }) && Shared.with<BackendLayout, bool>(&broad, fn(layout: &BackendLayout) -> bool {
+              return genericRecordLayout(layout, 16, 8, 8)
+            })
+          }
+        }
+      }
+    }
+  }
+  run Testing.expect(interned, "equal complete record instances share one interned layout and distinct instances do not")
+  run Testing.expect(laidOut, "generic record layout uses each complete instance's substituted field types")
+  return ()
+}
+
+test effect fn genericRecordInstancesClassifyCopyAndShareDropGlue() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("generic-record-ownership.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let text = """
+struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Box<T> { value: T }
+impl<T: Copy> Copy for Box<T> {}
+fn copied(boxed: &Box<i32>) -> i32 { drop boxed.* return 0 }
+fn affine(boxed: &Box<Token>) -> i32 { drop boxed.* return 0 }
+fn dropped(boxed: Box<Token>) -> i32 { drop boxed return 0 }
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let copied = run Semantic.demandBody(&mut store, &mut request, &id, b"copied")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let affine = run Semantic.demandBody(&mut store, &mut request, &id, b"affine")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(succeeded(&copied), "Box<i32> satisfies the generic record's declared Copy bound")
+  run Testing.expect(
+    rejectsSpan(
+      &affine,
+      RejectionCode.BorrowedExtraction,
+      text,
+      "boxed.*",
+      1,
+    ),
+    "Box<Token> remains affine because Token does not satisfy the declared Copy bound",
+  )
+  let firstDrop = run Semantic.demandMir(&mut store, &mut request, &id, b"dropped")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let firstGlue = run droppedGlue(&mut store, &mut request, &id, b"dropped")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let secondGlue = run droppedGlue(&mut store, &mut request, &id, b"dropped")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let firstIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&firstGlue, selectedMirIndex)
+  let secondIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&secondGlue, selectedMirIndex)
+  let sharedGlue = match move firstIndex {
+    Option<usize>.Some {value: first} => match move secondIndex {
+      Option<usize>.Some {value: second} => first == second
+      Option<usize>.None => false
+    }
+    Option<usize>.None => false
+  }
+  run Testing.expect(
+    sharedGlue && glueFact(&store, &firstGlue, usize.ZERO) == usize.ONE
+      && glueFact(&store, &firstGlue, 3) == usize.ZERO
+      && glueFact(&store, &firstGlue, 6) == usize.ONE,
+    "one Box<Token> glue instance drops its substituted Token field through Token glue",
+  )
+  let copyType = referentOf(bodyLocalType(&copied, usize.ZERO))
+  let dropType = droppedType(&store, &firstDrop)
+  let repeatedDropType = droppedType(&store, &firstDrop)
+  let mut keyed = false
+  if let Option<Shared<Type>>.Some {value: plain} = move copyType {
+    if let Option<Shared<Type>>.Some {value: droppable} = move dropType {
+      if let Option<Shared<Type>>.Some {value: repeated} = move repeatedDropType {
+        let plainKey = run InstanceKey.dropGlue(&plain) |> Effect.provideMut<Allocator>(&mut allocator)
+        let dropKey = run InstanceKey.dropGlue(&droppable) |> Effect.provideMut<Allocator>(&mut allocator)
+        let repeatedKey = run InstanceKey.dropGlue(&repeated) |> Effect.provideMut<Allocator>(&mut allocator)
+        if let Option<InstanceKey>.Some {value: plainInstance} = move plainKey {
+          if let Option<InstanceKey>.Some {value: dropInstance} = move dropKey {
+            if let Option<InstanceKey>.Some {value: repeatedInstance} = move repeatedKey {
+              let plainSymbol = run InstanceKey.symbol(&plainInstance)
+                |> Effect.provideMut<Allocator>(&mut allocator)
+              let dropSymbol = run InstanceKey.symbol(&dropInstance)
+                |> Effect.provideMut<Allocator>(&mut allocator)
+              let repeatedSymbol = run InstanceKey.symbol(&repeatedInstance)
+                |> Effect.provideMut<Allocator>(&mut allocator)
+              keyed = !InstanceKey.equals(&plainInstance, &dropInstance)
+                && InstanceKey.equals(&dropInstance, &repeatedInstance)
+                && !sameBytes(Bytes.asSlice(&plainSymbol), Bytes.asSlice(&dropSymbol))
+                && sameBytes(Bytes.asSlice(&dropSymbol), Bytes.asSlice(&repeatedSymbol))
+            }
+          }
+        }
+      }
+    }
+  }
+  run Testing.expect(keyed, "complete generic record instances have canonical distinct glue keys and symbols")
+  return ()
+}
+
 fn recordOperandsKeepWrittenOrder(body: &TypedBody) -> bool {
   let nodes = TypedBody.nodeSlice(body)
   let mut at = usize.ZERO
@@ -18846,7 +19261,6 @@ union Choice { Value { value: i32 }, Empty }
 struct Counter { value: i32 }
 impl Counter { fn read(value: &Self) -> i32 { return value.value } }
 enum Status { Ready }
-struct Box<T> { value: T }
 fn consume(value: Left | Right) -> i32 { return 42 }
 fn unionValue() -> i32 { return consume(Left { value: 42 }) }
 fn invalidUnion() -> i32 { return consume(true) }
@@ -18857,7 +19271,6 @@ fn produce(value: i32) -> Choice { return Choice.Value { value: value } }
 fn unionResult() -> i32 { let selected = produce(42) return 42 }
 fn invalidUnionResult() -> bool { return produce(42) }
 fn invalidEnum() -> i32 { let status = Status.Absent return 42 }
-fn genericValue() -> i32 { let boxed = Box { value: 42 } return 42 }
 fn bound(value: &Counter) -> i32 { let read = value.read return 42 }
 fn invalidMember(value: &Counter) -> i32 { let read = value.absent return 42 }
 """
@@ -18879,8 +19292,6 @@ fn invalidMember(value: &Counter) -> i32 { let read = value.absent return 42 }
   let invalidUnionResult = run Semantic.demandBody(&mut store, &mut request, &id, b"invalidUnionResult")
     |> Effect.provideMut<Allocator>(&mut allocator)
   let invalidEnum = run Semantic.demandBody(&mut store, &mut request, &id, b"invalidEnum")
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let genericValue = run Semantic.demandBody(&mut store, &mut request, &id, b"genericValue")
     |> Effect.provideMut<Allocator>(&mut allocator)
   let bound = run Semantic.demandBody(&mut store, &mut request, &id, b"bound")
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -18920,10 +19331,9 @@ fn invalidMember(value: &Counter) -> i32 { let read = value.absent return 42 }
     "an absent enum member remains an unknown member",
   )
   run Testing.expect(
-    rejectsSpan(&genericValue, RejectionCode.GenericRecordUnavailable, text, "Box { value: 42 }", 0) &&
     rejectsSpan(&bound, RejectionCode.BoundMethodUnavailable, text, "value.read", 0) &&
     rejectsSpan(&invalidMember, RejectionCode.UnknownMember, text, "absent", 0),
-    "generic records and published bound methods have specific reached gaps",
+    "published bound methods and invalid members keep specific diagnostics",
   )
   return ()
 }
@@ -19751,6 +20161,206 @@ fn variantsLayout(layout: &BackendLayout) -> bool {
     return tagSize == usize.ONE && payloadOffset == 8 && layout.size == 24 && layout.alignment == 8 && offsets
   }
   return false
+}
+
+fn genericUnionLayout(layout: &BackendLayout, size: usize, alignment: usize, payloadOffset: usize) -> bool {
+  if let LayoutStorage.Variants {tagSize, payloadOffset: offset, ..} = &layout.storage {
+    return tagSize == usize.ONE && offset == payloadOffset && layout.size == size
+      && layout.alignment == alignment
+  }
+  return false
+}
+
+test effect fn genericNominalUnionInstancesConstructMatchAndLayout() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("generic-nominal-union-instances.silk")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let text = """
+union Choice<T> { Some { value: T }, None }
+fn instances() -> u8 {
+  let narrow = Choice<u8>.Some { value: 42 }
+  let wide = Choice<i64>.Some { value: 42 }
+  drop wide
+  return match move narrow { Choice<u8>.Some { value } => value Choice<u8>.None => 0 }
+}
+fn incomplete(value: Choice<i32>) -> i32 {
+  return match move value { Choice<i32>.Some { value } => value }
+}
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let instances = run Semantic.demandBody(&mut store, &mut request, &id, b"instances")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let narrowType = match move bodyLocalType(&instances, usize.ZERO) {
+    Option<Shared<Type>>.Some {value} => value
+    Option<Shared<Type>>.None => {
+      run Testing.expect(false, "Choice<u8> construction retains its complete nominal type")
+      return ()
+    }
+  }
+  let wideType = match move bodyLocalType(&instances, usize.ONE) {
+    Option<Shared<Type>>.Some {value} => value
+    Option<Shared<Type>>.None => {
+      run Testing.expect(false, "Choice<i64> call result retains its complete nominal type")
+      return ()
+    }
+  }
+  let distinct = !(run Type.equalsShared(&narrowType, &wideType)
+    |> Effect.provideMut<Allocator>(&mut allocator))
+  run Testing.expect(
+    distinct && nominalOfKind(&narrowType, OwnerKind.Union)
+      && nominalOfKind(&wideType, OwnerKind.Union)
+      && !Type.hasOpenParameters(&narrowType)
+      && !Type.hasOpenParameters(&wideType),
+    "generic union construction and call results publish distinct complete applications",
+  )
+  let narrowLayout = run Semantic.demandLayout(&mut store, &mut request, &id, &narrowType)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let repeatedLayout = run Semantic.demandLayout(&mut store, &mut request, &id, &narrowType)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let wideLayout = run Semantic.demandLayout(&mut store, &mut request, &id, &wideType)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let narrowIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&narrowLayout, selectedLayoutIndex)
+  let repeatedIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&repeatedLayout, selectedLayoutIndex)
+  let wideIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&wideLayout, selectedLayoutIndex)
+  let mut interned = false
+  let mut laidOut = false
+  if let Option<usize>.Some {value: small} = move narrowIndex {
+    if let Option<usize>.Some {value: repeated} = move repeatedIndex {
+      if let Option<usize>.Some {value: broad} = move wideIndex {
+        interned = small == repeated && small != broad
+        let smallFacts = Semantic.layoutAt(&store, small)
+        let broadFacts = Semantic.layoutAt(&store, broad)
+        if let Option<Shared<BackendLayout>>.Some {value: narrowFacts} = move smallFacts {
+          if let Option<Shared<BackendLayout>>.Some {value: wideFacts} = move broadFacts {
+            laidOut = Shared.with<BackendLayout, bool>(&narrowFacts, fn(layout: &BackendLayout) -> bool {
+              return genericUnionLayout(layout, 2, usize.ONE, usize.ONE)
+            }) && Shared.with<BackendLayout, bool>(&wideFacts, fn(layout: &BackendLayout) -> bool {
+              return genericUnionLayout(layout, 16, 8, 8)
+            })
+          }
+        }
+      }
+    }
+  }
+  run Testing.expect(
+    interned && laidOut,
+    "equal generic union instances share one layout and distinct payload instances lay out separately",
+  )
+  let instancesBody = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&instances, checkedBody)
+  let mut patterns = false
+  if let Option<Shared<TypedBody>>.Some {value: body} = move instancesBody {
+    patterns = Shared.with<TypedBody, usize>(&body, matchTagCount) == 2
+      && Shared.with<TypedBody, usize>(&body, fn(selected: &TypedBody) -> usize {
+        return variantBindings(selected, usize.ZERO, usize.ZERO)
+      }) >= usize.ONE
+  }
+  run Testing.expect(patterns, "applied generic variant patterns retain tag coverage and substituted payload places")
+  let incomplete = run Semantic.demandBody(&mut store, &mut request, &id, b"incomplete")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    rejectsSpan(
+      &incomplete,
+      RejectionCode.MissingUnionMember,
+      text,
+      "match move value { Choice<i32>.Some { value } => value }",
+      0,
+    ),
+    "generic union coverage reports an omitted variant at the match",
+  )
+  return ()
+}
+
+test effect fn genericNominalUnionInstancesClassifyCopyAndShareDropGlue() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("generic-nominal-union-ownership.silk")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let text = """
+struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+union Slot<T> { Vacant, Held { value: T } }
+impl<T: Copy> Copy for Slot<T> {}
+fn abstract<T>(subject: &Slot<T>, value: T) -> Slot<T> {
+  let held = match &subject.* { Slot<T>.Held { .. } => true Slot<T>.Vacant => false }
+  if held { return Slot.Held { value: move value } }
+  return Slot.Vacant
+}
+fn copied(slot: &Slot<i32>) -> i32 { drop slot.* return 0 }
+fn affine(slot: &Slot<Token>) -> i32 { drop slot.* return 0 }
+fn dropped(slot: Slot<Token>) -> i32 { drop slot return 0 }
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let copied = run Semantic.demandBody(&mut store, &mut request, &id, b"copied")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let abstract = run Semantic.demandBody(&mut store, &mut request, &id, b"abstract")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let affine = run Semantic.demandBody(&mut store, &mut request, &id, b"affine")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(
+    succeeded(&copied) && succeeded(&abstract),
+    "generic union Copy bounds, open patterns and contextual constructors check abstractly",
+  )
+  run Testing.expect(
+    rejectsSpan(&affine, RejectionCode.BorrowedExtraction, text, "slot.*", 1),
+    "Slot<Token> remains affine because Token does not satisfy the declared Copy bound",
+  )
+  let dropped = run Semantic.demandMir(&mut store, &mut request, &id, b"dropped")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let firstGlue = run droppedGlue(&mut store, &mut request, &id, b"dropped")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let secondGlue = run droppedGlue(&mut store, &mut request, &id, b"dropped")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let firstIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&firstGlue, selectedMirIndex)
+  let secondIndex = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&secondGlue, selectedMirIndex)
+  let sharedGlue = match move firstIndex {
+    Option<usize>.Some {value: first} => match move secondIndex {
+      Option<usize>.Some {value: second} => first == second
+      Option<usize>.None => false
+    }
+    Option<usize>.None => false
+  }
+  run Testing.expect(
+    sharedGlue && glueFact(&store, &firstGlue, 2) == usize.ONE
+      && glueFact(&store, &firstGlue, usize.ZERO) == usize.ONE
+      && glueFact(&store, &firstGlue, 3) == 3010,
+    "one Slot<Token> glue instance switches on the active tag and drops its substituted Token once",
+  )
+  let copyType = referentOf(bodyLocalType(&copied, usize.ZERO))
+  let dropType = droppedType(&store, &dropped)
+  let repeatedDropType = droppedType(&store, &dropped)
+  let mut keyed = false
+  if let Option<Shared<Type>>.Some {value: plain} = move copyType {
+    if let Option<Shared<Type>>.Some {value: droppable} = move dropType {
+      if let Option<Shared<Type>>.Some {value: repeated} = move repeatedDropType {
+        let plainKey = run InstanceKey.dropGlue(&plain) |> Effect.provideMut<Allocator>(&mut allocator)
+        let dropKey = run InstanceKey.dropGlue(&droppable) |> Effect.provideMut<Allocator>(&mut allocator)
+        let repeatedKey = run InstanceKey.dropGlue(&repeated) |> Effect.provideMut<Allocator>(&mut allocator)
+        if let Option<InstanceKey>.Some {value: plainInstance} = move plainKey {
+          if let Option<InstanceKey>.Some {value: dropInstance} = move dropKey {
+            if let Option<InstanceKey>.Some {value: repeatedInstance} = move repeatedKey {
+              let plainSymbol = run InstanceKey.symbol(&plainInstance)
+                |> Effect.provideMut<Allocator>(&mut allocator)
+              let dropSymbol = run InstanceKey.symbol(&dropInstance)
+                |> Effect.provideMut<Allocator>(&mut allocator)
+              let repeatedSymbol = run InstanceKey.symbol(&repeatedInstance)
+                |> Effect.provideMut<Allocator>(&mut allocator)
+              keyed = !InstanceKey.equals(&plainInstance, &dropInstance)
+                && InstanceKey.equals(&dropInstance, &repeatedInstance)
+                && !sameBytes(Bytes.asSlice(&plainSymbol), Bytes.asSlice(&dropSymbol))
+                && sameBytes(Bytes.asSlice(&dropSymbol), Bytes.asSlice(&repeatedSymbol))
+            }
+          }
+        }
+      }
+    }
+  }
+  run Testing.expect(keyed, "complete generic union instances have canonical distinct glue keys and symbols")
+  return ()
 }
 
 // Non-generic nominal unions tag variants in declaration order, lay each variant out like a record

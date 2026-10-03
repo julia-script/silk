@@ -1,35 +1,44 @@
-# Gates: compiler revision validation and persistence stack
+# Gates: Step 7c generic inherent members
 
-OWNS: openspec/changes/jul-217-_/\**, openspec/changes/jul-218-_/**, openspec/changes/jul-219-\*/**, openspec/changes/jul-221-*/**, openspec/specs/**, packages/compiler/**, apps/docs/**, GATES.md
+OWNS: GATES.md, compiler/**, COMPILER_COMPATIBILITY.md, PAPERCUTS.md
 
-Scope: implement JUL-217, JUL-218, JUL-219, and JUL-221 as four stacked compiler changes. Full-repository CI is a workflow gate checked on the exact final PR head after all repository mutations; it is intentionally not a self-modifying ledger gate.
+Scope: select inherent methods and associated functions on complete generic nominal instances, preserving declaration-owned and member-owned arguments in one canonical application without privileged Option or Result handling
 
-- [x] G0: this ledger states outcome checks that can fail
-      CHECK: node /Users/juliaortiz/.agents/skills/unlazy/scripts/gate-lint.mjs GATES.md
-      EXPECT: LINT OK
-      EVIDENCE: 2026-09-21 LINT OK.
+- [x] G0: this ledger states outcomes that can fail
+  CHECK: node /Users/juliaortiz/.agents/skills/unlazy/scripts/gate-lint.mjs GATES.md
+  EXPECT: LINT OK
+  EVIDENCE: 2026-10-03 LINT OK with only the three declared manual-gate warnings
 
-- [x] G1: JUL-217 owns reconstructible semantic query descriptors, ordered revision validation, result-fingerprint cutoffs, and current diagnostic presentation for header/name/conformance readers
-      CHECK: openspec validate jul-217-semantic-revision-validation --strict && pnpm --filter @silklang/compiler exec vitest run test/SemanticInvalidation.test.ts test/NameResolution.test.ts test/DeclarationIndex.test.ts && echo JUL217_OK
-      EXPECT: JUL217_OK
-      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 100 focused tests passed; JUL217_OK.
+- [x] G1: Step 7c starts from the published Step 7b implementation and retains the Step 6 cleanup foundation
+  CHECK: git merge-base --is-ancestor eb0b94f58 HEAD && rg -q 'DropGlue' compiler/src && rg -q 'cleanupStack|CleanupStack|cleanup stack' compiler/src && echo 'prerequisite verification passed'
+  EXPECT: prerequisite verification passed
+  EVIDENCE: exact branch ancestry and source search passed after rebasing onto origin/selfhost 389740a81 on 2026-10-03
 
-- [x] G2: JUL-218 routes checked units, evaluation, residual construction, and ownership through the shared revision validator while preserving complete products and budget policy
-      CHECK: openspec validate jul-218-shared-body-evaluation-validation --strict && pnpm --filter @silklang/compiler exec vitest run test/NameResolution.test.ts test/SemanticInvalidation.test.ts test/ProjectAnalysis.test.ts test/StaticText.test.ts && echo JUL218_OK
-      EXPECT: JUL218_OK
-      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 97 focused tests passed; JUL218_OK.
+- [x] G2: prefix and applied-owner associated calls select the same complete application, with owner and member-owned arguments in their declared scopes
+  CHECK: SILK_AGENT=step7 /private/tmp/silk-local-test.sh /Users/juliaortiz/.t3/worktrees/silk/julia-step7a-generic-records genericInherent src/semantic/SemanticCases.silk
+  EXPECT: Tests  1 passed, 0 failed
+  EVIDENCE: exact rebased-source PASS in 570 ms; inferred Box.choose(42, true) and Box<i32>.choose<bool> publish equal applications with owner i32 in the impl scope and member-owned bool in own arguments
 
-- [x] G3: JUL-219 supplies bounded opaque Storage with memory and atomic-filesystem providers and migrates native cache owners without retaining obsolete byte-store contracts
-      CHECK: openspec validate jul-219-compiler-storage --strict && pnpm --filter @silklang/compiler exec vitest run test/Storage.test.ts test/NativeToolchain.test.ts && pnpm --filter @silklang/compiler exec vitest run test/Driver.test.ts -t "admits native final caching|artifact Storage|rejects interface before cache reads" && echo JUL219_OK
-      EXPECT: JUL219_OK
-      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 49 Storage/NativeToolchain tests and 3 selected Driver migration tests passed; JUL219_OK.
+- [x] G3: equal complete inherent-member instances share a key and symbol while distinct owner instances do not alias
+  CHECK: SILK_AGENT=step7 /private/tmp/silk-local-test.sh /Users/juliaortiz/.t3/worktrees/silk/julia-step7a-generic-records genericInherent src/semantic/SemanticCases.silk
+  EXPECT: Tests  1 passed, 0 failed
+  EVIDENCE: exact rebased-source PASS in 570 ms; equal inferred-prefix/applied instances have equal InstanceKey.function values and symbols, while inferred Box<bool>.choose<i32> is distinct
 
-- [x] G4: JUL-221 persists and strictly admits complete checked units plus ordered dependency manifests through Storage and the shared validator
-      CHECK: openspec validate jul-221-persisted-checked-units --strict && pnpm --filter @silklang/compiler exec vitest run test/TirCodec.test.ts test/SemanticPersistence.test.ts test/SemanticInvalidation.test.ts && echo JUL221_OK
-      EXPECT: JUL221_OK
-      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 24 focused codec, persistence, and invalidation tests passed; JUL221_OK.
+- [x] G4: direct receiver calls on a generic nominal instance retain the complete owner scope; bound method values remain the named Step 8 gap
+  CHECK: SILK_AGENT=step7 /private/tmp/silk-local-test.sh /Users/juliaortiz/.t3/worktrees/silk/julia-step7a-generic-records genericInherent src/semantic/SemanticCases.silk
+  EXPECT: Tests  1 passed, 0 failed
+  EVIDENCE: exact rebased-source PASS in 570 ms plus direct receiver runtime exit 42; the take call has no own arguments and one complete i32 impl scope
 
-- [x] G5: the final composed head keeps every new OpenSpec implementation task complete and the compiler type-safe
-      CHECK: pnpm --filter @silklang/llvm build && pnpm --filter @silklang/compiler typecheck && node -e "const fs=require('fs');for(const p of fs.readdirSync('openspec/changes').filter(x=>/^jul-(217|218|219|221)-/.test(x))){const t=fs.readFileSync('openspec/changes/'+p+'/tasks.md','utf8');if(/- \[ \]/.test(t))throw new Error('incomplete '+p)}console.log('FINAL_LOCAL_OK')"
-      EXPECT: FINAL_LOCAL_OK
-      EVIDENCE: 2026-09-21 LLVM build and compiler typecheck passed; all JUL-217/218/219/221 implementation tasks are complete; FINAL_LOCAL_OK.
+- [x] G5: stdlib Option and Result constructors use the ordinary generic inherent-member path without name-based compiler privilege
+  EVIDENCE: exact rebased release probe using Box.make<i32>, Option.some<i32>, and Result.succeed<i32, i32> builds and exits 42; compiler-source audit finds no Option, Result, module-path, variant-shape, layout or effect identity recognition beyond ordinary implementation imports and unrelated generic labels
+
+- [x] G6: the full corpus has zero new failures, loses no baseline PASS, and every remaining generic-member blocker has a precise later gap
+  EVIDENCE: exact rebased release sweep pass=63 fail=1 unsupported=325 track=46 with no lost baseline PASS; the three gains over the 60-PASS baseline are retained-if-let-match-binding, scalar-enum-equality-from-borrowed-variant, and while-entry-backedge; the sole FAIL is the unchanged stale generic-service-stabilization-contracts fixture fixed in prerequisite PR #738; http-values and borrowed-outcome-affine-stream advance to typed-form, method-call-matrix advances to Step 8 pipeline-callable
+
+- [x] G7: the task diff is structurally clean
+  CHECK: git diff --check && echo 'diff hygiene verified'
+  EXPECT: diff hygiene verified
+  EVIDENCE: recovered the formatter's unrelated whole-file rewrite, reconciled Step 8's extracted call and field actors, then git diff --check and the whole-compiler source check passed on the scoped rebased 7c diff
+
+- [ ] G8: independent review and required PR CI accept the exact final head
+  EVIDENCE: pending
