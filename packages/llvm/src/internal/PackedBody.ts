@@ -28,8 +28,8 @@ export interface PackedBody {
 }
 
 // The packed form is a dedicated encoding of the snapshot description: integers are unsigned
-// LEB128, string unions are ordinals into the tables below, boolean groups are bit sets, and local
-// names are interned per body. Every committed body is packed once and unpacked by each reader, so
+// LEB128, string unions are ordinals into the tables below, boolean groups are bit sets, and string
+// local names are UTF-8, the only spelling their readers observe. Every committed body is packed once and unpacked by each reader, so
 // both directions sit on the hot path of large compilations; reconstructing records through fixed
 // object literals keeps them monomorphic for the bitcode encoder and verifier.
 
@@ -185,9 +185,13 @@ const LandingPad = 29
 const Invoke = 30
 
 // Local name spellings.
-const NewString = 0
-const StringRef = 1
+const EmptyName = 0
+const TextName = 1
 const Bytes = 2
+
+const utf8Encoder = new TextEncoder()
+// A leading U+FEFF is part of the name, not a byte-order mark.
+const utf8Decoder = new TextDecoder('utf-8', { ignoreBOM: true })
 
 // Value sources.
 const ArgumentSource = 0
@@ -241,7 +245,6 @@ const unknown = (what: string, value: unknown): TypeError =>
 class Writer {
   bytes = new Uint8Array(1024)
   length = 0
-  readonly strings = new Map<string, number>()
 
   reserve(count: number): void {
     if (this.length + count <= this.bytes.length) return
@@ -296,15 +299,17 @@ class Writer {
       this.byte(Bytes)
       return this.rawBytes(value)
     }
-    const known = this.strings.get(value)
-    if (known !== undefined) {
-      this.byte(StringRef)
-      return this.natural(known)
-    }
-    this.strings.set(value, this.strings.size)
-    this.byte(NewString)
-    this.natural(value.length)
-    for (let index = 0; index < value.length; index += 1) this.natural(value.charCodeAt(index))
+    if (value.length === 0) return this.byte(EmptyName)
+    this.byte(TextName)
+    // Encode in place past the widest length prefix, then slide the bytes after the real prefix.
+    // The reservation covers the prefix too, so writing it never reallocates.
+    const start = this.length
+    const gap = 8
+    this.reserve(gap + value.length * 3)
+    const { written } = utf8Encoder.encodeInto(value, this.bytes.subarray(start + gap))
+    this.natural(written)
+    this.bytes.copyWithin(this.length, start + gap, start + gap + written)
+    this.length += written
   }
 
   /** Locals and constants share one natural: the low bit selects the table. */
@@ -600,7 +605,6 @@ class Writer {
 
 class Reader {
   offset = 0
-  readonly strings: Array<string> = []
 
   constructor(readonly bytes: Uint8Array) {}
 
@@ -652,11 +656,10 @@ class Reader {
   name(): LocalName.LocalName {
     const tag = this.byte()
     if (tag === Bytes) return this.rawBytes()
-    if (tag === StringRef) return this.strings[this.natural()] ?? ''
+    if (tag === EmptyName) return ''
     const length = this.natural()
-    let value = ''
-    for (let index = 0; index < length; index += 1) value += String.fromCharCode(this.natural())
-    this.strings.push(value)
+    const value = utf8Decoder.decode(this.bytes.subarray(this.offset, this.offset + length))
+    this.offset += length
     return value
   }
 
