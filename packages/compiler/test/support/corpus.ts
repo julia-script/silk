@@ -71,8 +71,8 @@ import {
   httpClientAcceptanceSource,
   httpClientBoundariesAcceptanceSource,
   httpClientOutputFailuresAcceptanceSource,
-  httpRedirectAcceptanceSource,
 } from './httpClientAcceptance.js'
+import { httpRedirectAcceptanceSource } from './httpRedirectAcceptance.js'
 import { httpClientContentAcceptanceSource } from './httpClientContentAcceptance.js'
 import { httpTransportAcceptanceSource } from './httpTransportAcceptance.js'
 import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
