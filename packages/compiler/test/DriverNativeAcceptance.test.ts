@@ -58,12 +58,27 @@ const configured = (name: string, fallback = ''): string =>
   Effect.runSync(Config.String(name).pipe(Config.withDefault(fallback)))
 const clang = configured('SILK_TEST_CLANG', defaultClang())
 const defaultLlvmAr = join(dirname(clang), 'llvm-ar')
-const toolchain: NativeToolchain.Toolchain = Object.freeze({
-  _tag: 'Toolchain',
-  clang,
-  llvmAr: configured('SILK_TEST_LLVM_AR', existsSync(defaultLlvmAr) ? defaultLlvmAr : 'llvm-ar'),
-  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
-})
+// Every native case builds for the host's default profile, so the platform supply (tool
+// versions, linker, and libraries) is resolved once here instead of in each case's build.
+const toolchain: NativeToolchain.Toolchain = await Effect.runPromise(
+  Effect.gen(function* () {
+    const profile = yield* CompilationProfile.normalize({
+      target: (yield* NativeToolchain.hostTarget()).id,
+    })
+    return yield* NativeToolchain.resolveToolchain(
+      {
+        _tag: 'Toolchain',
+        clang,
+        llvmAr: configured(
+          'SILK_TEST_LLVM_AR',
+          existsSync(defaultLlvmAr) ? defaultLlvmAr : 'llvm-ar',
+        ),
+        runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
+      },
+      profile,
+    )
+  }).pipe(Effect.map((resolved) => Object.freeze(resolved))),
+)
 
 // UTF-8, not charCodeAt: corpus programs may carry non-ASCII literals, and for ASCII sources the
 // bytes are identical.

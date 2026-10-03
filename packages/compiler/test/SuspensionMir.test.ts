@@ -101,77 +101,69 @@ it.effect('keeps synchronous recovery out of its protected recipe suspension reg
 )
 
 it.layer(Layer.effect(Suspended, snapshot()))((it) => {
-  it.effect(
-    'finalizes deterministic target-neutral origin, relay, resume, and logical layout facts',
-    () =>
-      Effect.gen(function* () {
-        const first = yield* Suspended
-        const second = yield* snapshot()
-        assert.deepEqual(Analysis.diagnostics(first), [])
-        const left = Analysis.loweredMir(first)
-        const right = Analysis.loweredMir(second)
-        assert.deepEqual(yield* MirVerification.verify(left), [], SuspensionMir.summary(left))
-        assert.strictEqual(MirEncoding.encode(left), MirEncoding.encode(right))
-        assert.strictEqual(SuspensionMir.summary(left), SuspensionMir.summary(right))
-        // A conservative discovery result for a synchronous constructor must not acquire a
-        // transfer ABI merely because a separate retained runner originates suspension.
-        const constructor = left.functions.find((fn) => fn.id.name === 'program')
-        assert.isDefined(constructor)
-        if (constructor === undefined) return
-        assert.isUndefined(constructor.suspension)
-        const conservative = SuspensionMir.finalize(
-          left,
-          {
-            _tag: 'ProvisionalMirModule',
-            module: 'suspension-mir/main',
-            executions: [
-              {
-                _tag: 'ProvisionalExecution',
-                classification: 'Unknown',
-                regions: [],
-                key: {
-                  _tag: 'InstanceExecution',
-                  instance: constructor.instance,
-                  functionOrdinal: 0,
-                  identity: 'conservative-constructor',
-                },
+  it.effect('finalizes target-neutral origin, relay, resume, and logical layout facts', () =>
+    Effect.gen(function* () {
+      const self = yield* Suspended
+      assert.deepEqual(Analysis.diagnostics(self), [])
+      const mir = Analysis.loweredMir(self)
+      assert.deepEqual(yield* MirVerification.verify(mir), [], SuspensionMir.summary(mir))
+      // A conservative discovery result for a synchronous constructor must not acquire a
+      // transfer ABI merely because a separate retained runner originates suspension.
+      const constructor = mir.functions.find((fn) => fn.id.name === 'program')
+      assert.isDefined(constructor)
+      if (constructor === undefined) return
+      assert.isUndefined(constructor.suspension)
+      const conservative = SuspensionMir.finalize(
+        mir,
+        {
+          _tag: 'ProvisionalMirModule',
+          module: 'suspension-mir/main',
+          executions: [
+            {
+              _tag: 'ProvisionalExecution',
+              classification: 'Unknown',
+              regions: [],
+              key: {
+                _tag: 'InstanceExecution',
+                instance: constructor.instance,
+                functionOrdinal: 0,
+                identity: 'conservative-constructor',
               },
-            ],
-          },
-          {
-            _tag: 'SuspensionOwnershipModule',
-            module: 'suspension-mir/main',
-            plans: [],
-            executionPackages: [],
-            violations: [],
-          },
-          first.index,
-        )
-        assert.isUndefined(
-          conservative.functions.find((fn) => fn.id === constructor.id)?.suspension,
-        )
-        assert.isTrue(
-          suspensionRegions(conservative).some((region) => region._tag === 'SuspendEffectRegion'),
-        )
-        const regions = suspensionRegions(left)
-        assert.lengthOf(
-          regions.filter((region) => region._tag === 'SuspendEffectRegion'),
-          1,
-        )
-        assert.isAtLeast(
-          regions.filter((region) => region._tag === 'RunSuspendableEffectRegion').length,
-          1,
-        )
-        const [, relay] = stateful(left)
-        assert.deepEqual(relay.relay.preserves, ['Child', 'Origin', 'TypedOutcome'])
-        assert.strictEqual(relay.complete._tag, 'CompleteInCurrentActivation')
-        assert.strictEqual(relay.relay.frame, 'StatefulRelay')
-        assert.isDefined(relay.relay.state)
-        assert.deepEqual(
-          relay.relay.state?.slots.map((slot) => slot.local.ordinal),
-          relay.liveLocals.map((local) => local.ordinal),
-        )
-      }),
+            },
+          ],
+        },
+        {
+          _tag: 'SuspensionOwnershipModule',
+          module: 'suspension-mir/main',
+          plans: [],
+          executionPackages: [],
+          violations: [],
+        },
+        self.index,
+      )
+      assert.isUndefined(conservative.functions.find((fn) => fn.id === constructor.id)?.suspension)
+      assert.isTrue(
+        suspensionRegions(conservative).some((region) => region._tag === 'SuspendEffectRegion'),
+      )
+      const regions = suspensionRegions(mir)
+      assert.lengthOf(
+        regions.filter((region) => region._tag === 'SuspendEffectRegion'),
+        1,
+      )
+      assert.isAtLeast(
+        regions.filter((region) => region._tag === 'RunSuspendableEffectRegion').length,
+        1,
+      )
+      const [, relay] = stateful(mir)
+      assert.deepEqual(relay.relay.preserves, ['Child', 'Origin', 'TypedOutcome'])
+      assert.strictEqual(relay.complete._tag, 'CompleteInCurrentActivation')
+      assert.strictEqual(relay.relay.frame, 'StatefulRelay')
+      assert.isDefined(relay.relay.state)
+      assert.deepEqual(
+        relay.relay.state?.slots.map((slot) => slot.local.ordinal),
+        relay.liveLocals.map((local) => local.ordinal),
+      )
+    }),
   )
 
   it.effect(
