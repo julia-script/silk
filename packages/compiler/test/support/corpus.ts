@@ -7203,6 +7203,34 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'generic-record-instances',
+    source: `struct Token<'data> { drops: &'data mut i32 }
+impl<'data> Drop for Token<'data> {
+  fn drop(self: &mut Token<'data>) -> () {
+    if self.drops.* != 0 {
+      let trapped = 1 / 0
+      drop trapped
+    }
+    self.drops.* = self.drops.* + 1
+    return ()
+  }
+}
+struct Box<T> { value: T }
+impl<T: Copy> Copy for Box<T> {}
+fn copied(boxed: Box<i32>) -> i32 {
+  let duplicate = boxed
+  return boxed.value + duplicate.value
+}
+pub fn main() -> i32 {
+  let mut drops = 0
+  let boxed = Box { value: Token { drops: &mut drops } }
+  drop boxed
+  if drops != 1 { return 1 }
+  return copied(Box { value: 21 })
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'foreign-libc-pointer-roundtrip',
     source: `pub fn main() -> i32 {
   return 42
