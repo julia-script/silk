@@ -47,6 +47,7 @@ import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
 import { networkAddressResolutionCorpusProgram } from './support/networkAddressResolutionAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 import * as NativeWork from './support/NativeWork.js'
+import { unreachable } from './support/raise.js'
 import type * as TestExecution from '../src/TestExecution.js'
 
 const defaultClang = (): string => {
@@ -366,7 +367,11 @@ const requestedCases = new Set(
     .filter((name) => name.length !== 0),
 )
 const selected = NativeWork.select(nativeWork, {
-  shard: NativeWork.parseShard(requestedShard),
+  shard:
+    requestedShard === ''
+      ? undefined
+      : (NativeWork.parseShard(requestedShard) ??
+        unreachable('SILK_NATIVE_SHARD must be k/n with 1 <= k <= n')),
   fixed: configured('SILK_NATIVE_FIXED_TESTS', 'true') === 'true',
   cases: requestedCases,
 })
@@ -380,8 +385,7 @@ const fixedScenario = (
 
 // A requested case may name either corpus: the wasm entries are how a 32-bit regression reaches
 // the PR lane, which sets `SILK_NATIVE_FIXED_TESTS=false`.
-it('finds the requested shard and every requested native corpus case', () => {
-  assert.isTrue(requestedShard === '' || NativeWork.parseShard(requestedShard) !== undefined)
+it('finds every requested native corpus case', () => {
   assert.deepStrictEqual(
     [...requestedCases].filter(
       (name) =>
@@ -392,12 +396,31 @@ it('finds the requested shard and every requested native corpus case', () => {
   )
 })
 
-it('deals every native, fixed, and Wasm case to exactly one shard', () => {
+it('selects requested cases and deals every native, fixed, and Wasm case to exactly one shard', () => {
   const names = (work: NativeWork.NativeWork<NativeWork.Named, string, NativeWork.Named>) => [
     ...work.native.map((program) => `native:${program.name}`),
     ...work.fixed.map((name) => `fixed:${name}`),
     ...work.wasm.map((program) => `wasm:${program.name}`),
   ]
+  // Names key build roots and case selection, so each category's names are unique.
+  assert.strictEqual(new Set(names(nativeWork)).size, names(nativeWork).length)
+  // Some cases run in both corpora; pick one name from each that the other lacks.
+  const native =
+    nativeCorpus.find((program) => !portableWasmCorpus.some(({ name }) => name === program.name)) ??
+    unreachable('expected a native-only case')
+  const wasm =
+    portableWasmCorpus.find((program) => !nativeCorpus.some(({ name }) => name === program.name)) ??
+    unreachable('expected a Wasm-only case')
+  assert.deepStrictEqual(
+    names(
+      NativeWork.select(nativeWork, {
+        shard: undefined,
+        fixed: false,
+        cases: new Set([native.name, wasm.name]),
+      }),
+    ),
+    [`native:${native.name}`, `wasm:${wasm.name}`],
+  )
   for (const count of [1, 2, 3, 4]) {
     const shards = Array.from({ length: count }, (_, index) =>
       NativeWork.select(nativeWork, {
