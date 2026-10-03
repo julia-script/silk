@@ -861,8 +861,8 @@ const verifyModule = Effect.fn('NativeProgram.verifyModule')(function* (
   builder: Builder.Builder,
   program: Mir.Module,
 ) {
-  // The compiler-development audit verifies the module before it is encoded, so what reaches
-  // Clang has been checked for the SSA invariants Clang itself will not check on `-x ir` input.
+  // The compiler-development audit reports SSA violations against the emitted module before it
+  // is encoded; without it, Clang's module verifier still rejects them at the object step.
   const violations = yield* Verify.verify(builder)
   if (violations.length > 0) {
     return yield* new BackendError({

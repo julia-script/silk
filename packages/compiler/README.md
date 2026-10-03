@@ -283,8 +283,9 @@ Normal compilation skips the compiler-invariant audits. Enable them with `verify
 `Driver.compile`, `Analysis.codegen`, or `Backend.emit` when developing the compiler. The driver
 records a separate `mir-verification` phase before emission-cache lookup; an audit failure returns
 `VerificationFailed`. `Analysis.codegen` exposes `MirVerificationError` in its typed error channel.
-The LLVM backend then verifies the emitted module's SSA invariants before encoding it, because Clang
-does not check them on `-x ir` input; a violation is a `BackendError` with an `InvalidModule` reason.
+The LLVM backend then verifies the emitted module's SSA invariants before encoding it; a violation
+is a `BackendError` with an `InvalidModule` reason. Without the audit, Clang's module verifier still
+rejects invalid IR at the object step.
 
 Call `yield* MirVerification.check(program)` to audit hand-built MIR independently. `Backend.emit`
 expects internally consistent MIR and retains target, intrinsic, and foreign capability checks.

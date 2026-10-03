@@ -22,8 +22,9 @@ export interface CodegenRequest {
   readonly sources?: ReadonlyMap<string, Uint8Array>
   readonly privateExecutionStackPages?: number
   /**
-   * Audit the emitted module's SSA invariants before encoding (compiler development). Clang does
-   * not check them on `-x ir` input when built without assertions. Defaults to false.
+   * Audit the emitted module's SSA invariants before encoding (compiler development), so a
+   * violation is reported against the emitted module instead of at Clang's object step, whose own
+   * module verifier rejects it otherwise. Defaults to false.
    */
   readonly verifyIr?: boolean
 }
