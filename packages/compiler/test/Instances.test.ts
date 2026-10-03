@@ -416,7 +416,10 @@ pub fn main() -> i32 { return 0 }`),
       ['increment'],
     )
     assert.deepStrictEqual(yield* MirVerification.verify(prepared.program), [])
-    const artifact = yield* LlvmBackend.LlvmBackend.emit(prepared.program, { mode: 'release' })
+    const artifact = yield* LlvmBackend.LlvmBackend.emit(prepared.program, {
+      mode: 'release',
+      verifyIr: true,
+    })
     assert.match(artifact.ir, /define hidden i32 @silk_/)
     assert.match(artifact.ir, /define i32 @increment\(/)
     assert.notMatch(artifact.ir, /define hidden i32 @increment\(/)
@@ -438,7 +441,10 @@ it.effect('emits an empty native library without retaining unrelated public func
     assert.strictEqual(prepared._tag, 'Prepared')
     if (prepared._tag === 'Prepared') {
       assert.deepEqual(prepared.program.functions, [])
-      const artifact = yield* LlvmBackend.LlvmBackend.emit(prepared.program, { mode: 'release' })
+      const artifact = yield* LlvmBackend.LlvmBackend.emit(prepared.program, {
+        mode: 'release',
+        verifyIr: true,
+      })
       assert.deepEqual(artifact.foreignExports, [])
     }
   }),
@@ -2389,7 +2395,10 @@ it.effect(
         program.retainedRoots?.map((root) => root.declaration.name),
         ['keep'],
       )
-      const artifact = yield* LlvmBackend.LlvmBackend.emit(program, { mode: 'release' })
+      const artifact = yield* LlvmBackend.LlvmBackend.emit(program, {
+        mode: 'release',
+        verifyIr: true,
+      })
       assert.match(artifact.ir, /@llvm.used = appending global \[1 x ptr\]/)
       assert.match(artifact.ir, /section "llvm.metadata"/)
       assert.deepEqual(

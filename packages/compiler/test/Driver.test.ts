@@ -851,7 +851,7 @@ it.effect(
           // so nothing is shared between them but the directory.
           const source = 'pub fn main() -> i32 { return 40 + 2 }'
           const first = yield* compileSource('default-cache-first', source, {
-            verifyMir: false,
+            verifyIr: false,
             toolchain: Object.freeze({ _tag: 'Toolchain', clang, llvmAr: 'llvm-ar' }),
             cache: true,
           })
