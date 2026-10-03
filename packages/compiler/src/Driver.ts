@@ -156,7 +156,7 @@ const decodeCachedEmission = (
       return undefined
     if (header.foreignExports.some((entry) => entry.variadic)) return undefined
     const bitcode = bytes.slice(4 + jsonLength)
-    // The driver cache does not expose IR or control-flow inspection to callers.
+    // The driver cache does not expose IR inspection to callers.
     return {
       _tag: 'LlvmBitcodeArtifact',
       backend: 'llvm',
@@ -168,7 +168,6 @@ const decodeCachedEmission = (
       foreignImports: header.foreignImports,
       foreignExports: header.foreignExports,
       foreignStatics: header.foreignStatics,
-      control: [],
       bitcode,
       ir: '',
     }
@@ -179,8 +178,11 @@ const decodeCachedEmission = (
 
 /** One driver request. */
 export interface CompileRequest {
-  /** Audit compiler MIR invariants before emission/cache reuse. Defaults to false. */
-  readonly verifyMir?: boolean
+  /**
+   * Audit compiler IR invariants (compiler development): lowered MIR before emission or cache
+   * reuse, and the emitted LLVM module before encoding. Defaults to false.
+   */
+  readonly verifyIr?: boolean
   readonly nativeBindings?: ReadonlyArray<NativeRequirementBinding.NativeRequirementBinding>
   readonly stage?: ArtifactPlan.Stage
   readonly compilation: ModuleClosure.CompilationRequest
@@ -508,7 +510,7 @@ const prepareEmission = Effect.fnUntraced(function* (
       report: [...report],
     }
   // Explicit audits run even when a later emission-cache lookup can reuse the artifact.
-  if (request.verifyMir === true) {
+  if (request.verifyIr === true) {
     const verified = yield* PhaseReport.measureEffectInto(
       report,
       'mir-verification',
@@ -721,6 +723,7 @@ export const compile = Effect.fn('Driver.compile')(
             program.functions.length,
             Backend.emit(backend, program, {
               mode,
+              verifyIr: request.verifyIr ?? false,
               sources: new Map(
                 [...staged.sources].map(([module, source]) => [
                   module,
