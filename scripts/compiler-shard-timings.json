@@ -45,7 +45,6 @@
     "test/CompilerArtifactArchitecture.test.ts": 47886,
     "test/CompleteInterfaceContractsFixtures.test.ts": 303,
     "test/ConditionalConformance.test.ts": 1002,
-    "test/ConditionalConformanceDeterminism.test.ts": 2297,
     "test/ConditionalConformanceFixtures.test.ts": 313,
     "test/ConditionalConformanceRejection.test.ts": 265,
     "test/ConformanceHead.test.ts": 30,
