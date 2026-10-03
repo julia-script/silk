@@ -10,6 +10,8 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
 import { raise } from './support/raise.js'
+import { readFileSync } from 'node:fs'
+import { executionDriveOpaqueCallbackSource } from './support/corpus.js'
 
 const encoder = new TextEncoder()
 
@@ -344,6 +346,27 @@ pub fn main() -> i32 {
         .sort((left, right) => left - right)
       assert.deepEqual(sizes, [4, 8])
     }),
+)
+
+it.effect('reports the statically called Execution.drive instance with an opaque callback', () =>
+  Effect.gen(function* () {
+    const self = yield* AnalysisFixture.retainingMain(
+      'opaque/execution-drive-callback',
+      encoder.encode(executionDriveOpaqueCallbackSource),
+    )
+    const execution = readFileSync(
+      new URL('../stdlib/silk/execution.silk', import.meta.url),
+      'utf8',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => ({
+        code: diagnostic.code,
+        sourceId: diagnostic.span.sourceId,
+        head: execution.slice(diagnostic.span.start, diagnostic.span.end).split('\n')[0],
+      })),
+      [{ code: 'SEM0219', sourceId: 'silk/execution', head: "pub effect<'env> fn drive<" }],
+    )
+  }),
 )
 
 it.effect('rejects a static join between values from distinct opaque families', () =>

@@ -92,21 +92,19 @@ const runtimeParameterCount = (fn: Tir.TirFunction): number =>
   fn.declaration.parameters.filter((parameter) => parameter.phase === 'Runtime').length
 
 /**
- * A reachable instance whose valid body or contract type native lowering does not support yet.
- * Lowering never substitutes a trap stub: the program diagnoses it when emitted code references it.
+ * A reachable instance whose valid body native lowering does not support yet. Lowering never
+ * substitutes a trap stub: the program diagnoses it when emitted code references it.
  */
 export interface UnsupportedFunction {
   readonly _tag: 'UnsupportedFunction'
   readonly instance: Instances.InstanceKey
-  readonly construct: 'Body' | 'ContractType'
   readonly span: SourceSpan.SourceSpan
 }
 
 const unsupportedFunction = (
   instance: Instances.Instance,
-  construct: UnsupportedFunction['construct'],
   span: SourceSpan.SourceSpan,
-): UnsupportedFunction => ({ _tag: 'UnsupportedFunction', instance: instance.key, construct, span })
+): UnsupportedFunction => ({ _tag: 'UnsupportedFunction', instance: instance.key, span })
 
 export interface LoweredGeneratedEffectRunner {
   readonly _tag: 'LoweredGeneratedEffectRunner'
@@ -440,9 +438,12 @@ export const lowerInstance = (
           instance.specialization.result,
         ))
       : i32)
-  if (resultType === undefined) {
-    return unsupportedFunction(instance, 'ContractType', bodySpan(fn, registry))
-  }
+  // Target layout realizes every reachable instance's specialized result type before lowering, and
+  // its representation fences reject the types it cannot serve; no known program reaches this.
+  if (resultType === undefined)
+    throw new RangeError(
+      `Result type of ${instance.key.declaration.module}:${instance.key.declaration.name} has no MIR representation after layout`,
+    )
 
   const lowering = new FunctionLowering(
     layout,
@@ -479,7 +480,7 @@ export const lowerInstance = (
     )
   ) {
     const unavailable = Tir.firstUnavailable(fn)
-    return unsupportedFunction(instance, 'Body', unavailable?.span ?? bodySpan(fn, registry))
+    return unsupportedFunction(instance, unavailable?.span ?? bodySpan(fn, registry))
   }
 
   return {

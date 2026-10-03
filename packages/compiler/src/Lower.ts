@@ -810,6 +810,6 @@ export const referencedUnsupportedFunctions = (
   collectDeclarations(program.foreignExports, referenced)
   return unsupported
     .filter((entry) => referenced.has(declarationText(entry.instance.declaration)))
-    .map((entry) => Diagnostic.unsupportedLowering(entry.construct, entry.span))
+    .map((entry) => Diagnostic.unsupportedLowering(entry.span))
 }
 import type * as SemanticContext from './SemanticContext.js'
