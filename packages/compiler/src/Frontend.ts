@@ -847,7 +847,7 @@ const configureProjectSelection = Effect.fn('Frontend.configureProjectSelection'
       application !== undefined && closure.sources.has(application)
         ? application
         : closure.rootModules[0]
-    const view = first === undefined ? undefined : ModuleClosure.view(closure, first)
+    const view = ModuleClosure.view(closure, first)
     if (view === undefined) throw new RangeError('Project selection lost its root')
     const base = yield* bootstrapFacts(closure, report, options)
     if (!ModuleSelection.required(closure)) bootstrapHeaders = base

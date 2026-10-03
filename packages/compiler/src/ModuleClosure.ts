@@ -2,9 +2,11 @@ import type * as ConfigurationOrigin from './ConfigurationOrigin.js'
 import type * as ArtifactComposition from './ArtifactComposition.js'
 import type * as CompilationProfile from './CompilationProfile.js'
 import type * as PackageConfiguration from './PackageConfiguration.js'
+import * as Arr from 'effect/Array'
 import * as Effect from 'effect/Effect'
 import * as Data from 'effect/Data'
 import * as Option from 'effect/Option'
+import * as Order from 'effect/Order'
 import * as Result from 'effect/Result'
 import type * as AuthoredHir from './AuthoredHir.js'
 import * as AuthoredIdentity from './AuthoredIdentity.js'
@@ -126,7 +128,7 @@ export interface Closure extends Facts {
 /** The deterministic union closure admitted by one project discovery pass. */
 export interface ProjectClosure extends Facts {
   readonly _tag: 'ProjectModuleClosure'
-  readonly rootModules: ReadonlyArray<string>
+  readonly rootModules: Arr.NonEmptyReadonlyArray<string>
 }
 
 /** A requested root cannot establish a complete analysis snapshot. */
@@ -155,8 +157,9 @@ const compareText = (left: string, right: string): number => {
 export const validateRoots = Effect.fn('ModuleClosure.validateRoots')(function* (
   roots: ReadonlyArray<string>,
   additionalRoots: ReadonlyArray<string> = [],
-): Effect.fn.Return<ReadonlyArray<string>, ModuleClosureError> {
-  if (roots.length === 0)
+): Effect.fn.Return<Arr.NonEmptyReadonlyArray<string>, ModuleClosureError> {
+  const canonical = [...new Set(roots)].sort()
+  if (!Arr.isReadonlyArrayNonEmpty(canonical))
     return yield* new ModuleClosureError({
       operation: 'ModuleClosure.loadProject',
       message: 'Project analysis requires at least one root module',
@@ -169,7 +172,7 @@ export const validateRoots = Effect.fn('ModuleClosure.validateRoots')(function* 
         message: `Root module identity ${module} is not canonical`,
         reason: { _tag: 'InvalidRoot', module },
       })
-  return [...new Set(roots)].sort()
+  return canonical
 })
 
 interface ParsedModule {
@@ -394,7 +397,7 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
   const loaded = new Map<string, Module>()
   const diagnostics: Array<ReadonlyArray<Diagnostic.Diagnostic>> = []
   const resolutions = new Map<string, Resolution>()
-  const rootModules: Array<string> = [...roots]
+  const additionalRootModules: Array<string> = []
   const missingRoots: Array<string> = []
 
   const resolve = Effect.fn('ModuleClosure.resolve')(function* (
@@ -437,10 +440,10 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
   for (const module of [...new Set(request.additionalRoots ?? [])].sort()) {
     if (roots.includes(module)) continue
     const outcome = yield* resolve(module)
-    if (outcome._tag === 'Found') rootModules.push(module)
+    if (outcome._tag === 'Found') additionalRootModules.push(module)
     else if (outcome._tag === 'Absent') missingRoots.push(module)
   }
-  rootModules.sort()
+  const rootModules = Arr.sort(Arr.appendAll(roots, additionalRootModules), Order.String)
   const pending: Array<string> = [...rootModules]
 
   while (pending.length > 0) {
@@ -486,20 +489,24 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
   }
 })
 
+const rootView = (self: ProjectClosure, rootModule: string): Closure => ({
+  _tag: 'ModuleClosure',
+  rootModule,
+  modules: self.modules,
+  cycles: self.cycles,
+  diagnostics: self.diagnostics,
+  sources: self.sources,
+  resolutionFailures: self.resolutionFailures,
+  missingRoots: self.missingRoots,
+})
+
 /** Selects one root from a project closure without copying project-owned module facts. */
 export const view = (self: ProjectClosure, rootModule: string): Closure | undefined =>
-  self.rootModules.includes(rootModule)
-    ? {
-        _tag: 'ModuleClosure',
-        rootModule,
-        modules: self.modules,
-        cycles: self.cycles,
-        diagnostics: self.diagnostics,
-        sources: self.sources,
-        resolutionFailures: self.resolutionFailures,
-        missingRoots: self.missingRoots,
-      }
-    : undefined
+  self.rootModules.includes(rootModule) ? rootView(self, rootModule) : undefined
+
+/** Selects every root of a project closure, in canonical root order. */
+export const views = (self: ProjectClosure): Arr.NonEmptyReadonlyArray<Closure> =>
+  Arr.map(self.rootModules, (rootModule) => rootView(self, rootModule))
 
 /** Requires explicit ownership and logical paths for every in-memory source reached from discovery. */
 export const validateDiscoverySources = Effect.fn('ModuleClosure.validateDiscoverySources')(
