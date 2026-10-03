@@ -1,35 +1,50 @@
-# Gates: compiler revision validation and persistence stack
+# Gates: Step 7d generic-instance corpus sweep
 
-OWNS: openspec/changes/jul-217-_/\**, openspec/changes/jul-218-_/**, openspec/changes/jul-219-\*/**, openspec/changes/jul-221-*/**, openspec/specs/**, packages/compiler/**, apps/docs/**, GATES.md
+OWNS: GATES.md, compiler/**, .github/workflows/selfhost.yml, COMPILER_COMPATIBILITY.md, PAPERCUTS.md
 
-Scope: implement JUL-217, JUL-218, JUL-219, and JUL-221 as four stacked compiler changes. Full-repository CI is a workflow gate checked on the exact final PR head after all repository mutations; it is intentionally not a self-modifying ledger gate.
+Scope: pin every corpus program newly enabled by Step 7, replace generic first-blocker labels with precise later gaps and owners, re-audit Option and Result compiler privilege, and close the Step 7 roadmap only after exact-head CI has zero failures
 
-- [x] G0: this ledger states outcome checks that can fail
-      CHECK: node /Users/juliaortiz/.agents/skills/unlazy/scripts/gate-lint.mjs GATES.md
-      EXPECT: LINT OK
-      EVIDENCE: 2026-09-21 LINT OK.
+- [x] G0: this ledger states outcomes that can fail
+  CHECK: node /Users/juliaortiz/.agents/skills/unlazy/scripts/gate-lint.mjs GATES.md
+  EXPECT: LINT OK
+  EVIDENCE: 2026-10-03 LINT OK with only the six declared manual or unmeasured gate warnings
 
-- [x] G1: JUL-217 owns reconstructible semantic query descriptors, ordered revision validation, result-fingerprint cutoffs, and current diagnostic presentation for header/name/conformance readers
-      CHECK: openspec validate jul-217-semantic-revision-validation --strict && pnpm --filter @silklang/compiler exec vitest run test/SemanticInvalidation.test.ts test/NameResolution.test.ts test/DeclarationIndex.test.ts && echo JUL217_OK
-      EXPECT: JUL217_OK
-      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 100 focused tests passed; JUL217_OK.
+- [x] G1: Step 7d starts from the published Step 7c implementation and retains the Step 6 cleanup foundation
+  CHECK: git merge-base --is-ancestor e2606d5d5 HEAD && rg -q 'DropGlue' compiler/src && rg -q 'cleanupStack|CleanupStack|cleanup stack' compiler/src && echo 'prerequisite verification passed'
+  EXPECT: prerequisite verification passed
+  EVIDENCE: exact branch ancestry and source search passed on 2026-10-03
 
-- [x] G2: JUL-218 routes checked units, evaluation, residual construction, and ownership through the shared revision validator while preserving complete products and budget policy
-      CHECK: openspec validate jul-218-shared-body-evaluation-validation --strict && pnpm --filter @silklang/compiler exec vitest run test/NameResolution.test.ts test/SemanticInvalidation.test.ts test/ProjectAnalysis.test.ts test/StaticText.test.ts && echo JUL218_OK
-      EXPECT: JUL218_OK
-      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 97 focused tests passed; JUL218_OK.
+- [ ] G2: the full corpus has zero failures, loses no baseline PASS, and reports the final PASS, unsupported, and track counts
+  CHECK: SILKC=compiler/build/llvm/aarch64-apple-darwin/release-with-debug/silk-compiler pnpm --filter @silklang/compiler exec tsx ../../compiler/scripts/runSelfhostCorpus.ts
+  EXPECT: Selfhost corpus reports fail=0 and no selfhost track failure
+  EVIDENCE: exact Step 7c sweep pass=63 fail=1 unsupported=325 track=46; the only failure is the stale generic-service-stabilization-contracts fixture fixed on main in prerequisite PR #738
 
-- [x] G3: JUL-219 supplies bounded opaque Storage with memory and atomic-filesystem providers and migrates native cache owners without retaining obsolete byte-store contracts
-      CHECK: openspec validate jul-219-compiler-storage --strict && pnpm --filter @silklang/compiler exec vitest run test/Storage.test.ts test/NativeToolchain.test.ts && pnpm --filter @silklang/compiler exec vitest run test/Driver.test.ts -t "admits native final caching|artifact Storage|rejects interface before cache reads" && echo JUL219_OK
-      EXPECT: JUL219_OK
-      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 49 Storage/NativeToolchain tests and 3 selected Driver migration tests passed; JUL219_OK.
+- [x] G3: every existing corpus program newly passing because of Step 7 is pinned in both hard-coded acceptance lists after an exact native PASS
+  CHECK: SILKC=compiler/build/llvm/aarch64-apple-darwin/release-with-debug/silk-compiler SILK_SELFHOST_CORPUS_CASES=retained-if-let-match-binding,scalar-enum-equality-from-borrowed-variant,while-entry-backedge pnpm --filter @silklang/compiler exec tsx ../../compiler/scripts/runSelfhostCorpus.ts
+  EXPECT: Selfhost corpus: pass=3 fail=0 unsupported=0 track=3
+  EVIDENCE: the exact full Step 7c sweep passes all three in 270 ms, 244 ms, and 299 ms; an exact targeted Step 7d run reports pass=3 fail=0 unsupported=0 track=3; both hard-coded lists pin the same names
 
-- [x] G4: JUL-221 persists and strictly admits complete checked units plus ordered dependency manifests through Storage and the shared validator
-      CHECK: openspec validate jul-221-persisted-checked-units --strict && pnpm --filter @silklang/compiler exec vitest run test/TirCodec.test.ts test/SemanticPersistence.test.ts test/SemanticInvalidation.test.ts && echo JUL221_OK
-      EXPECT: JUL221_OK
-      EVIDENCE: 2026-09-21 strict OpenSpec validation passed; 24 focused codec, persistence, and invalidation tests passed; JUL221_OK.
+- [x] G4: every remaining program whose earlier first blocker was a generic instance has a precise next blocker owned by Step 8, Step 9, or a named follow-up
+  EVIDENCE: the normalized before/after audit records the following ownership; the exact sweep has no generic-record gap and the only two surviving union-form reports are the ordinary-union follow-up
 
-- [x] G5: the final composed head keeps every new OpenSpec implementation task complete and the compiler type-safe
-      CHECK: pnpm --filter @silklang/llvm build && pnpm --filter @silklang/compiler typecheck && node -e "const fs=require('fs');for(const p of fs.readdirSync('openspec/changes').filter(x=>/^jul-(217|218|219|221)-/.test(x))){const t=fs.readFileSync('openspec/changes/'+p+'/tasks.md','utf8');if(/- \[ \]/.test(t))throw new Error('incomplete '+p)}console.log('FINAL_LOCAL_OK')"
-      EXPECT: FINAL_LOCAL_OK
-      EVIDENCE: 2026-09-21 LLVM build and compiler typecheck passed; all JUL-217/218/219/221 implementation tasks are complete; FINAL_LOCAL_OK.
+  | Owner | Programs and exact current blocker |
+  | --- | --- |
+  | Step 8 callable values | generic-interface-runtime-contracts (typed-form in function-value calls), closed-operator-surface (typed-form at a checked-operation section), staged-callable-section (typed-form), option-result-combinators (typed-form at callable argument), method-call-matrix (pipeline-callable) |
+  | Step 9 effects and services | borrowed-outcome-stream, borrowed-outcome-affine-stream, generic-inline-effect-conformance, generic-service-stabilization-contracts after its main fixture sync; x25519 also reaches its provider run after intrinsic gaps |
+  | intrinsic/static-value follow-up | integer-operation-matrix and arith-convergence-checked-remainder-min-none (intrinsic-member); checked-conversion-f32/f64 (typed-form at primitive static INFINITY); checked-conversion-pointer-width (typed-form at pointerBits); chacha20-poly1305 and rsa-verification (intrinsic-member/unit-parameter plus typed-form) |
+  | ordinary union/pattern follow-up | nominal-union-represented-copy-drop and ordinary-union-droppable-array (union-form); nominal-result-compound-error (typed-form at the nominal arm inside a structural union) |
+  | borrowed aggregate/string follow-up | ecdsa-p256-verification (typed-form at the borrowed array-to-slice Option payload); http-values (typed-form at a string header-name operand) |
+
+- [x] G5: Option and Result receive no direct or indirect compiler privilege, and a user-defined Option-shaped generic union has identical layout and behavior
+  EVIDENCE: source audit found no Option, Result, module-path, success/failure-shape, effect, try-sugar, layout, or niche recognition; the user-defined Maybe<T> structural/runtime claim is staged in prerequisite PR #738 and the exact ordinary-path probes exit 42
+
+- [ ] G6: the generic-record and user-defined generic-union native corpus acceptances land on main, sync to selfhost, pass exactly, and are pinned
+  EVIDENCE: prerequisite draft main PR #738 is green and awaiting review/merge before the required selfhost sync
+
+- [x] G7: the task diff is structurally clean and changes every hard-coded corpus-name list together
+  CHECK: git diff --check && rg -q "'retained-if-let-match-binding'" compiler/scripts/selfhostTrack.ts .github/workflows/selfhost.yml && rg -q "'scalar-enum-equality-from-borrowed-variant'" compiler/scripts/selfhostTrack.ts .github/workflows/selfhost.yml && rg -q "'while-entry-backedge'" compiler/scripts/selfhostTrack.ts .github/workflows/selfhost.yml && echo 'diff hygiene and pin lists verified'
+  EXPECT: diff hygiene and pin lists verified
+  EVIDENCE: diff hygiene and both pin-list membership checks passed on 2026-10-03
+
+- [ ] G8: independent review and required PR CI accept the exact final head, and #567 records the Step 7 link plus final PASS and pin counts
+  EVIDENCE: pending
