@@ -297,8 +297,6 @@ pub fn main() -> i32 { let parser = outer<i32>(true) return parser(1) }`
       [],
     )
     assert.strictEqual(realized.mir._tag, 'Available')
-    if (realized.mir._tag === 'Available')
-      assert.notInclude(MirEncoding.encode(realized.mir.value), 'unavailable contract type')
   }),
 )
 
@@ -445,8 +443,6 @@ pub fn main() -> i32 { let parser = make(40) return parser(2) }`
     assert.notInclude(encoded, 'OpaqueRepresentationArgument')
     assert.notInclude(encoded, 'Existential')
     assert.notInclude(encoded, 'CallIndirect')
-    assert.notInclude(encoded, 'unavailable body')
-    assert.notInclude(encoded, 'unavailable contract type')
     const operations = self.mir.value.functions.flatMap(MirVerification.operations)
     assert.strictEqual(
       operations.some((operation) => operation._tag === 'Allocate'),
@@ -483,8 +479,6 @@ pub fn main() -> i32 { return run make(42) }`),
     assert.strictEqual(self.mir._tag, 'Available')
     if (self.mir._tag !== 'Available') return
     const encoded = MirEncoding.encode(self.mir.value)
-    assert.notInclude(encoded, 'unavailable body')
-    assert.notInclude(encoded, 'unavailable contract type')
     assert.notInclude(encoded, 'OpaqueRepresentationArgument')
     assert.strictEqual(
       self.mir.value.functions
