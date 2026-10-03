@@ -33,13 +33,21 @@ interface RecordedEvaluation<A> {
   readonly reusable: boolean
 }
 
+/** A body input fingerprint derived once, when revision validation or persistence first reads it. */
+type Fingerprint = () => string
+
+const derivedOnce = (compute: () => string): Fingerprint => {
+  let value: string | undefined
+  return () => (value ??= compute())
+}
+
 interface Runtime {
   readonly bodies: Map<
     string,
     {
-      readonly header: string
-      readonly implementation: string
-      readonly scope: string
+      readonly header: Fingerprint
+      readonly implementation: Fingerprint
+      readonly scope: Fingerprint
       readonly build?: () => Elaboration.CheckedUnit
     }
   >
@@ -250,33 +258,36 @@ const associatedCandidatesFingerprint = (
     ).sort(),
   )
 
+// Header and scope inputs derive from this session's immutable index and resolution, and a body's
+// fingerprints from its registered inputs, so each derivation is deferred until a revision
+// validation or persistence reads it.
 const readInput = (
   index: DeclarationIndex.Index,
   resolution: NameResolution.Resolution,
   configuration: string,
   runtime: Runtime,
   address: SemanticQuery.InputAddress,
-): string | undefined => {
+): SemanticQuery.InputFingerprint => {
   const parts = partsOf(address.address)
   switch (address.family) {
     case 'Configuration':
       return parts[0] === 'semantic-session' ? configuration : undefined
     case 'Namespace':
-      return namespaceFingerprint(resolution, parts[0] ?? '', parts[1] ?? '')
+      return () => namespaceFingerprint(resolution, parts[0] ?? '', parts[1] ?? '')
     case 'ImportSelection':
-      return importSelectionFingerprint(resolution, parts[0] ?? '', parts[1] ?? '')
+      return () => importSelectionFingerprint(resolution, parts[0] ?? '', parts[1] ?? '')
     case 'Header':
     case 'Alias':
     case 'Bound':
-      return headerFingerprint(index, parts[0] ?? '', parts[1] ?? '')
+      return () => headerFingerprint(index, parts[0] ?? '', parts[1] ?? '')
     case 'AssociatedCandidates':
-      return associatedCandidatesFingerprint(index, parts[0] ?? '', parts[1] ?? '', parts[2] ?? '')
-    case 'ConformanceCandidates': {
-      runtime.conformanceCandidatesFingerprint ??= ToolchainIntegrity.contentDigest(
-        ModuleSurface.resolutionSignature(index),
-      )
-      return runtime.conformanceCandidatesFingerprint
-    }
+      return () =>
+        associatedCandidatesFingerprint(index, parts[0] ?? '', parts[1] ?? '', parts[2] ?? '')
+    case 'ConformanceCandidates':
+      return () =>
+        (runtime.conformanceCandidatesFingerprint ??= ToolchainIntegrity.contentDigest(
+          ModuleSurface.resolutionSignature(index),
+        ))
     case 'BodyHeader':
       return runtime.bodies.get(parts[0] ?? '')?.header
     case 'BodyImplementation':
@@ -732,13 +743,17 @@ export const checkBody = (bodyInput: BodyInput): Elaboration.CheckedUnit => {
   const request = checkBodyDescriptor(bodyInput.declaration)
   const runtime = runtimeOf(bodyInput.session)
   const provider = {
-    header: BodyQuery.headerFingerprint(bodyInput.index, bodyInput.declaration),
-    implementation: BodyQuery.implementationFingerprint(bodyInput.authored, bodyInput.declaration),
-    scope: BodyQuery.scopeFingerprint(
-      bodyInput.index,
-      bodyInput.authored,
-      bodyInput.declaration,
-      bodyInput.scope,
+    header: derivedOnce(() => BodyQuery.headerFingerprint(bodyInput.index, bodyInput.declaration)),
+    implementation: derivedOnce(() =>
+      BodyQuery.implementationFingerprint(bodyInput.authored, bodyInput.declaration),
+    ),
+    scope: derivedOnce(() =>
+      BodyQuery.scopeFingerprint(
+        bodyInput.index,
+        bodyInput.authored,
+        bodyInput.declaration,
+        bodyInput.scope,
+      ),
     ),
     build: () =>
       bodyInput.query === undefined
