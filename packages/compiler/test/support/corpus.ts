@@ -3191,7 +3191,10 @@ pub fn main() -> i32 {
     name: 'pattern-conditionals-and-destructuring',
     source: `struct Left { value: i32 }
 struct Right {}
-struct Point { x: i32, y: i32 }
+struct Point {
+  x: i32
+  y: i32
+}
 struct Token { value: i32 }
 impl Copy for Token {}
 union Shape { Circle { radius: i32 }, Empty }
