@@ -69,7 +69,6 @@ jobs:
           --filter='!@silklang/lsp'
           --filter='!@silklang/cli'
       - run: pnpm test:scripts
-      - run: pnpm release:candidate
 
   package-tests:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
@@ -535,7 +534,6 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=6144
           VITEST_MAX_WORKERS: 1
-      - run: pnpm release:candidate
 
   platform-supplies:
     if: github.event_name != 'workflow_dispatch' || (!inputs.full_verification && inputs.selfhost_sha == '')
