@@ -1461,6 +1461,13 @@ it.effect(
       const target = yield* NativeToolchain.hostTarget()
       const profile = yield* profileFor(target)
       const selected = yield* NativeToolchain.resolveToolchain(toolchain, profile)
+      // A passed supply, not a stale tool spelling, selects the tools that run.
+      const reselected = yield* NativeToolchain.resolveToolchain(
+        { ...selected, clang: 'unvalidated-clang', llvmAr: 'unvalidated-llvm-ar' },
+        profile,
+      )
+      assert.strictEqual(reselected.clang, selected.supply?.compiler.command)
+      assert.strictEqual(reselected.llvmAr, selected.supply?.archiver.command)
       yield* NativeToolchain.withBuildScope(
         'supply-identities',
         Effect.fnUntraced(function* (scope) {
@@ -1868,6 +1875,52 @@ it.effect(
           assert.isTrue(Result.isFailure(ObjectSymbols.inspect(bytes.subarray(0, length), target)))
       }
     }),
+)
+
+it.effect('keys a reusable helper object by every input that shapes it, and only those', () =>
+  Effect.gen(function* () {
+    const profile = yield* CompilationProfile.normalize({ target: 'x86_64-unknown-linux-gnu' })
+    const arm = yield* CompilationProfile.normalize({ target: 'aarch64-unknown-linux-gnu' })
+    const memcpy = yield* HelperCapability.provider('memcpy', profile)
+    const memset = yield* HelperCapability.provider('memset', profile)
+    const compiler = { digest: 'clang-digest', version: 'clang version 22.1.8' }
+    const key = (
+      facts: CompilationProfile.Facts,
+      overrides: {
+        readonly distribution?: string
+        readonly backend?: string
+        readonly providers?: ReadonlyArray<HelperCapability.Provider>
+        readonly compiler?: typeof compiler
+      } = {},
+    ) =>
+      NativeToolchain.helperCacheKey(
+        overrides.distribution ?? 'distribution',
+        overrides.backend ?? 'llvm',
+        overrides.providers ?? [memcpy, memset],
+        facts,
+        overrides.compiler ?? compiler,
+      )
+    const base = key(profile)
+    // Provider order and program-only facts do not split the cache across programs.
+    assert.strictEqual(key(profile, { providers: [memset, memcpy] }), base)
+    assert.strictEqual(key({ ...profile, safety: 'unchecked', artifact: 'loadable-module' }), base)
+    const variants = [
+      key(profile, { providers: [memcpy] }),
+      key(profile, { distribution: 'other-distribution' }),
+      key(profile, { backend: 'other-backend' }),
+      key({ ...profile, target: arm.target }),
+      key({ ...profile, cpu: { ...profile.cpu, model: 'x86-64-v3' } }),
+      key({ ...profile, cpu: { ...profile.cpu, features: ['+avx2'] } }),
+      key({ ...profile, deployment: '12.0.0' }),
+      key({ ...profile, relocation: profile.relocation === 'pic' ? 'static' : 'pic' }),
+      key({ ...profile, codeModel: profile.codeModel === 'small' ? 'large' : 'small' }),
+      key({ ...profile, optimization: profile.optimization === 'none' ? 'speed' : 'none' }),
+      key({ ...profile, debug: !profile.debug }),
+      key(profile, { compiler: { ...compiler, digest: 'other-clang-digest' } }),
+      key(profile, { compiler: { ...compiler, version: 'clang version 22.1.9' } }),
+    ]
+    assert.strictEqual(new Set([base, ...variants]).size, variants.length + 1)
+  }),
 )
 
 it.effect(
