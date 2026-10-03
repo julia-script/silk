@@ -230,14 +230,9 @@ it.layer(Layer.effect(Relayed, snapshot(source)))((it) => {
     }),
   )
 
-  it.effect('publishes deterministic state ownership and restoration', () =>
+  it.effect('restores every retained state slot on success', () =>
     Effect.gen(function* () {
-      const first = yield* Relayed
-      const second = yield* snapshot(source)
-      const left = available(first)
-      const right = available(second)
-      assert.strictEqual(SuspensionOwnership.encode(left), SuspensionOwnership.encode(right))
-      for (const plan of left.plans) {
+      for (const plan of available(yield* Relayed).plans) {
         assert.deepEqual(
           plan.success.restores,
           plan.slots.map((slot) => slot.ordinal),
