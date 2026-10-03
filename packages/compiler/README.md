@@ -235,9 +235,12 @@ typed operation and `SourceResolver` is its Effect service: browser and editor t
 compiler core.
 
 `ProjectAnalysis` analyzes the union closure of synchronized roots once and returns immutable root
-views that share syntax, declaration, semantic, tooling, and diagnostic facts. Revising a project
-reuses byte-identical syntax and authored artifacts; semantic facts are reused per body when their
-authored content, scope and dependencies are unchanged and recomputed otherwise.
+views that share syntax, declaration, semantic, tooling, and diagnostic facts. Its root list is
+non-empty by type. `primary` is a view of the shared project-wide facts, rooted at the first
+canonical root (not the configured application); every view carries the same project facts, so
+documentation and source catalogs read it directly. Revising a project reuses byte-identical
+syntax and authored artifacts; semantic facts are reused per body when their authored content,
+scope and dependencies are unchanged and recomputed otherwise.
 
 ## Editor and documentation facts
 

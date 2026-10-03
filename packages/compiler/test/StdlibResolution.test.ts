@@ -857,7 +857,7 @@ it.effect(
       )
       for (const target of Target.all) {
         const selection = yield* SourceCatalog.analyze({
-          roots: [root, facade].map((source) => source.id),
+          roots: [root.id, facade.id],
           configuration: {
             profile: { target: target.id, artifact: 'object', runtime: { kind: 'none' } },
           },
@@ -937,9 +937,7 @@ pub fn portableProvider(value: MemoryTrustSource) -> () { return () }`
       const selected: Array<string> = []
       for (const target of Target.all) {
         const selection = yield* SourceCatalog.analyze({
-          roots: [SourceFile.make(`native-file-trust/${target.id}`, ascii(source))].map(
-            (source) => source.id,
-          ),
+          roots: [`native-file-trust/${target.id}`],
           configuration: {
             profile: { target: target.id, artifact: 'object', runtime: { kind: 'none' } },
           },
