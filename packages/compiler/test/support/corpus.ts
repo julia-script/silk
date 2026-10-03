@@ -7203,6 +7203,86 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'generic-record-instances',
+    source: `struct Token<'data> { drops: &'data mut i32 }
+impl<'data> Drop for Token<'data> {
+  fn drop(self: &mut Token<'data>) -> () {
+    if self.drops.* != 0 {
+      let trapped = 1 / 0
+      drop trapped
+    }
+    self.drops.* = self.drops.* + 1
+    return ()
+  }
+}
+struct Box<T> { value: T }
+impl<T: Copy> Copy for Box<T> {}
+fn copied(boxed: Box<i32>) -> i32 {
+  let duplicate = boxed
+  return match move duplicate {
+    Box<i32> { value } => boxed.value + value
+  }
+}
+pub fn main() -> i32 {
+  let mut drops = 0
+  let boxed = Box { value: Token { drops: &mut drops } }
+  drop boxed
+  if drops != 1 { return 1 }
+  return copied(Box { value: 21 })
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    // A user-defined Option-shaped union follows the same generic construction and match path.
+    name: 'generic-union-instances',
+    source: `import silk.option { Option }
+struct Token<'data> { drops: &'data mut i32 }
+impl<'data> Drop for Token<'data> {
+  fn drop(self: &mut Token<'data>) -> () {
+    if self.drops.* != 0 {
+      let trapped = 1 / 0
+      drop trapped
+    }
+    self.drops.* = self.drops.* + 1
+    return ()
+  }
+}
+union Maybe<T> {
+  None,
+  Some { value: T },
+}
+fn some<T>(value: T) -> Maybe<T> {
+  return Maybe<T>.Some { value: move value }
+}
+fn none<T>() -> Maybe<T> {
+  return Maybe<T>.None
+}
+fn wrapped<'data>(drops: &'data mut i32) -> Maybe<Token<'data>> {
+  return Maybe<Token<'data>>.Some { value: Token { drops: move drops } }
+}
+pub fn main() -> i32 {
+  let mut drops = 0
+  let droppable = wrapped(&mut drops)
+  drop droppable
+  if drops != 1 { return 1 }
+  let custom = match move some<i32>(20) {
+    Maybe<i32>.Some { value } => value
+    Maybe<i32>.None => 0
+  }
+  let ordinaryValue = Option<i32>.Some { value: 22 }
+  let ordinary = match move ordinaryValue {
+    Option<i32>.Some { value } => value
+    Option<i32>.None => 0
+  }
+  let empty = match move none<i32>() {
+    Maybe<i32>.Some { value } => value
+    Maybe<i32>.None => 0
+  }
+  return custom + ordinary + empty
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'foreign-libc-pointer-roundtrip',
     source: `pub fn main() -> i32 {
   return 42
@@ -8120,8 +8200,12 @@ service SchemaService {
 }
 struct InterfaceSchema {}
 struct ServiceSchema {}
-fn interfaceWidth(value: &InterfaceSchema) -> i32 { return 32 }
-fn serviceWidth(value: &ServiceSchema) -> i32 { return 32 }
+impl InterfaceSchema {
+  fn interfaceWidth(value: &Self) -> i32 { return 32 }
+}
+impl ServiceSchema {
+  fn serviceWidth(value: &Self) -> i32 { return 32 }
+}
 impl SchemaInterface for InterfaceSchema {
   fn decode(value: &Self) -> i32 { return 42 }
   width: InterfaceSchema.interfaceWidth
