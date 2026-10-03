@@ -24,6 +24,11 @@ export interface Session {
   readonly configuration: string
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
+  /**
+   * Whether checked bodies publish their editor-only results (name occurrences, inferred-type
+   * hints, lexical scopes, expression types). A build session leaves them out.
+   */
+  readonly tooling: boolean
   readonly queries: SemanticQuery.Session
 }
 
@@ -549,14 +554,24 @@ const makeProvider = (
   read: (address) => readInput(index, resolution, configuration, runtime, address),
 })
 
+export interface SessionOptions {
+  /** The selection the session reads under; records from another configuration never validate. */
+  readonly configuration?: string
+  /** Reusable records of one prior revision. */
+  readonly previous?: SemanticQuery.Snapshot
+  /** Whether checked bodies publish their editor-only results. */
+  readonly tooling?: boolean
+}
+
 /** Builds one current session and optionally admits records from one prior snapshot. */
 export const makeSession = (
   epoch: string,
   index: DeclarationIndex.Index,
   resolution: NameResolution.Resolution,
-  configuration = 'default',
-  previous?: SemanticQuery.Snapshot,
+  options: SessionOptions = {},
 ): Session => {
+  const configuration = options.configuration ?? 'default'
+  const tooling = options.tooling === true
   const runtime: Runtime = {
     bodies: new Map(),
     ownership: new Map(),
@@ -565,8 +580,9 @@ export const makeSession = (
   }
   const queries = SemanticQuery.make(
     epoch + '\u0000' + configuration,
-    makeProvider(index, resolution, configuration, runtime),
-    previous,
+    // A checked unit's tooling results depend on the session purpose, so it is configuration.
+    makeProvider(index, resolution, tooling ? configuration + ':tooling' : configuration, runtime),
+    options.previous,
   )
   runtime.queries = queries
   const session = {
@@ -575,6 +591,7 @@ export const makeSession = (
     configuration,
     index,
     resolution,
+    tooling,
     queries,
   }
   runtimes.set(session, runtime)
@@ -810,7 +827,7 @@ export const checkBodyFresh = (bodyInput: BodyInput): Elaboration.CheckedUnit =>
     bodyInput.session.epoch + ':fresh',
     bodyInput.session.index,
     bodyInput.session.resolution,
-    bodyInput.session.configuration,
+    { configuration: bodyInput.session.configuration, tooling: bodyInput.session.tooling },
   )
   const { query: _query, ...fresh } = bodyInput
   return checkBody({ ...fresh, session: isolated })

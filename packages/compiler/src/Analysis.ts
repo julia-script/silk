@@ -163,7 +163,7 @@ export const make = Effect.fn('Analysis.make')(function* (
   ModuleClosure.ModuleClosureError,
   SourceResolver.SourceResolver
 > {
-  const { frontend } = yield* Preparation.prepare(request, 'analysis')
+  const { frontend } = yield* Preparation.prepare(request, 'analysis', { tooling: true })
   yield* Effect.yieldNow
   const tooling = yield* FrontendTooling.make(frontend)
   return OpaqueRealization.withCatalog(
@@ -185,7 +185,7 @@ export const realize = Effect.fn('Analysis.realize')(function* (
   options: Frontend.Options = {},
 ): Effect.fn.Return<Snapshot, ModuleClosure.ModuleClosureError, SourceResolver.SourceResolver> {
   const { frontend, ...realization } = Preparation.realization(
-    yield* Preparation.promote(self, target, options),
+    yield* Preparation.promote(self, target, { ...options, tooling: true }),
   )
   const tooling =
     frontend.index === self.index && frontend.closure === self.closure
@@ -216,7 +216,7 @@ export const makeRealized = Effect.fn('Analysis.makeRealized')(function* (
     request.configuration === undefined && request.target === undefined
       ? { ...request, target: Target.x8664UnknownLinuxGnu.id }
       : request
-  const bundle = yield* Preparation.prepare(selected, 'executable')
+  const bundle = yield* Preparation.prepare(selected, 'executable', { tooling: true })
   const { frontend, ...realization } = Preparation.realization(bundle)
   const tooling = yield* FrontendTooling.make(frontend)
   return OpaqueRealization.withCatalog(
@@ -251,7 +251,10 @@ export const ofSourceRealized = (
 ): Effect.Effect<Snapshot, ModuleClosure.ModuleClosureError> =>
   Effect.provide(
     Effect.gen(function* () {
-      const bundle = yield* Preparation.prepare({ root: sourceId, target }, 'executable', options)
+      const bundle = yield* Preparation.prepare({ root: sourceId, target }, 'executable', {
+        ...options,
+        tooling: true,
+      })
       const { frontend, ...realization } = Preparation.realization(bundle)
       const tooling = yield* FrontendTooling.make(frontend)
       return OpaqueRealization.withCatalog(
@@ -1025,7 +1028,7 @@ export const typeHints = (
     : TypeHint.make(
         scope.context,
         (self.results.get(module)?.bodies ?? []).flatMap((body) =>
-          body.hidden ? [] : body.results.hints,
+          body.hidden ? [] : (body.results.tooling?.hints ?? []),
         ),
         module,
         scope,
