@@ -9750,6 +9750,29 @@ pub effect fn main() -> () ! WriterError {
     expected: { _tag: 'Completes', result: 0 },
   },
   {
+    name: 'stdout-writer-hello',
+    source: 'pub fn main() -> i32 { return 0 }',
+    nativeSource: `import silk.effect { Effect }
+import silk.os_writer { StdoutWriter }
+import silk.writer { Writer, WriterError }
+
+effect fn hello() -> () ! WriterError {
+  let mut writer = StdoutWriter.make()
+  return run Writer.writeAll(b"hello\\n") |> Effect.provideMut<Writer>(&mut writer)
+}
+
+effect fn ignoreWriteFailure(error: WriterError) -> () {
+  return ()
+}
+
+pub fn main() -> i32 {
+  let completed = run Effect.catchAll(hello(), ignoreWriteFailure)
+  return 0
+}`,
+    nativeStdout: 'hello\n',
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
     name: 'secure-random-provider',
     source: deterministicSecureRandom,
     nativeSource: nativeSecureRandom,
