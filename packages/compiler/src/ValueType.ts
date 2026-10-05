@@ -77,6 +77,32 @@ export type GeneratedEffectRunner =
   | GeneratedBuiltinEffectRunner
   | GeneratedCatchEffectRunner
 
+// Run sites looked up their runner by scanning the program-wide runner list (about 10 s in the
+// selfhost lowering profile). Runner lists only grow by appending, so each list's index catches
+// up with new entries and keeps the first runner per key, exactly as the scan selected it.
+const generatedRunnerIndexes = new WeakMap<
+  ReadonlyArray<GeneratedEffectRunner>,
+  { readonly byKey: Map<string, GeneratedEffectRunner>; indexed: number }
+>()
+
+/** Selects the first generated runner registered under one specialization key. */
+export const generatedRunner = (
+  runners: ReadonlyArray<GeneratedEffectRunner>,
+  specializationKey: string,
+): GeneratedEffectRunner | undefined => {
+  let index = generatedRunnerIndexes.get(runners)
+  if (index === undefined) {
+    index = { byKey: new Map(), indexed: 0 }
+    generatedRunnerIndexes.set(runners, index)
+  }
+  for (; index.indexed < runners.length; index.indexed += 1) {
+    const runner = runners.at(index.indexed)
+    if (runner !== undefined && !index.byKey.has(runner.specializationKey))
+      index.byKey.set(runner.specializationKey, runner)
+  }
+  return index.byKey.get(specializationKey)
+}
+
 export const instanceText = (
   declaration: { readonly module: string; readonly name: string },
   typeArguments: ReadonlyArray<Type.GenericArgument>,
@@ -630,7 +656,7 @@ export const ensureEffectRunner = (
 ): DeclarationFacts.CanonicalId | undefined => {
   const key =
     requirements.length === 0 ? effectRunnerKey(type) : providedRunnerKey(type, requirements)
-  const existing = fn.generatedRunners.find((candidate) => candidate.specializationKey === key)
+  const existing = generatedRunner(fn.generatedRunners, key)
   if (existing !== undefined) return existing.id
   // A caller can precede the source declaration that registers its builtin runner. The
   // layout already selects the physical closure; its canonical base id does not depend on

@@ -86,6 +86,7 @@ import {
   effectValueType,
   ensureEffectRunner,
   functionItemValueType,
+  generatedRunner,
   instanceText,
   providerBindings,
   requirementsFor,
@@ -1375,7 +1376,7 @@ function lowerEffectBlockExpression(
     provenance: authored(expression.span),
   })
   const specializationKey = baseRunnerKey(fn.owner.key, expression.site, type.type)
-  if (!fn.generatedRunners.some((candidate) => candidate.specializationKey === specializationKey)) {
+  if (generatedRunner(fn.generatedRunners, specializationKey) === undefined) {
     fn.generatedRunners.push({
       _tag: 'BlockEffectRunner',
       id: runner,
