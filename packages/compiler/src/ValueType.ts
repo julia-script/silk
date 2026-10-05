@@ -77,31 +77,49 @@ export type GeneratedEffectRunner =
   | GeneratedBuiltinEffectRunner
   | GeneratedCatchEffectRunner
 
-// Run sites looked up their runner by scanning the program-wide runner list (about 10 s in the
+interface GeneratedRunnerIndex {
+  /** The first runner registered per specialization key. */
+  readonly byKey: Map<string, GeneratedEffectRunner>
+  /** Runners without provided requirements per physical site, in registration order. */
+  readonly basesBySite: Map<string, Array<GeneratedEffectRunner>>
+  indexed: number
+}
+
+// Run sites looked up their runner by scanning the program-wide runner list (about 15 s in the
 // selfhost lowering profile). Runner lists only grow by appending, so each list's index catches
-// up with new entries and keeps the first runner per key, exactly as the scan selected it.
+// up with new entries and preserves the selection and order of the scans it replaces.
 const generatedRunnerIndexes = new WeakMap<
   ReadonlyArray<GeneratedEffectRunner>,
-  { readonly byKey: Map<string, GeneratedEffectRunner>; indexed: number }
+  GeneratedRunnerIndex
 >()
+
+const generatedRunnerIndex = (
+  runners: ReadonlyArray<GeneratedEffectRunner>,
+): GeneratedRunnerIndex => {
+  let index = generatedRunnerIndexes.get(runners)
+  if (index === undefined) {
+    index = { byKey: new Map(), basesBySite: new Map(), indexed: 0 }
+    generatedRunnerIndexes.set(runners, index)
+  }
+  for (; index.indexed < runners.length; index.indexed += 1) {
+    const runner = runners.at(index.indexed)
+    if (runner === undefined) continue
+    if (!index.byKey.has(runner.specializationKey))
+      index.byKey.set(runner.specializationKey, runner)
+    if (runner.providedRequirements.length > 0) continue
+    const site = effectRunnerSiteKey(runner.type)
+    const bases = index.basesBySite.get(site)
+    if (bases === undefined) index.basesBySite.set(site, [runner])
+    else bases.push(runner)
+  }
+  return index
+}
 
 /** Selects the first generated runner registered under one specialization key. */
 export const generatedRunner = (
   runners: ReadonlyArray<GeneratedEffectRunner>,
   specializationKey: string,
-): GeneratedEffectRunner | undefined => {
-  let index = generatedRunnerIndexes.get(runners)
-  if (index === undefined) {
-    index = { byKey: new Map(), indexed: 0 }
-    generatedRunnerIndexes.set(runners, index)
-  }
-  for (; index.indexed < runners.length; index.indexed += 1) {
-    const runner = runners.at(index.indexed)
-    if (runner !== undefined && !index.byKey.has(runner.specializationKey))
-      index.byKey.set(runner.specializationKey, runner)
-  }
-  return index.byKey.get(specializationKey)
-}
+): GeneratedEffectRunner | undefined => generatedRunnerIndex(runners).byKey.get(specializationKey)
 
 export const instanceText = (
   declaration: { readonly module: string; readonly name: string },
@@ -674,11 +692,8 @@ export const ensureEffectRunner = (
   // concreteSpecialization re-solves provider witnesses from these complete runtime
   // arguments; object identity would reject equivalent contextual specializations.
   const site = effectRunnerSiteKey(type)
-  const physical = fn.generatedRunners.filter(
-    (candidate) =>
-      candidate.providedRequirements.length === 0 &&
-      effectRunnerSiteKey(candidate.type) === site &&
-      EffectExecutionContract.matches(candidate.type.type, type.type, requirements),
+  const physical = (generatedRunnerIndex(fn.generatedRunners).basesBySite.get(site) ?? []).filter(
+    (candidate) => EffectExecutionContract.matches(candidate.type.type, type.type, requirements),
   )
   const base = physical.length === 1 ? physical.at(0) : undefined
   if (base === undefined) return undefined
