@@ -368,6 +368,17 @@ export const analyze = (
   const allPoints = Array.from({ length: pointCount }, (_, ordinal) => ordinal)
   const spans = new Map(entries.map(([anchor, point]) => [point, context.spanOf(anchor)]))
   for (const [point, span] of terminalSpans) spans.set(point, span)
+  // Every binding borrow filters all points by authored order; selfhost profiling attributed 3.8 s
+  // to resolving those orders per borrow, so resolve each point's order once.
+  const entryOrders = Array.from({ length: entries.length }, (): number | undefined => undefined)
+  const entryOrder = (ordinal: number, position: AuthoredHir.Anchor): number => {
+    let order = entryOrders[ordinal]
+    if (order === undefined) {
+      order = context.orderOf(position)
+      entryOrders[ordinal] = order
+    }
+    return order
+  }
   const regions = new Map<string, Region>()
   const origins = new Map<string, Origin>()
   const constraints = new Map(body.constraints)
@@ -529,9 +540,9 @@ export const analyze = (
     const bindingOrder = context.orderOf(origin)
     const available = entries
       .filter(
-        ([position]) =>
+        ([position], ordinal) =>
           encloses(context, scope, position) &&
-          (source._tag !== 'BindingRoot' || context.orderOf(position) >= bindingOrder),
+          (source._tag !== 'BindingRoot' || entryOrder(ordinal, position) >= bindingOrder),
       )
       .map(([, point]) => point)
     restrict(lifetime, available, {
@@ -1264,6 +1275,15 @@ export const analyze = (
       pending.push(...(incoming.get(Lifetime.key(source)) ?? []))
     }
   }
+  // Selfhost profiling attributed 3.8 s to resolving every point's boundary, and keying its barrier
+  // list, once per activated constraint. Resolve the boundaries once and each reach set once.
+  let resolvedSpanUses:
+    | ReadonlyArray<readonly [number, BodyControlFlow.Boundary | undefined]>
+    | undefined
+  const spanUses = (): ReadonlyArray<readonly [number, BodyControlFlow.Boundary | undefined]> =>
+    (resolvedSpanUses ??= [...spans].map(
+      ([point, span]) => [point, BodyControlFlow.at(controlFlow, span)] as const,
+    ))
   const activatedConstraints = body.activatedConstraints.flatMap(({ bound, installed, owner }) => {
     ensure(bound.longer)
     ensure(bound.shorter)
@@ -1277,15 +1297,10 @@ export const analyze = (
       installation.before,
       ...(ownerBoundary === undefined ? [] : [ownerBoundary.before]),
     ]
+    const reachable = BodyControlFlow.reachable(controlFlow, installation.after, barriers)
     const points = new Set<number>()
-    for (const [point, span] of spans) {
-      const use = BodyControlFlow.at(controlFlow, span)
-      if (
-        use !== undefined &&
-        BodyControlFlow.reaches(controlFlow, installation.after, use.after, barriers)
-      )
-        points.add(point)
-    }
+    for (const [point, use] of spanUses())
+      if (use !== undefined && BodyControlFlow.includes(reachable, use.after)) points.add(point)
     return [{ ...bound, points }]
   })
   const input: Lifetime.Input = {
