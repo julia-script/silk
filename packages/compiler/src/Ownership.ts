@@ -2643,8 +2643,12 @@ const analyzeLoans = (
     }
   }
 
-  const delayedLoansAt = (span: SourceSpan.SourceSpan, write = false): ReadonlyArray<LoanFact> =>
-    loans.filter((loan) => {
+  const delayedLoansAt = (span: SourceSpan.SourceSpan, write = false): ReadonlyArray<LoanFact> => {
+    if (loans.length === 0) return []
+    // Every loan in scope is probed at this one access: resolve its control-flow point once.
+    const flow = fn.lifetimeFlow
+    const at = flow === undefined ? undefined : LifetimeFlow.accessPoint(flow, span, write)
+    return loans.filter((loan) => {
       const retainedExecutableCapture =
         loan.origin === 'CallableCapture' ||
         loan.origin === 'ReturnedCallableCapture' ||
@@ -2659,11 +2663,12 @@ const analyzeLoans = (
       // invocation and would otherwise make the capture disappear before the authored use.
       if (retainedExecutableCapture && retainedThroughAuthoredUse) return true
       const live =
-        fn.lifetimeFlow === undefined
+        flow === undefined || at === undefined
           ? undefined
-          : LifetimeFlow.liveAt(fn.lifetimeFlow, loan.startSpan, span, loan.endSpan, write)
+          : LifetimeFlow.liveAt(flow, loan.startSpan, at, loan.endSpan)
       return live ?? retainedThroughAuthoredUse
     })
+  }
 
   const checkDirectAccess = (
     expression: LoanView.Expression,

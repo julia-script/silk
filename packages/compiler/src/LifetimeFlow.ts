@@ -1425,8 +1425,32 @@ interface LoanLiveness {
 // rather than retaining one forward traversal for every access and creation barrier pair.
 // Cleanup and presentation return new flows, so their changed uses and spans get fresh answers.
 const loanLivenessCache = new WeakMap<LifetimeFlow, Map<string, LoanLiveness>>()
+// Ownership probes each loan's own start span against every access in scope. Selfhost profiling
+// attributed 13.8 s of self time to keying that probe by a freshly built span string, so answer by
+// span object first, including the loans no origin or boundary answers for.
+const loanLivenessBySpan = new WeakMap<
+  LifetimeFlow,
+  WeakMap<SourceSpan.SourceSpan, LoanLiveness | false>
+>()
 
 const loanLiveness = (
+  self: LifetimeFlow,
+  solution: Extract<Lifetime.Solution, { readonly _tag: 'Solved' }>,
+  start: SourceSpan.SourceSpan,
+): LoanLiveness | undefined => {
+  let bySpan = loanLivenessBySpan.get(self)
+  if (bySpan === undefined) {
+    bySpan = new WeakMap()
+    loanLivenessBySpan.set(self, bySpan)
+  }
+  const known = bySpan.get(start)
+  if (known !== undefined) return known === false ? undefined : known
+  const answer = resolveLoanLiveness(self, solution, start)
+  bySpan.set(start, answer ?? false)
+  return answer
+}
+
+const resolveLoanLiveness = (
   self: LifetimeFlow,
   solution: Extract<Lifetime.Solution, { readonly _tag: 'Solved' }>,
   start: SourceSpan.SourceSpan,
@@ -1460,23 +1484,34 @@ const loanLiveness = (
   return answer
 }
 
-/** Tests concrete loan liveness at an access using the solved holder uses and source CFG. */
-export const liveAt = (
+/**
+ * The control-flow point a solved flow checks one access at. Ownership resolves it once and probes
+ * it against every loan in scope with `liveAt`.
+ */
+export const accessPoint = (
   self: LifetimeFlow,
-  start: SourceSpan.SourceSpan,
   access: SourceSpan.SourceSpan,
-  end: SourceSpan.SourceSpan,
   write = false,
-): boolean | undefined => {
+): number | undefined => {
   if (self.solution._tag !== 'Solved') return undefined
   const accessed = BodyControlFlow.at(self.controlFlow, access)
   if (accessed === undefined) return undefined
+  return write
+    ? (BodyControlFlow.writeAt(self.controlFlow, access) ?? accessed.after)
+    : accessed.before
+}
+
+/** Tests concrete loan liveness at an access point using the solved holder uses and source CFG. */
+export const liveAt = (
+  self: LifetimeFlow,
+  start: SourceSpan.SourceSpan,
+  at: number,
+  end: SourceSpan.SourceSpan,
+): boolean | undefined => {
+  if (self.solution._tag !== 'Solved') return undefined
   const liveness = loanLiveness(self, self.solution, start)
   if (liveness === undefined) return undefined
   const { created } = liveness
-  const at = write
-    ? (BodyControlFlow.writeAt(self.controlFlow, access) ?? accessed.after)
-    : accessed.before
   if (!BodyControlFlow.reaches(self.controlFlow, created.after, at, created.before)) return false
   if (BodyControlFlow.includes(liveness.required, at)) return true
   if (liveness.observedHolderUse) return false
