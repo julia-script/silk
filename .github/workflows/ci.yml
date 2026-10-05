@@ -33,6 +33,69 @@ permissions:
   contents: read
 
 jobs:
+  bundled-cli:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: ./.github/actions/setup-linux-llvm
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}-bundle
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
+            turbo-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm bundle:cli
+      - run: node packages/cli/scripts/test-bundle.mjs node --native
+      - run: node packages/cli/scripts/test-bundle.mjs bun --native
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-cli-${{ github.sha }}
+          path: packages/cli/dist/silk.mjs
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  publish-bootstrap:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - bundled-cli
+      - validate
+      - package-tests
+      - compiler-documentation
+      - native-acceptance
+      - compiler-tests
+      - tls-wasm
+      - macos-native-os
+      - webcontainer-browser
+      - platform-supplies
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: bootstrap-cli-${{ github.sha }}
+          path: bootstrap
+      # The shared name is reserved for main bundles whose complete CI graph has passed.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: silk-bootstrap
+          path: bootstrap/silk.mjs
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+
   # Spike (openspec/changes/spike-ci-test-sharding): the compiler vitest payload runs in the
   # compiler-tests matrix below; validate keeps everything else `pnpm check` ran.
   validate:
@@ -148,29 +211,23 @@ jobs:
       ((github.event_name == 'pull_request' && github.base_ref == 'selfhost') ||
        (github.event_name == 'push' && github.ref == 'refs/heads/selfhost'))
     name: Self-hosted M1 semantics
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: pnpm
       - uses: ./.github/actions/setup-linux-llvm
-      - uses: actions/cache@v4
-        with:
-          path: .turbo/cache
-          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}-self-hosted-m1
-          restore-keys: |
-            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
-            turbo-${{ runner.os }}-
-      - run: pnpm install --frozen-lockfile
-      - run: CI=true node scripts/turbo.mjs run build --filter=@silklang/cli...
-      - run: node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/M1Cases.silk --no-cache
+      - uses: ./.github/actions/download-bootstrap
+        id: bootstrap
+      - run: node "${{ steps.bootstrap.outputs.path }}" test --manifest-path compiler/silk.toml --root src/M1Cases.silk --no-cache
         env:
           NODE_OPTIONS: --max-old-space-size=6144
-      - run: node packages/cli/dist/bin.js test --manifest-path compiler/silk.toml --root src/hir/LoweringCases.silk --filter integer --no-cache
+      - run: node "${{ steps.bootstrap.outputs.path }}" test --manifest-path compiler/silk.toml --root src/hir/LoweringCases.silk --filter integer --no-cache
 
   # Pull requests run a representative compile/link/execute smoke set, including one portable Wasm
   # case so the LLVM-to-Wasm leg under the shared host-resolved toolchain stays covered. The bounded
