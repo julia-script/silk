@@ -122,25 +122,57 @@ export const initializationFor = (
   return { state, flags: flags }
 }
 
+interface TransitionIndex {
+  /** The first binding fact per binding site, as a source-ordered scan would select it. */
+  readonly bindings: ReadonlyMap<string, Ownership.BindingFact>
+  /** Source-ordered transitions per kind and span. */
+  readonly transitions: ReadonlyMap<string, ReadonlyArray<Ownership.PlaceTransition>>
+}
+
+// Every place expression resolves its transition. Scanning all bindings and transitions per
+// expression cost about 9 s in the selfhost lowering profile; ownership facts are immutable, so
+// each function indexes them once.
+const transitionIndexes = new WeakMap<Ownership.FunctionOwnership, TransitionIndex>()
+
+const transitionKey = (kind: Ownership.PlaceTransition['kind'], span: SourceSpan.SourceSpan) =>
+  `${kind}:${spanKey(span)}`
+
+const transitionIndex = (ownership: Ownership.FunctionOwnership): TransitionIndex => {
+  const existing = transitionIndexes.get(ownership)
+  if (existing !== undefined) return existing
+  const bindings = new Map<string, Ownership.BindingFact>()
+  for (const binding of Ownership.allBindings(ownership)) {
+    const key = Ownership.siteKey(binding.site)
+    if (!bindings.has(key)) bindings.set(key, binding)
+  }
+  const transitions = new Map<string, Array<Ownership.PlaceTransition>>()
+  for (const transition of ownership.transitions) {
+    const key = transitionKey(transition.kind, transition.span)
+    const group = transitions.get(key)
+    if (group === undefined) transitions.set(key, [transition])
+    else group.push(transition)
+  }
+  const index = { bindings, transitions }
+  transitionIndexes.set(ownership, index)
+  return index
+}
+
 export const transitionAt = (
   fn: FunctionLowering,
   span: SourceSpan.SourceSpan,
   kind: Ownership.PlaceTransition['kind'],
   root?: Ownership.BindingSite,
 ): Ownership.PlaceTransition | undefined => {
+  if (fn.ownership === undefined) return undefined
+  const index = transitionIndex(fn.ownership)
   const canonicalRoot = (site: Ownership.BindingSite): Ownership.BindingSite => {
-    const alias = Ownership.allBindings(fn.ownership).find(
-      (binding) => Ownership.siteKey(binding.site) === Ownership.siteKey(site),
-    )?.place?.root
+    const alias = index.bindings.get(Ownership.siteKey(site))?.place?.root
     return alias === undefined ? site : canonicalRoot(alias)
   }
   const rootKey = root === undefined ? undefined : Ownership.siteKey(canonicalRoot(root))
-  return fn.ownership?.transitions.find(
-    (transition) =>
-      transition.kind === kind &&
-      spanKey(transition.span) === spanKey(span) &&
-      (rootKey === undefined || Ownership.siteKey(transition.root) === rootKey),
-  )
+  return index.transitions
+    .get(transitionKey(kind, span))
+    ?.find((transition) => rootKey === undefined || Ownership.siteKey(transition.root) === rootKey)
 }
 
 /** Resolves a canonical source owner to its retained MIR storage. */
