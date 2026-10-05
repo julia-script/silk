@@ -285,5 +285,14 @@ pub fn main() -> i32 {
     assert.strictEqual(diagnostic.span.end, start + 'pending'.length)
     const mutable = yield* analyzed('stored-effect-ownership/mutable-mut-run', source('let mut'))
     assert.notInclude(codesOf(mutable), 'SEM0077')
+    assert.notInclude(codesOf(mutable), 'SEM0068')
+    const shared = yield* analyzed(
+      'stored-effect-ownership/mutable-shared-recipe',
+      `pub fn main() -> i32 {
+  let mut pending = effect { return 1 }
+  return run pending
+}`,
+    )
+    assert.include(codesOf(shared), 'SEM0068')
   }),
 )
