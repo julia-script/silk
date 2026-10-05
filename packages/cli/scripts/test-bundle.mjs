@@ -6,6 +6,10 @@ import { join } from 'node:path'
 
 const runtime = process.argv[2] ?? process.execPath
 const native = process.argv.includes('--native')
+const location = spawnSync(runtime, ['--print', 'process.execPath'], { encoding: 'utf8' })
+assert.ifError(location.error)
+assert.equal(location.status, 0, location.stderr)
+const executable = location.stdout.trim()
 // Copy only the published asset out of the workspace. A relative import, node_modules lookup,
 // or stdlib filesystem dependency must fail here, even when it works in the build checkout.
 const directory = await mkdtemp(join(tmpdir(), 'silk-bundle-'))
@@ -13,11 +17,19 @@ try {
   const bundle = join(directory, 'silk.mjs')
   await copyFile(new URL('../dist/silk.mjs', import.meta.url), bundle)
   const cli = (...args) => {
-    const result = spawnSync(runtime, [bundle, ...args], {
+    const nativeCommand = args[0] === 'run' || args[0] === 'test'
+    const result = spawnSync(executable, [bundle, ...args], {
       cwd: directory,
       encoding: 'utf8',
       timeout: 120_000,
-      env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '', NO_COLOR: '1' },
+      // Frontend and bitcode commands must also work without any external compiler on PATH.
+      env: {
+        ...process.env,
+        PATH: nativeCommand ? process.env.PATH : '',
+        NODE_PATH: '',
+        NODE_OPTIONS: '',
+        NO_COLOR: '1',
+      },
     })
     assert.ifError(result.error)
     assert.equal(
