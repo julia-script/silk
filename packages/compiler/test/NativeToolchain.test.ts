@@ -2083,6 +2083,67 @@ it.effect(
 )
 
 it.effect(
+  'executes the no-libc source memory providers across lengths, offsets and overlap',
+  () =>
+    Effect.gen(function* () {
+      const target = yield* NativeToolchain.hostTarget()
+      const selected = yield* NativeToolchain.resolveToolchain(toolchain, yield* profileFor(target))
+      const profile = yield* CompilationProfile.normalize({
+        target: target.id,
+        libc: 'none',
+        artifact: 'object',
+        entry: { kind: 'none' },
+        runtime: { kind: 'none' },
+      })
+      const darwin = target.operatingSystem === 'darwin'
+      const symbols = ['memcpy', 'memmove', 'memset', 'memcmp', darwin ? 'bzero' : 'bcmp'].map(
+        (name) => ({
+          name: darwin ? `_${name}` : name,
+          defined: false,
+          weak: false,
+          visibility: 'default' as const,
+        }),
+      )
+      const report = yield* HelperCapability.reconcile(
+        { format: darwin ? 'macho' : 'elf', symbols, references: [] },
+        { foreignImports: [], foreignStatics: [], nativeRuntimeSymbols: [] },
+        profile,
+        'program.o',
+        'program-digest',
+      )
+      const linked = yield* NativeToolchain.withBuildScope(
+        'source-memory-execution',
+        Effect.fnUntraced(function* (scope) {
+          const helpers = yield* NativeToolchain.compileHelpers(selected, scope, profile, report, {
+            _tag: 'Disabled',
+          })
+          if (helpers === undefined) return assert.fail('expected a source helper object')
+          // The helper object's definitions take precedence over libc for the receiver's calls.
+          const receiver = yield* NativeToolchain.compileCObject(
+            selected,
+            scope,
+            target,
+            'source-memory-receiver',
+            readFileSync(new URL('./fixtures/source-memory-helpers.c', import.meta.url), 'utf8'),
+          )
+          return yield* finalize(
+            selected,
+            scope,
+            'NativeExecutable',
+            target,
+            [receiver.artifact, helpers.object.artifact],
+            [],
+            join(testRoot, 'source-memory-helpers'),
+          )
+        }),
+      )
+      const run = spawnSync(linked.path, [], { encoding: 'utf8' })
+      assert.strictEqual(run.status, 42, run.stderr)
+    }),
+  30_000,
+)
+
+it.effect(
   'accounts emitted helper ABIs separately from source foreign calls and runtime contracts',
   () =>
     Effect.gen(function* () {
