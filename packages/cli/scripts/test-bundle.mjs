@@ -3,9 +3,12 @@ import { spawnSync } from 'node:child_process'
 import { copyFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import * as Config from 'effect/Config'
+import * as Effect from 'effect/Effect'
 
 const runtime = process.argv[2] ?? process.execPath
 const native = process.argv.includes('--native')
+const nativePath = Effect.runSync(Config.String('PATH').pipe(Config.withDefault('')))
 const location = spawnSync(runtime, ['--print', 'process.execPath'], { encoding: 'utf8' })
 assert.ifError(location.error)
 assert.equal(location.status, 0, location.stderr)
@@ -25,7 +28,7 @@ try {
       // Frontend and bitcode commands must also work without any external compiler on PATH.
       env: {
         ...process.env,
-        PATH: nativeCommand ? process.env.PATH : '',
+        PATH: nativeCommand ? nativePath : '',
         NODE_PATH: '',
         NODE_OPTIONS: '',
         NO_COLOR: '1',
