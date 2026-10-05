@@ -2324,12 +2324,12 @@ export const modules = [
     module: 'silk/support/bzero',
     path: 'silk/support/bzero.silk',
     sourceIdentity: 'silk/support/bzero',
-    digest: '4a53b48f8807012f8d96f86b47e196503032cdf0349cce3cb83ba37dbfa8d985',
+    digest: '7ab66795f9e8434cf35116fdc17d93b4bfa70473554a16863f27e9f9b17711d5',
     documentation: 'silk/support/bzero.silk',
     staticInventory: [],
     runtimeInventory: ['pointerReinterpret', 'pointerRequalify'],
     source:
-      '//! Source-owned word-wise clearing for the Darwin LLVM zero-fill helper.\n\nimport silk.pointer { Pointer }\n\n/// Writes zero to each of the `count` destination bytes.\n///\n/// # Details\n///\n/// Zero is written eight bytes at a time through unaligned word accesses, then one byte at a\n/// time for the tail.\n///\n/// # Gotchas\n///\n/// The caller must provide a live writable range of `count` bytes.\nexport "C" fn bzero(destination: ?[*]mut u8, count: usize) -> () {\n  if count == 0 { return () }\n  unsafe {\n    let output = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(destination)\n    let mut index: usize = 0\n    while count - index >= 8 {\n      Pointer.writeUnaligned<u64>(Intrinsic.pointerReinterpret<*mut u8, *mut align(1) u64>(Pointer.atMut<u8>(output, index)), 0)\n      index = index + 8\n    }\n    while index < count {\n      Pointer.write<u8>(Pointer.atMut<u8>(output, index), 0)\n      index = index + 1\n    }\n  }\n  return ()\n}\n',
+      '//! Source-owned word-wise clearing for the Darwin LLVM zero-fill helper.\n\nimport silk.pointer { Pointer }\n\n/// Writes zero to each of the `count` destination bytes.\n///\n/// # Details\n///\n/// Zero is written eight bytes at a time through unaligned word accesses, then one byte at a\n/// time for the tail.\n///\n/// # Gotchas\n///\n/// The caller must provide a live writable range of `count` bytes.\nexport "C" fn bzero(destination: ?[*]mut u8, count: usize) -> () {\n  if count == 0 { return () }\n  unsafe {\n    let output = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(destination)\n    let mut index: usize = 0\n    while count - index >= 8 {\n      Pointer.writeUnaligned<u64>(wordAtMut(output, index), 0)\n      index = index + 8\n    }\n    while index < count {\n      Pointer.write<u8>(Pointer.atMut<u8>(output, index), 0)\n      index = index + 1\n    }\n  }\n  return ()\n}\n\nunsafe fn wordAtMut(base: [*]mut u8, index: usize) -> *mut align(1) u64 {\n  unsafe { return Intrinsic.pointerReinterpret<*mut u8, *mut align(1) u64>(Pointer.atMut<u8>(base, index)) }\n}\n',
   },
   {
     module: 'silk/support/certificate_pem',
@@ -2381,12 +2381,12 @@ export const modules = [
     module: 'silk/support/memset',
     path: 'silk/support/memset.silk',
     sourceIdentity: 'silk/support/memset',
-    digest: '618c62ca2e6924d0426ac2599d496d138b1cc378e60172eab3960c8cbe072c1b',
+    digest: '6e3306af3510a8277babdbb6ee7ce5ff2c0451d070b2af6a75119df8c490cf0a',
     documentation: 'silk/support/memset.silk',
     staticInventory: [],
     runtimeInventory: ['i32ToU8', 'pointerReinterpret', 'pointerRequalify', 'u8ToU64'],
     source:
-      '//! Word-wise compiler support with explicit C linkage and no runtime services.\n\nimport silk.pointer { Pointer }\n\n/// Writes the low eight bits of `value` to `count` bytes and returns the destination.\n///\n/// # Details\n///\n/// The byte is repeated across a word and written eight bytes at a time through unaligned word\n/// accesses, then one byte at a time for the tail.\n///\n/// # Gotchas\n///\n/// The caller must provide a live writable destination range of `count` bytes.\nexport "C" fn memset(destination: ?[*]mut u8, value: i32, count: usize) -> ?[*]mut u8 {\n  if count == 0 { return destination }\n  unsafe {\n    let output = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(destination)\n    let byte = Intrinsic.i32ToU8(value & 255)\n    // Every byte of 0x0101010101010101 is one, so the product repeats `byte` without overflow.\n    let ones: u64 = 72340172838076673\n    let word = Intrinsic.u8ToU64(byte) * ones\n    let mut index: usize = 0\n    while count - index >= 8 {\n      Pointer.writeUnaligned<u64>(Intrinsic.pointerReinterpret<*mut u8, *mut align(1) u64>(Pointer.atMut<u8>(output, index)), word)\n      index = index + 8\n    }\n    while index < count {\n      Pointer.write<u8>(Pointer.atMut<u8>(output, index), byte)\n      index = index + 1\n    }\n    return destination\n  }\n}\n',
+      '//! Word-wise compiler support with explicit C linkage and no runtime services.\n\nimport silk.pointer { Pointer }\n\n/// Writes the low eight bits of `value` to `count` bytes and returns the destination.\n///\n/// # Details\n///\n/// The byte is repeated across a word and written eight bytes at a time through unaligned word\n/// accesses, then one byte at a time for the tail.\n///\n/// # Gotchas\n///\n/// The caller must provide a live writable destination range of `count` bytes.\nexport "C" fn memset(destination: ?[*]mut u8, value: i32, count: usize) -> ?[*]mut u8 {\n  if count == 0 { return destination }\n  unsafe {\n    let output = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(destination)\n    let byte = Intrinsic.i32ToU8(value & 255)\n    // Every byte of 0x0101010101010101 is one, so the product repeats `byte` without overflow.\n    let ones: u64 = 72340172838076673\n    let word = Intrinsic.u8ToU64(byte) * ones\n    let mut index: usize = 0\n    while count - index >= 8 {\n      Pointer.writeUnaligned<u64>(wordAtMut(output, index), word)\n      index = index + 8\n    }\n    while index < count {\n      Pointer.write<u8>(Pointer.atMut<u8>(output, index), byte)\n      index = index + 1\n    }\n    return destination\n  }\n}\n\nunsafe fn wordAtMut(base: [*]mut u8, index: usize) -> *mut align(1) u64 {\n  unsafe { return Intrinsic.pointerReinterpret<*mut u8, *mut align(1) u64>(Pointer.atMut<u8>(base, index)) }\n}\n',
   },
   {
     module: 'silk/support/zstd_block',

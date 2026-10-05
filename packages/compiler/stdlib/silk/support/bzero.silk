@@ -18,7 +18,7 @@ export "C" fn bzero(destination: ?[*]mut u8, count: usize) -> () {
     let output = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(destination)
     let mut index: usize = 0
     while count - index >= 8 {
-      Pointer.writeUnaligned<u64>(Intrinsic.pointerReinterpret<*mut u8, *mut align(1) u64>(Pointer.atMut<u8>(output, index)), 0)
+      Pointer.writeUnaligned<u64>(wordAtMut(output, index), 0)
       index = index + 8
     }
     while index < count {
@@ -27,4 +27,8 @@ export "C" fn bzero(destination: ?[*]mut u8, count: usize) -> () {
     }
   }
   return ()
+}
+
+unsafe fn wordAtMut(base: [*]mut u8, index: usize) -> *mut align(1) u64 {
+  unsafe { return Intrinsic.pointerReinterpret<*mut u8, *mut align(1) u64>(Pointer.atMut<u8>(base, index)) }
 }

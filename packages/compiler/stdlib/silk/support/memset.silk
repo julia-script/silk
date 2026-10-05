@@ -22,7 +22,7 @@ export "C" fn memset(destination: ?[*]mut u8, value: i32, count: usize) -> ?[*]m
     let word = Intrinsic.u8ToU64(byte) * ones
     let mut index: usize = 0
     while count - index >= 8 {
-      Pointer.writeUnaligned<u64>(Intrinsic.pointerReinterpret<*mut u8, *mut align(1) u64>(Pointer.atMut<u8>(output, index)), word)
+      Pointer.writeUnaligned<u64>(wordAtMut(output, index), word)
       index = index + 8
     }
     while index < count {
@@ -31,4 +31,8 @@ export "C" fn memset(destination: ?[*]mut u8, value: i32, count: usize) -> ?[*]m
     }
     return destination
   }
+}
+
+unsafe fn wordAtMut(base: [*]mut u8, index: usize) -> *mut align(1) u64 {
+  unsafe { return Intrinsic.pointerReinterpret<*mut u8, *mut align(1) u64>(Pointer.atMut<u8>(base, index)) }
 }
