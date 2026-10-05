@@ -4643,25 +4643,41 @@ const checkFunction = (
         )
   state.work.loanAccessChecks = loanAnalysis.loanAccessChecks
   state.diagnostics.push(...loanAnalysis.diagnostics)
+  // Selfhost profiling attributed 35 s to testing every loan against every region of every exit;
+  // an exit's regions accumulate each statement walked before it. Index loan positions by start
+  // and end region, so an exit tests only the loans of its regions, still in loan order.
+  const loansByRegion = new Map<number, Array<number>>()
+  const indexLoan = (region: number, position: number): void => {
+    const positions = loansByRegion.get(region)
+    if (positions === undefined) loansByRegion.set(region, [position])
+    else if (positions.at(-1) !== position) positions.push(position)
+  }
+  for (const [position, loan] of loanAnalysis.loans.entries()) {
+    indexLoan(loan.endRegion.ordinal, position)
+    indexLoan(loan.startRegion.ordinal, position)
+  }
   const exitPlans = cleanupExits.map((plan, ordinal): ExitPlan => {
     const exit = exits.at(ordinal)
     if (exit === undefined) return plan
-    return {
-      ...plan,
-      loanEnds: loanAnalysis.loans
-        .filter(
-          (loan) =>
-            (exit.region !== undefined && loan.endRegion.ordinal === exit.region.ordinal) ||
-            ((exit.loanRegions ?? []).some(
-              (region) =>
-                region.ordinal === loan.endRegion.ordinal ||
-                region.ordinal === loan.startRegion.ordinal,
-            ) &&
-              loan.startSpan.start <= exit.span.start &&
-              loan.endSpan.end > exit.span.start),
-        )
-        .map((loan) => loan.id),
+    const loanRegions = new Set((exit.loanRegions ?? []).map((region) => region.ordinal))
+    const candidates = new Set<number>()
+    for (const region of exit.region === undefined
+      ? loanRegions
+      : [exit.region.ordinal, ...loanRegions])
+      for (const position of loansByRegion.get(region) ?? []) candidates.add(position)
+    const loanEnds: Array<BorrowId> = []
+    for (const position of Int32Array.from(candidates).sort()) {
+      const loan = loanAnalysis.loans.at(position)
+      if (
+        loan !== undefined &&
+        ((exit.region !== undefined && loan.endRegion.ordinal === exit.region.ordinal) ||
+          ((loanRegions.has(loan.endRegion.ordinal) || loanRegions.has(loan.startRegion.ordinal)) &&
+            loan.startSpan.start <= exit.span.start &&
+            loan.endSpan.end > exit.span.start))
+      )
+        loanEnds.push(loan.id)
     }
+    return { ...plan, loanEnds }
   })
 
   const firstUnavailable = Tir.firstUnavailable(fn)
