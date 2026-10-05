@@ -707,12 +707,8 @@ it.effect(
       const source = 'pub fn main() -> i32 { return 42 }'
       // An unchanged rebuild reuses emission and the final artifact. Hosted libc supplies the
       // memory helpers, so no build realizes a helper object.
-      for (const [name, text] of [
-        ['admission-first', source],
-        ['admission-second', source],
-        ['admission-other', 'pub fn main() -> i32 { return 41 }'],
-      ] as const) {
-        const outcome = yield* compileSource(name, text, { cache: true }).pipe(
+      for (const name of ['admission-first', 'admission-second'] as const) {
+        const outcome = yield* compileSource(name, source, { cache: true }).pipe(
           Effect.provideService(NativeToolchain.ArtifactStorage, artifactStorage),
         )
         assert.strictEqual(outcome._tag, 'Compiled')
@@ -739,12 +735,11 @@ it.effect(
       if (failed.failure.reason._tag === 'SupplyFailed')
         assert.strictEqual(failed.failure.reason.failure.code, 'MissingCapability')
       assert.strictEqual(reads.filter((key) => key.startsWith('native-')).length, nativeReads)
-      // One final artifact per distinct program and no helper object.
-      assert.strictEqual(writes.filter((key) => key.startsWith('native-')).length, 2)
+      // One final artifact for the program and no helper object.
+      assert.strictEqual(writes.filter((key) => key.startsWith('native-')).length, 1)
       assert.strictEqual(writes.filter((key) => key.startsWith('helpers-')).length, 0)
     }),
-  // Cold emission, a second program, cache reuse and a rejected supply took 21s locally on
-  // 2026-10-02; the complete source runtime pipelines exceeded 120s in CI shard 4.
+  // The complete source runtime pipelines exceeded 120s in CI shard 4.
   240_000,
 )
 

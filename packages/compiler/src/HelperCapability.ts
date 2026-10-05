@@ -96,8 +96,9 @@ const nativeTargets: ReadonlyArray<Target.Id> = [
 ]
 
 /**
- * A hosted native profile links the platform C library, which already supplies every admitted
- * helper. Only a profile without libc needs Silk source memory providers.
+ * A hosted native profile links the platform C library, which supplies every admitted memory
+ * helper; arithmetic comes from the platform math library. Only a profile without libc needs Silk
+ * source memory providers.
  */
 const hosted = (profile: CompilationProfile.Facts): boolean =>
   profile.libc !== 'none' && profile.target.kind === 'Native'
