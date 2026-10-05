@@ -100,7 +100,7 @@ const backendEmissionCacheKey = (
 }
 
 interface CachedEmissionHeader {
-  readonly schema: 7
+  readonly schema: 8
   readonly module: string
   readonly symbols: Backend.LlvmBitcodeArtifact['symbols']
   readonly nativeRuntimeSymbols: ReadonlyArray<string>
@@ -110,10 +110,16 @@ interface CachedEmissionHeader {
   readonly foreignStatics: Backend.LlvmBitcodeArtifact['foreignStatics']
 }
 
-const encodeCachedEmission = (artifact: Backend.LlvmBitcodeArtifact): Uint8Array | undefined => {
+/**
+ * The cache record as consecutive parts, `[length-prefixed header, bitcode]`: the envelope
+ * concatenates them once, instead of first copying the module-sized bitcode into one record.
+ */
+const encodeCachedEmission = (
+  artifact: Backend.LlvmBitcodeArtifact,
+): ReadonlyArray<Uint8Array> | undefined => {
   try {
     const header: CachedEmissionHeader = {
-      schema: 7,
+      schema: 8,
       module: artifact.module,
       symbols: artifact.symbols,
       nativeRuntimeSymbols: artifact.nativeRuntimeSymbols,
@@ -123,11 +129,10 @@ const encodeCachedEmission = (artifact: Backend.LlvmBitcodeArtifact): Uint8Array
       foreignStatics: artifact.foreignStatics,
     }
     const json = new TextEncoder().encode(JSON.stringify(header))
-    const bytes = new Uint8Array(4 + json.length + artifact.bitcode.length)
-    new DataView(bytes.buffer).setUint32(0, json.length, true)
-    bytes.set(json, 4)
-    bytes.set(artifact.bitcode, 4 + json.length)
-    return bytes
+    const prefix = new Uint8Array(4 + json.length)
+    new DataView(prefix.buffer).setUint32(0, json.length, true)
+    prefix.set(json, 4)
+    return [prefix, artifact.bitcode]
   } catch {
     // Fail open: an unserializable symbol table only means this compilation is not cached.
     return undefined
@@ -145,7 +150,7 @@ const decodeCachedEmission = (
     const header: CachedEmissionHeader = JSON.parse(
       new TextDecoder().decode(bytes.subarray(4, 4 + jsonLength)),
     )
-    if (header.schema !== 7) return undefined
+    if (header.schema !== 8) return undefined
     if (
       ![...header.foreignImports, ...header.foreignExports].every(
         (entry) =>
@@ -1002,11 +1007,9 @@ export const compile = Effect.fn('Driver.compile')(
               { heapBytes },
             )
             if (finalArtifactStorage !== undefined && cacheKey !== undefined) {
-              yield* NativeToolchain.writeArtifactCache(
-                finalArtifactStorage,
-                cacheKey,
+              yield* NativeToolchain.writeArtifactCache(finalArtifactStorage, cacheKey, [
                 finalized.bytes,
-              )
+              ])
             }
             return {
               _tag: 'Compiled' as const,

@@ -31,7 +31,6 @@ export interface CodegenRequest {
 
 export interface SymbolEntry {
   readonly declaration: DeclarationFacts.CanonicalId
-  readonly instance: Mir.MirFunction['instance']
   readonly symbol: string
 }
 
