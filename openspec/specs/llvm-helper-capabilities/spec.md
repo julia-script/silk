@@ -84,7 +84,7 @@ The final artifact plan MUST expose the selected support roots, contracts and ph
 
 ### Requirement: Conformance proves selected helper ABIs and preserves Wasm
 
-Required Darwin ARM64 and GNU x86-64/ARM64 lanes MUST produce actual target objects and independent C ABI fixtures, inspect debug/optimized helper inventories and execute the distinguishing cases on available runners. Missing supplies and skipped required cases MUST fail. The admitted LLVM-to-Wasm helper set MUST remain usable through an explicit target-compatible provider without native OS dependencies.
+Required Darwin ARM64 and GNU x86-64/ARM64 lanes MUST produce actual target objects and independent C ABI fixtures, account hosted helper requests to the platform C library, inspect the optimized no-libc helper inventories for debug and optimized programs, and execute the distinguishing cases on available runners. Missing supplies and skipped required cases MUST fail. The admitted LLVM-to-Wasm helper set MUST remain usable through an explicit target-compatible provider without native OS dependencies.
 
 #### Scenario: Required target lane
 
