@@ -6,6 +6,7 @@ import {
   ownershipLocal,
   lowerOwnershipPath,
   lowerReferencePlace,
+  patternBinding,
   propagationLoanEnds,
   propagationReleases,
 } from './CleanupEmission.js'
@@ -1674,11 +1675,7 @@ export const patternPlace = (
 ):
   | { readonly root: Mir.LocalId; readonly selectors: ReadonlyArray<Mir.PlaceSelector> }
   | undefined => {
-  const place = Ownership.allBindings(fn.ownership).find(
-    (candidate) =>
-      candidate.site._tag === 'Pattern' &&
-      patternKey(candidate.site.binding) === patternKey(binding),
-  )?.place
+  const place = patternBinding(fn, binding)?.place
   if (place === undefined) return undefined
   const root = ownershipLocal(fn, place.root)
   if (root === undefined) return undefined
@@ -1696,11 +1693,7 @@ export const ownedWriteRoot = (
     case 'BindingWriteRoot':
       return fn.bindingLocals.get(root.binding.ordinal)
     case 'PatternWriteRoot': {
-      const place = Ownership.allBindings(fn.ownership).find(
-        (candidate) =>
-          candidate.site._tag === 'Pattern' &&
-          patternKey(candidate.site.binding) === patternKey(root.binding),
-      )?.place
+      const place = patternBinding(fn, root.binding)?.place
       return place === undefined
         ? fn.patternLocals.get(patternKey(root.binding))
         : ownershipLocal(fn, place.root)
