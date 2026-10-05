@@ -31,6 +31,7 @@ import * as SemanticPersistence from './SemanticPersistence.js'
 import * as SourceFile from './SourceFile.js'
 import * as SourceResolver from './SourceResolver.js'
 import type * as SourceSpan from './SourceSpan.js'
+import type * as Storage from './Storage.js'
 import * as Target from './Target.js'
 import * as TestExecution from './TestExecution.js'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
@@ -156,7 +157,6 @@ const decodeCachedEmission = (
       return undefined
     if (header.foreignExports.some((entry) => entry.variadic)) return undefined
     const bitcode = bytes.slice(4 + jsonLength)
-    // The driver cache does not expose IR inspection to callers.
     return {
       _tag: 'LlvmBitcodeArtifact',
       backend: 'llvm',
@@ -169,7 +169,6 @@ const decodeCachedEmission = (
       foreignExports: header.foreignExports,
       foreignStatics: header.foreignStatics,
       bitcode,
-      ir: '',
     }
   } catch {
     return undefined
@@ -569,6 +568,159 @@ const prepareEmission = Effect.fnUntraced(function* (
   }
 })
 
+/**
+ * What the representation and final-artifact steps keep from emission. The prepared MIR and the
+ * in-memory LLVM module stay local to {@link emitProgram}, so neither is retained while Clang
+ * compiles the object and the linker runs.
+ */
+interface Emitted extends Omit<Staged, '_tag' | 'program'> {
+  readonly _tag: 'Emitted'
+  readonly artifact: Backend.LlvmBitcodeArtifact
+  /** Textual IR, rendered only for the `llvm-ir` stage. */
+  readonly ir: string | undefined
+  /** Native toolchain resolution; a final native build starts it while the backend emits. */
+  readonly supply: Effect.Effect<
+    Result.Result<NativeToolchain.Toolchain, NativeToolchain.ToolchainError>
+  >
+}
+
+const renderedIr = (self: Emitted): string => {
+  if (self.ir === undefined) throw new RangeError('The llvm-ir stage lost its rendered IR')
+  return self.ir
+}
+
+/** Steps 4-9 of {@link compile}: prepare MIR, then reuse or emit its LLVM bitcode. */
+const emitProgram = Effect.fnUntraced(function* (
+  request: CompileRequest,
+  compilation: ModuleClosure.CompilationRequest,
+  targetId: string | undefined,
+  stage: ArtifactPlan.Stage,
+  report: Array<DriverPhaseReport>,
+  heapBytes: () => number,
+  distribution: ToolchainIntegrity.Graph,
+  artifactStorage: Storage.Service | undefined,
+): Effect.fn.Return<
+  Outcome | Emitted,
+  ModuleClosure.ModuleClosureError | SourceResolutionFailed | NativeToolchain.ToolchainError,
+  SourceResolver.SourceResolver
+> {
+  const staged = yield* prepareEmission(
+    request,
+    compilation,
+    targetId,
+    stage,
+    report,
+    heapBytes,
+    distribution,
+  )
+  if (staged._tag !== 'Staged') return staged
+  const { program, ...retained } = staged
+  const { target, diagnostics, artifactPlan } = staged
+  const backend = LlvmBackend.LlvmBackend
+  // 9. Look up LLVM emission independently of the final-artifact cache. The key covers the
+  // distribution, backend, profile, artifact plan/kind, mode, source closure, and ABI manifests.
+  const mode = staged.profile.debug ? 'debug' : 'release'
+  const emissionCache = artifactStorage
+  const emissionCacheKey =
+    emissionCache === undefined
+      ? undefined
+      : backendEmissionCacheKey(
+          distribution.digest,
+          backend.id,
+          staged.profile.identity,
+          artifactPlan.identity,
+          request.artifactKind,
+          mode,
+          staged.sources,
+          request.foreignInterfaces ?? [],
+        )
+  // Missing or undecodable entries are cache misses; a usable entry restores bitcode and metadata.
+  // Cached entries carry no textual IR, so the `llvm-ir` stage always emits.
+  const cachedEmission =
+    emissionCache !== undefined && emissionCacheKey !== undefined && stage !== 'llvm-ir'
+      ? decodeCachedEmission(
+          (yield* NativeToolchain.readArtifactCache(emissionCache, emissionCacheKey)) ??
+            new Uint8Array(0),
+          target,
+        )
+      : undefined
+  // Reuse cached emission or ask LLVM to emit the prepared MIR, recording which path ran.
+  // Pass source bytes for backend source information and convert BackendError to an outcome.
+  // Native toolchain resolution only queries installed tools, so it runs during emission.
+  const resolveSupply = Effect.result(
+    NativeToolchain.resolveToolchain(request.toolchain, staged.profile),
+  )
+  const pendingToolchain =
+    stage === 'final' && target.kind === 'Native' && request.artifactKind !== 'WebAssemblyModule'
+      ? yield* Effect.forkChild(resolveSupply)
+      : undefined
+  const emitted =
+    cachedEmission !== undefined
+      ? PhaseReport.measureInto(
+          report,
+          'backend-cache',
+          program.functions.length,
+          () => ({ _tag: 'Emitted' as const, artifact: cachedEmission, ir: undefined }),
+          (result) => result.artifact.symbols.length,
+          () => 0,
+          { heapBytes },
+        )
+      : yield* PhaseReport.measureEffectInto(
+          report,
+          'backend',
+          program.functions.length,
+          Backend.emit(backend, program, {
+            mode,
+            verifyIr: request.verifyIr ?? false,
+            sources: new Map(
+              [...staged.sources].map(([module, source]) => [
+                module,
+                SourceFile.toUint8Array(source),
+              ]),
+            ),
+          }).pipe(
+            // Keep only the durable artifact: the emission's in-memory module is released here.
+            Effect.map((emission) => ({
+              _tag: 'Emitted' as const,
+              artifact: Backend.bitcodeArtifact(emission),
+              ir: stage === 'llvm-ir' ? emission.ir : undefined,
+            })),
+            Effect.catchTag('BackendError', (error) =>
+              Effect.succeed({ _tag: 'Rejected' as const, error }),
+            ),
+          ),
+          (result) => (result._tag === 'Emitted' ? result.artifact.symbols.length : 0),
+          () => 0,
+          { heapBytes },
+        )
+  if (emitted._tag === 'Rejected') {
+    return {
+      _tag: 'BackendFailed',
+      error: emitted.error,
+      diagnostics,
+      report: [...report],
+    }
+  }
+  // Publish newly emitted bitcode to the emission cache when its metadata can be serialized.
+  const artifact = emitted.artifact
+  if (
+    cachedEmission === undefined &&
+    emissionCache !== undefined &&
+    emissionCacheKey !== undefined
+  ) {
+    const encoded = encodeCachedEmission(artifact)
+    if (encoded !== undefined)
+      yield* NativeToolchain.writeArtifactCache(emissionCache, emissionCacheKey, encoded)
+  }
+  return {
+    ...retained,
+    _tag: 'Emitted',
+    artifact,
+    ir: emitted.ir,
+    supply: pendingToolchain === undefined ? resolveSupply : Fiber.join(pendingToolchain),
+  }
+})
+
 /** Compiles one request end to end, writing its final artifact to the durable destination. */
 export const compile = Effect.fn('Driver.compile')(
   function* (
@@ -658,7 +810,7 @@ export const compile = Effect.fn('Driver.compile')(
           }
 
     const stage = request.stage ?? 'final'
-    const staged = yield* prepareEmission(
+    const emitted = yield* emitProgram(
       request,
       compilation,
       targetId,
@@ -666,119 +818,35 @@ export const compile = Effect.fn('Driver.compile')(
       report,
       heapBytes,
       distribution,
+      artifactStorage,
     )
-    if (staged._tag !== 'Staged') return staged
-    const { program, target, diagnostics, artifactPlan } = staged
-    const backend = LlvmBackend.LlvmBackend
-    // 9. Look up LLVM emission independently of the final-artifact cache. The key covers the
-    // distribution, backend, profile, artifact plan/kind, mode, source closure, and ABI manifests.
-    const mode = staged.profile.debug ? 'debug' : 'release'
-    const emissionCache = artifactStorage
-    const emissionCacheKey =
-      emissionCache === undefined
-        ? undefined
-        : backendEmissionCacheKey(
-            distribution.digest,
-            backend.id,
-            staged.profile.identity,
-            artifactPlan.identity,
-            request.artifactKind,
-            mode,
-            staged.sources,
-            request.foreignInterfaces ?? [],
-          )
-    // Missing or undecodable entries are cache misses; a usable entry restores bitcode and metadata.
-    const cachedEmission =
-      emissionCache !== undefined && emissionCacheKey !== undefined
-        ? decodeCachedEmission(
-            (yield* NativeToolchain.readArtifactCache(emissionCache, emissionCacheKey)) ??
-              new Uint8Array(0),
-            target,
-          )
-        : undefined
-    // Reuse cached emission or ask LLVM to emit the prepared MIR, recording which path ran.
-    // Pass source bytes for backend source information and convert BackendError to an outcome.
-    // Native toolchain resolution only queries installed tools, so it runs during emission.
-    const resolveSupply = Effect.result(
-      NativeToolchain.resolveToolchain(request.toolchain, staged.profile),
-    )
-    const pendingToolchain =
-      stage === 'final' && target.kind === 'Native' && request.artifactKind !== 'WebAssemblyModule'
-        ? yield* Effect.forkChild(resolveSupply)
-        : undefined
-    const emitted =
-      cachedEmission !== undefined
-        ? PhaseReport.measureInto(
-            report,
-            'backend-cache',
-            program.functions.length,
-            () => ({ _tag: 'Emitted' as const, artifact: cachedEmission }),
-            (result) => result.artifact.symbols.length,
-            () => 0,
-            { heapBytes },
-          )
-        : yield* PhaseReport.measureEffectInto(
-            report,
-            'backend',
-            program.functions.length,
-            Backend.emit(backend, program, {
-              mode,
-              verifyIr: request.verifyIr ?? false,
-              sources: new Map(
-                [...staged.sources].map(([module, source]) => [
-                  module,
-                  SourceFile.toUint8Array(source),
-                ]),
-              ),
-            }).pipe(
-              Effect.map((artifact) => ({ _tag: 'Emitted' as const, artifact })),
-              Effect.catchTag('BackendError', (error) =>
-                Effect.succeed({ _tag: 'Rejected' as const, error }),
-              ),
-            ),
-            (result) => (result._tag === 'Emitted' ? result.artifact.symbols.length : 0),
-            () => 0,
-            { heapBytes },
-          )
-    if (emitted._tag === 'Rejected') {
-      return {
-        _tag: 'BackendFailed',
-        error: emitted.error,
-        diagnostics,
-        report: [...report],
-      }
-    }
-    // Publish newly emitted bitcode to the emission cache when its metadata can be serialized.
-    const artifact = emitted.artifact
-    if (
-      cachedEmission === undefined &&
-      emissionCache !== undefined &&
-      emissionCacheKey !== undefined &&
-      artifact._tag === 'LlvmBitcodeArtifact'
-    ) {
-      const encoded = encodeCachedEmission(artifact)
-      if (encoded !== undefined)
-        yield* NativeToolchain.writeArtifactCache(emissionCache, emissionCacheKey, encoded)
-    }
+    if (emitted._tag !== 'Emitted') return emitted
+    const { artifact, profile, target, diagnostics, artifactPlan } = emitted
 
     // 10. An intermediate-stage request ends here: write LLVM IR, bitcode, assembly, or an object
     // to the destination inside a temporary build scope, then return its identity and diagnostics.
     // The scope removes temporary files on exit unless saveTemps is enabled.
     if (stage !== 'final') {
-      const path = yield* NativeToolchain.withBuildScope(
-        request.scopeName ?? 'representation',
-        Effect.fnUntraced(function* (scope: NativeToolchain.BuildScope) {
-          return yield* NativeToolchain.emitRepresentation(
-            request.toolchain,
-            scope,
-            artifact,
-            staged.profile,
-            stage,
-            request.destination,
-          )
-        }),
-        { saveTemps: request.saveTemps ?? false },
-      )
+      const path =
+        stage === 'llvm-ir'
+          ? yield* NativeToolchain.commitRepresentation(
+              new TextEncoder().encode(renderedIr(emitted)),
+              request.destination,
+            )
+          : yield* NativeToolchain.withBuildScope(
+              request.scopeName ?? 'representation',
+              Effect.fnUntraced(function* (scope: NativeToolchain.BuildScope) {
+                return yield* NativeToolchain.emitRepresentation(
+                  request.toolchain,
+                  scope,
+                  artifact,
+                  profile,
+                  stage,
+                  request.destination,
+                )
+              }),
+              { saveTemps: request.saveTemps ?? false },
+            )
       return {
         _tag: 'Compiled',
         backend: artifact.backend,
@@ -806,12 +874,12 @@ export const compile = Effect.fn('Driver.compile')(
       ),
     )
     if (Result.isFailure(bound)) {
-      const span = staged.rootSpan
+      const span = emitted.rootSpan
       if (span === undefined)
         throw new RangeError('Native requirement binding lost application source')
       return {
         _tag: 'Rejected',
-        sources: staged.sources,
+        sources: emitted.sources,
         diagnostics: Diagnostic.merge(diagnostics, [
           Diagnostic.invalidConfiguration(bound.failure, span),
         ]),
@@ -850,7 +918,7 @@ export const compile = Effect.fn('Driver.compile')(
       finalArtifactStorage !== undefined && artifact._tag === 'LlvmBitcodeArtifact'
         ? yield* NativeToolchain.wasmArtifactCacheKey(
             request.toolchain,
-            staged.profile,
+            profile,
             artifact.bitcode,
             runtimeSource,
           )
@@ -926,7 +994,7 @@ export const compile = Effect.fn('Driver.compile')(
                 request.toolchain,
                 scope,
                 artifact,
-                staged.profile,
+                profile,
                 request.destination,
               ),
               () => 1,
@@ -971,7 +1039,7 @@ export const compile = Effect.fn('Driver.compile')(
 
           // Test identities were computed before emission so discovery and elaboration results
           // are no longer retained while the backend builds the LLVM module.
-          const tests = staged.tests
+          const tests = emitted.tests
 
           // 14. Resolve the native toolchain for the profile and turn LLVM bitcode into an object.
           // Track both generated object files and any helper capabilities reported by emission.
@@ -981,7 +1049,7 @@ export const compile = Effect.fn('Driver.compile')(
             report,
             'supply',
             1,
-            pendingToolchain === undefined ? resolveSupply : Fiber.join(pendingToolchain),
+            emitted.supply,
             (result) => (Result.isSuccess(result) ? 1 : 0),
             () => 0,
             { heapBytes },
@@ -995,7 +1063,7 @@ export const compile = Effect.fn('Driver.compile')(
               toolchain,
               scope,
               artifact,
-              profile: staged.profile,
+              profile,
             }),
             () => 1,
             () => 0,
@@ -1014,7 +1082,7 @@ export const compile = Effect.fn('Driver.compile')(
               NativeToolchain.compileHelpers(
                 toolchain,
                 scope,
-                staged.profile,
+                profile,
                 object.helpers,
                 artifactStorage === undefined
                   ? { _tag: 'Disabled' }
@@ -1095,7 +1163,7 @@ export const compile = Effect.fn('Driver.compile')(
             toolchain,
             scope,
             cacheKind,
-            staged.profile,
+            profile,
             generatedObjects,
             selectedNativeInputs,
             request.destination,
@@ -1159,7 +1227,7 @@ export const compile = Effect.fn('Driver.compile')(
           const testManifest =
             reuse !== undefined
               ? TestExecution.make(reuse.closures, {
-                  profileIdentity: staged.profile.identity,
+                  profileIdentity: profile.identity,
                   bootstrapIdentity: reuse.bootstrapIdentity,
                   runnerIdentity: reuse.runner.identity,
                   compilerIdentity: distribution.digest,
@@ -1168,7 +1236,7 @@ export const compile = Effect.fn('Driver.compile')(
                     linkPlan,
                     generatedObjects.map((entry) => entry.path),
                     bound.success.identity,
-                    HelperCapability.policyIdentity(staged.profile),
+                    HelperCapability.policyIdentity(profile),
                   ),
                   complete: reuse.runner.complete,
                 })

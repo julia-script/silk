@@ -1829,12 +1829,10 @@ export const emitRepresentation = Effect.fn('NativeToolchain.emitRepresentation'
   scope: BuildScope,
   artifact: Backend.LlvmBitcodeArtifact,
   profile: CompilationProfile.CompilationProfile,
-  stage: Exclude<ArtifactPlan.Stage, 'final'>,
+  stage: Exclude<ArtifactPlan.Stage, 'final' | 'llvm-ir'>,
   destination: string,
 ): Effect.fn.Return<string, ToolchainError> {
   if (stage === 'llvm-bitcode') return yield* commitRepresentation(artifact.bitcode, destination)
-  if (stage === 'llvm-ir')
-    return yield* commitRepresentation(new TextEncoder().encode(artifact.ir), destination)
   if (stage === 'object') {
     const object = yield* materializeObject(toolchain, scope, artifact, profile)
     return yield* commitPathRepresentation(object.artifact, destination)
