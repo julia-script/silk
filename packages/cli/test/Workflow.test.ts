@@ -6,6 +6,7 @@ import * as Project from '@silklang/compiler/Project'
 import * as Storage from '@silklang/compiler/Storage'
 import type * as TestExecution from '@silklang/compiler/TestExecution'
 import * as Config from 'effect/Config'
+import * as ConfigProvider from 'effect/ConfigProvider'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
@@ -603,6 +604,51 @@ it.effect('checks a whole project without creating build artifacts', () =>
     assert.strictEqual(status, 0)
     assert.strictEqual(yield* fileSystem.exists(`${root}/.silk`), false)
   }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
+)
+
+it.effect('persists CLI checked bodies across builds and rejects an edited invalid body', () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const root = yield* fs.makeTempDirectoryScoped()
+    yield* makeProject(root)
+    const project = yield* Project.load({ workingDirectory: root })
+    const destination = `${root}/build/main.ll`
+    const reports: Array<string> = []
+    const reportingConsole: Console.Console = Object.assign(Object.create(console), {
+      log: (...args: ReadonlyArray<unknown>) => reports.push(args.join(' ')),
+      error: (...args: ReadonlyArray<unknown>) => reports.push(args.join(' ')),
+    })
+    const compile = Effect.fnUntraced(function* () {
+      return yield* Workflow.compile({
+        entry: project.entry,
+        target: 'x86_64-unknown-linux-gnu',
+        artifactKind: 'NativeExecutable',
+        stage: 'llvm-ir',
+        packageName: 'hello',
+        destination,
+        toolchain: { _tag: 'Toolchain', clang: '/unused/clang', llvmAr: '/unused/llvm-ar' },
+        scopeName: 'semantic-cache-test',
+        timings: true,
+      }).pipe(Effect.provideService(Console.Console, reportingConsole))
+    })
+    assert.strictEqual((yield* compile())._tag, 'Built', reports.join('\n'))
+    assert.isTrue(yield* fs.exists(`${root}/build/.silk-cache`))
+    const freshIr = yield* fs.readFileString(destination)
+    reports.length = 0
+    assert.strictEqual((yield* compile())._tag, 'Built', reports.join('\n'))
+    assert.isTrue(
+      reports.some((report) => /Semantic cache: [1-9][0-9]* candidates loaded/.test(report)),
+      reports.join('\n'),
+    )
+    assert.strictEqual(yield* fs.readFileString(destination), freshIr)
+
+    yield* writeFile(`${root}/src/Main.silk`, 'pub fn main() -> i32 { return missing }')
+    assert.deepStrictEqual(yield* compile(), { _tag: 'NotBuilt', status: 1 })
+  }).pipe(
+    Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromUnknown({})),
+    Effect.scoped,
+    Effect.provide(CompilerHost.layer),
+  ),
 )
 
 it.effect('separates source diagnostics from operational resolver failures during check', () =>

@@ -12,11 +12,14 @@ import type * as NativeLinkInput from '@silklang/compiler/NativeLinkInput'
 import * as Project from '@silklang/compiler/Project'
 import * as SourceEntry from '@silklang/compiler/SourceEntry'
 import * as SourceFile from '@silklang/compiler/SourceFile'
+import * as SemanticPersistence from '@silklang/compiler/SemanticPersistence'
 import * as Storage from '@silklang/compiler/Storage'
+import * as ToolchainIntegrity from '@silklang/compiler/ToolchainIntegrity'
 import type * as Target from '@silklang/compiler/Target'
 import type * as TestExecution from '@silklang/compiler/TestExecution'
 import type * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
 import * as Console from 'effect/Console'
+import * as Config from 'effect/Config'
 import type * as Crypto from 'effect/Crypto'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
@@ -170,6 +173,23 @@ export const compile = Effect.fn('Workflow.compile')(function* (
     return { _tag: 'NotBuilt', status: 2 }
   }
 
+  const semanticCacheDirectory = yield* Config.String('SILK_SEMANTIC_CACHE_DIR').pipe(
+    Config.withDefault(path.join(path.dirname(options.destination), '.silk-cache')),
+    Effect.orDie,
+  )
+  const suppliedPersistence = Option.getOrUndefined(
+    yield* Effect.serviceOption(SemanticPersistence.SemanticPersistence),
+  )
+  const persistence =
+    suppliedPersistence ??
+    (semanticCacheDirectory === ''
+      ? undefined
+      : SemanticPersistence.make({
+          storage: yield* Storage.fileSystemService(semanticCacheDirectory),
+          compilerIdentity: ToolchainIntegrity.installed().digest,
+          maximumRecordBytes: 64 * 1024 * 1024,
+        }))
+
   const attempted = yield* Effect.result(
     Driver.compile({
       compilation: {
@@ -203,10 +223,16 @@ export const compile = Effect.fn('Workflow.compile')(function* (
         Layer.mergeAll(
           FileSourceResolver.layer(resolver),
           tracing === undefined ? Layer.empty : tracing.success,
+          persistence === undefined
+            ? Layer.empty
+            : Layer.succeed(SemanticPersistence.SemanticPersistence, persistence),
         ),
       ),
     ),
   )
+
+  if (options.timings === true && persistence !== undefined)
+    yield* Console.log(Report.semanticCache(SemanticPersistence.counters(persistence)))
 
   if (Result.isFailure(attempted)) {
     const failure = attempted.failure
@@ -352,6 +378,7 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
     (plan) =>
       compile({
         verifyIr: options.verifyIr ?? false,
+        timings: options.timings ?? false,
         entry: plan.project.entry,
         displayRoot: plan.project.directory,
         target: plan.target.id,
@@ -653,6 +680,7 @@ export const run = Effect.fn('Workflow.run')(function* (
   const [plan] = planned.success.plans
   const attempted = yield* compile({
     verifyIr: options.verifyIr ?? false,
+    timings: options.timings ?? false,
     entry: plan.project.entry,
     displayRoot: plan.project.directory,
     target: plan.target.id,
@@ -864,6 +892,7 @@ export const test = Effect.fn('Workflow.test')(function* (
   const attempted = yield* compile({
     verifyIr: options.verifyIr ?? false,
     testResultCache: options.cacheResults ?? true,
+    timings: options.timings ?? false,
     entry: discoveryEntry.success,
     displayRoot: project.directory,
     root: 'silk/test_runner',

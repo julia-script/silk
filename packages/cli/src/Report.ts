@@ -4,6 +4,7 @@ import type * as Driver from '@silklang/compiler/Driver'
 import * as FileSourceResolver from '@silklang/compiler/FileSourceResolver'
 import type * as Mir from '@silklang/compiler/Mir'
 import type * as NativeToolchain from '@silklang/compiler/NativeToolchain'
+import type * as SemanticPersistence from '@silklang/compiler/SemanticPersistence'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import type * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as ToolchainIntegrity from '@silklang/compiler/ToolchainIntegrity'
@@ -105,6 +106,10 @@ export const phases = (self: ReadonlyArray<Driver.DriverPhaseReport>): string =>
     )
     .join('\n')
 }
+
+/** Reports optional checked-body storage activity; loaded candidates still require validation. */
+export const semanticCache = (self: SemanticPersistence.Counters): string =>
+  `Semantic cache: ${self.loaded} candidates loaded, ${self.published} published, ${self.rejected} rejected, ${self.readFailures} read failures, ${self.publicationFailures} publication failures`
 
 /**
  * Renders a native toolchain failure with the exact command that failed. The driver keeps full

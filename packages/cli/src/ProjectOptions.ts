@@ -5,6 +5,10 @@ import * as Result from 'effect/Result'
 import { Flag } from 'effect/unstable/cli'
 
 export const profiles = ['debug', 'release', 'release-with-debug'] as const
+export const timings = Flag.Boolean('timings').pipe(
+  Flag.withDescription('Print per-phase timings, memory and semantic cache activity.'),
+  Flag.withDefault(false),
+)
 const targetIds = ['host', ...Target.all.map((candidate) => candidate.id)]
 
 export const manifestPath = Flag.String('manifest-path').pipe(
@@ -51,6 +55,7 @@ export const watch = Flag.Boolean('watch').pipe(
 )
 
 export interface Input {
+  readonly timings?: boolean
   readonly verifyIr?: boolean
   readonly manifestPath?: string
   readonly targets?: ReadonlyArray<string>
@@ -62,6 +67,7 @@ export interface Input {
 }
 
 export interface ProjectOptions {
+  readonly timings?: boolean
   readonly verifyIr?: boolean
   readonly manifestPath?: string
   readonly targets?: ReadonlyArray<string>
@@ -92,6 +98,7 @@ export const resolve = (input: Input): Result.Result<ProjectOptions, ProjectOpti
   let optimization = input.optimization
   if (input.release) optimization = 'release'
   return Result.succeed({
+    ...(input.timings === undefined ? {} : { timings: input.timings }),
     ...(input.verifyIr === undefined ? {} : { verifyIr: input.verifyIr }),
     ...(input.manifestPath === undefined ? {} : { manifestPath: input.manifestPath }),
     ...(input.targets === undefined || input.targets.length === 0

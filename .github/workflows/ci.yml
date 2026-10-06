@@ -28,6 +28,11 @@ on:
         required: false
         type: string
         default: ''
+      semantic_cache_benchmark:
+        description: Compare disabled, cold and warm checked-body persistence on one runner
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -466,7 +471,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && !inputs.full_verification && inputs.selfhost_sha != ''
     name: Selfhost CLI / ${{ matrix.compiler }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ inputs.semantic_cache_benchmark && 120 || 45 }}
     strategy:
       fail-fast: false
       matrix:
@@ -498,19 +503,13 @@ jobs:
           git archive "$SELFHOST_SHA" compiler | tar -x -C "$workload_dir"
           git show "$SELFHOST_SHA:.github/scripts/check-selfhost-test-times.mjs" > "$workload_dir/check-test-times.mjs"
           git show "$SELFHOST_SHA:.github/workflows/selfhost.yml" > "$RUNNER_TEMP/selfhost-logs/selfhost-workflow.yml"
-          heap_options=()
-          while IFS= read -r option; do
-            heap_options+=("$option")
-          done < <(sed -n 's/^[[:space:]]*NODE_OPTIONS:[[:space:]]*//p' "$RUNNER_TEMP/selfhost-logs/selfhost-workflow.yml")
-          test "${#heap_options[@]}" -eq 4
-          [[ "${heap_options[0]}" =~ ^--max-old-space-size=[1-9][0-9]*$ ]]
-          for option in "${heap_options[@]}"; do
-            test "$option" = "${heap_options[0]}"
-          done
+          # Current selfhost uses per-shard heap values, rather than four literal NODE_OPTIONS.
+          heap_mb=$(sed -nE 's/.*(heap: |--max-old-space-size=)([0-9]+).*/\2/p' "$RUNNER_TEMP/selfhost-logs/selfhost-workflow.yml" | sort -n | tail -1)
+          [[ "$heap_mb" =~ ^[1-9][0-9]*$ ]]
           {
             echo "SELFHOST_MANIFEST=$workload_dir/compiler/silk.toml"
             echo "SELFHOST_TIME_CHECK=$workload_dir/check-test-times.mjs"
-            echo "SELFHOST_NODE_OPTIONS=${heap_options[0]}"
+            echo "SELFHOST_NODE_OPTIONS=--max-old-space-size=$heap_mb"
           } >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v6
@@ -538,6 +537,7 @@ jobs:
             clang --version
           } > "$RUNNER_TEMP/selfhost-logs/machine.log" 2>&1
       - name: Build self-hosted compiler CLI
+        if: ${{ !inputs.semantic_cache_benchmark }}
         shell: bash
         run: |
           set -euo pipefail
@@ -545,6 +545,7 @@ jobs:
         env:
           NODE_OPTIONS: ${{ env.SELFHOST_NODE_OPTIONS }}
       - name: Run M1 query and source-index cases
+        if: ${{ !inputs.semantic_cache_benchmark }}
         shell: bash
         run: |
           set -euo pipefail
@@ -553,6 +554,7 @@ jobs:
         env:
           NODE_OPTIONS: ${{ env.SELFHOST_NODE_OPTIONS }}
       - name: Run M1 semantic cases
+        if: ${{ !inputs.semantic_cache_benchmark }}
         shell: bash
         run: |
           set -euo pipefail
@@ -561,6 +563,7 @@ jobs:
         env:
           NODE_OPTIONS: ${{ env.SELFHOST_NODE_OPTIONS }}
       - name: Run frozen target cases
+        if: ${{ !inputs.semantic_cache_benchmark }}
         shell: bash
         run: |
           set -euo pipefail
@@ -569,11 +572,49 @@ jobs:
         env:
           NODE_OPTIONS: ${{ env.SELFHOST_NODE_OPTIONS }}
       - name: Run HIR lowering and fingerprint cases
+        if: ${{ !inputs.semantic_cache_benchmark }}
         shell: bash
         run: |
           set -euo pipefail
           /usr/bin/time -v node packages/cli/dist/bin.js test --manifest-path "$SELFHOST_MANIFEST" --root src/hir/LoweringCases.silk --no-cache 2>&1 | tee "$RUNNER_TEMP/selfhost-logs/hir.log"
           node "$SELFHOST_TIME_CHECK" "$RUNNER_TEMP/selfhost-logs/hir.log"
+      - name: Compare checked-body persistence across fresh processes
+        if: ${{ inputs.semantic_cache_benchmark }}
+        shell: bash
+        env:
+          NODE_OPTIONS: ${{ env.SELFHOST_NODE_OPTIONS }}
+          # Emission/final caches stay process-local, isolating the semantic cache's benefit.
+          SILK_NATIVE_CACHE_DIR: ''
+        run: |
+          set -euo pipefail
+          workload_dir=$(dirname "$SELFHOST_MANIFEST")
+          for workload in build semantic; do
+            cache_dir="$RUNNER_TEMP/semantic-cache-$workload"
+            for mode in disabled cold warm; do
+              if [ "$mode" = disabled ]; then
+                export SILK_SEMANTIC_CACHE_DIR=''
+              else
+                export SILK_SEMANTIC_CACHE_DIR="$cache_dir"
+              fi
+              log="$RUNNER_TEMP/selfhost-logs/$workload-$mode.log"
+              timing="$RUNNER_TEMP/selfhost-logs/$workload-$mode.time"
+              if [ "$workload" = build ]; then
+                /usr/bin/time -v -o "$timing" node packages/cli/dist/bin.js build --manifest-path "$SELFHOST_MANIFEST" --optimization release-with-debug --timings 2>&1 | tee "$log"
+                artifact="$workload_dir/build/llvm/x86_64-unknown-linux-gnu/release-with-debug/silk-compiler"
+              else
+                /usr/bin/time -v -o "$timing" node packages/cli/dist/bin.js test --manifest-path "$SELFHOST_MANIFEST" --root src/semantic/SemanticCases.silk --no-cache --timings 2>&1 | tee "$log"
+                node "$SELFHOST_TIME_CHECK" "$log"
+                artifact="$workload_dir/build/test/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler"
+              fi
+              sha256sum "$artifact" | cut -d' ' -f1 > "$RUNNER_TEMP/selfhost-logs/$workload-$mode.sha256"
+              if [ "$mode" = warm ]; then
+                grep -Eq 'Semantic cache: [1-9][0-9]* candidates loaded' "$log"
+                cmp "$RUNNER_TEMP/selfhost-logs/$workload-disabled.sha256" "$RUNNER_TEMP/selfhost-logs/$workload-warm.sha256"
+                cmp "$RUNNER_TEMP/selfhost-logs/$workload-cold.sha256" "$RUNNER_TEMP/selfhost-logs/$workload-warm.sha256"
+                du -sh "$cache_dir" | tee "$RUNNER_TEMP/selfhost-logs/$workload-cache-size.txt"
+              fi
+            done
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:

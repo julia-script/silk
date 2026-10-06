@@ -42,6 +42,7 @@ export const command = Command.make(
     filter,
     noCache,
     trace: ProjectOptions.trace,
+    timings: ProjectOptions.timings,
   },
   Effect.fnUntraced(function* (config) {
     const options = ProjectOptions.resolve({
@@ -53,6 +54,7 @@ export const command = Command.make(
       release: config.release,
       verifyIr: config.verifyIr,
       ...(typeof config.trace === 'undefined' ? {} : { trace: config.trace }),
+      timings: config.timings,
     })
     if (Result.isFailure(options)) {
       yield* Console.error(options.failure.message)

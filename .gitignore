@@ -1,5 +1,6 @@
 **/node_modules/
 **/dist/
+**/.silk-cache/
 /packages/compiler/src/ToolchainIntegrity.generated.ts
 /coverage/
 /.pnpm-store/
