@@ -57,9 +57,13 @@ jobs:
             turbo-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm bundle:cli
-      - name: Check standalone formatter and full-pin corpus verification modes
+      # Inventory mode consumes SILK_INVENTORY_REQUEST as a versioned immutable request file.
+      # Full compiler capture records its explicit heap setup separately (currently 8GiB);
+      # these isolated small-source checks do not claim full inventory/native readiness.
+      - name: Check standalone formatter, corpus and inventory verification modes
         run: |
           pnpm --filter @silklang/compiler exec tsx --test ../../compiler/scripts/runSelfhostCorpus.test.ts
+          pnpm --filter @silklang/compiler exec vitest run --root ../.. --config packages/compiler/vitest.config.ts compiler/scripts/BootstrapClosureInventory.test.ts --maxWorkers=1
           node .github/scripts/bundle-selfhost-verification.mjs
           node .github/scripts/test-selfhost-verification.mjs
       - run: node packages/cli/scripts/test-bundle.mjs node --native
@@ -102,7 +106,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           overwrite: true
-      # Publish compiler and both verification modes from this exact run after isolated checks succeed.
+      # Publish compiler and all verification modes from this exact run after isolated checks succeed.
       - uses: actions/upload-artifact@v4
         with:
           name: silk-bootstrap
@@ -147,6 +151,12 @@ jobs:
           --filter='!@silklang/lsp'
           --filter='!@silklang/cli'
       - run: pnpm test:scripts
+      - name: Check native generation receipt and verified tool contracts
+        uses: ./.github/actions/check-native-contracts
+      - name: Type-check native generation contracts
+        run: |
+          pnpm --filter @silklang/compiler exec tsc --ignoreConfig --noEmit --strict --exactOptionalPropertyTypes --skipLibCheck --allowImportingTsExtensions --allowJs --module nodenext --target es2022 --typeRoots node_modules/@types --types node ../../compiler/scripts/NativeBuild.ts ../../compiler/scripts/NativeProcess.ts
+          pnpm --filter @silklang/compiler exec tsc --ignoreConfig --noEmit --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess --skipLibCheck --allowImportingTsExtensions --allowJs --module nodenext --target es2023 --typeRoots node_modules/@types --types node ../../compiler/scripts/StrictMeasurementReport.ts
 
   package-tests:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
