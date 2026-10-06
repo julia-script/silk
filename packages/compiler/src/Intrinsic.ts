@@ -1510,8 +1510,8 @@ const intrinsicOperations = [
     semanticTypeParameters: rawTypeParameters,
     parameters: [],
     semanticParameters: [],
-    result: 'Layout',
-    semanticResult: closedResult(Type.layout),
+    result: '(usize, usize)',
+    semanticResult: generatedUsizePair,
   }),
   builtin({
     actor: 'Execution',

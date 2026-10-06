@@ -39,7 +39,8 @@ pub struct Layout {
 impl Layout {
   /// Returns the byte size and alignment required to store one value of `T`.
   pub fn of<T>() -> Layout {
-    return Intrinsic.layoutOf<T>()
+    let measured = Intrinsic.layoutOf<T>()
+    return Layout { bytes: measured.0, alignment: measured.1 }
   }
 
   /// Creates a layout from an explicit byte size and alignment.
@@ -83,4 +84,3 @@ pub struct InvalidAlignment {
 
 /// Reports that [`repeat`] could not represent the aggregate byte size as `usize`.
 pub struct LayoutOverflow {}
-
