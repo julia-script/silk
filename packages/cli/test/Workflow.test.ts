@@ -606,7 +606,7 @@ it.effect('checks a whole project without creating build artifacts', () =>
   }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
 )
 
-it.effect('persists CLI checked bodies across builds and rejects an edited invalid body', () =>
+it.effect('disables or persists CLI checked bodies and rejects an edited invalid body', () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const root = yield* fs.makeTempDirectoryScoped()
@@ -631,9 +631,21 @@ it.effect('persists CLI checked bodies across builds and rejects an edited inval
         timings: true,
       }).pipe(Effect.provideService(Console.Console, reportingConsole))
     })
+    const uncached = yield* compile().pipe(
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromEnv({ env: { SILK_SEMANTIC_CACHE: 'false' } }),
+      ),
+    )
+    assert.strictEqual(uncached._tag, 'Built', reports.join('\n'))
+    assert.isFalse(yield* fs.exists(`${root}/build/.silk-cache`))
+    assert.isFalse(reports.some((report) => report.startsWith('Semantic cache:')))
+    const uncachedIr = yield* fs.readFileString(destination)
+    reports.length = 0
     assert.strictEqual((yield* compile())._tag, 'Built', reports.join('\n'))
     assert.isTrue(yield* fs.exists(`${root}/build/.silk-cache`))
     const freshIr = yield* fs.readFileString(destination)
+    assert.strictEqual(freshIr, uncachedIr)
     reports.length = 0
     assert.strictEqual((yield* compile())._tag, 'Built', reports.join('\n'))
     assert.isTrue(

@@ -153,8 +153,8 @@ LLVM supports native targets and `wasm32-unknown-unknown`.
 Build, run, and test commands persist complete checked bodies in `.silk-cache` beside the output
 artifact. Each candidate is validated against current semantic dependencies before reuse; missing,
 incompatible, corrupt, or unreadable records recompute. `check` does not create this cache.
-Set `SILK_SEMANTIC_CACHE_DIR` to share one cache directory across output roots or CI runs; set it to
-an empty string to disable the default persistence. `silk build --timings` and `silk test --timings`
+Set `SILK_SEMANTIC_CACHE_DIR` to share one cache directory across output roots or CI runs, or set
+`SILK_SEMANTIC_CACHE=false` to disable the default persistence. `silk build --timings` and `silk test --timings`
 print per-phase timings and cache activity. Loaded candidates are not necessarily admitted hits.
 This cache is independent of `SILK_NATIVE_CACHE_DIR` and of `test --no-cache`, which still executes
 selected tests without reusing their stored pass results. `silk clean` removes the default cache

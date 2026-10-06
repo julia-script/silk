@@ -578,43 +578,24 @@ jobs:
           set -euo pipefail
           /usr/bin/time -v node packages/cli/dist/bin.js test --manifest-path "$SELFHOST_MANIFEST" --root src/hir/LoweringCases.silk --no-cache 2>&1 | tee "$RUNNER_TEMP/selfhost-logs/hir.log"
           node "$SELFHOST_TIME_CHECK" "$RUNNER_TEMP/selfhost-logs/hir.log"
-      - name: Compare checked-body persistence across fresh processes
+      - name: Measure build with disabled semantic cache
         if: ${{ inputs.semantic_cache_benchmark }}
-        shell: bash
-        env:
-          NODE_OPTIONS: ${{ env.SELFHOST_NODE_OPTIONS }}
-          # Emission/final caches stay process-local, isolating the semantic cache's benefit.
-          SILK_NATIVE_CACHE_DIR: ''
-        run: |
-          set -euo pipefail
-          workload_dir=$(dirname "$SELFHOST_MANIFEST")
-          for workload in build semantic; do
-            cache_dir="$RUNNER_TEMP/semantic-cache-$workload"
-            for mode in disabled cold warm; do
-              if [ "$mode" = disabled ]; then
-                export SILK_SEMANTIC_CACHE_DIR=''
-              else
-                export SILK_SEMANTIC_CACHE_DIR="$cache_dir"
-              fi
-              log="$RUNNER_TEMP/selfhost-logs/$workload-$mode.log"
-              timing="$RUNNER_TEMP/selfhost-logs/$workload-$mode.time"
-              if [ "$workload" = build ]; then
-                /usr/bin/time -v -o "$timing" node packages/cli/dist/bin.js build --manifest-path "$SELFHOST_MANIFEST" --optimization release-with-debug --timings 2>&1 | tee "$log"
-                artifact="$workload_dir/build/llvm/x86_64-unknown-linux-gnu/release-with-debug/silk-compiler"
-              else
-                /usr/bin/time -v -o "$timing" node packages/cli/dist/bin.js test --manifest-path "$SELFHOST_MANIFEST" --root src/semantic/SemanticCases.silk --no-cache --timings 2>&1 | tee "$log"
-                node "$SELFHOST_TIME_CHECK" "$log"
-                artifact="$workload_dir/build/test/llvm/x86_64-unknown-linux-gnu/debug/silk-compiler"
-              fi
-              sha256sum "$artifact" | cut -d' ' -f1 > "$RUNNER_TEMP/selfhost-logs/$workload-$mode.sha256"
-              if [ "$mode" = warm ]; then
-                grep -Eq 'Semantic cache: [1-9][0-9]* candidates loaded' "$log"
-                cmp "$RUNNER_TEMP/selfhost-logs/$workload-disabled.sha256" "$RUNNER_TEMP/selfhost-logs/$workload-warm.sha256"
-                cmp "$RUNNER_TEMP/selfhost-logs/$workload-cold.sha256" "$RUNNER_TEMP/selfhost-logs/$workload-warm.sha256"
-                du -sh "$cache_dir" | tee "$RUNNER_TEMP/selfhost-logs/$workload-cache-size.txt"
-              fi
-            done
-          done
+        run: bash .github/scripts/benchmark-semantic-cache.sh build disabled
+      - name: Measure build with cold semantic cache
+        if: ${{ inputs.semantic_cache_benchmark }}
+        run: bash .github/scripts/benchmark-semantic-cache.sh build cold
+      - name: Measure build with warm semantic cache
+        if: ${{ inputs.semantic_cache_benchmark }}
+        run: bash .github/scripts/benchmark-semantic-cache.sh build warm
+      - name: Measure semantic with disabled semantic cache
+        if: ${{ inputs.semantic_cache_benchmark }}
+        run: bash .github/scripts/benchmark-semantic-cache.sh semantic disabled
+      - name: Measure semantic with cold semantic cache
+        if: ${{ inputs.semantic_cache_benchmark }}
+        run: bash .github/scripts/benchmark-semantic-cache.sh semantic cold
+      - name: Measure semantic with warm semantic cache
+        if: ${{ inputs.semantic_cache_benchmark }}
+        run: bash .github/scripts/benchmark-semantic-cache.sh semantic warm
       - uses: actions/upload-artifact@v4
         if: always()
         with:

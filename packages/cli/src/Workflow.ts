@@ -173,6 +173,10 @@ export const compile = Effect.fn('Workflow.compile')(function* (
     return { _tag: 'NotBuilt', status: 2 }
   }
 
+  const semanticCacheEnabled = yield* Config.Boolean('SILK_SEMANTIC_CACHE').pipe(
+    Config.withDefault(true),
+    Effect.orDie,
+  )
   const semanticCacheDirectory = yield* Config.String('SILK_SEMANTIC_CACHE_DIR').pipe(
     Config.withDefault(path.join(path.dirname(options.destination), '.silk-cache')),
     Effect.orDie,
@@ -182,7 +186,7 @@ export const compile = Effect.fn('Workflow.compile')(function* (
   )
   const persistence =
     suppliedPersistence ??
-    (semanticCacheDirectory === ''
+    (!semanticCacheEnabled
       ? undefined
       : SemanticPersistence.make({
           storage: yield* Storage.fileSystemService(semanticCacheDirectory),
