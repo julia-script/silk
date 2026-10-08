@@ -66,6 +66,45 @@ pub enum Code {
   GenericOperation,
   WitnessOperand,
   Cleanup,
+  CleanupB1201,
+  CleanupB1485,
+  CleanupB1495,
+  CleanupB1679,
+  CleanupB1693,
+  CleanupB1798,
+  CleanupB1814,
+  CleanupB1836,
+  CleanupB1857,
+  CleanupB1864,
+  CleanupB2057,
+  CleanupB2062,
+  CleanupB2103,
+  CleanupB2120,
+  CleanupB2149,
+  CleanupB2160,
+  CleanupB2169,
+  CleanupB2245,
+  CleanupB2247,
+  CleanupB2259,
+  CleanupB2273,
+  CleanupB2283,
+  CleanupB2288,
+  CleanupB2345,
+  CleanupB2360,
+  CleanupB2378,
+  CleanupB4041,
+  CleanupB4229,
+  CleanupS43274,
+  CleanupS43289,
+  CleanupS43492,
+  CleanupS43865,
+  CleanupS43938,
+  CleanupS46419,
+  CleanupS46488,
+  CleanupS46555,
+  CleanupS46565,
+  CleanupS46886,
+  CleanupS46934,
 }
 
 /// Exact source evidence, independent of the reached instance that reports it.
@@ -191,6 +230,45 @@ impl Gap {
       Code.GenericOperation => b"generic-operation"
       Code.WitnessOperand => b"witness-operand"
       Code.Cleanup => b"cleanup"
+      Code.CleanupB1201 => b"cleanupb1201"
+      Code.CleanupB1485 => b"cleanupb1485"
+      Code.CleanupB1495 => b"cleanupb1495"
+      Code.CleanupB1679 => b"cleanupb1679"
+      Code.CleanupB1693 => b"cleanupb1693"
+      Code.CleanupB1798 => b"cleanupb1798"
+      Code.CleanupB1814 => b"cleanupb1814"
+      Code.CleanupB1836 => b"cleanupb1836"
+      Code.CleanupB1857 => b"cleanupb1857"
+      Code.CleanupB1864 => b"cleanupb1864"
+      Code.CleanupB2057 => b"cleanupb2057"
+      Code.CleanupB2062 => b"cleanupb2062"
+      Code.CleanupB2103 => b"cleanupb2103"
+      Code.CleanupB2120 => b"cleanupb2120"
+      Code.CleanupB2149 => b"cleanupb2149"
+      Code.CleanupB2160 => b"cleanupb2160"
+      Code.CleanupB2169 => b"cleanupb2169"
+      Code.CleanupB2245 => b"cleanupb2245"
+      Code.CleanupB2247 => b"cleanupb2247"
+      Code.CleanupB2259 => b"cleanupb2259"
+      Code.CleanupB2273 => b"cleanupb2273"
+      Code.CleanupB2283 => b"cleanupb2283"
+      Code.CleanupB2288 => b"cleanupb2288"
+      Code.CleanupB2345 => b"cleanupb2345"
+      Code.CleanupB2360 => b"cleanupb2360"
+      Code.CleanupB2378 => b"cleanupb2378"
+      Code.CleanupB4041 => b"cleanupb4041"
+      Code.CleanupB4229 => b"cleanupb4229"
+      Code.CleanupS43274 => b"cleanups43274"
+      Code.CleanupS43289 => b"cleanups43289"
+      Code.CleanupS43492 => b"cleanups43492"
+      Code.CleanupS43865 => b"cleanups43865"
+      Code.CleanupS43938 => b"cleanups43938"
+      Code.CleanupS46419 => b"cleanups46419"
+      Code.CleanupS46488 => b"cleanups46488"
+      Code.CleanupS46555 => b"cleanups46555"
+      Code.CleanupS46565 => b"cleanups46565"
+      Code.CleanupS46886 => b"cleanups46886"
+      Code.CleanupS46934 => b"cleanups46934"
     }
   }
   /// Classifies a precise semantic deferral without replacing its authored source evidence.

@@ -1198,7 +1198,7 @@ effect fn dropPlace(builder: &mut Builder, destination: Place, ty: &Shared<Type>
   }
   let glue = match move keyed {
     Option<InstanceKey>.Some {value} => value
-    Option<InstanceKey>.None => { return run unsupported(owner, origin, GapCode.Cleanup) }
+    Option<InstanceKey>.None => { return run unsupported(owner, origin, GapCode.CleanupB1201) }
   }
   return run dropPrepared(&mut builder.*, move destination, move glue, origin)
 }
@@ -1482,7 +1482,7 @@ effect fn expandState(builder: &mut Builder, node: usize, state: OwnerState, mis
   }
   if nodes[node].active && state != OwnerState.Moved {
     let identity = InstanceKey.identity(&builder.function.key)
-    return run unsupported(&identity, origin, GapCode.Cleanup)
+    return run unsupported(&identity, origin, GapCode.CleanupB1485)
   }
   let children = run copyIndices(&nodes[node].children)
   let parentFlag = nodes[node].flag
@@ -1492,7 +1492,7 @@ effect fn expandState(builder: &mut Builder, node: usize, state: OwnerState, mis
     if state == OwnerState.Maybe {
       if parentFlag == usize.MAX {
         let identity = InstanceKey.identity(&builder.function.key)
-        return run unsupported(&identity, origin, GapCode.Cleanup)
+        return run unsupported(&identity, origin, GapCode.CleanupB1495)
       }
       let childFlag = run componentFlag(&mut builder.*, listed[at], origin)
       run flagOnEdge(&mut builder.*, edge, childFlag, Operand.Copy {place: place(parentFlag)}, origin)
@@ -1676,7 +1676,7 @@ effect fn checkBackEdge(builder: &Builder, entry: &Vector<OwnerSnapshot>, origin
   while index < expected.length {
     if !sameFrontier(&owners[index].components, &expected[index].components, true) {
       let owner = InstanceKey.identity(&builder.function.key)
-      return run unsupported(&owner, origin, GapCode.Cleanup)
+      return run unsupported(&owner, origin, GapCode.CleanupB1679)
     }
     index = index + usize.ONE
   }
@@ -1690,7 +1690,7 @@ effect fn checkUnchanged(builder: &Builder, entry: &Vector<OwnerSnapshot>, origi
   while index < expected.length {
     if owners[index].ended != expected[index].ended || !sameFrontier(&owners[index].components, &expected[index].components, false) {
       let owner = InstanceKey.identity(&builder.function.key)
-      return run unsupported(&owner, origin, GapCode.Cleanup)
+      return run unsupported(&owner, origin, GapCode.CleanupB1693)
     }
     index = index + usize.ONE
   }
@@ -1795,7 +1795,7 @@ effect fn joinOwners(builder: &mut Builder, arrivals: &[Arrival], origin: Origin
       let other = Vector.asSlice<ComponentState>(&snapshots[at].components)
       if other.length != first.length {
         let identity = InstanceKey.identity(&builder.function.key)
-        return run unsupported(&identity, origin, GapCode.Cleanup)
+        return run unsupported(&identity, origin, GapCode.CleanupB1798)
       }
       at = at + usize.ONE
     }
@@ -1811,7 +1811,7 @@ effect fn joinOwners(builder: &mut Builder, arrivals: &[Arrival], origin: Origin
         let other = Vector.asSlice<ComponentState>(&snapshots[at].components)
         if other.length != first.length || other[position].node != node {
           let identity = InstanceKey.identity(&builder.function.key)
-          return run unsupported(&identity, origin, GapCode.Cleanup)
+          return run unsupported(&identity, origin, GapCode.CleanupB1814)
         }
         if other[position].state != initial { same = false }
         missing = outerMissing(&builder.*, missing, other[position].missing)
@@ -1833,7 +1833,7 @@ effect fn joinOwners(builder: &mut Builder, arrivals: &[Arrival], origin: Origin
       // A Maybe answer must have exact edge definitions, never an uninitialized sentinel flag.
       if state == OwnerState.Maybe && Vector.asSlice<CleanupNode>(&builder.cleanup)[node].flag == usize.MAX {
         let identity = InstanceKey.identity(&builder.function.key)
-        return run unsupported(&identity, origin, GapCode.Cleanup)
+        return run unsupported(&identity, origin, GapCode.CleanupB1836)
       }
       run Vector.append<ComponentState>(&mut joined, ComponentState {node: node, state: state, missing: missing})
       position = position + usize.ONE
@@ -1854,14 +1854,14 @@ effect fn dropComponent(builder: &mut Builder, component: &ComponentState, origi
     Option<InstanceKey>.Some {value} => InstanceKey.copy(&value)
     _ => {
       let identity = InstanceKey.identity(&builder.function.key)
-      return run unsupported(&identity, origin, GapCode.Cleanup)
+      return run unsupported(&identity, origin, GapCode.CleanupB1857)
     }
   }
   let flag = nodes[component.node].flag
   if component.state == OwnerState.Live { return run dropPrepared(&mut builder.*, move stored, move glue, origin) }
   if flag == usize.MAX {
     let identity = InstanceKey.identity(&builder.function.key)
-    return run unsupported(&identity, origin, GapCode.Cleanup)
+    return run unsupported(&identity, origin, GapCode.CleanupB1864)
   }
   let dropping = run block(&mut builder.*, origin)
   let after = run block(&mut builder.*, origin)
@@ -2054,12 +2054,12 @@ effect fn partitionComponent(builder: &mut Builder, node: usize, remainder: usiz
   if expanded {
     if active != nodes[node].active {
       let identity = InstanceKey.identity(&builder.function.key)
-      return run unsupported(&identity, origin, GapCode.Cleanup)
+      return run unsupported(&identity, origin, GapCode.CleanupB2057)
     }
     if run samePartition(&builder.*, &parent, &existing, listed, remainder, depth) { return move existing }
     if !active {
       let identity = InstanceKey.identity(&builder.function.key)
-      return run unsupported(&identity, origin, GapCode.Cleanup)
+      return run unsupported(&identity, origin, GapCode.CleanupB2062)
     }
     let alternatives = Vector.asSlice<CleanupPartition>(&nodes[node].alternatives)
     let mut at = usize.ZERO
@@ -2100,7 +2100,7 @@ effect fn exposeComponentPath(builder: &mut Builder, index: usize, remainder: us
 ! Gap | CanonicalizationFailure | OutOfMemoryError ? &mut Allocator {
   let identity = InstanceKey.identity(&builder.function.key)
   if index == usize.MAX || remainder == usize.MAX || remainderHooked(&builder.*, remainder, ownerDepth(&builder.*, index)) {
-    return run unsupported(&identity, origin, GapCode.Cleanup)
+    return run unsupported(&identity, origin, GapCode.CleanupB2103)
   }
   let remainders = Vector.asSlice<Remainder>(&builder.remainders)
   let target = run copyProjectionPath(&remainders[remainder].steps)
@@ -2117,7 +2117,7 @@ effect fn exposeComponentPath(builder: &mut Builder, index: usize, remainder: us
       let actual = run copyCleanupPath(&builder.*, node)
       let depth = Vector.length<Projection>(&actual)
       if depth < length && prefixPath(Vector.asSlice<Projection>(&actual), Vector.asSlice<Projection>(&target)) {
-        if listed[at].state != OwnerState.Live { return run unsupported(&identity, origin, GapCode.Cleanup) }
+        if listed[at].state != OwnerState.Live { return run unsupported(&identity, origin, GapCode.CleanupB2120) }
         let children = run partitionComponent(&mut builder.*, node, remainder, depth, origin)
         let childList = Vector.asSlice<usize>(&children)
         let mut child = usize.ZERO
@@ -2146,7 +2146,7 @@ effect fn releaseComponentPath(builder: &mut Builder, index: usize, remainder: u
   let missing = componentPathNode(&builder.*, root, Vector.asSlice<Projection>(&target))
   if missing == usize.MAX {
     let identity = InstanceKey.identity(&builder.function.key)
-    return run unsupported(&identity, origin, GapCode.Cleanup)
+    return run unsupported(&identity, origin, GapCode.CleanupB2149)
   }
   let saved = run copyOwnerComponents(&builder.*, index)
   let listed = Vector.asSlice<ComponentState>(&saved)
@@ -2157,7 +2157,7 @@ effect fn releaseComponentPath(builder: &mut Builder, index: usize, remainder: u
     if prefixPath(Vector.asSlice<Projection>(&target), Vector.asSlice<Projection>(&actual)) {
       if listed[at].state != OwnerState.Live {
         let identity = InstanceKey.identity(&builder.function.key)
-        return run unsupported(&identity, origin, GapCode.Cleanup)
+        return run unsupported(&identity, origin, GapCode.CleanupB2160)
       }
       found = true
       run componentTransition(&mut builder.*, index, at, OwnerState.Moved, missing, origin)
@@ -2166,7 +2166,7 @@ effect fn releaseComponentPath(builder: &mut Builder, index: usize, remainder: u
   }
   if !found {
     let identity = InstanceKey.identity(&builder.function.key)
-    return run unsupported(&identity, origin, GapCode.Cleanup)
+    return run unsupported(&identity, origin, GapCode.CleanupB2169)
   }
   return ()
 }
@@ -2242,9 +2242,9 @@ effect fn replacedComponents(builder: &mut Builder, index: usize, destination: &
   }
   let root = Vector.asSlice<Owner>(&builder.owners)[index].root
   if replacementLosesActive(&builder.*, root, Vector.asSlice<Projection>(&destination.projections)) {
-    return run unsupported(&identity, origin, GapCode.Cleanup)
+    return run unsupported(&identity, origin, GapCode.CleanupB2245)
   }
-  if !whole && Vector.asSlice<Owner>(&builder.owners)[index].ended { return run unsupported(&identity, origin, GapCode.Cleanup) }
+  if !whole && Vector.asSlice<Owner>(&builder.owners)[index].ended { return run unsupported(&identity, origin, GapCode.CleanupB2247) }
   run normalizeOwner(&mut builder.*, index, origin)
   let saved = run copyOwnerComponents(&builder.*, index)
   let listed = Vector.asSlice<ComponentState>(&saved)
@@ -2256,7 +2256,7 @@ effect fn replacedComponents(builder: &mut Builder, index: usize, destination: &
     if missing != usize.MAX {
       let absent = Vector.asSlice<Projection>(&nodes[missing].place.projections)
       if absent.length < written.length && prefixPath(absent, written) {
-        return run unsupported(&identity, origin, GapCode.Cleanup)
+        return run unsupported(&identity, origin, GapCode.CleanupB2259)
       }
     }
     at = at + usize.ONE
@@ -2270,7 +2270,7 @@ effect fn replacedComponents(builder: &mut Builder, index: usize, destination: &
       run dropComponent(&mut builder.*, &listed[at], origin)
       run Vector.append<usize>(&mut selected, at)
     } else if prefixPath(actual, written) {
-      if listed[at].state != OwnerState.Live { return run unsupported(&identity, origin, GapCode.Cleanup) }
+      if listed[at].state != OwnerState.Live { return run unsupported(&identity, origin, GapCode.CleanupB2273) }
       // The intact ancestor remains intact after replacing this one complete initialized child.
       run dropPlace(&mut builder.*, run copyPlace(destination), ty, &identity, origin)
       return move selected
@@ -2280,12 +2280,12 @@ effect fn replacedComponents(builder: &mut Builder, index: usize, destination: &
       while shared < actual.length && shared < written.length && sameProjection(&actual[shared], &written[shared]) {
         shared = shared + usize.ONE
       }
-      if shared < written.length && runtimeIndex(&written[shared]) { return run unsupported(&identity, origin, GapCode.Cleanup) }
+      if shared < written.length && runtimeIndex(&written[shared]) { return run unsupported(&identity, origin, GapCode.CleanupB2283) }
     }
     at = at + usize.ONE
   }
   if !whole && Vector.length<usize>(&selected) == usize.ZERO {
-    return run unsupported(&identity, origin, GapCode.Cleanup)
+    return run unsupported(&identity, origin, GapCode.CleanupB2288)
   }
   return move selected
 }
@@ -2342,7 +2342,7 @@ effect fn dropReleased(builder: &mut Builder, release: &Release, storage: Place,
   if !needed { return run applyRelease(&mut builder.*, release, false, origin) }
   if index == usize.MAX {
     let identity = InstanceKey.identity(&builder.function.key)
-    if !whole { return run unsupported(&identity, origin, GapCode.Cleanup) }
+    if !whole { return run unsupported(&identity, origin, GapCode.CleanupB2345) }
     return run dropPlace(&mut builder.*, move storage, ty, &identity, origin)
   }
   if whole {
@@ -2357,7 +2357,7 @@ effect fn dropReleased(builder: &mut Builder, release: &Release, storage: Place,
   let missing = componentPathNode(&builder.*, root, Vector.asSlice<Projection>(&target))
   if missing == usize.MAX {
     let identity = InstanceKey.identity(&builder.function.key)
-    return run unsupported(&identity, origin, GapCode.Cleanup)
+    return run unsupported(&identity, origin, GapCode.CleanupB2360)
   }
   let saved = run copyOwnerComponents(&builder.*, index)
   let listed = Vector.asSlice<ComponentState>(&saved)
@@ -2375,7 +2375,7 @@ effect fn dropReleased(builder: &mut Builder, release: &Release, storage: Place,
   }
   if !found {
     let identity = InstanceKey.identity(&builder.function.key)
-    return run unsupported(&identity, origin, GapCode.Cleanup)
+    return run unsupported(&identity, origin, GapCode.CleanupB2378)
   }
   return ()
 }
@@ -4038,7 +4038,7 @@ effect fn bindArm(builder: &mut Builder, body: &Shared<TypedBody>, node: BodyNod
     } else {
       let remainder = remainderIndex(&builder.*, declared.index)
       if remainder == usize.MAX || remainderHooked(&builder.*, remainder, usize.ZERO) {
-        return run unsupported(&owner, origin, GapCode.Cleanup)
+        return run unsupported(&owner, origin, GapCode.CleanupB4041)
       }
       run releaseComponentPath(&mut builder.*, scrutinee, remainder, origin)
     }
@@ -4226,7 +4226,7 @@ effect fn lowerMatch(
       let value = run expression(&mut builder.*, body, hir, result)
       // A borrowing result could still view an arm temporary after the arm ends; that is not lowered.
       if Vector.length<usize>(&builder.temporaries) > armPending && Shared.with<Type, bool>(ty, borrowingType) {
-        return run unsupported(&owner, armOrigin, GapCode.Cleanup)
+        return run unsupported(&owner, armOrigin, GapCode.CleanupB4229)
       }
       if valued && builder.live {
         run assign(&mut builder.*, place(output), Rvalue.Use {value: move value}, armOrigin)

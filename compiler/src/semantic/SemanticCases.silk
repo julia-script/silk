@@ -8971,7 +8971,7 @@ fn constraintOrder(signature: &Signature) -> bool {
 // Give each independent contract claim only the declarations it needs to resolve.
 fn contractFixture(part: usize) -> string<'static> {
   if part == 0 {
-    return "import services { Clock }\nservice Logger {}\ninterface Hash {}\nstruct Problem {}\nstruct Other {}\nrole Primary\nfn apply(transform: fn(i32) -> i32, value: i32) -> i32 { return value }\nfn consume(transform: once fn(i32) -> i32) -> i32 { return 0 }\neffect fn load(id: i32) -> i32 ! Problem ? &Clock { return id }\neffect fn both() -> i32 ! Problem | Other ? &Logger | &Clock at Primary | &mut Clock at Primary | &Clock { return 0 }\neffect fn swapped() -> i32 ! Other | Problem | Other ? &mut Clock at Primary | &Clock | &Logger { return 0 }\neffect fn closed() -> i32 { return 0 }\neffect fn spelled() -> i32 ! never ? never { return 0 }\nfn pending(value: Effect<i32 ! Problem ? &Clock>) -> i32 { return 0 }\nfn preserve<'env, A, ?R>(pending: once Effect<'env; A ? R>) -> Effect<'env; A ? R> { return move pending }\nfn bounded<'long: 'short, 'short, T: Hash + Logger + 'short>(value: &'long T) -> &'short i32 { return () }\nunsafe fn risky() -> i32 { return 1 }\nstruct Box<T> { value: T }\ntype Pair<T> = T | Box<T>\nfn control(value: Pair<i32>) -> i32 { return 0 }\nfn nested(value: Pair<Box<i32>>) -> i32 { return 0 }\nfn again(value: Pair<Box<i32>>) -> i32 { return 0 }\nservice Store<T> {}\ntype Stored<'env, T> = Effect<'env; i32 ? &Store<T> | &Store<Box<T>>>\nfn stored<'a>(value: Stored<'a, Box<i32>>) -> i32 { return 0 }\n"
+    return "import services { Clock }\nservice Logger {}\ninterface Hash {}\nstruct Problem {}\nstruct Other {}\nrole Primary\nfn apply(transform: fn(i32) -> i32, value: i32) -> i32 { return value }\nfn consume(transform: once fn(i32) -> i32) -> i32 { return 0 }\neffect fn load(id: i32) -> i32 ! Problem ? &Clock { return id }\neffect fn both() -> i32 ! Problem | Other ? &Logger | &Clock at Primary | &mut Clock at Primary | &Clock { return 0 }\neffect fn swapped() -> i32 ! Other | Problem | Other ? &mut Clock at Primary | &Clock | &Logger { return 0 }\neffect fn closed() -> i32 { return 0 }\neffect fn spelled() -> i32 ! never ? never { return 0 }\nfn pending(value: Effect<i32 ! Problem ? &Clock>) -> i32 { return 0 }\nfn preserve<'env, A, ?R>(pending: once Effect<'env; A ? R>) -> Effect<'env; A ? R> { return move pending }\nfn bounded<'long: 'short, 'short, T: Hash + Logger + 'short>(value: &'long T) -> &'short i32 { return () }\nunsafe fn risky() -> i32 { return 1 }\nstruct Box<T> { value: T }\ntype Pair<T> = T | Box<T>\nfn control(value: Pair<i32>) -> i32 { return 0 }\nfn nested(value: Pair<Box<i32>>) -> i32 { return 0 }\nfn again(value: Pair<Box<i32>>) -> i32 { return 0 }\nservice Store<T> {}\ntype Stored<'env, T> = Effect<'env; i32 ? &Store<T> | &Store<Box<T>>>\nfn stored<'a>(value: Stored<'a, Box<i32>>) -> i32 { return 0 }\ntest effect fn checked() -> () ! Problem { return () }\ntest fn parameterized(value: i32) {}\n"
   }
   if part == 1 {
     return "import services { Clock }\nservice Logger {}\ninterface Hash {}\nstruct Plain {}\nstruct Problem {}\nstruct Other {}\nrole Primary\ntype Borrowed = &'static i32\neffect fn notService() -> i32 ? &Plain { return 0 }\neffect fn interfaceRow() -> i32 ? &Hash { return 0 }\neffect fn badRole() -> i32 ? &Clock at Plain { return 0 }\nfn notBound<T: Plain>() -> i32 { return 0 }\nfn repeated<T: Hash + Hash>() -> i32 { return 0 }\nfn ordinaryFailure() -> i32 ! Problem { return 0 }\nfn rowAsType<?R>(value: R) -> i32 { return 0 }\nfn borrowedUnion() -> Borrowed | i32 { return 0 }\nfn ambiguousCallable(transform: fn<'static>(&i32, &i32) -> &i32) -> i32 { return 0 }\nfn nestedQuantifier(transform: for<'a> fn<'static>(for<'b> fn<'static>(&'b i32) -> i32) -> i32) -> i32 { return 0 }\nfn ordinaryRow() -> i32 ? &Clock { return 0 }\npub fn exposedCallable(transform: fn(Plain) -> i32) -> i32 { return 0 }\npub effect fn exposedRow() -> i32 ? &Logger { return 0 }\n"
@@ -9081,6 +9081,12 @@ effect fn contractClaims(part: usize) -> ()
     )
     let loadBody = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"load")
     run Testing.expect(succeeded(&loadBody), "an effect body is typed against its declared success type")
+    let checked = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"checked")
+    let checkedBody = run Semantic.demandBody(&mut semantic, &mut request, &entry, b"checked")
+    let parameterized = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"parameterized")
+    run Testing.expect(Shared.with<Result<Answer, NoRejection>, bool>(&checked, declaredEffect) && succeeded(&checkedBody)
+      && rejectsWith(&parameterized, RejectionCode.Unsupported),
+      "a valid test entry is analyzed like any other function; an invalid entry stays unsupported")
   }
   if part == 1 {
     let notService = run Semantic.demandSignature(&mut semantic, &mut request, &entry, b"notService")
@@ -25833,6 +25839,11 @@ struct Guarded { status: Status }
 impl Drop for Guarded { fn drop(self: &mut Guarded) -> () { return () } }
 fn guardedField(value: Guarded) -> i32 { return match move value.status { _ => 0 } }
 fn borrowed(status: Status) -> i32 { return match &status { _ => 0 } }
+impl Status {
+  fn ready(status: Status) -> bool { return status == Status.Ready }
+}
+fn inherent(status: Status) -> bool { return Status.ready(status) }
+fn calledMember() -> i32 { return Status.Ready(1) }
 """
   let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -25955,6 +25966,12 @@ fn borrowed(status: Status) -> i32 { return match &status { _ => 0 } }
     rejectsSpan(&guardType, RejectionCode.ConditionNotBool, text, "count", 1),
     "enum coverage, foreign members and non-Boolean guards report precise spans",
   )
+  let inherent = run Semantic.demandBody(&mut store, &mut request, &id, b"inherent")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let calledMember = run Semantic.demandBody(&mut store, &mut request, &id, b"calledMember")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(succeeded(&inherent) && rejectsSpan(&calledMember, RejectionCode.NotCallable, text, "Status.Ready(1)", 0),
+    "a qualified enum call selects an inherent function; invoking a member stays not callable")
   return ()
 }
 
@@ -27437,6 +27454,8 @@ fn absentMember(input: Left | Right) -> i32 { return match move input { Token he
 fn onlyLeft(input: Left | Right) -> i32 { return match move input { Left _ => 1 } }
 fn outside(input: Left | Right) -> i32 { return match &input { Left { value } => { break } Right {} => 0 } }
 fn outsideContinue(input: Left | Right) -> i32 { return match &input { Left { value } => { continue } Right {} => 0 } }
+enum Mode { Fast, Slow }
+fn scalarMember(input: Left | Mode) -> i32 { return match move input { Left held => held.value Mode mode => 1 } }
 """
   let source = run present(text) |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&Revision.make(), &id, &source) |> Effect.provideMut<Allocator>(&mut allocator)
@@ -27466,6 +27485,8 @@ fn outsideContinue(input: Left | Right) -> i32 { return match &input { Left { va
     copiedPlace = Shared.with<TypedBody, bool>(&value, matchAddressesPlace)
   }
   run Testing.expect(succeeded(&copied) && !copiedPlace, "a bare match of a Copy record reads one copy")
+  let scalarMember = run Semantic.demandMir(&mut store, &mut request, &id, b"scalarMember") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(succeeded(&scalarMember), "a whole-member arm binds a scalar enum member")
   let earlyMir = run Semantic.demandMir(&mut store, &mut request, &id, b"early") |> Effect.provideMut<Allocator>(&mut allocator)
   let divergingMir = run Semantic.demandMir(&mut store, &mut request, &id, b"diverging") |> Effect.provideMut<Allocator>(&mut allocator)
   let loopsMir = run Semantic.demandMir(&mut store, &mut request, &id, b"loops") |> Effect.provideMut<Allocator>(&mut allocator)
@@ -27796,6 +27817,9 @@ fn continues(limit: i32) -> i32 {
   }
   return count
 }
+fn kept<T: Copy>(value: T) -> i32 { return 0 }
+fn lent<'env>(predicate: fn<'env>(i32) -> bool) -> i32 { return 0 }
+fn affine<T>(value: T) -> i32 { return 7 }
 """
   let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -27855,6 +27879,12 @@ fn continues(limit: i32) -> i32 {
     rejectsSpan(&exclusiveBinding, RejectionCode.InvalidMatchScrutineePlace, text, "let Token { value } = &mut make()", 0) &&
     rejectsSpan(&placeTemporary, RejectionCode.InvalidMatchScrutineePlace, text, "match place make() { Token { value } => value }", 0),
     "an exclusive or place match, or an exclusive destructuring let, must name an existing place")
+  let kept = run Semantic.demandMir(&mut store, &mut request, &id, b"kept") |> Effect.provideMut<Allocator>(&mut allocator)
+  let lent = run Semantic.demandMir(&mut store, &mut request, &id, b"lent") |> Effect.provideMut<Allocator>(&mut allocator)
+  let affine = run Semantic.demandMir(&mut store, &mut request, &id, b"affine") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(glueFact(&store, &kept, usize.ZERO) == usize.ZERO && glueFact(&store, &lent, usize.ZERO) == usize.ZERO
+    && cleanupGapAt(&affine, text, "return 7", 0),
+    "a Copy-bounded parameter or a shared callable representation owns no cleanup; an unbounded abstract owner keeps the gap")
   return ()
 }
 
@@ -31596,6 +31626,14 @@ fn guardedOnly(outer: Outer) -> i32 {
 fn unreachable(outer: Outer) -> i32 {
   return match move outer { Outer.Wrap { inner: Inner.Empty {} } => 0 Outer.Wrap { inner: Inner.Empty {} } => 1 _ => 2 }
 }
+union Maybe<T> { Some { value: T }, None }
+struct Holder { slot: Maybe<Narrow> }
+fn applied(holder: Holder) -> i32 {
+  return match move holder {
+    Holder { slot: Maybe<Narrow>.Some { value } } => value.first
+    Holder { slot: Maybe<Narrow>.None } => 1
+  }
+}
 """
   let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -31621,6 +31659,8 @@ fn unreachable(outer: Outer) -> i32 {
     rejectsSpan(&unreachable, RejectionCode.UnreachableMatchArm, text, "Outer.Wrap { inner: Inner.Empty {} }", 3),
     "a guarded nested arm covers nothing and a nested arm with no uncovered value is unreachable",
   )
+  let applied = run Semantic.demandMir(&mut store, &mut request, &id, b"applied") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(succeeded(&applied), "applied variant subpatterns test a generic nominal union field and cover it")
   return ()
 }
 
@@ -45061,6 +45101,13 @@ fn httpStyle(outer: &Outer, method: Method<'static>, target: Target<'static>, po
   let local = Headers {bytes: whole(&outer.inner)}
   return prepare(move method, move target, &local, &policy)
 }
+fn either<'a>(first: bool, left: &'a Inner, right: &'a Inner) -> &'a Inner { if first { return left } return right }
+fn parameters(left: &Inner, right: &Inner) -> u8 { let chosen = either(true, left, right) return chosen.values[0] }
+struct Scoped<'s> {
+  count: &'s mut i32
+  view: &'s Inner
+}
+fn fields(count: &mut i32, view: &Inner) -> u8 { let scoped = Scoped {count: &mut count.*, view: view} return scoped.view.values[0] }
 """
   let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -45089,6 +45136,12 @@ fn httpStyle(outer: &Outer, method: Method<'static>, target: Target<'static>, po
   let httpStyle = run providedSucceeds(&mut store, &mut request, &id, "httpStyle")
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(httpStyle, "static method and target, local headers and a borrowed static policy share the inferred storage region")
+  let parameters = run providedSucceeds(&mut store, &mut request, &id, "parameters")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(parameters, "a binder fixed by one of the caller's lifetimes meets another of them at the call region")
+  let fields = run providedSucceeds(&mut store, &mut request, &id, "fields")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(fields, "a literal's binder fixed by one caller lifetime meets another at the literal's loan region")
   return ()
 }
 

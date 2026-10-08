@@ -158,7 +158,12 @@ Each entry records:
   and at a variant pattern that writes its regions, which admits the subject by covariant region
   subtyping (a `'static` subject meets `Maybe<&'a i32>`, as in the bootstrap). An inferred lifetime binder that earlier `'static` evidence fixed
   shortens to a later operand's caller-local region when every parameter stores the binder
-  covariantly and no bound or environment names it.
+  covariantly and no bound or environment names it. On 2026-10-08 the same rule extended to a
+  binder an earlier operand fixed to one of the caller's own lifetimes: a later caller-local region
+  shortens it to that region, and a later different caller lifetime shortens it to the call's own
+  region, which both operands outlive (`either(true, left, right)` over two elided parameters). An
+  inferred struct literal binder follows the same rule at the literal's own loan region
+  (`Scoped {count: &mut count.*, view: view}`).
 - **Source migration:** none.
 - **Diagnostics and limits:** a fresh loan of body-owned storage still needs a declared premise,
   a pattern region longer than the subject's stays `TypeMismatch`, and a
@@ -323,6 +328,9 @@ Each entry records:
   element, a loop iteration that leaves an owner in a different state than it found it, a
   guard that changes an owner's state, a borrowing match result whose arm created temporaries, and
   drop glue for callable and Effect environments and unions without a canonical member order.
+  Since 2026-10-08 a type parameter owns no cleanup when a declared premise proves it Copy, as
+  `K: Copy` or a shared callable representation does; an unbounded abstract owner of a generic
+  named instance keeps the `cleanup` gap.
 - **Source migration:** none.
 - **Evidence:** `cleanupStackDropsWhatEachExitLeaves`, `cleanupFollowsLoopsAndConditionalPaths`,
   `partialMovesDropTheRemainingChildren` and `dropGlueCleansHookThenChildren` in
@@ -962,6 +970,22 @@ The structured parser assertion lives in `hir/LoweringCases.structFieldCommaRepo
   are step 14 scope and are not claimed here.
 - **Evidence:** `sliceConversionsRetainRegionAccessAndDiagnostics` asserts `TypeMismatch` at
   `&local` and `&[42]`. The bootstrap's `RuntimeSliceOwnership.test.ts` asserts `OWN0019`.
+
+### Selfhost test declaration diagnostics
+
+- **Status:** recorded on 2026-10-08 with the Stage 1 census tail.
+- **Rule:** [TEST-001](apps/docs/content/reference/testing.md#test-001--test-marks-a-parameterless-unit-function)
+  admits a module-level, safe, non-static function with a body, no generic or value parameters and
+  unit success as a test entry; [TEST-002](apps/docs/content/reference/testing.md#test-002--ordinary-builds-do-not-execute-or-retain-tests)
+  analyzes an active test entry like any other function in an ordinary build.
+- **Compilers:** both analyze a valid test entry as an ordinary function. The bootstrap reports an
+  invalid entry as `InvalidTestDeclaration`; selfhost has no test declaration diagnostic yet and
+  refuses that signature as `Unsupported`.
+- **Source migration:** none.
+- **Diagnostics and limits:** selfhost does not discover, describe or run tests.
+- **Evidence:** `callableAndEffectSignatureContracts` in `compiler/src/semantic/SemanticCases.silk`
+  checks a valid `test effect fn` signature and body and the refused parameterized entry.
+- **Owner:** the test declaration diagnostic and discovery: #567 follow-ups.
 
 ## Maintaining this file
 
