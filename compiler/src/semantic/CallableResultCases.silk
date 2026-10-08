@@ -24,7 +24,7 @@ import semantic.SourceRevision {Revision}
 import semantic.Specialization {Application as SpecializationApplication, ScopeBinding, StaticSlot, Target as SpecializationTarget}
 import semantic.Type {Argument, Binding, Comparison, ComparisonChild, CallableFieldInput, Outlives, Requirement, Row, RowParameter, RowSubtraction, Type, Unification}
 import semantic.Target {Id as TargetId, Target as MachineTarget}
-import semantic.TypedBody {AggregateField as BodyAggregateField, Expression as BodyExpression, Node as BodyNode, NodeId as BodyNodeId, NodeKind as BodyNodeKind, SafetyObligation as BodySafetyObligation, Stage as BodyStage, TypedBody}
+import semantic.TypedBody {AggregateField as BodyAggregateField, Expression as BodyExpression, ConsumedPlace as BodyConsumedPlace, PlaceRoot as BodyPlaceRoot, PlaceStep as BodyPlaceStep, Node as BodyNode, NodeId as BodyNodeId, NodeKind as BodyNodeKind, SafetyObligation as BodySafetyObligation, Stage as BodyStage, TypedBody}
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
 import silk.effect {Effect}
@@ -3690,21 +3690,18 @@ fn delayedStageSignature(answer: &Result<Answer, NoRejection>, owner: &Declarati
   }
   return false
 }
-fn delayedStageBaseSchema(value: &Type, id: &ModuleId) -> bool {
-  if let Type.CallableSchema {schema, captures, fieldInputs, ..} = &value.* {
-    if Vector.length<Shared<Type>>(&captures) != usize.ZERO || Vector.length<CallableFieldInput>(&fieldInputs) != usize.ZERO { return false }
-    return Shared.with<SectionSchema, bool>(&schema, fn(recipe: &SectionSchema) -> bool { return delayedStageSchema(recipe, id) })
-  }
-  return false
-}
+// This is a proper suffix section, distinct from selecting an uncaptured generic function item.
+// Its complete application retains the original two authored lifetime slots and the hidden
+// Effect representation inferred from the supplied pending operand.
 fn delayedStageApplication(application: &SpecializationApplication, caller: &DeclarationId, id: &ModuleId) -> bool {
   let target = SpecializationApplication.bodyDeclaration(application)
-  if !ModuleId.equals(DeclarationId.moduleId(target), id) || !DeclarationId.named(target, b"stageEffect")
+  if !ModuleId.equals(DeclarationId.moduleId(target), id) || !DeclarationId.named(target, b"keepEffect")
     || DeclarationId.kind(target) != OwnerKind.Function || DeclarationId.ownerSteps(target).length != usize.ONE
     || DeclarationId.ownerSteps(target)[usize.ZERO].occurrence != usize.ZERO { return false }
   let arguments = Vector.asSlice<Argument>(&application.arguments)
   let ordinals = Vector.asSlice<usize>(&application.argumentOrdinals)
-  if arguments.length != 4 || ordinals.length != 4 || Vector.length<ScopeBinding>(&application.scopes) != usize.ZERO { return false }
+  if arguments.length != 3 || ordinals.length != 3 || Vector.length<ScopeBinding>(&application.scopes) != usize.ZERO
+    || Vector.length<StaticSlot>(&application.statics) != usize.ZERO { return false }
   let mut at = usize.ZERO
   while at < ordinals.length { if ordinals[at] != at { return false } at = at + usize.ONE }
   at = usize.ZERO
@@ -3715,10 +3712,42 @@ fn delayedStageApplication(application: &SpecializationApplication, caller: &Dec
     at = at + usize.ONE
   }
   if let Argument.Type {value} = &arguments[2] {
-    if !Shared.with<Type, bool>(&value, fn(representation: &Type) -> bool { return delayedStageBaseSchema(representation, id) }) { return false }
-  } else { return false }
-  if let Argument.Type {value} = &arguments[3] {
     return Shared.with<Type, bool>(&value, fn(parameter: &Type) -> bool { return delayedOwnedParameter(parameter, caller, usize.ONE) })
+  }
+  return false
+}
+fn delayedStageSection(value: &Type, id: &ModuleId, caller: &DeclarationId) -> bool {
+  if let Type.CallableValue {application, contract, captures, fieldInputs, ..} = &value.* {
+    let fields = Vector.asSlice<Shared<Type>>(&captures)
+    let inputs = Vector.asSlice<CallableFieldInput>(&fieldInputs)
+    if fields.length != usize.ONE || inputs.length != usize.ONE
+      || !Shared.with<Type, bool>(&fields[usize.ZERO], fn(parameter: &Type) -> bool { return delayedOwnedParameter(parameter, caller, usize.ONE) }) { return false }
+    if let CallableFieldInput.Argument {parameter} = &inputs[usize.ZERO] {
+      return parameter == usize.ONE
+        && Shared.with<SpecializationApplication, bool>(&application, fn(selected: &SpecializationApplication) -> bool {
+          return delayedStageApplication(selected, caller, id)
+        })
+        && Shared.with<Type, bool>(&contract, fn(promised: &Type) -> bool { return delayedStageRemainder(promised, caller) })
+    }
+  }
+  return false
+}
+// Once invocation consumes the actual stored section; it does not introduce another target.
+fn delayedStageConsumedLocal(consumed: &Option<BodyConsumedPlace>, ordinal: usize) -> bool {
+  if let Option<BodyConsumedPlace>.Some {value: place} = &consumed.* {
+    if Vector.length<BodyPlaceStep>(&place.steps) != usize.ZERO { return false }
+    if let BodyPlaceRoot.Local {local} = &place.root { return local.index == ordinal }
+  }
+  return false
+}
+fn delayedStageMovedLocal(body: &TypedBody, index: usize, ordinal: usize) -> bool {
+  let nodes = TypedBody.nodeSlice(body)
+  if index >= nodes.length { return false }
+  if let BodyNodeKind.Expression {form: BodyExpression.Move {value, consumed}, ..} = &nodes[index].kind {
+    if value.index >= nodes.length || !delayedStageConsumedLocal(&consumed, ordinal) { return false }
+    if let BodyNodeKind.Expression {form: BodyExpression.Local {local}, ..} = &nodes[value.index].kind {
+      return local.index == ordinal
+    }
   }
   return false
 }
@@ -3727,32 +3756,68 @@ fn delayedStageEntry(body: &TypedBody, id: &ModuleId) -> bool {
   if !ModuleId.equals(DeclarationId.moduleId(caller), id) || !DeclarationId.named(caller, b"stagedEffectEntry")
     || DeclarationId.kind(caller) != OwnerKind.Function || DeclarationId.ownerSteps(caller).length != usize.ONE
     || DeclarationId.ownerSteps(caller)[usize.ZERO].occurrence != usize.ZERO { return false }
+  let locals = TypedBody.localSlice(body)
+  if locals.length != 2 || locals[usize.ONE].mutable
+    || !Shared.with<Type, bool>(&locals[usize.ZERO].ty, fn(value: &Type) -> bool {
+      return delayedOwnedParameter(value, caller, usize.ONE)
+    }) || !Shared.with<Type, bool>(&locals[usize.ONE].ty, fn(value: &Type) -> bool {
+      return delayedStageSection(value, id, caller)
+    }) { return false }
   let nodes = TypedBody.nodeSlice(body)
-  let mut count = usize.ZERO
+  let mut construction = usize.MAX
+  let mut binding = usize.MAX
+  let mut invocation = usize.MAX
+  let mut returned = usize.MAX
   let mut at = usize.ZERO
   while at < nodes.length {
-    if let BodyNodeKind.Expression {form: BodyExpression.DirectCall {declaration, application, ..}, ..} = &nodes[at].kind {
-      if DeclarationId.named(&declaration, b"stageEffect") {
-        if !Shared.with<SpecializationApplication, bool>(&application, fn(selected: &SpecializationApplication) -> bool {
-          return delayedStageApplication(selected, caller, id)
-        }) { return false }
-        count = count + usize.ONE
+    if let BodyNodeKind.Expression {ty, form: BodyExpression.Aggregate {fields}} = &nodes[at].kind {
+      if Shared.with<Type, bool>(&ty, fn(value: &Type) -> bool { return delayedStageSection(value, id, caller) }) {
+        let captured = Vector.asSlice<BodyAggregateField>(&fields)
+        if construction != usize.MAX || captured.length != usize.ONE || captured[usize.ZERO].index != usize.ZERO
+          || !delayedStageMovedLocal(body, captured[usize.ZERO].value.index, usize.ZERO) { return false }
+        construction = at
       }
+    }
+    if let BodyNodeKind.LocalBinding {local, initializer} = &nodes[at].kind {
+      if local.index != usize.ONE || binding != usize.MAX || construction == usize.MAX
+        || initializer.index != construction { return false }
+      binding = at
+    }
+    if let BodyNodeKind.Expression {ty, form: BodyExpression.CallableCall {callee, mode, arguments, constructs, ..}} = &nodes[at].kind {
+      let supplied = Vector.asSlice<BodyNodeId>(&arguments)
+      if invocation != usize.MAX || binding == usize.MAX || mode != CallableMode.Once || constructs
+        || supplied.length != usize.ONE || callee.index >= nodes.length
+        || !Shared.with<Type, bool>(&ty, delayedI32) || supplied[usize.ZERO].index >= nodes.length
+        || !delayedIntegerInitializer(&nodes[supplied[usize.ZERO].index])
+        || !delayedStageMovedLocal(body, callee.index, usize.ONE) { return false }
+      if let BodyNodeKind.Expression {ty: receiver, form: BodyExpression.Move {value, ..}} = &nodes[callee.index].kind {
+        if !Shared.with<Type, bool>(&receiver, fn(value: &Type) -> bool { return delayedStageSection(value, id, caller) }) { return false }
+        if let BodyNodeKind.Expression {ty: original, ..} = &nodes[value.index].kind {
+          if !Shared.with<Type, bool>(&original, fn(value: &Type) -> bool { return delayedStageSection(value, id, caller) }) { return false }
+        } else { return false }
+      } else { return false }
+      invocation = at
+    }
+    if let BodyNodeKind.Return {value} = &nodes[at].kind {
+      if returned != usize.MAX || invocation == usize.MAX { return false }
+      if let Option<BodyNodeId>.Some {value: result} = &value {
+        if result.index != invocation { return false }
+      } else { return false }
+      returned = at
     }
     at = at + usize.ONE
   }
-  return count == usize.ONE
+  return construction != usize.MAX && binding != usize.MAX && invocation != usize.MAX && returned != usize.MAX
 }
 
-fn delayedStageSchema(recipe: &SectionSchema, id: &ModuleId) -> bool {
-  let target = Shared.with<DeclarationId, bool>(&recipe.target, fn(owner: &DeclarationId) -> bool {
-    return ModuleId.equals(DeclarationId.moduleId(owner), id) && DeclarationId.named(owner, b"keepEffect")
-      && DeclarationId.kind(owner) == OwnerKind.Function && DeclarationId.ownerSteps(owner).length == usize.ONE
-      && DeclarationId.ownerSteps(owner)[usize.ZERO].occurrence == usize.ZERO
-  })
-  let deferred = Vector.asSlice<usize>(&recipe.deferred)
-  return target && Vector.length<Binding>(&recipe.selected) == usize.ZERO && deferred.length == 3
-    && deferred[usize.ZERO] == usize.ZERO && deferred[usize.ONE] == usize.ONE && deferred[2] == 2
+fn delayedStageAmbiguousModule(answer: &Result<Answer, NoRejection>, id: &ModuleId) -> bool {
+  if let Result<Answer, NoRejection>.Success {value} = &answer.* {
+    if let Outcome.Rejected {diagnostic} = &value.outcome {
+      return Shared.with<Rejection, bool>(&diagnostic,
+        fn(found: &Rejection) -> bool { return ModuleId.equals(&found.module, id) })
+    }
+  }
+  return false
 }
 
 fn delayedStageHeaderForBody(body: &TypedBody, header: &Shared<Result<Answer, NoRejection>>) -> bool {
@@ -3808,6 +3873,10 @@ fn environmentMetadata<'left, 'right, 'env>(source: mut Effect<'left & 'right; i
 fn keepEffect<'a, 'b>(number: i32, pending: once Effect<'a & 'b; i32>) -> i32 { drop pending return number }
 fn stageEffect<'a: 'b, 'b, F: fn<'static>(i32, once Effect<'a & 'b; i32>) -> i32>(f: F, pending: mut Effect<'a; i32>) -> some<G: once fn<'a>(i32) -> i32> G { return f(move pending) }
 fn stagedEffectEntry<'a>(pending: mut Effect<'a; i32>) -> i32 {
+  let saved = keepEffect<'a, 'a>(move pending)
+  return saved(42)
+}
+fn stagedEffectAmbiguous<'a>(pending: mut Effect<'a; i32>) -> i32 {
   let saved = stageEffect<'a, 'a>(keepEffect, move pending)
   return saved(42)
 }
@@ -3866,8 +3935,16 @@ fn stagedEffectEntry<'a>(pending: mut Effect<'a; i32>) -> i32 {
   if let Option<Shared<TypedBody>>.Some {value: stagedEntryBody} = move checkedStagedEntry {
     stageSelection = Shared.with<TypedBody, bool>(&stagedEntryBody, fn(value: &TypedBody) -> bool { return delayedStageEntry(value, &id) })
   }
-  run Testing.expect(stageSource && stageSelection,
-    "abstract-F staging preserves its declared Effect bound, original schema and source-owned application coordinates")
+  run Testing.expect(stageSource,
+    "abstract-F staging preserves its declared Effect bound and original source-owned parameter coordinates")
+  run Testing.expect(stageSelection,
+    "a proper suffix selects original keepEffect lifetime slots zero and one, infers hidden representation slot two from pending, captures original input one and invokes remaining input zero")
+  let ambiguousEntry = run Semantic.demandBody(&mut store, &mut request, &id, b"stagedEffectAmbiguous")
+  run Testing.expect(rejectsSpan(&ambiguousEntry, RejectionCode.TypeArgumentInference, text,
+    "stageEffect<'a, 'a>(keepEffect, move pending)", usize.ZERO)
+    && Shared.with<Result<Answer, NoRejection>, bool>(&ambiguousEntry,
+      fn(answer: &Result<Answer, NoRejection>) -> bool { return delayedStageAmbiguousModule(answer, &id) }),
+    "two independent source lifetime slots in one Effect meet do not acquire a guessed partition during callable admission")
 }
 
 test effect fn anonymousCallableParametersRejectUnknownOwnedReturns() -> ()
