@@ -19733,7 +19733,7 @@ fn answerLayoutIndex(answer: &Result<Answer, NoRejection>) -> Option<usize> {
 fn answerLayoutUnsupported(answer: &Result<Answer, NoRejection>) -> bool {
   return match & answer.* {
     Result<Answer, NoRejection>.Success {value} => match & value.outcome {
-      Outcome.Success {value: selected} => match move selected {
+      Outcome.Success {value: selected} => match &selected {
         Value.LayoutUnsupported => true
         _ => false
       }
@@ -34234,11 +34234,10 @@ effect fn checkExpressionUnder<'scope>(
     }
     Node.IntegerLiteral {sign, magnitude, suffix, ..} => {
       let digits = run bodyText(&resolver.source, cursor, magnitude)
-      let mut writtenSuffix = Option.none<Bytes>()
-      let mut selected = b"i32"
+      let mut written = run Bytes.copy(b"i32")
       let mut contextual = false
       if suffix.present {
-        writtenSuffix = Option.some<Bytes>(run bodyText(&resolver.source, cursor, suffix.symbol))
+        written = run bodyText(&resolver.source, cursor, suffix.symbol)
       } else if let Option<Shared<Type>>.Some {value} = &expected.* {
         if Shared.with<Type, bool>(
           &value,
@@ -34249,9 +34248,7 @@ effect fn checkExpressionUnder<'scope>(
           contextual = true
         }
       }
-      if let Option<Bytes>.Some {value} = &writtenSuffix {
-        selected = Bytes.asSlice(&value)
-      }
+      let selected = Bytes.asSlice(&written)
       if contextual {
         if let Option<Shared<Type>>.Some {value} = &expected.* {
           let fits = Shared.with<Type, bool>(
