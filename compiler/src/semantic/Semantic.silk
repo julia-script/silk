@@ -39593,6 +39593,9 @@ effect fn copyTypeWithin(
       // `string` is a Copy view (TEXT-001).
       Type.String {..} => true
       Type.Callable {mode, ..} => mode == CallableMode.Shared
+      // A shared-access Effect runs repeatedly from a shared environment, so it is Copy
+      // (EFFECT-OWN-002), like a shared callable.
+      Type.Effect {mode, ..} => mode == CallableMode.Shared
       Type.CallableValue {contract, ..} => Shared.with<Type, CallableMode>(&contract, callableInvocationMode) == CallableMode.Shared
       Type.CallableOrigin {contract, ..} => Shared.with<Type, CallableMode>(&contract, callableInvocationMode) == CallableMode.Shared
       Type.CallableWitnessResult {witness} => {

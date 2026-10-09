@@ -4659,6 +4659,12 @@ fn passedOn() -> i32 {
   let provision = now() |> provided<Clock>(&clock)
   return run runOnce(provision)
 }
+fn later() -> Effect<i32 ? &Clock> { return now() }
+fn passedDeclared() -> i32 {
+  let clock = FixedClock { marker: 0 }
+  let provision = later() |> provided<Clock>(&clock)
+  return run runOnce(provision)
+}
 fn unprovided() -> i32 { return run now() |> mapped(addTwo) }
 effect fn keyed<'env, E, ?R>(self: once Effect<'env; i32 ! E ? R>, key: string<'env>) -> i32 ! E ? R { return run move self }
 effect fn paired<'env, T, E, ?R>(self: once Effect<'env; i32 ! E ? R>, other: &'env T) -> i32 ! E ? R { return run move self }
@@ -4703,6 +4709,9 @@ fn absentKey() -> i32 {
   let passedOn = run Semantic.demandMir(&mut store, &mut request, &id, b"passedOn")
   run Testing.expect(succeeded(&passedOn) && constructedEffectCount(&store, &passedOn, b"provided") == usize.ONE,
     "an invoked section's Effect whose stored arguments are Copy is Copy, so passing its place copies the construction")
+  let passedDeclared = run Semantic.demandBody(&mut store, &mut request, &id, b"passedDeclared")
+  run Testing.expect(succeeded(&passedDeclared),
+    "a shared-access Effect value is Copy, so a section storing it constructs a Copy Effect")
   let selected = run Semantic.demandBody(&mut store, &mut request, &id, b"selected")
   run Testing.expect(rejectsSpan(&selected, RejectionCode.ProviderSectionUnavailable, text, "provided(&clock)", 0),
     "a provision section whose selector waits for the piped Effect is a named deferral")
