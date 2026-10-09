@@ -1,8 +1,11 @@
-//! Exact semantic keys and canonical erased runtime families for selected instances.
+//! Exact semantic keys, region-erased code identities and canonical erased runtime families for
+//! selected instances.
 //!
 //! A key is canonical by construction: its application and provider types number their caller
-//! regions across the complete closed input domain ([`Numbering`]), so call sites that lend different caller-local
-//! regions in the same pattern share one instance.
+//! regions across the complete closed input domain ([`Numbering`]), so call sites that lend
+//! different caller-local regions in the same pattern share one semantic application. Lifetimes
+//! select no code, so every region pattern of an application also shares one backend instance
+//! ([`InstanceKey.sameInstance`]); the pattern remains validity evidence ([`InstanceKey.sameApplication`]).
 
 import hir.Hir {OwnerKind}
 import semantic.DeclarationId {DeclarationId}
@@ -25,7 +28,8 @@ import silk.vector {Vector}
 
 /// One canonical selected application, the generated C entry shim, one C export shim, or one
 /// type's drop glue. Cached projections are derived once. Caller regions are numbered canonically;
-/// `'static`, region sharing and every type, row, static and provider input remain exact.
+/// `'static`, region sharing and every type, row, static and provider input remain exact semantic
+/// evidence, and code identity erases only the regions.
 pub union InstanceKey {
   Function {
     pub application: Shared<Application>,
@@ -433,19 +437,28 @@ impl InstanceKey {
       _ => Option.none<Shared<Type>>()
     }
   }
-  /// Exact semantic environment equality for proof-bearing backend query inputs.
-  /// This equality never substitutes erased-family equality for semantic proof inputs.
+  /// Exact semantic equality, region sharing and `'static` included: the identity of the
+  /// application's validity evidence, never of its code.
   pub effect fn sameApplication(self: &Self, other: &InstanceKey) -> bool
   ! OutOfMemoryError ? &mut Allocator {
     if !InstanceKey.sameRuntimeBase(self, other) { return false }
-    // Backend identity is this complete canonical content. Use the same equality at query
-    // interning, discovery and references so equivalent keys always name the same definition.
+    let mut firstCoordinates = RuntimeEncoding.coordinates()
+    let first = run InstanceKey.encodingAt(self, &mut firstCoordinates)
+    let mut secondCoordinates = RuntimeEncoding.coordinates()
+    let second = run InstanceKey.encodingAt(other, &mut secondCoordinates)
+    return RuntimeEncoding.equals(Bytes.asSlice(&first), Bytes.asSlice(&second))
+  }
+  /// Backend identity: one definition, body and symbol for every region pattern of an
+  /// application. Query interning, discovery and references all use this equality.
+  pub effect fn sameInstance(self: &Self, other: &InstanceKey) -> bool
+  ! OutOfMemoryError ? &mut Allocator {
+    if !InstanceKey.sameRuntimeBase(self, other) { return false }
     let first = run InstanceKey.encoding(self)
     let second = run InstanceKey.encoding(other)
     return RuntimeEncoding.equals(Bytes.asSlice(&first), Bytes.asSlice(&second))
   }
-  /// Returns a hash that two keys share whenever [`sameRuntimeBase`] or [`sameApplication`]
-  /// reports them equal: the erased family's cached bytes, an export's symbol, or an entry shim's
+  /// Returns a hash that two keys share whenever [`sameRuntimeBase`], [`sameInstance`] or
+  /// [`sameApplication`] reports them equal: the erased family's cached bytes, an export's symbol, or an entry shim's
   /// declaration.
   pub fn runtimeHash(self: &Self) -> u64 {
     return match & self.* {
@@ -511,12 +524,14 @@ impl InstanceKey {
     }
     return run copyShared(&runtime)
   }
-  /// Linkage content retains exact application evidence. It contains no selected body or callee body.
+  /// Linkage content: the exact application with every region erased. It contains no selected
+  /// body or callee body.
   pub effect fn encoding(self: &Self) -> Bytes ! OutOfMemoryError ? &mut Allocator {
-    let mut coordinates = RuntimeEncoding.coordinates()
+    let mut coordinates = RuntimeEncoding.codeCoordinates()
     return run InstanceKey.encodingAt(self, &mut coordinates)
   }
-  /// Exact linkage content, with local regions expressed within their declaration.
+  /// Exact content under `coordinates`: semantic evidence keeps regions, with local regions
+  /// expressed within their declaration; code coordinates erase them.
   pub effect fn encodingAt(self: &Self, coordinates: &mut Coordinates) -> Bytes
   ! OutOfMemoryError
   ? &mut Allocator {

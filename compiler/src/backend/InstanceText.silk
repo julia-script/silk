@@ -60,7 +60,7 @@ pub effect fn content(
   foreign: &[CAbi.Signature],
   signatures: &[u8],
 ) -> Bytes ! OutOfMemoryError ? &mut Allocator {
-  let mut coordinates = RuntimeEncoding.coordinates()
+  let mut coordinates = RuntimeEncoding.codeCoordinates()
   let mut identities = Vector.make<InstanceIdentity>()
   run Vector.append<InstanceIdentity>(
     &mut identities,

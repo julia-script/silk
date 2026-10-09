@@ -1882,7 +1882,7 @@ pub fn pointerHasMutableAccess(value: &Type) -> bool {
 
 pub effect fn emitClosedMir(function: &MirFunction, target: &MachineTarget, layouts: &[TypeLayout], foreign: &[CAbi.Signature]) -> Bytes
 ! BackendGap | OutOfMemoryError ? &mut Allocator {
-  let mut coordinates = RuntimeEncoding.coordinates()
+  let mut coordinates = RuntimeEncoding.codeCoordinates()
   let mut identities = Vector.make<InstanceIdentity>()
   run Vector.append<InstanceIdentity>(
     &mut identities,
