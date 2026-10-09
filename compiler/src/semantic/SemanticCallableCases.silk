@@ -2601,7 +2601,8 @@ fn operand() -> i32 { return one(match 1 { _ => { return 17 } }) }
 }
 
 // A failure whose borrowed payload carries a call's loan region meets the declared union member it
-// differs from only in covariant regions, as it meets that member declared alone (UNION-001).
+// differs from only in covariant regions, as it meets that member declared alone (UNION-001), whether
+// it is failed directly or propagated by `run`.
 test effect fn failurePayloadMeetsItsUnionMemberByRegion() -> ()
 ! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -2625,13 +2626,20 @@ effect fn begin<'head>(exchange: &'head mut Exchange) -> i32 ! View<'head> | Oth
 effect fn foreign<'head>(exchange: &'head mut Exchange) -> i32 ! View<'head> | Other {
   fail Parser { value: 1 }
 }
+effect fn decode<'h>(view: View<'h>) -> i32 ! View<'h> { fail move view }
+effect fn relay<'head>(exchange: &'head mut Exchange) -> i32 ! View<'head> | Other {
+  let view = head(&exchange.connection.parser)
+  return run decode(move view)
+}
 """
   let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
   let mut request = Request.make()
   let begin = run Semantic.demandBody(&mut store, &mut request, &id, b"begin")
   let foreign = run Semantic.demandBody(&mut store, &mut request, &id, b"foreign")
+  let relay = run Semantic.demandBody(&mut store, &mut request, &id, b"relay")
   run Testing.expect(succeeded(&begin) && rejectsSpan(&foreign, RejectionCode.UndeclaredFailure, text, "Parser { value: 1 }", 0),
     "a payload differing from one union member only in regions is injected as it, and an unrelated payload stays undeclared")
+  run Testing.expect(succeeded(&relay), "a run failure differing from one declared member only in regions is covered by it")
   return ()
 }
 
