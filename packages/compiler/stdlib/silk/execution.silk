@@ -84,12 +84,21 @@ impl Execution {
     onComplete: C,
     onSuspend: S
   ) -> () {
-    return run Intrinsic.executionDrive<A, D, C, S>(
+    let reference = Intrinsic.executionRefOf<A>(&execution)
+    let phase = Intrinsic.executionLoad(&reference, phaseWord)
+    if phase != initial && phase != initialReady && phase != eligible { trap() }
+    Intrinsic.executionStore(&reference, phaseWord, running)
+    run Intrinsic.executionDrive<A, D, C, S>(
       move execution,
       move branchState,
       move onComplete,
       move onSuspend
     )
+    // A signal latched during registration notifies once the owner holds the Execution again.
+    if Intrinsic.executionLive(&reference) && Intrinsic.executionLoad(&reference, phaseWord) == latched {
+      notifyReady(&reference)
+    }
+    return ()
   }
 
   /// Notifies the fixed readiness endpoint for one `Initial` Execution exactly once.
@@ -104,7 +113,11 @@ impl Execution {
   /// The Execution must still be `Initial`. Calling this operation again, or calling it after the
   /// Execution has been driven, parked, completed, or destroyed, is a fatal state trap.
   pub fn notifyInitial<A>(execution: &mut Intrinsic.Execution<A>) -> () {
-    return Intrinsic.executionNotifyInitial<A>(execution)
+    let reference = Intrinsic.executionRefOf<A>(execution)
+    if Intrinsic.executionLoad(&reference, phaseWord) != initial { trap() }
+    Intrinsic.executionStore(&reference, phaseWord, initialReady)
+    Intrinsic.executionNotify(&reference)
+    return ()
   }
 
   /// Relinquishes the currently Running Execution until one external readiness signal arrives.
@@ -122,10 +135,71 @@ impl Execution {
   pub effect fn park<
     'env,
     G,
-    F: once fn<'env>(Intrinsic.Wake) -> G + Intrinsic.NonParking
+    F: once fn<'env>(Wake) -> G + Intrinsic.NonParking
   >(register: F) -> () {
-    return run Intrinsic.park<G, F>(move register)
+    let reference = run Intrinsic.executionCurrent()
+    let generation = Intrinsic.executionLoad(&reference, generationWord) + 1
+    Intrinsic.executionStore(&reference, generationWord, generation)
+    Intrinsic.executionStore(&reference, phaseWord, registering)
+    let guard = register(Wake { reference: run Intrinsic.executionCurrent(), generation: generation })
+    // A latched signal stays latched; the drive notifies it after the owner holds the Execution.
+    if Intrinsic.executionLoad(&reference, phaseWord) != latched {
+      Intrinsic.executionStore(&reference, phaseWord, dormant)
+    }
+    drop reference
+    run Intrinsic.relinquish()
+    drop guard
+    return ()
   }
+
+  /// Signals one parked generation: a dormant Execution becomes eligible and its fixed readiness
+  /// endpoint runs once; a signal during registration is latched. A stale, completed or destroyed
+  /// generation ignores the signal and releases the Wake's authority.
+  pub fn wake(wake: Wake) -> () {
+    let Wake { reference, generation } = move wake
+    if !Intrinsic.executionLive(&reference) { return () }
+    if Intrinsic.executionLoad(&reference, generationWord) != generation { return () }
+    let phase = Intrinsic.executionLoad(&reference, phaseWord)
+    if phase == registering {
+      Intrinsic.executionStore(&reference, phaseWord, latched)
+      return ()
+    }
+    if phase == dormant { notifyReady(&reference) }
+    return ()
+  }
+}
+
+// Runs the fixed readiness endpoint once. The Execution is not driveable while it runs, and
+// becomes eligible after it unless the endpoint dropped it.
+fn notifyReady(reference: &Intrinsic.ExecutionRef) -> () {
+  Intrinsic.executionStore(reference, phaseWord, notifying)
+  Intrinsic.executionNotify(reference)
+  if Intrinsic.executionLive(reference) { Intrinsic.executionStore(reference, phaseWord, eligible) }
+  return ()
+}
+
+/// The affine readiness authority for one parked generation of an Execution. Dropping it releases
+/// its authority without signaling.
+pub struct Wake {
+  reference: Intrinsic.ExecutionRef
+  generation: usize
+}
+
+// The package's source control words: the readiness phase and the parked generation.
+const phaseWord: usize = 0
+const generationWord: usize = 1
+const initial: usize = 0
+const initialReady: usize = 1
+const running: usize = 2
+const registering: usize = 3
+const latched: usize = 4
+const dormant: usize = 5
+const eligible: usize = 6
+const notifying: usize = 7
+
+fn trap() -> () {
+  let boom = 1 / 0
+  return ()
 }
 
 fn absurd<T>() -> T {
