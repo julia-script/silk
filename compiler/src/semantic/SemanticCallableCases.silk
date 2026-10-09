@@ -5932,6 +5932,45 @@ effect fn callableUnionDropBlock(block: &MirBlock, environment: &Shared<Type>, t
   return false
 }
 
+// A `provides` bound's elided provider region is a fresh binder of its own function. A generic
+// caller proves a callee's `&mut P provides &S from R` by the one premise of its own with that
+// selector and source row, which fixes the callee's region; a premise over another row does not.
+test effect fn providesBoundRegionComesFromTheCallerPremise() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run providesPremiseClaims() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn providesPremiseClaims() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let id = run module("provides-premises.silk")
+  let text = """
+import silk.allocator { Allocator }
+service Counter { effect fn get() -> i32 ? &Counter }
+effect<'env> fn inner<P: 'env, 'env>(value: P) -> i32 where &mut P provides &Counter from &mut Counter { return 40 }
+effect<'env> fn forwarded<P: 'env, 'env>(value: P) -> i32 where &mut P provides &Counter from &mut Counter {
+  return run inner(move value)
+}
+effect<'env> fn chosen<P: 'env, 'env>(value: P) -> i32
+where &mut P provides &Counter from &mut Counter | &mut Allocator, &mut P provides &Counter from &mut Counter {
+  return run inner(move value)
+}
+effect<'env> fn widened<P: 'env, 'env>(value: P) -> i32 where &mut P provides &Counter from &mut Counter | &mut Allocator {
+  return run inner(move value)
+}
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+  let mut request = Request.make()
+  let forwarded = run Semantic.demandBody(&mut store, &mut request, &id, b"forwarded")
+  let chosen = run Semantic.demandBody(&mut store, &mut request, &id, b"chosen")
+  let widened = run Semantic.demandBody(&mut store, &mut request, &id, b"widened")
+  run Testing.expect(succeeded(&forwarded) && succeeded(&chosen),
+    "a generic call's provides bound takes its elided region from the caller's premise with the same rows")
+  run Testing.expect(rejectsSpan(&widened, RejectionCode.Unsupported, text, "inner(move value)", 2),
+    "a caller premise over another source row does not prove the callee's provides bound")
+  return ()
+}
+
 // A generic binding in the shape of `Effect.bindRequirementOwned` serves its key from the owned
 // provider inside its own instance, whose row is then empty; the provider type keys the callee.
 test effect fn ownedProviderServesGenericBinding() -> ()

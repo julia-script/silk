@@ -21859,7 +21859,9 @@ effect fn inferFromProvides(callOwner: &Shared<DeclarationId>, declared: &[Const
   let mut at = usize.ZERO
   while at < declared.length {
     if let Constraint.Provides {provider: offered, selector: premiseSelector, source: premiseSource} = &declared[at] {
-      if run Row.equalsShared(&wantedSelector, &premiseSelector) && run Row.equalsShared(&wantedSource, &premiseSource) {
+      let sameSelector = run Row.equalsShared(&wantedSelector, &premiseSelector)
+      let sameSource = run Row.equalsShared(&wantedSource, &premiseSource)
+      if sameSelector && sameSource {
         let mut trial = run copyBindings(Vector.asSlice<Binding>(&inferred.*))
         let matched = run Type.unify(&wanted, &offered, Vector.asSlice<Shared<DeclarationId>>(&variables), Comparison.Exact,
           &mut trial)
