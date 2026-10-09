@@ -1480,14 +1480,17 @@ effect fn markMoved(builder: &mut Builder, index: usize, origin: Origin) -> () !
 }
 
 // Expand one snapshot only using a complete prepared partition. A compact live union does not
-// authenticate an active member merely because another branch selected that member.
+// authenticate an active member merely because another branch selected that member, so only a
+// store, which writes inside one member, refuses it. A drop or a join keeps the compact node as
+// one whole component: its glue, under its flag when Maybe, selects the stored member at runtime.
 effect fn expandState(builder: &mut Builder, node: usize, state: OwnerState, missing: usize, edge: usize,
-  output: &mut Vector<ComponentState>, origin: Origin) -> () ! Gap | CanonicalizationFailure | OutOfMemoryError ? &mut Allocator {
+  storing: bool, output: &mut Vector<ComponentState>, origin: Origin) -> () ! Gap | CanonicalizationFailure | OutOfMemoryError ? &mut Allocator {
   let nodes = Vector.asSlice<CleanupNode>(&builder.cleanup)
-  if !nodes[node].expanded {
+  let compact = nodes[node].active && state != OwnerState.Moved
+  if !nodes[node].expanded || (compact && !storing) {
     return run Vector.append<ComponentState>(&mut output.*, ComponentState {node: node, state: state, missing: missing})
   }
-  if nodes[node].active && state != OwnerState.Moved {
+  if compact {
     let identity = InstanceKey.identity(&builder.function.key)
     return run unsupported(&identity, origin, GapCode.Cleanup)
   }
@@ -1504,28 +1507,28 @@ effect fn expandState(builder: &mut Builder, node: usize, state: OwnerState, mis
       let childFlag = run componentFlag(&mut builder.*, listed[at], origin)
       run flagOnEdge(&mut builder.*, edge, childFlag, Operand.Copy {place: place(parentFlag)}, origin)
     }
-    run expandState(&mut builder.*, listed[at], state, missing, edge, &mut output.*, origin)
+    run expandState(&mut builder.*, listed[at], state, missing, edge, storing, &mut output.*, origin)
     at = at + usize.ONE
   }
   return ()
 }
 
-effect fn normalizedComponents(builder: &mut Builder, states: &Vector<ComponentState>, edge: usize, origin: Origin)
+effect fn normalizedComponents(builder: &mut Builder, states: &Vector<ComponentState>, edge: usize, storing: bool, origin: Origin)
   -> Vector<ComponentState> ! Gap | CanonicalizationFailure | OutOfMemoryError ? &mut Allocator {
   let listed = Vector.asSlice<ComponentState>(states)
   let mut output = Vector.make<ComponentState>()
   let mut at = usize.ZERO
   while at < listed.length {
-    run expandState(&mut builder.*, listed[at].node, listed[at].state, listed[at].missing, edge, &mut output, origin)
+    run expandState(&mut builder.*, listed[at].node, listed[at].state, listed[at].missing, edge, storing, &mut output, origin)
     at = at + usize.ONE
   }
   return move output
 }
 
-effect fn normalizeOwner(builder: &mut Builder, index: usize, origin: Origin) -> () ! Gap | CanonicalizationFailure | OutOfMemoryError ? &mut Allocator {
+effect fn normalizeOwner(builder: &mut Builder, index: usize, storing: bool, origin: Origin) -> () ! Gap | CanonicalizationFailure | OutOfMemoryError ? &mut Allocator {
   let saved = run copyOwnerComponents(&builder.*, index)
   let edge = builder.current
-  let normalized = run normalizedComponents(&mut builder.*, &saved, edge, origin)
+  let normalized = run normalizedComponents(&mut builder.*, &saved, edge, storing, origin)
   let mut owners = Vector.asMutSlice<Owner>(&mut builder.*.owners)
   owners[index].components = move normalized
   return ()
@@ -1637,7 +1640,8 @@ effect fn arrival(builder: &Builder) -> Arrival ! OutOfMemoryError ? &mut Alloca
   return Arrival {block: builder.current, states: run ownerStates(builder)}
 }
 
-effect fn flagLoopOwners(builder: &mut Builder, origin: Origin) -> () ! OutOfMemoryError ? &mut Allocator {
+effect fn flagLoopOwners(builder: &mut Builder, origin: Origin) -> Vector<usize> ! OutOfMemoryError ? &mut Allocator {
+  let mut flipped = Vector.make<usize>()
   let count = Vector.length<Owner>(&builder.owners)
   let mut index = usize.ZERO
   while index < count {
@@ -1652,12 +1656,70 @@ effect fn flagLoopOwners(builder: &mut Builder, origin: Origin) -> () ! OutOfMem
         let mut owners = Vector.asMutSlice<Owner>(&mut builder.*.owners)
         let mut components = Vector.asMutSlice<ComponentState>(&mut owners[index].components)
         components[at].state = OwnerState.Maybe
+        run Vector.append<usize>(&mut flipped, node)
       }
       at = at + usize.ONE
     }
     index = index + usize.ONE
   }
+  return move flipped
+}
+
+// A loop marks each moved component Maybe so its body may refill it. When nothing inside the loop
+// writes anything but `false` to that component's flag, it is still moved on every exit, so the
+// exits join it as Moved rather than as a flagged value that no partition of it can align with.
+effect fn settleLoopExits(builder: &Builder, flipped: &[usize], firstBlock: usize, exits: &mut Vector<Arrival>) -> ()
+! OutOfMemoryError ? &mut Allocator {
+  let nodes = Vector.asSlice<CleanupNode>(&builder.cleanup)
+  let blocks = Vector.asSlice<Block>(&builder.function.blocks)
+  let mut at = usize.ZERO
+  while at < flipped.length {
+    if !flagSetInside(blocks, firstBlock, nodes[flipped[at]].flag) {
+      let mut arrivals = Vector.asMutSlice<Arrival>(&mut exits.*)
+      let mut edge = usize.ZERO
+      while edge < arrivals.length {
+        let mut owners = Vector.asMutSlice<OwnerSnapshot>(&mut arrivals[edge].states)
+        let mut owner = usize.ZERO
+        while owner < owners.length {
+          let mut components = Vector.asMutSlice<ComponentState>(&mut owners[owner].components)
+          let mut position = usize.ZERO
+          while position < components.length {
+            if components[position].node == flipped[at] && components[position].state == OwnerState.Maybe {
+              components[position].state = OwnerState.Moved
+            }
+            position = position + usize.ONE
+          }
+          owner = owner + usize.ONE
+        }
+        edge = edge + usize.ONE
+      }
+    }
+    at = at + usize.ONE
+  }
   return ()
+}
+
+// Whether a block from `firstBlock` on may store anything but `false` into `flag`.
+fn flagSetInside(blocks: &[Block], firstBlock: usize, flag: usize) -> bool {
+  let mut at = firstBlock
+  while at < blocks.length {
+    let statements = Vector.asSlice<Statement>(&blocks[at].statements)
+    let mut position = usize.ZERO
+    while position < statements.length {
+      if let Statement.Assign {destination, value, ..} = &statements[position] {
+        if destination.local == flag {
+          let cleared = match &value {
+            Rvalue.Use {value: Operand.Boolean {value: set}} => !set
+            _ => false
+          }
+          if !cleared { return true }
+        }
+      }
+      position = position + usize.ONE
+    }
+    at = at + usize.ONE
+  }
+  return false
 }
 
 fn sameFrontier(left: &Vector<ComponentState>, right: &Vector<ComponentState>, backEdge: bool) -> bool {
@@ -1790,7 +1852,7 @@ effect fn joinOwners(builder: &mut Builder, arrivals: &[Arrival], origin: Origin
     while at < arrivals.length {
       let snapshots = Vector.asSlice<OwnerSnapshot>(&arrivals[at].states)
       let saved = &snapshots[index]
-      let components = run normalizedComponents(&mut builder.*, &saved.components, arrivals[at].block, origin)
+      let components = run normalizedComponents(&mut builder.*, &saved.components, arrivals[at].block, false, origin)
       if saved.ended { ended = true }
       run Vector.append<OwnerSnapshot>(&mut incoming, OwnerSnapshot {components: move components, ended: saved.ended})
       at = at + usize.ONE
@@ -1890,7 +1952,7 @@ effect fn dropOwner(builder: &mut Builder, index: usize, origin: Origin) -> () !
     let complete = ComponentState {node: owners[index].root, state: OwnerState.Live, missing: usize.MAX}
     return run dropComponent(&mut builder.*, &complete, origin)
   }
-  run normalizeOwner(&mut builder.*, index, origin)
+  run normalizeOwner(&mut builder.*, index, false, origin)
   let components = run copyOwnerComponents(&builder.*, index)
   let listed = Vector.asSlice<ComponentState>(&components)
   let mut at = usize.ZERO
@@ -2252,7 +2314,7 @@ effect fn replacedComponents(builder: &mut Builder, index: usize, destination: &
     return run unsupported(&identity, origin, GapCode.Cleanup)
   }
   if !whole && Vector.asSlice<Owner>(&builder.owners)[index].ended { return run unsupported(&identity, origin, GapCode.Cleanup) }
-  run normalizeOwner(&mut builder.*, index, origin)
+  run normalizeOwner(&mut builder.*, index, true, origin)
   let saved = run copyOwnerComponents(&builder.*, index)
   let listed = Vector.asSlice<ComponentState>(&saved)
   let written = Vector.asSlice<Projection>(&destination.projections)
@@ -6481,7 +6543,7 @@ effect fn lowerStatement(builder: &mut Builder, body: &Shared<TypedBody>, hir: &
       let header = run block(&mut builder.*, origin)
       let loopBlock = run block(&mut builder.*, origin)
       let exit = run block(&mut builder.*, origin)
-      run flagLoopOwners(&mut builder.*, origin)
+      let flipped = run flagLoopOwners(&mut builder.*, origin)
       let entry = run ownerStates(&builder.*)
       terminate(&mut builder.*, Terminator.Goto {target: header, origin: origin})
       resume(&mut builder.*, header)
@@ -6512,10 +6574,11 @@ effect fn lowerStatement(builder: &mut Builder, body: &Shared<TypedBody>, hir: &
         run checkBackEdge(&builder.*, &entry, origin)
         terminate(&mut builder.*, Terminator.Goto {target: header, origin: origin})
       }
-      let finished = match move Vector.pop<LoopTargets>(&mut builder.*.loops) {
+      let mut finished = match move Vector.pop<LoopTargets>(&mut builder.*.loops) {
         Option<LoopTargets>.Some {value} => value
         Option<LoopTargets>.None => { return run unsupported(&owner, origin, GapCode.BreakOutsideLoop) }
       }
+      run settleLoopExits(&builder.*, Vector.asSlice<usize>(&flipped), header, &mut finished.exits)
       resume(&mut builder.*, exit)
       run joinOwners(&mut builder.*, Vector.asSlice<Arrival>(&finished.exits), origin)
     }
