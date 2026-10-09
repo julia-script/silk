@@ -6682,30 +6682,9 @@ effect fn declarationApplication(
         return Result.failResult<DeclarationApplication, Shared<Rejection>>(move error)
       }
     }
-    let incomplete = run completeAggregateBinders(
-      &mut resolver.*,
-      &mut owner.*,
-      &mut dependencies.*,
-      moduleOrdinal,
-      &module,
-      declaration,
-      span,
-      &mut binders,
-    )
+    let incomplete = run completeDeclarationBinders(&mut resolver.*, &mut owner.*, &mut dependencies.*, moduleOrdinal,
+      &module, declaration, span, &mut binders)
     if let Option<Shared<Rejection>>.Some {value: diagnostic} = move incomplete {
-      return Result.failResult<DeclarationApplication, Shared<Rejection>>(move diagnostic)
-    }
-    let boundLifetimes = run completeBoundBinders(
-      &mut resolver.*,
-      &mut owner.*,
-      &mut dependencies.*,
-      moduleOrdinal,
-      &module,
-      declaration,
-      span,
-      &mut binders,
-    )
-    if let Option<Shared<Rejection>>.Some {value: diagnostic} = move boundLifetimes {
       return Result.failResult<DeclarationApplication, Shared<Rejection>>(move diagnostic)
     }
     let rowBinders = rowBinderCount(Vector.asSlice<Binder>(&binders))
@@ -10637,16 +10616,8 @@ effect fn resolveMemberShape(
         return memberRejected(move error, move dependencies)
       }
     }
-    let incomplete = run completeAggregateBinders(
-      &mut resolver.*,
-      &mut owner.*,
-      &mut dependencies,
-      key.module,
-      &module,
-      key.declaration,
-      value.span,
-      &mut binders,
-    )
+    let incomplete = run completeDeclarationBinders(&mut resolver.*, &mut owner.*, &mut dependencies, key.module, &module,
+      key.declaration, value.span, &mut binders)
     if let Option<Shared<Rejection>>.Some {value: diagnostic} = move incomplete {
       return memberRejected(move diagnostic, move dependencies)
     }
@@ -15771,6 +15742,29 @@ fn contractLifetimeAt(answer: &Result<Answer, NoRejection>, at: usize) -> Option
     }
   }
   return Option.none<Shared<Lifetime>>()
+}
+
+// A declaration's complete binder list: written binders, then the lifetimes its fields generate,
+// then the omitted lifetimes its bounds own. Every application of the declaration supplies them all.
+effect fn completeDeclarationBinders(
+  resolver: &mut Resolver,
+  owner: &mut Query<Word, Answer, NoRejection>,
+  dependencies: &mut Vector<Dependency>,
+  moduleOrdinal: usize,
+  module: &ModuleId,
+  ordinal: usize,
+  span: Span,
+  binders: &mut Vector<Binder>,
+) -> Option<Shared<Rejection>>
+! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError
+? &mut Allocator {
+  let incomplete = run completeAggregateBinders(&mut resolver.*, &mut owner.*, &mut dependencies.*, moduleOrdinal, module,
+    ordinal, span, &mut binders.*)
+  if let Option<Shared<Rejection>>.Some {value: diagnostic} = move incomplete {
+    return Option.some<Shared<Rejection>>(move diagnostic)
+  }
+  return run completeBoundBinders(&mut resolver.*, &mut owner.*, &mut dependencies.*, moduleOrdinal, module, ordinal, span,
+    &mut binders.*)
 }
 
 // A declaration's contract owns omitted lifetimes in its bounds. Add those binders after its
@@ -27028,30 +27022,9 @@ effect fn inferredAggregateDeclaration(
       return Result.failResult<Option<InferredAggregateTarget>, Shared<Rejection>>(move error)
     }
   }
-  let aggregateFailure = run completeAggregateBinders(
-    &mut resolver.*,
-    &mut owner.*,
-    &mut dependencies.*,
-    declaration.module,
-    &declaredModule,
-    declaration.ordinal,
-    span,
-    &mut binders,
-  )
-  if let Option<Shared<Rejection>>.Some {value: diagnostic} = move aggregateFailure {
-    return Result.failResult<Option<InferredAggregateTarget>, Shared<Rejection>>(move diagnostic)
-  }
-  let boundFailure = run completeBoundBinders(
-    &mut resolver.*,
-    &mut owner.*,
-    &mut dependencies.*,
-    declaration.module,
-    &declaredModule,
-    declaration.ordinal,
-    span,
-    &mut binders,
-  )
-  if let Option<Shared<Rejection>>.Some {value: diagnostic} = move boundFailure {
+  let incomplete = run completeDeclarationBinders(&mut resolver.*, &mut owner.*, &mut dependencies.*, declaration.module,
+    &declaredModule, declaration.ordinal, span, &mut binders)
+  if let Option<Shared<Rejection>>.Some {value: diagnostic} = move incomplete {
     return Result.failResult<Option<InferredAggregateTarget>, Shared<Rejection>>(move diagnostic)
   }
   if Vector.length<Binder>(&binders) > usize.ZERO {
@@ -27650,7 +27623,7 @@ effect fn callTupleFields(
       Result<Vector<Binder>, Shared<Rejection>>.Success {value} => move value
       Result<Vector<Binder>, Shared<Rejection>>.Failure {error} => { return Result.failResult<Vector<Shared<Type>>, Shared<Rejection>>(move error) }
     }
-    let failed = run completeAggregateBinders(&mut resolver.*, &mut owner.*, &mut dependencies.*,
+    let failed = run completeDeclarationBinders(&mut resolver.*, &mut owner.*, &mut dependencies.*,
       moduleOrdinal, declaredModule, ordinal, span, &mut binders)
     if let Option<Shared<Rejection>>.Some {value} = move failed { return Result.failResult<Vector<Shared<Type>>, Shared<Rejection>>(move value) }
     let generated = Vector.make<Shared<Lifetime>>()
@@ -32193,6 +32166,54 @@ effect fn shortenedAggregateBinder(
   return false
 }
 
+// A callable bound's omitted environment is a declaration lifetime that no field mentions. The
+// field's offered representation infers it, as a call infers its own bound environments.
+effect fn aggregateBoundBindings(
+  resolver: &mut Resolver, owner: &mut Query<Word, Answer, NoRejection>,
+  dependencies: &mut Vector<Dependency>, module: &ModuleId, recordType: &Shared<Type>,
+  target: &InferredAggregateTarget, inferred: &[Binding], constraints: &[Constraint], span: Span,
+) -> Result<Vector<Binding>, Shared<Rejection>>
+! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
+  let mut bindings = run copyBindings(inferred)
+  let declaredModule = run resolvedModule(&resolver.*, target.module)
+  if !run declaresBounds(&mut resolver.*, &declaredModule, target.declaration) {
+    return Result.succeed<Vector<Binding>, Shared<Rejection>>(move bindings)
+  }
+  let partial = run Type.applyBindings(recordType, inferred, true)
+  let count = Shared.with<Type, usize>(&partial, applicationLength)
+  let mut arguments = Vector.make<Argument>()
+  let mut at = usize.ZERO
+  while at < count {
+    let argument = Shared.with<Type, Option<Argument>>(&partial, fn(ty: &Type) -> Option<Argument> { return applicationArgument(ty, at) })
+    if let Option<Argument>.Some {value} = move argument { run Vector.append<Argument>(&mut arguments, move value) }
+    at = at + usize.ONE
+  }
+  let resolvedBounds = run appliedDeclarationBounds(&mut resolver.*, &mut owner.*, &mut dependencies.*, target.module,
+    target.declaration, target.generics, Vector.asSlice<Binder>(&target.binders), Vector.asSlice<Argument>(&arguments), span,
+    target.isPublic)
+  let bounds = match move resolvedBounds {
+    Result<Vector<Constraint>, Shared<Rejection>>.Success {value} => move value
+    Result<Vector<Constraint>, Shared<Rejection>>.Failure {error} => { return Result.failResult<Vector<Binding>, Shared<Rejection>>(move error) }
+  }
+  let fresh = run DeclarationId.copyShared(&target.owner)
+  let listed = Vector.asSlice<Constraint>(&bounds)
+  at = usize.ZERO
+  while at < listed.length {
+    // Only a representation the fields fixed is evidence; an open one stays for completion.
+    if let Constraint.Represents {parameter, contract} = &listed[at] {
+      if !run typeMentionsOwner(&parameter, &fresh) {
+        let failed = run inferCallableBound(&mut resolver.*, &mut owner.*, &mut dependencies.*, module, &fresh, constraints,
+          &mut bindings, &parameter, &contract, span)
+        if let Option<Shared<Rejection>>.Some {value: diagnostic} = move failed {
+          return Result.failResult<Vector<Binding>, Shared<Rejection>>(move diagnostic)
+        }
+      }
+    }
+    at = at + usize.ONE
+  }
+  return Result.succeed<Vector<Binding>, Shared<Rejection>>(move bindings)
+}
+
 // The same complete nominal application and bound proof completes structs and union payloads.
 effect fn completeAggregateInference(
   resolver: &mut Resolver, owner: &mut Query<Word, Answer, NoRejection>,
@@ -32203,7 +32224,13 @@ effect fn completeAggregateInference(
 ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
   let mut completed = Shared.clone<Type>(recordType)
   if let Option<InferredAggregateTarget>.Some {value: target} = &inference.* {
-    completed = run Type.applyBindings(recordType, inferred, true)
+    let proved = run aggregateBoundBindings(&mut resolver.*, &mut owner.*, &mut dependencies.*, module, recordType,
+      &target, inferred, constraints, span)
+    let bound = match move proved {
+      Result<Vector<Binding>, Shared<Rejection>>.Success {value} => value
+      Result<Vector<Binding>, Shared<Rejection>>.Failure {error} => { return Result.failResult<Shared<Type>, Shared<Rejection>>(move error) }
+    }
+    completed = run Type.applyBindings(recordType, Vector.asSlice<Binding>(&bound), true)
     let targetOwner = Shared.clone<DeclarationId>(&target.owner)
     let ownerId = run DeclarationId.copyShared(&targetOwner)
     if run typeMentionsOwner(&completed, &ownerId) {
