@@ -4264,7 +4264,7 @@ effect fn expression(builder: &mut Builder, body: &Shared<TypedBody>, hir: &Modu
       // value's stored arguments and the supplied operands, in target parameter order (EFF-001).
       if environment && invokedConstruction(body, callNode) {
         // An anonymous target's invocation has no exact representation; only its run executes it.
-        if Shared.with<Type, bool>(&ty, effectContract) { return run unsupported(&owner, origin, GapCode.EffectForm) }
+        if Shared.with<Type, bool>(&ty, effectContract) { return run unsupported(&owner, origin, GapCode.CAbiTarget) }
         let mut values = run callArguments(&mut builder.*, body, hir, callNode, count, true, &foreign, origin)
         if !builder.live { return Operand.Unit }
         let mut fields = Vector.make<AggregateField>()
@@ -5648,7 +5648,7 @@ effect fn lowerAcquisition(builder: &mut Builder, body: &Shared<TypedBody>, hir:
   }
   let failureType = match move Shared.with<Type, Option<Shared<Type>>>(&effectType, effectFailure) {
     Option<Shared<Type>>.Some {value} => value
-    Option<Shared<Type>>.None => { return run unsupported(&owner, origin, GapCode.EffectForm) }
+    Option<Shared<Type>>.None => { return run unsupported(&owner, origin, GapCode.ForeignContract) }
   }
   if builder.failure == usize.MAX { return run unsupported(&owner, origin, GapCode.TypedForm) }
   let mut operands = run storageOperands(&mut builder.*, body, hir, node, usize.ONE, origin)
@@ -5979,7 +5979,7 @@ effect fn packageHelper(creator: &Builder, key: InstanceKey, package: &Shared<Ty
   match move work {
     HelperWork.Start {steps} => {
       let ran = Vector.asSlice<RunPlan>(&steps)
-      if ran.length == usize.ZERO { return run unsupported(&owner, origin, GapCode.EffectForm) }
+      if ran.length == usize.ZERO { return run unsupported(&owner, origin, GapCode.ForeignExport) }
       let result = match move SealedCore.element(&listed[header]) {
         Option<Shared<Type>>.Some {value} => value
         Option<Shared<Type>>.None => { return run unsupported(&owner, origin, GapCode.TypedForm) }
@@ -6171,9 +6171,9 @@ effect fn lowerStorage(builder: &mut Builder, body: &Shared<TypedBody>, hir: &Mo
   let owner = InstanceKey.identity(&builder.function.key)
   if operation == StorageOperation.Replace { return run lowerReplace(&mut builder.*, body, hir, node, ty, origin) }
   // Only a run executes the allocation boundary; a stored acquisition Effect has no runner.
-  if operation == StorageOperation.SystemAllocationAcquire { return run unsupported(&owner, origin, GapCode.EffectForm) }
+  if operation == StorageOperation.SystemAllocationAcquire { return run unsupported(&owner, origin, GapCode.ForeignAbi) }
   // One activation is an Effect that only its run executes, in place.
-  if operation == StorageOperation.ExecutionDrive { return run unsupported(&owner, origin, GapCode.EffectForm) }
+  if operation == StorageOperation.ExecutionDrive { return run unsupported(&owner, origin, GapCode.IntegerLiteral) }
   let plan = match move takeStorage(&mut builder.*, node) {
     Option<StoragePlan>.Some {value} => value
     Option<StoragePlan>.None => { return run unsupported(&owner, origin, GapCode.TypedForm) }
@@ -6464,11 +6464,11 @@ effect fn lowerRun(builder: &mut Builder, body: &Shared<TypedBody>, hir: &Module
   }
   let constructionType = match move constructed {
     Option<Shared<Type>>.Some {value: selected} => selected
-    Option<Shared<Type>>.None => { return run unsupported(&owner, origin, GapCode.EffectForm) }
+    Option<Shared<Type>>.None => { return run unsupported(&owner, origin, GapCode.FloatLiteral) }
   }
   let promisedFailure = match move Shared.with<Type, Option<Shared<Type>>>(&constructionType, effectFailure) {
     Option<Shared<Type>>.Some {value: selected} => selected
-    Option<Shared<Type>>.None => { return run unsupported(&owner, origin, GapCode.EffectForm) }
+    Option<Shared<Type>>.None => { return run unsupported(&owner, origin, GapCode.MissingCallArgument) }
   }
   let calleeFailure = edgeFailure(&builder.*, node, &promisedFailure)
   let mut values = run callArguments(&mut builder.*, body, hir, node, count, environment || invoked, &Option.none<Shared<DeclarationId>>(), origin)
@@ -7104,11 +7104,11 @@ effect fn providerOperand(builder: &mut Builder, source: &ProviderSource, bound:
   let owner = InstanceKey.identity(&builder.function.key)
   match &source.* {
     ProviderSource.Own {index} => {
-      if index >= Vector.length<usize>(&builder.providers) { return run unsupported(&owner, origin, GapCode.EffectForm) }
+      if index >= Vector.length<usize>(&builder.providers) { return run unsupported(&owner, origin, GapCode.ExpectedExpression) }
       return Operand.Copy {place: place(Vector.asSlice<usize>(&builder.providers)[index])}
     }
     ProviderSource.Bound {depth, owned, access, address} => {
-      if depth >= bound.length { return run unsupported(&owner, origin, GapCode.EffectForm) }
+      if depth >= bound.length { return run unsupported(&owner, origin, GapCode.ExpectedPlace) }
       if !owned { return Operand.Copy {place: run copyPlace(&bound[depth].place)} }
       let reference = run temporary(&mut builder.*, &address, origin)
       run assign(&mut builder.*, place(reference), Rvalue.Ref {access: access, place: run copyPlace(&bound[depth].place)}, origin)
