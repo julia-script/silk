@@ -35,7 +35,7 @@ permissions:
 jobs:
   bundled-cli:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
@@ -88,7 +88,7 @@ jobs:
     # Distribution is checked by the isolated Node/Bun bundle smoke, including native builds.
     # Other repository checks still report failures without suppressing this CI input.
     needs: bundled-cli
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 10
     steps:
       - uses: actions/download-artifact@v4
@@ -119,7 +119,7 @@ jobs:
   # compiler-tests matrix below; validate keeps everything else `pnpm check` ran.
   validate:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -161,7 +161,7 @@ jobs:
   package-tests:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Package tests / ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -200,7 +200,7 @@ jobs:
 
   compiler-documentation:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     # Each independent check gets the existing bound; generation must not consume doctest time.
     timeout-minutes: 45
     strategy:
@@ -239,7 +239,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -263,7 +263,7 @@ jobs:
   native-acceptance:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Native acceptance / ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     # Cold source-runtime corpus shards exceed 30 minutes, including toolchain/build setup.
     # Each test still enforces its own bounded compile/run deadline.
     timeout-minutes: 60
@@ -310,7 +310,7 @@ jobs:
 
   compiler-tests:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -363,7 +363,7 @@ jobs:
   tls-wasm:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: TLS Wasm / ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -447,7 +447,7 @@ jobs:
 
   webcontainer-browser:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
@@ -467,7 +467,7 @@ jobs:
   selfhost-bootstrap-plan:
     if: github.event_name == 'workflow_dispatch' && !inputs.full_verification && inputs.selfhost_sha != ''
     name: Selfhost CLI plan
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     env:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       SELFHOST_SHA: ${{ inputs.selfhost_sha }}
@@ -500,7 +500,7 @@ jobs:
   selfhost-bootstrap-benchmark:
     needs: selfhost-bootstrap-plan
     name: Selfhost CLI / ${{ matrix.compiler }} / ${{ matrix.case.shard }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -586,7 +586,7 @@ jobs:
 
   full-verification:
     if: github.event_name == 'workflow_dispatch' && inputs.full_verification
-    runs-on: ubuntu-24.04
+    runs-on: namespace-profile-silk
     timeout-minutes: 240
     concurrency:
       group: full-verification-${{ github.ref }}
@@ -644,7 +644,7 @@ jobs:
             llvm: macOS-ARM64
             digest: f260f4f7c0d430828a81ae8a3826a1d63fc0963ec2459489308cc23b1f7eab4f
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-24.04
+            runner: namespace-profile-silk
             llvm: Linux-X64
             digest: df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384
           - target: aarch64-unknown-linux-gnu
