@@ -70,9 +70,13 @@ pub enum StorageOperation {
   /// `executionNotifyInitial<A>(execution: &mut Intrinsic.Execution<A>) -> ()`: `Initial` becomes
   /// `InitialReady` and the fixed readiness endpoint runs once.
   ExecutionNotifyInitial,
+  /// `executionDrive<A, D, C, S>(execution: Intrinsic.Execution<A>, branchState: D, onComplete: C,
+  /// onSuspend: S) -> Effect<()>`, run in place: one activation, completing with `onComplete(branchState,
+  /// result)` or relinquishing with `onSuspend(branchState, execution)`.
+  ExecutionDrive,
 }
 
-fn operations() -> [StorageOperation; 26] {
+fn operations() -> [StorageOperation; 27] {
   return [
     StorageOperation.RawBufferFrom, StorageOperation.RawBufferSlot, StorageOperation.RawBufferCount,
     StorageOperation.RawBufferRead, StorageOperation.RawBufferCopy, StorageOperation.RawBufferFill,
@@ -82,7 +86,7 @@ fn operations() -> [StorageOperation; 26] {
     StorageOperation.SharedWithMut, StorageOperation.LayoutOf, StorageOperation.SystemAllocationAcquire,
     StorageOperation.StringUtf8Bytes, StorageOperation.StringFromUtf8Unchecked, StorageOperation.StringByteLength,
     StorageOperation.Replace, StorageOperation.ExecutionLayout, StorageOperation.ExecutionFromAllocation,
-    StorageOperation.ExecutionNotifyInitial,
+    StorageOperation.ExecutionNotifyInitial, StorageOperation.ExecutionDrive,
   ]
 }
 
@@ -130,6 +134,7 @@ impl StorageOperation {
       StorageOperation.ExecutionLayout => b"executionLayout"
       StorageOperation.ExecutionFromAllocation => b"executionFromAllocation"
       StorageOperation.ExecutionNotifyInitial => b"executionNotifyInitial"
+      StorageOperation.ExecutionDrive => b"executionDrive"
     }
   }
 
@@ -176,6 +181,7 @@ impl StorageOperation {
       StorageOperation.ExecutionLayout => usize.ZERO
       StorageOperation.ExecutionFromAllocation => 4
       StorageOperation.ExecutionNotifyInitial => usize.ONE
+      StorageOperation.ExecutionDrive => 4
     }
   }
 
@@ -191,6 +197,7 @@ impl StorageOperation {
       StorageOperation.StringByteLength => usize.ZERO
       StorageOperation.ExecutionLayout => 4
       StorageOperation.ExecutionFromAllocation => 4
+      StorageOperation.ExecutionDrive => 4
       _ => usize.ONE
     }
   }
@@ -210,15 +217,17 @@ impl StorageOperation {
       StorageOperation.Replace => false
       StorageOperation.ExecutionLayout => false
       StorageOperation.ExecutionNotifyInitial => false
+      StorageOperation.ExecutionDrive => false
       _ => true
     }
   }
 
   /// Whether the target's layout of the call's type arguments is part of the expansion: element
-  /// sizes and alignments, or a control block's.
+  /// sizes and alignments, a control block's, or a complete execution package's.
   pub fn measures(operation: StorageOperation) -> bool {
     return operation == StorageOperation.RawBufferFrom || operation == StorageOperation.RawBufferCopy
       || operation == StorageOperation.SharedLayout || operation == StorageOperation.SharedFromAllocation
-      || operation == StorageOperation.LayoutOf
+      || operation == StorageOperation.LayoutOf || operation == StorageOperation.ExecutionLayout
+      || operation == StorageOperation.ExecutionFromAllocation
   }
 }

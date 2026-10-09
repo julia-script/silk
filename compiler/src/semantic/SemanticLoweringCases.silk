@@ -61,6 +61,7 @@ import semantic.ProfileBinding {
 }
 import semantic.SourceIndex {NoRejection, RevisionMismatch, SourceIndex}
 import semantic.Rejection {Rejection, RejectionCode}
+import semantic.ExecutionStorage {Binding as StorageBinding, ExecutionStorage}
 import semantic.TypedBody {
   ConsumedPlace as BodyConsumedPlace,
   MatchArm as BodyMatchArm,
@@ -275,12 +276,12 @@ static fn concatByte() -> u8 { return selectedByte(selectedConcat("é", "!"), 3)
   let first = run Revision.publish(&Revision.make(), &wrapper, &publishedWrapper)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&first, &id, &held) |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut wasmSemantic = Semantic.make(
+  let mut wasmSemantic = Semantic.traced(
     run Revision.copy(&revision) |> Effect.provideMut<Allocator>(&mut allocator),
     MachineTarget.forId(TargetId.Wasm32UnknownUnknown),
     Option.none<FinalProfile>(),
   )
-  let mut nativeSemantic = Semantic.make(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
+  let mut nativeSemantic = Semantic.traced(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
   let mut wasmDependencies = Vector.make<Dependency>()
   let mut nativeDependencies = Vector.make<Dependency>()
   let mut wasm = run StaticExecution.make(
@@ -585,12 +586,12 @@ const selectedArchitecture: string<'static> = architecture
     |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&first, &entry, &entrySource)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut wasm = Semantic.make(
+  let mut wasm = Semantic.traced(
     run Revision.copy(&revision) |> Effect.provideMut<Allocator>(&mut allocator),
     MachineTarget.forId(TargetId.Wasm32UnknownUnknown),
     Option.none<FinalProfile>(),
   )
-  let mut native = Semantic.make(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
+  let mut native = Semantic.traced(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
   let mut wasmRequest = Request.make()
   let mut nativeRequest = Request.make()
   let wasmBits = run Semantic.demandInitializer(&mut wasm, &mut wasmRequest, &entry, b"selectedBits")
@@ -753,7 +754,7 @@ fn moduleCall() -> i32 { return Library<Missing>.finish(1) }
   let librarySource = run present("pub fn finish(value: i32) -> i32 { return value }\n") |> Effect.provideMut<Allocator>(&mut allocator)
   let first = run Revision.publish(&Revision.make(), &id, &entrySource) |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&first, &library, &librarySource) |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut store = Semantic.make(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
+  let mut store = Semantic.traced(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
   let mut request = Request.make()
   let body = run Semantic.demandBody(&mut store, &mut request, &id, b"main") |> Effect.provideMut<Allocator>(&mut allocator)
   let checked = Shared.with<Result<Answer, NoRejection>, Option<Shared<TypedBody>>>(&body, checkedBody)
@@ -1041,6 +1042,75 @@ pub fn main() -> i32 {
     |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(rejectsFrom(&racy, RejectionCode.InvalidConfiguration, offsetOf(source, "Intrinsic.assembly<u64>(\"movq", usize.ZERO)),
     "a writing fragment without side effects violates the machine contract at the call")
+  return ()
+}
+
+// Binds each storage operation to the same-named declaration of `module`.
+effect fn storageIn(module: &ModuleId) -> ExecutionStorage ! OutOfMemoryError ? &mut Allocator {
+  return ExecutionStorage {
+    create: StorageBinding {module: run ModuleId.copy(module), declaration: run Bytes.copy(b"create")},
+    acquire: StorageBinding {module: run ModuleId.copy(module), declaration: run Bytes.copy(b"acquire")},
+    release: StorageBinding {module: run ModuleId.copy(module), declaration: run Bytes.copy(b"release")},
+    destroy: StorageBinding {module: run ModuleId.copy(module), declaration: run Bytes.copy(b"destroy")},
+  }
+}
+
+// A build that reaches a suspension boundary needs the selected execution storage; with it,
+// every suspendable instance becomes a driver, an `$enter` and a `$step` over a frame from that
+// storage, and a borrowed local lives in the frame.
+test effect fn suspensionBuildsCoroutinesOverSelectedStorage() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("suspension-frames.silk")
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  // The storage exports only need to exist for this structural build; their bodies never run.
+  let source = """
+struct Counter { value: i32 }
+effect fn bump(counter: &mut Counter, value: i32) -> i32 {
+  let next = run Intrinsic.suspendEffect(effect { return value + 1 })
+  counter.value = counter.value + next
+  return next
+}
+pub fn main() -> i32 {
+  let mut counter = Counter { value: 1 }
+  let first = run bump(&mut counter, 2)
+  return first + counter.value
+}
+export "C" fn create() -> usize { return 0 }
+export "C" fn acquire(state: usize, size: usize, alignment: usize) -> usize { return state }
+export "C" fn release(state: usize, frame: usize) -> () { return () }
+export "C" fn destroy(state: usize) -> () { return () }
+"""
+  let mut store = run staticSemantic(&id, source, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let unselected = run Semantic.buildMain(&mut store, &mut request, &id, staticClosureNodes)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let boundary = offsetOf(source, "run Intrinsic.suspendEffect", usize.ZERO)
+  let mut refused = false
+  if let BackendBuild.Rejected {first, ..} = &unselected {
+    refused = Shared.with<Rejection, bool>(&first, fn(found: &Rejection) -> bool {
+      return found.code == RejectionCode.InvalidConfiguration && found.span.start == boundary
+    })
+  }
+  run Testing.expect(refused, "a reached suspension without a selected execution storage is a configuration rejection at its boundary")
+  let storage = run storageIn(&id) |> Effect.provideMut<Allocator>(&mut allocator)
+  Semantic.selectExecutionStorage(&mut store, move storage)
+  let built = run Semantic.buildMain(&mut store, &mut request, &id, staticClosureNodes)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut lowered = false
+  match move built {
+    BackendBuild.Module {text, ..} => {
+      let ir = Bytes.asSlice(&text)
+      lowered = containsIr(ir, b"$enter\"(ptr %transfer") && containsIr(ir, b"$step\"(ptr %transfer, ptr %frame) {") &&
+        containsIr(ir, b"%frame = call ptr @\"acquire\"(ptr ") && containsIr(ir, b"call void @\"release\"(ptr ") &&
+        containsIr(ir, b"call void @\"destroy\"(ptr ") && containsIr(ir, b", label %resume1") &&
+        containsIr(ir, b"\nret i32 1\n") && containsIr(ir, b" = getelementptr i8, ptr %frame, i64 ") &&
+        containsIr(ir, b"call i32 %")
+    }
+    _ => {}
+  }
+  run Testing.expect(lowered, "suspendable instances drive frames from the selected storage and keep borrowed locals in their frame")
   return ()
 }
 
@@ -1670,8 +1740,8 @@ pub fn main() -> i32 { return zero(-7) + tails(-7, -7, 255, -300, 65535, 32, 32,
   let source = run present(text) |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&Revision.make(), &id, &source) |> Effect.provideMut<Allocator>(&mut allocator)
   let copiedRevision = run Revision.copy(&revision) |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut store = Semantic.make(move copiedRevision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
-  let mut darwin = Semantic.make(move revision, MachineTarget.forId(TargetId.Aarch64AppleDarwin), Option.none<FinalProfile>())
+  let mut store = Semantic.traced(move copiedRevision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
+  let mut darwin = Semantic.traced(move revision, MachineTarget.forId(TargetId.Aarch64AppleDarwin), Option.none<FinalProfile>())
   let mut request = Request.make()
   let signature = run Semantic.demandSignature(&mut store, &mut request, &id, b"receive") |> Effect.provideMut<Allocator>(&mut allocator)
   let declared = Shared.with<Result<Answer, NoRejection>, bool>(&signature, variadicSignatureAnswer)
@@ -1820,8 +1890,8 @@ pub fn main() -> i32 { return unsafe receive(1, 2) }
   let second = run Revision.publish(&first, &conflictId, &conflictSource) |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&second, &targetId, &targetSource) |> Effect.provideMut<Allocator>(&mut allocator)
   let copiedRevision = run Revision.copy(&revision) |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut native = Semantic.make(move copiedRevision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
-  let mut unsupported = Semantic.make(move revision, MachineTarget.forId(TargetId.Aarch64UnknownLinuxGnu), Option.none<FinalProfile>())
+  let mut native = Semantic.traced(move copiedRevision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
+  let mut unsupported = Semantic.traced(move revision, MachineTarget.forId(TargetId.Aarch64UnknownLinuxGnu), Option.none<FinalProfile>())
   let mut backendRequest = Request.make()
   let exported = run Semantic.buildRuntime(&mut native, &mut backendRequest, &exportId, staticClosureNodes) |> Effect.provideMut<Allocator>(&mut allocator)
   let conflict = run Semantic.buildMain(&mut native, &mut backendRequest, &conflictId, staticClosureNodes) |> Effect.provideMut<Allocator>(&mut allocator)
@@ -3102,7 +3172,7 @@ fn uninferred() -> i32 { let tail = Tail<i32> { first: 42 } return 0 }
   let librarySource = run present("pub struct Pair<A, B> { pub first: A pub second: B }") |> Effect.provideMut<Allocator>(&mut allocator)
   let first = run Revision.publish(&Revision.make(), &id, &entrySource) |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&first, &library, &librarySource) |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut store = Semantic.make(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
+  let mut store = Semantic.traced(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
   let mut request = Request.make()
   let prefixed = run Semantic.demandBody(&mut store, &mut request, &id, b"prefixed") |> Effect.provideMut<Allocator>(&mut allocator)
   let qualified = run Semantic.demandBody(&mut store, &mut request, &id, b"qualified") |> Effect.provideMut<Allocator>(&mut allocator)
@@ -6807,6 +6877,7 @@ fn stringy() -> i32 {
   let count: i32 = 1
   return stringUnion(count)
 }
+fn stringMatch(value: i32 | string<'static>) -> i32 { return match move value { i32 n => n string text => 1 } }
 fn truthy(v: i64 | bool) -> bool {
   return match move v {
     bool b => b
@@ -6911,12 +6982,13 @@ pub fn main() -> i32 {
     "a non-member type arm, a repeated type arm and a field list on a scalar member report precise spans",
   )
   let floatyAnswer = run Semantic.demandBody(&mut store, &mut request, &id, b"floaty")
-  let stringyAnswer = run Semantic.demandBody(&mut store, &mut request, &id, b"stringy")
-  run Testing.expect(
-    rejectsSpan(&floatyAnswer, RejectionCode.UnionFormUnavailable, text, "floatUnion(truth)", 0) &&
-    rejectsSpan(&stringyAnswer, RejectionCode.UnionFormUnavailable, text, "stringUnion(count)", 0),
-    "float and string members stay the named union-form gap",
-  )
+  run Testing.expect(rejectsSpan(&floatyAnswer, RejectionCode.UnionFormUnavailable, text, "floatUnion(truth)", 0),
+    "a float member stays the named union-form gap")
+  let stringyAnswer = run Semantic.demandMir(&mut store, &mut request, &id, b"stringy")
+  let stringMatch = run Semantic.demandMir(&mut store, &mut request, &id, b"stringMatch")
+  let stringLayout = run parameterLayout(&mut store, &mut request, &id, b"stringMatch")
+  run Testing.expect(succeeded(&stringyAnswer) && succeeded(&stringMatch) && stringLayout % 1000000 == 108248,
+    "a text view is a descriptor member: i32 | string injects, binds and switches with its payload at 8, size 24, alignment 8")
   return ()
 }
 
@@ -7141,6 +7213,67 @@ fn flaggedSubjectDrop(store: &Semantic, answer: &Shared<Result<Answer, NoRejecti
     at = at + usize.ONE
   }
   return false
+}
+
+// OWN-004, OWN-008: a `match place` arm that moves a payload field partitions the union while
+// another arm keeps it compact. The join keeps one Alternatives component: the union's own flag
+// says whether it is whole, and each joined child has a flag. When every arm partitions it there
+// is no compact arrival, so only the child flags exist.
+test effect fn placeMatchJoinsCompactAndPartitionedUnionUnderFlags() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run alternativesJoinClaims() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+effect fn alternativesJoinClaims() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let id = run module("place-match-alternatives-join.silk")
+  let text = """
+struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+union Packet { Empty, Ready { left: Token, right: Token } }
+union Parcel { Single { only: Token }, Ready { left: Token, right: Token } }
+fn joined(packet: Packet) -> () {
+  match place packet {
+    Packet.Ready { left, .. } => { drop move left }
+    Packet.Empty => {}
+  }
+  return ()
+}
+fn partitioned(parcel: Parcel) -> () {
+  match place parcel {
+    Parcel.Ready { left, .. } => { drop move left }
+    Parcel.Single { only } => { drop move only }
+  }
+  return ()
+}
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+  let mut request = Request.make()
+  let joined = run Semantic.demandMir(&mut store, &mut request, &id, b"joined")
+  let partitioned = run Semantic.demandMir(&mut store, &mut request, &id, b"partitioned")
+  run Testing.expect(succeeded(&joined) && flagDepths(&store, &joined, usize.ZERO) == usize.ONE &&
+    flagDepths(&store, &joined, usize.ONE) == 2,
+    "a compact arm and a partitioning arm join under the union's whole flag and its children's flags")
+  run Testing.expect(succeeded(&partitioned) && flagDepths(&store, &partitioned, usize.ZERO) == usize.ZERO &&
+    flagDepths(&store, &partitioned, usize.ONE) == 3,
+    "arms that each partition the union join under child flags alone")
+}
+
+// The drop-flag locals of a MIR function whose owner path has `depth` projections.
+fn flagDepths(store: &Semantic, answer: &Shared<Result<Answer, NoRejection>>, depth: usize) -> usize {
+  let selected = Shared.with<Result<Answer, NoRejection>, Option<usize>>(answer, selectedMirIndex)
+  let index = match move selected { Option<usize>.Some {value} => value _ => { return usize.MAX } }
+  let function = match move Semantic.mirAt(store, index) { Option<&MirFunction>.Some {value} => value _ => { return usize.MAX } }
+  let locals = Vector.asSlice<MirLocal>(&function.locals)
+  let mut count = usize.ZERO
+  let mut at = usize.ZERO
+  while at < locals.length {
+    if let MirLocalKind.DropFlag {path, ..} = &locals[at].kind {
+      if Vector.length<MirProjection>(&path) == depth { count = count + usize.ONE }
+    }
+    at = at + usize.ONE
+  }
+  return count
 }
 
 // UNION-001: substitution may collapse a written failure row, so `Cycle | E | Exhausted` stores
@@ -7384,7 +7517,7 @@ fn instances(actual: Option<i32>, custom: Maybe<i32>, actualToken: Option<Token>
 """) |> Effect.provideMut<Allocator>(&mut allocator)
   let entryRevision = run Revision.publish(&Revision.make(), &id, &source) |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&entryRevision, &library, &librarySource) |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut store = Semantic.make(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
+  let mut store = Semantic.traced(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
   let mut request = Request.make()
   let body = run Semantic.demandBody(&mut store, &mut request, &id, b"instances") |> Effect.provideMut<Allocator>(&mut allocator)
   let actual = match move bodyLocalType(&body, usize.ZERO) {
@@ -7900,7 +8033,8 @@ fn mirFact(store: &Semantic, answer: &Shared<Result<Answer, NoRejection>>, retur
 
 // Match arms are statement blocks after `=>`: a completing block is `()`, an all-transferring block
 // contributes no result, and a transfer leaves the arm even inside a call argument. Whole-member
-// arms select one exact member, and a bare match reads only a Copy scrutinee.
+// arms select one exact member, a bare match reads only a Copy scrutinee, and distinct record
+// results join into their union.
 test effect fn matchArmsRunBlocksBindMembersAndCopyBareSubjects() -> ()
 ! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -7951,10 +8085,20 @@ union Outcome { Lost, Found { value: i32 } }
 fn unionMember(input: Left | Outcome) -> i32 {
   return match move input { Left held => held.value Outcome outcome => match move outcome { Outcome.Found { value } => value Outcome.Lost => 0 } }
 }
+struct Wide { value: i32 }
+struct Narrow { value: i32 }
+fn joined(input: Left | Right) -> i32 {
+  let picked = match move input { Left { value } => Wide { value: value } Right {} => Narrow { value: 2 } }
+  return match move picked { Wide { value } => value Narrow { value } => value }
+}
+fn unjoinable(input: Left | Right, other: &Token) -> i32 {
+  let picked = match move input { Left { value } => Wide { value: value } Right {} => other }
+  return 0
+}
 """
   let source = run present(text) |> Effect.provideMut<Allocator>(&mut allocator)
   let revision = run Revision.publish(&Revision.make(), &id, &source) |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut store = Semantic.make(run Revision.copy(&revision) |> Effect.provideMut<Allocator>(&mut allocator),
+  let mut store = Semantic.traced(run Revision.copy(&revision) |> Effect.provideMut<Allocator>(&mut allocator),
     MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
   let mut request = Request.make()
   let early = run Semantic.demandBody(&mut store, &mut request, &id, b"early") |> Effect.provideMut<Allocator>(&mut allocator)
@@ -7991,6 +8135,12 @@ fn unionMember(input: Left | Outcome) -> i32 {
     "a transferring arm returns from its block, and an all-transferring match adds no fallthrough return")
   run Testing.expect(mirFact(&store, &divergingMir, false) == usize.ZERO, "a never match stores no value")
   run Testing.expect(mirFact(&store, &loopsMir, true) == usize.ONE, "loop control from arms keeps one function return")
+  let joinedMir = run Semantic.demandMir(&mut store, &mut request, &id, b"joined") |> Effect.provideMut<Allocator>(&mut allocator)
+  let unjoinable = run Semantic.demandBody(&mut store, &mut request, &id, b"unjoinable") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(succeeded(&joinedMir) &&
+    rejectsSpan(&unjoinable, RejectionCode.IncompatibleMatchResults, text,
+      "match move input { Left { value } => Wide { value: value } Right {} => other }", 0),
+    "unannotated arms of distinct records join into their union, and a borrowed view joins no record")
   let incompatible = run Semantic.demandBody(&mut store, &mut request, &id, b"incompatible") |> Effect.provideMut<Allocator>(&mut allocator)
   let bareAffine = run Semantic.demandBody(&mut store, &mut request, &id, b"bareAffine") |> Effect.provideMut<Allocator>(&mut allocator)
   let absentMember = run Semantic.demandBody(&mut store, &mut request, &id, b"absentMember") |> Effect.provideMut<Allocator>(&mut allocator)
@@ -8123,6 +8273,10 @@ fn droppedPlaced(boxed: Crate) -> i32 {
   match place boxed { Crate { cargo } => { drop cargo } }
   return 0
 }
+struct Shell { envelope: Envelope }
+fn nestedPlaced(shell: Shell) -> Token {
+  return match place shell { Shell { envelope: Envelope { token, code } } => move token }
+}
 fn matchedBorrowed(envelope: Envelope) -> i32 {
   return match &envelope { Envelope { token, code } => match move token.value { _ => 0 } }
 }
@@ -8151,10 +8305,14 @@ fn inspectedWhole(envelope: Envelope) -> i32 {
   let escaped = run Semantic.demandBody(&mut store, &mut request, &id, b"escaped") |> Effect.provideMut<Allocator>(&mut allocator)
   let placed = run Semantic.demandBody(&mut store, &mut request, &id, b"placed") |> Effect.provideMut<Allocator>(&mut allocator)
   let droppedPlaced = run Semantic.demandBody(&mut store, &mut request, &id, b"droppedPlaced") |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(rejectsSpan(&escaped, RejectionCode.MatchBorrowEscape, text, "move token", 1) &&
-    rejectsSpan(&placed, RejectionCode.Unsupported, text, "move token", 2) &&
-    rejectsSpan(&droppedPlaced, RejectionCode.Unsupported, text, "cargo", 2),
-    "a borrowing match binding cannot leave its arm (OWN0006), and a `match place` binding move stays unsupported")
+  let nestedPlaced = run Semantic.demandBody(&mut store, &mut request, &id, b"nestedPlaced") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(rejectsSpan(&escaped, RejectionCode.MatchBorrowEscape, text, "move token", 1),
+    "a borrowing match binding cannot leave its arm (OWN0006)")
+  run Testing.expect(consumesAt(&placed, usize.ZERO, usize.ZERO, usize.ZERO, usize.MAX)
+    && consumesAt(&droppedPlaced, usize.ONE, usize.ZERO, usize.ZERO, usize.MAX),
+    "a one-step `match place` binding moves or drops that projection of its subject's own place (OWN-004)")
+  run Testing.expect(rejectsSpan(&nestedPlaced, RejectionCode.Unsupported, text, "move token", 4),
+    "a deeper `match place` binding path keeps its unsupported boundary")
   let projectedRvalue = run Semantic.demandBody(&mut store, &mut request, &id, b"projectedRvalue") |> Effect.provideMut<Allocator>(&mut allocator)
   let sliced = run Semantic.demandBody(&mut store, &mut request, &id, b"sliced") |> Effect.provideMut<Allocator>(&mut allocator)
   run Testing.expect(rejectsSpan(&projectedRvalue, RejectionCode.ExtractionBoundary, text, "move wrapped().token", 0) &&
@@ -8179,7 +8337,7 @@ fn inspectedWhole(envelope: Envelope) -> i32 {
     "a consuming match copies a Copy part of a borrowing binding unless an owner on its path has a Drop hook (OWN0002)")
   let matchedWhole = run Semantic.demandBody(&mut store, &mut request, &id, b"matchedWhole") |> Effect.provideMut<Allocator>(&mut allocator)
   let inspectedWhole = run Semantic.demandBody(&mut store, &mut request, &id, b"inspectedWhole") |> Effect.provideMut<Allocator>(&mut allocator)
-  run Testing.expect(rejectsSpan(&matchedWhole, RejectionCode.MatchBorrowEscape, text, "token", 18) &&
+  run Testing.expect(rejectsSpan(&matchedWhole, RejectionCode.MatchBorrowEscape, text, "token", 20) &&
     succeeded(&inspectedWhole),
     "a consuming match of a whole affine borrowing binding escapes its arm (OWN0006), and a borrowing match inspects it")
   return ()
@@ -8764,7 +8922,7 @@ static if false {
   let first = run Revision.publish(&Revision.make(), &runtime, &runtimeSource)
   let second = run Revision.publish(&first, &application, &applicationSource)
   let revision = run Revision.publish(&second, &lanes, &laneSource)
-  let mut store = Semantic.make(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
+  let mut store = Semantic.traced(move revision, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
   let mut request = Request.forApplication(run ModuleId.copy(&application))
   let built = run Semantic.buildRuntime(&mut store, &mut request, &runtime, staticClosureNodes)
   let mut rooted = false
@@ -8852,7 +9010,7 @@ effect fn compositionClaims() -> ()
       return ()
     }
   }
-  let mut store = Semantic.make(run ModuleSourceFiles.revision(&sources), MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
+  let mut store = Semantic.traced(run ModuleSourceFiles.revision(&sources), MachineTarget.forId(TargetId.X8664UnknownLinuxGnu), Option.none<FinalProfile>())
   let mut request = Request.forApplication(run ModuleId.copy(&application))
   let mut built = run Semantic.buildRuntime(&mut store, &mut request, &runtime, staticClosureNodes)
   while run ModuleSourceFiles.publishObserved(&mut sources, Semantic.sourceEvents(&store)) {
