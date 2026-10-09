@@ -5962,6 +5962,41 @@ effect fn callableUnionDropBlock(block: &MirBlock, environment: &Shared<Type>, t
   return false
 }
 
+// A failure whose borrowed payload carries a call's loan region meets the declared union member it
+// differs from only in covariant regions, as it meets that member declared alone (UNION-001).
+test effect fn failurePayloadMeetsItsUnionMemberByRegion() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run failureRegionClaims() |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
+effect fn failureRegionClaims() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> ? &mut Allocator {
+  let id = run module("failure-union-regions.silk")
+  let text = """
+pub struct Other {}
+pub struct Parser { pub value: i32 }
+pub struct Conn { pub parser: Parser }
+pub struct Exchange { pub connection: Conn }
+pub struct View<'a> { pub data: &'a i32 }
+fn head(parser: &Parser) -> View { return View { data: &parser.value } }
+effect fn begin<'head>(exchange: &'head mut Exchange) -> i32 ! View<'head> | Other {
+  let view = head(&exchange.connection.parser)
+  fail move view
+}
+effect fn foreign<'head>(exchange: &'head mut Exchange) -> i32 ! View<'head> | Other {
+  fail Parser { value: 1 }
+}
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+  let mut request = Request.make()
+  let begin = run Semantic.demandBody(&mut store, &mut request, &id, b"begin")
+  let foreign = run Semantic.demandBody(&mut store, &mut request, &id, b"foreign")
+  run Testing.expect(succeeded(&begin) && rejectsSpan(&foreign, RejectionCode.UndeclaredFailure, text, "Parser { value: 1 }", 0),
+    "a payload differing from one union member only in regions is injected as it, and an unrelated payload stays undeclared")
+  return ()
+}
+
 // A generic binding in the shape of `Effect.bindRequirementOwned` serves its key from the owned
 // provider inside its own instance, whose row is then empty; the provider type keys the callee.
 test effect fn ownedProviderServesGenericBinding() -> ()
