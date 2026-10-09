@@ -150,7 +150,7 @@ An instance receives one hidden provider address per entry of its requirement ro
 service-role key order (D2), and its key names each provider's type. Running
 `Intrinsic.bindRequirement*<S>` serves `S` from the stored provider to the inner run only; running
 `Svc.op(args)` calls the witness for the serving provider's type with the provider address as its
-receiver. `effect fn main` keeps the `entry-signature` gap; `Intrinsic.suspendEffect` and `Intrinsic.park` report `suspension`.
+receiver. `effect fn main` keeps the `entry-signature` gap.
 Catalog `Intrinsic` type families outside the storage core, such as `Intrinsic.Execution`, report
 `core-type`.
 
