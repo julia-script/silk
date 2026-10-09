@@ -30,7 +30,7 @@ impl InstanceIdentity {
   ? &mut Allocator {
     let mut at = usize.ZERO
     while at < values.length {
-      if run InstanceKey.sameApplication(&values[at].key, key) {
+      if run InstanceKey.sameInstance(&values[at].key, key) {
         return run Bytes.copy(Bytes.asSlice(&values[at].symbol))
       }
       at = at + usize.ONE

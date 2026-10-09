@@ -4462,6 +4462,13 @@ effect fn callerRegionNumberingClaims() -> ()
   run Testing.expect(!sharingKept && !lastingKept && InstanceKey.sameRuntimeBase(&distinct, &shared)
     && InstanceKey.sameRuntimeBase(&distinct, &lasting),
     "region sharing and 'static remain exact instance evidence inside one erased runtime family")
+  let sharingCode = run InstanceKey.sameInstance(&distinct, &shared)
+  let lastingCode = run InstanceKey.sameInstance(&distinct, &lasting)
+  let distinctSymbol = run InstanceKey.symbol(&distinct)
+  let lastingSymbol = run InstanceKey.symbol(&lasting)
+  let symbolShared = RuntimeEncoding.equals(Bytes.asSlice(&distinctSymbol), Bytes.asSlice(&lastingSymbol))
+  run Testing.expect(sharingCode && lastingCode && symbolShared,
+    "lifetimes select no code: every region pattern of one application shares one backend instance and symbol")
   let supplied = run Shared.make<Lifetime>(Lifetime.Supplied {ordinal: 3})
   let mixedKinds = run numberingPair(&pair, run numberingRegion(&caller, 3, false), move supplied)
   run Testing.expect((run InstanceKey.sameApplication(&distinct, &mixedKinds))
@@ -4494,11 +4501,12 @@ effect fn callerRegionNumberingClaims() -> ()
       if let Option<InstanceKey>.Some {value: permanent} = &staticGlue {
         let glueShared = run InstanceKey.sameApplication(&first, &second)
         let glueLasting = run InstanceKey.sameApplication(&first, &permanent)
-        glue = glueShared && !glueLasting
+        let glueCode = run InstanceKey.sameInstance(&first, &permanent)
+        glue = glueShared && !glueLasting && glueCode
       }
     }
   }
-  run Testing.expect(glue, "drop glue numbers caller regions of its type and keeps 'static cleanup selection distinct")
+  run Testing.expect(glue, "drop glue numbers caller regions of its type; 'static stays exact evidence and shares the glue body")
   let serve = run numberingDeclaration(&id, b"serve", OwnerKind.Function)
   let sink = run numberingDeclaration(&id, b"Sink", OwnerKind.Service)
   let console = run numberingDeclaration(&id, b"Console", OwnerKind.Struct)

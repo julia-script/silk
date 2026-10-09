@@ -365,6 +365,9 @@ pub enum Family {
   OriginValidate,
   /// A backend-neutral control-flow graph for one closed runtime instance.
   Mir,
+  /// One region pattern of a backend instance whose body another pattern publishes: the same
+  /// lowering under this exact application, checked and never published.
+  Validity,
   /// Backend-neutral storage, field offsets and ABI facts for one type on this store's target.
   Layout,
   /// Source-validated immutable emission inputs for one instance.
@@ -709,6 +712,9 @@ pub union Value {
   OriginPlan {pub index: usize},
   OriginEvidence {pub index: usize},
   Mir {pub index: usize},
+  /// One region pattern's lowering checked without publishing a body: the exact instances it
+  /// reaches and whether it observes diagnostics.
+  Validated {pub references: Shared<Vector<MirReference>>, pub observes: bool},
   /// The position of a target layout answer in this store's immutable answer arena.
   Layout {pub index: usize},
   /// This target-neutral type has no layout in the current backend subset.
@@ -823,7 +829,7 @@ impl Dependency {
 
 // Families whose key names one module declaration by ordinal.
 fn declarationFamily(family: Family) -> bool {
-  return family == Family.Import || family == Family.Alias || family == Family.Identity || family == Family.Members || family == Family.MemberShape || family == Family.Contract || family == Family.Operations || family == Family.ImplementationHead || family == Family.InherentMembers || family == Family.ConformanceHeads || family == Family.ImplementationMembers || family == Family.FieldLifetimes || family == Family.Signature || family == Family.OperationUnder || family == Family.AppliedOperation || family == Family.AppliedInherent || family == Family.Coherence || family == Family.ProofBounds || family == Family.Witnesses || family == Family.Constant || family == Family.Initializer || family == Family.Condition || family == Family.ParameterSchema || family == Family.ParameterDefault || family == Family.Body || family == Family.OpaqueRealization || family == Family.CallableOrigin || family == Family.OriginGraph || family == Family.OriginDraft || family == Family.OriginSolve || family == Family.OriginValidate || family == Family.Mir || family == Family.EmissionInputs
+  return family == Family.Import || family == Family.Alias || family == Family.Identity || family == Family.Members || family == Family.MemberShape || family == Family.Contract || family == Family.Operations || family == Family.ImplementationHead || family == Family.InherentMembers || family == Family.ConformanceHeads || family == Family.ImplementationMembers || family == Family.FieldLifetimes || family == Family.Signature || family == Family.OperationUnder || family == Family.AppliedOperation || family == Family.AppliedInherent || family == Family.Coherence || family == Family.ProofBounds || family == Family.Witnesses || family == Family.Constant || family == Family.Initializer || family == Family.Condition || family == Family.ParameterSchema || family == Family.ParameterDefault || family == Family.Body || family == Family.OpaqueRealization || family == Family.CallableOrigin || family == Family.OriginGraph || family == Family.OriginDraft || family == Family.OriginSolve || family == Family.OriginValidate || family == Family.Mir || family == Family.Validity || family == Family.EmissionInputs
 }
 
 // The family and module of one transitive demand, the only parts `hasDemand` reads. A frame
@@ -963,7 +969,7 @@ fn sameScopedKey(left: &ScopedKey, right: &ScopedKey) -> bool {
 // families are named by their interned subject alone.
 fn hashKey(hashed: u64, key: Key) -> u64 {
   let named = Hash.combine(Hash.combine(hashed, u8.toU64(Family.value(key.family))), usize.toU64(key.name))
-  if key.family == Family.Layout || key.family == Family.Mir || key.family == Family.EmissionInputs || key.family == Family.LlvmText {
+  if key.family == Family.Layout || backendFamily(key.family) {
     return named
   }
   let placed = Hash.combine(Hash.combine(named, usize.toU64(key.module)), usize.toU64(key.declaration))
@@ -1346,8 +1352,12 @@ struct Resolver {
   applicationLookup: InternIndex
   layoutTypes: Vector<Shared<Type>>
   layoutTypeLookup: InternIndex
+  // One entry per code identity; its key is the representative region pattern whose body publishes.
   backendInstances: Vector<BackendInstance>
   backendInstanceLookup: InternIndex
+  // One entry per exact region pattern that a Validity key checks.
+  rankedInstances: Vector<BackendInstance>
+  rankedInstanceLookup: InternIndex
   // Semantic applications of selected bodies; a Body key's member is one plus this index.
   originEvidence: Vector<CallableOrigin.Producer>
   originPlans: Vector<CallableOrigin.Plan>
@@ -2609,6 +2619,7 @@ fn sameValue(left: &Value, right: &Value) -> bool {
       _ => false
     }
     Value.Mir {..} => false
+    Value.Validated {..} => false
     Value.Layout {..} => false
     Value.LayoutUnsupported => false
     Value.OriginPlan {..} => false
@@ -3065,6 +3076,9 @@ effect fn identityOfFact(fact: &Value) -> Option<Shared<Value>> ! OutOfMemoryErr
     Value.Mir {..} => {
       return Option.none<Shared<Value>>()
     }
+    Value.Validated {..} => {
+      return Option.none<Shared<Value>>()
+    }
     Value.Layout {..} => {
       return Option.none<Shared<Value>>()
     }
@@ -3408,11 +3422,16 @@ fn primitive(name: &[u8]) -> bool {
   ) || same(name, b"usize") || same(name, b"f32") || same(name, b"f64") || same(name, b"char")
 }
 
+// Content-addressed backend families, named by their interned instance alone.
+fn backendFamily(family: Family) -> bool {
+  return family == Family.Mir || family == Family.Validity || family == Family.EmissionInputs || family == Family.LlvmText
+}
+
 fn sameKey(left: Key, right: Key) -> bool {
   if left.family == Family.Layout || right.family == Family.Layout {
     return left.family == Family.Layout && right.family == Family.Layout && left.name == right.name
   }
-  if left.family == Family.Mir || left.family == Family.EmissionInputs || left.family == Family.LlvmText || right.family == Family.Mir || right.family == Family.EmissionInputs || right.family == Family.LlvmText {
+  if backendFamily(left.family) || backendFamily(right.family) {
     return left.family == right.family && left.name == right.name
   }
   return left.family == right.family && left.module == right.module && left.name == right.name && left.declaration == right.declaration && left.member == right.member && left.external == right.external
@@ -3461,6 +3480,8 @@ struct BackendInstance {
   observing: bool
 }
 
+// Interns one backend instance by code identity. Its first region pattern is the representative
+// whose body publishes.
 effect fn internBackendInstance(resolver: &mut Resolver, instance: &InstanceKey, observing: bool) -> usize
 ! OutOfMemoryError
 ? &mut Allocator {
@@ -3468,7 +3489,7 @@ effect fn internBackendInstance(resolver: &mut Resolver, instance: &InstanceKey,
   let known = Vector.asSlice<BackendInstance>(&resolver.backendInstances)
   let mut at = InternIndex.first(&resolver.backendInstanceLookup, hashed)
   while at != usize.MAX {
-    if known[at].observing == observing && run InstanceKey.sameApplication(&known[at].key, instance) {
+    if known[at].observing == observing && run InstanceKey.sameInstance(&known[at].key, instance) {
       return at
     }
     at = InternIndex.after(&resolver.backendInstanceLookup, at)
@@ -3477,6 +3498,89 @@ effect fn internBackendInstance(resolver: &mut Resolver, instance: &InstanceKey,
   run Vector.append<BackendInstance>(&mut resolver.*.backendInstances, BackendInstance {key: InstanceKey.copy(instance), observing: observing})
   run InternIndex.record(&mut resolver.backendInstanceLookup, hashed)
   return interned
+}
+
+// Interns one exact region pattern for its Validity key.
+effect fn internRankedInstance(resolver: &mut Resolver, instance: &InstanceKey, observing: bool) -> usize
+! OutOfMemoryError
+? &mut Allocator {
+  let hashed = InstanceKey.runtimeHash(instance)
+  let known = Vector.asSlice<BackendInstance>(&resolver.rankedInstances)
+  let mut at = InternIndex.first(&resolver.rankedInstanceLookup, hashed)
+  while at != usize.MAX {
+    if known[at].observing == observing && run InstanceKey.sameApplication(&known[at].key, instance) {
+      return at
+    }
+    at = InternIndex.after(&resolver.rankedInstanceLookup, at)
+  }
+  let interned = known.length
+  run Vector.append<BackendInstance>(&mut resolver.*.rankedInstances, BackendInstance {key: InstanceKey.copy(instance), observing: observing})
+  run InternIndex.record(&mut resolver.rankedInstanceLookup, hashed)
+  return interned
+}
+
+// Whether `instance` is the region pattern its backend instance publishes.
+effect fn representsInstance(resolver: &Resolver, name: usize, instance: &InstanceKey) -> bool
+! OutOfMemoryError
+? &mut Allocator {
+  let known = Vector.asSlice<BackendInstance>(&resolver.backendInstances)
+  return run InstanceKey.sameApplication(&known[name].key, instance)
+}
+
+// Another region pattern of a published body first proves its own validity evidence. Answers the
+// refusal when it fails, and nothing for the representative or a valid pattern.
+effect fn refusedPattern(resolver: &mut Resolver, owner: &mut Query<Word, Answer, NoRejection>, instance: &InstanceKey,
+  location: InstanceLocation, observing: bool, span: Span) -> Option<Shared<Result<Answer, NoRejection>>>
+! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
+  let name = run internBackendInstance(&mut resolver.*, instance, observing)
+  if run representsInstance(&resolver.*, name, instance) { return Option.none<Shared<Result<Answer, NoRejection>>>() }
+  let key = run validityKey(&mut resolver.*, instance, location, observing)
+  let checked = run demandRaw(&mut resolver.*, &mut owner.*, key, span)
+  let validated = Shared.with<Result<Answer, NoRejection>,
+    Option<Shared<Vector<MirReference>>>>(&checked, answerValidatedReferences)
+  if let Option<Shared<Vector<MirReference>>>.Some {..} = move validated {
+    run representValid(&mut resolver.*, &mut owner.*, name, instance, location)
+    return Option.none<Shared<Result<Answer, NoRejection>>>()
+  }
+  return Option.some<Shared<Result<Answer, NoRejection>>>(move checked)
+}
+
+// A representative whose own proofs refused it publishes no body. A valid pattern of the same
+// backend instance then represents it, and its body publishes on the next demand.
+effect fn representValid(resolver: &mut Resolver, owner: &mut Query<Word, Answer, NoRejection>, name: usize,
+  instance: &InstanceKey, location: InstanceLocation) -> ()
+! OutOfMemoryError ? &mut Allocator {
+  let mirWord = run internKey(&mut resolver.*, Key {family: Family.Mir, module: location.module, name: name,
+    declaration: location.declaration, member: instanceMember(instance), external: false})
+  let completed = Query.completed(&mut owner.*, mirWord)
+  let published = match move completed {
+    Option<Shared<Result<Answer, NoRejection>>>.Some {value} => value
+    Option<Shared<Result<Answer, NoRejection>>>.None => { return () }
+  }
+  let body = Shared.with<Result<Answer, NoRejection>, Option<usize>>(&published, answerMirIndex)
+  if let Option<usize>.Some {..} = move body { return () }
+  let mut known = Vector.asMutSlice<BackendInstance>(&mut resolver.backendInstances)
+  known[name].key = InstanceKey.copy(instance)
+  Query.forget(&mut owner.*, mirWord)
+  let inputsWord = run internKey(&mut resolver.*, Key {family: Family.EmissionInputs, module: location.module, name: name,
+    declaration: location.declaration, member: instanceMember(instance), external: false})
+  Query.forget(&mut owner.*, inputsWord)
+  return ()
+}
+
+// The Validity key of `instance`'s exact region pattern, beside its backend instance's MIR key.
+effect fn validityKey(resolver: &mut Resolver, instance: &InstanceKey, location: InstanceLocation, observing: bool) -> Key
+! OutOfMemoryError
+? &mut Allocator {
+  let ranked = run internRankedInstance(&mut resolver.*, instance, observing)
+  return Key {
+    family: Family.Validity,
+    module: location.module,
+    name: ranked,
+    declaration: location.declaration,
+    member: instanceMember(instance),
+    external: false,
+  }
 }
 
 fn applicationLength(value: &Type) -> usize {
@@ -3642,7 +3746,7 @@ effect fn internKey(resolver: &mut Resolver, key: Key) -> Word ! OutOfMemoryErro
     at = InternIndex.after(&resolver.keyLookup, at)
   }
   if at != usize.MAX {
-    if key.family == Family.Mir || key.family == Family.EmissionInputs {
+    if key.family == Family.Mir || key.family == Family.Validity || key.family == Family.EmissionInputs {
       let mut keys = Vector.asMutSlice<ScopedKey>(&mut resolver.*.keys)
       keys[at].key = key
     }
@@ -4737,6 +4841,7 @@ effect fn resolve(
     Family.OpaqueRealization => run resolveOpaqueRealization(&mut resolver.*, &mut owner.*, key)
     Family.CallableOrigin => run resolveCallableOrigin(&mut resolver.*, &mut owner.*, key)
     Family.Mir => run resolveMir(&mut resolver.*, &mut owner.*, key)
+    Family.Validity => run resolveValidity(&mut resolver.*, &mut owner.*, key)
     Family.Layout => run resolveLayout(&mut resolver.*, &mut owner.*, key)
     Family.EmissionInputs => run resolveEmissionInputs(&mut resolver.*, &mut owner.*, key)
     Family.LlvmText => run resolveLlvmText(&mut resolver.*, key)
@@ -19755,6 +19860,27 @@ effect fn anchorCanonicalAnswer(resolver: &mut Resolver, answer: &Shared<Result<
       run canonicalRejection(&mut resolver.*, sourceOwner, span), Vector.make<Dependency>())))
   }
   return Shared.clone<Result<Answer, NoRejection>>(answer)
+}
+
+fn answerValidatedReferences(answer: &Result<Answer, NoRejection>) -> Option<Shared<Vector<MirReference>>> {
+  return match & answer.* {
+    Result<Answer, NoRejection>.Success {value} => match & value.outcome {
+      Outcome.Success {value: Value.Validated {references, ..}} => Option.some<Shared<Vector<MirReference>>>(
+        Shared.clone<Vector<MirReference>>(&references))
+      _ => Option.none<Shared<Vector<MirReference>>>()
+    }
+    Result<Answer, NoRejection>.Failure {error: _} => Option.none<Shared<Vector<MirReference>>>()
+  }
+}
+
+fn answerValidatedObserves(answer: &Result<Answer, NoRejection>) -> bool {
+  return match & answer.* {
+    Result<Answer, NoRejection>.Success {value} => match & value.outcome {
+      Outcome.Success {value: Value.Validated {observes, ..}} => observes
+      _ => false
+    }
+    Result<Answer, NoRejection>.Failure {error: _} => false
+  }
 }
 
 fn answerMirIndex(answer: &Result<Answer, NoRejection>) -> Option<usize> {
@@ -44169,6 +44295,17 @@ effect fn checkedStaticRoot(
   )
 }
 
+// Publishes a lowered body, or answers a checked region pattern with only the exact instances it
+// reaches; its body is never retained.
+effect fn publishLowered(resolver: &mut Resolver, function: MirFunction, dependencies: Vector<Dependency>, publish: bool) -> Answer
+! OutOfMemoryError
+? &mut Allocator {
+  if publish { return run storeMir(&mut resolver.*, move function, move dependencies) }
+  let MirFunction {references, observes, ..} = move function
+  return memberSuccess(Value.Validated {references: run Shared.make<Vector<MirReference>>(move references), observes: observes},
+    move dependencies)
+}
+
 effect fn storeMir(resolver: &mut Resolver, function: MirFunction, dependencies: Vector<Dependency>) -> Answer
 ! OutOfMemoryError
 ? &mut Allocator {
@@ -44930,7 +45067,7 @@ effect fn siteRemainder(resolver: &mut Resolver, owner: &mut Query<Word, Answer,
 // discovering elements, and a shared core counts references and cleans its value and control block
 // with the last handle.
 effect fn resolveCoreGlue(resolver: &mut Resolver, owner: &mut Query<Word, Answer, NoRejection>, dependencies: Vector<Dependency>,
-  instance: InstanceKey, ty: &Shared<Type>, core: SealedKind, observing: bool) -> Answer
+  instance: InstanceKey, ty: &Shared<Type>, core: SealedKind, observing: bool, publish: bool) -> Answer
 ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
   let mut tracked = move dependencies
   let identity = InstanceKey.identity(&instance)
@@ -44939,7 +45076,7 @@ effect fn resolveCoreGlue(resolver: &mut Resolver, owner: &mut Query<Word, Answe
   if core == SealedKind.Allocation {
     let free = run SealedCore.cFunction(&anchor, SealedFunction.Free)
     let function = run DropGlue.lowerCore(move instance, ty, CoreCleanup.Allocation {free: move free}, observing)
-    return run storeMir(&mut resolver.*, move function, move tracked)
+    return run publishLowered(&mut resolver.*, move function, move tracked, publish)
   }
   let allocationType = run SealedCore.allocationBeside(&anchor)
   if core == SealedKind.RawBuffer {
@@ -44957,7 +45094,7 @@ effect fn resolveCoreGlue(resolver: &mut Resolver, owner: &mut Query<Word, Answe
     run Vector.append<GlueChild>(&mut fields, move allocation)
     let function = run DropGlue.lower(DropGlue {key: move instance, ty: Shared.clone<Type>(ty), hook: Option.none<InstanceKey>(),
       children: GlueChildren.Fields {fields: move fields}}, observing)
-    return run storeMir(&mut resolver.*, move function, move tracked)
+    return run publishLowered(&mut resolver.*, move function, move tracked, publish)
   }
   if core != SealedKind.SharedCore { return memberSuccess(move gap, move tracked) }
   let element = match move SealedCore.element(ty) {
@@ -44997,20 +45134,20 @@ effect fn resolveCoreGlue(resolver: &mut Resolver, owner: &mut Query<Word, Answe
   }
   let function = run DropGlue.lowerCore(move instance, ty, CoreCleanup.Shared {block: move block, value: move value,
     allocation: move allocation}, observing)
-  return run storeMir(&mut resolver.*, move function, move tracked)
+  return run publishLowered(&mut resolver.*, move function, move tracked, publish)
 }
 
 // Drop glue reads its type's Drop hook and member shapes, never a function body. A cleanup form
 // this backend cannot lower yet is the `cleanup` gap, attributed to the glue's owner declaration.
 effect fn resolveGlueMir(resolver: &mut Resolver, owner: &mut Query<Word, Answer, NoRejection>, instance: InstanceKey, ty: &Shared<Type>,
-  observing: bool) -> Answer
+  observing: bool, publish: bool) -> Answer
 ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
   let mut dependencies = Vector.make<Dependency>()
   let identity = InstanceKey.identity(&instance)
   let gap = Value.Unsupported {gap: run Shared.make<BackendGap>(BackendGap.make(GapCode.Cleanup, &identity, Span.make(usize.ZERO, usize.ZERO)))}
   // A sealed core cleans its own storage; source can install no hook on it.
   if let Option<SealedKind>.Some {value: core} = move SealedCore.coreOf(ty) {
-    return run resolveCoreGlue(&mut resolver.*, &mut owner.*, move dependencies, move instance, ty, core, observing)
+    return run resolveCoreGlue(&mut resolver.*, &mut owner.*, move dependencies, move instance, ty, core, observing, publish)
   }
   let hook = match move run dropHook(&mut resolver.*, &mut owner.*, &mut dependencies, ty) {
     Result<Option<InstanceKey>, PreparationFailure>.Success {value} => value
@@ -45022,7 +45159,7 @@ effect fn resolveGlueMir(resolver: &mut Resolver, owner: &mut Query<Word, Answer
     Result<GlueChildren, PreparationFailure>.Failure {error} => { return run preparationQueryAnswer(&identity, move error, move dependencies) }
   }
   let function = run DropGlue.lower(DropGlue {key: move instance, ty: Shared.clone<Type>(ty), hook: move hook, children: move children}, observing)
-  return run storeMir(&mut resolver.*, move function, move dependencies)
+  return run publishLowered(&mut resolver.*, move function, move dependencies, publish)
 }
 
 // An origin demand cannot read a body whose own checking is waiting on that origin. This
@@ -48333,6 +48470,7 @@ effect fn exportShim(
   symbol: &Shared<Bytes>,
   written: ForeignHeader,
   observing: bool,
+  publish: bool,
 ) -> Answer ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
   let mut evidence = move dependencies
   let location = InstanceLocation {module: key.module, declaration: key.declaration}
@@ -48360,9 +48498,10 @@ effect fn exportShim(
     at = at + usize.ONE
   }
   let shim = run MirFunction.cExport(identity, symbol, Vector.asSlice<Shared<Type>>(&parameters), &signature.result.ty, observing)
-  return run storeMir(&mut resolver.*, move shim, move evidence)
+  return run publishLowered(&mut resolver.*, move shim, move evidence, publish)
 }
 
+// Publishes the body of a backend instance's representative region pattern.
 effect fn resolveMir(
   resolver: &mut Resolver,
   owner: &mut Query<Word, Answer, NoRejection>,
@@ -48371,8 +48510,34 @@ effect fn resolveMir(
   let instances = Vector.asSlice<BackendInstance>(&resolver.backendInstances)
   let instance = InstanceKey.copy(&instances[key.name].key)
   let observing = instances[key.name].observing
+  return run lowerInstance(&mut resolver.*, &mut owner.*, key, move instance, observing, true)
+}
+
+// Checks another region pattern of a published backend instance through the same lowering. Its
+// proofs are its own, and its answer retains only the exact instances that pattern reaches.
+effect fn resolveValidity(
+  resolver: &mut Resolver,
+  owner: &mut Query<Word, Answer, NoRejection>,
+  key: Key,
+) -> Answer ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
+  let instances = Vector.asSlice<BackendInstance>(&resolver.rankedInstances)
+  let instance = InstanceKey.copy(&instances[key.name].key)
+  let observing = instances[key.name].observing
+  return run lowerInstance(&mut resolver.*, &mut owner.*, key, move instance, observing, false)
+}
+
+// Lowers one exact instance. `publish` stores its body; otherwise the answer is its checked
+// validity evidence.
+effect fn lowerInstance(
+  resolver: &mut Resolver,
+  owner: &mut Query<Word, Answer, NoRejection>,
+  key: Key,
+  instance: InstanceKey,
+  observing: bool,
+  publish: bool,
+) -> Answer ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
   if let Option<Shared<Type>>.Some {value: glued} = move InstanceKey.glueType(&instance) {
-    return run resolveGlueMir(&mut resolver.*, &mut owner.*, move instance, &glued, observing)
+    return run resolveGlueMir(&mut resolver.*, &mut owner.*, move instance, &glued, observing, publish)
   }
   let module = run resolvedModule(&resolver.*, key.module)
   let declared = run declarationAt(&mut resolver.*, &module, key.declaration)
@@ -48484,7 +48649,7 @@ effect fn resolveMir(
       )
     }
     if let Option<Shared<Bytes>>.Some {value: symbol} = move InstanceKey.exportSymbol(&instance) {
-      return run exportShim(&mut resolver.*, &mut owner.*, move dependencies, &identity, key, &symbol, move foreign, observing)
+      return run exportShim(&mut resolver.*, &mut owner.*, move dependencies, &identity, key, &symbol, move foreign, observing, publish)
     }
     // The exported definition's own body lowers below like any ordinary function.
   }
@@ -48525,7 +48690,7 @@ effect fn resolveMir(
       )
     }
     let entry = run MirFunction.entry(&identity, &result, observing)
-    return run storeMir(&mut resolver.*, move entry, move dependencies)
+    return run publishLowered(&mut resolver.*, move entry, move dependencies, publish)
   }
   // A function with static work lowers the selected body for this application, never an
   // abstract all-arms body.
@@ -49035,10 +49200,11 @@ effect fn resolveMir(
     }
   }
   return match move lowered {
-    Result<MirFunction, BackendGap | CanonicalizationFailure | OutOfMemoryError>.Success {value} => run storeMir(
+    Result<MirFunction, BackendGap | CanonicalizationFailure | OutOfMemoryError>.Success {value} => run publishLowered(
       &mut resolver.*,
       move value,
       move dependencies,
+      publish,
     )
     Result<MirFunction, BackendGap | CanonicalizationFailure | OutOfMemoryError>.Failure {error} => match move error {
       BackendGap {code, owner: gapOwner, source} => memberSuccess(
@@ -50325,7 +50491,7 @@ effect fn resolveEmissionInputs(
     }
     at = at + usize.ONE
   }
-  let mut coordinates = RuntimeEncoding.coordinates()
+  let mut coordinates = RuntimeEncoding.codeCoordinates()
   let initialFunctions = Vector.asSlice<MirFunction>(&resolver.mirValues)
   let recipe = run InstanceRecipe.make(&initialFunctions[mirIndex])
   let callees = Vector.asSlice<InstanceKey>(&recipe.callees)
@@ -56300,6 +56466,8 @@ impl Semantic {
         layoutTypeLookup: InternIndex.make(),
         backendInstances: Vector.make<BackendInstance>(),
         backendInstanceLookup: InternIndex.make(),
+        rankedInstances: Vector.make<BackendInstance>(),
+        rankedInstanceLookup: InternIndex.make(),
         originPlans: Vector.make<CallableOrigin.Plan>(),
         originEvidence: Vector.make<CallableOrigin.Producer>(),
         selectedApplications: Vector.make<Application>(),
@@ -57626,6 +57794,12 @@ impl Semantic {
           run reject(&self.resolver, &module, RejectionCode.UnknownMember, span), Vector.make<Dependency>())))
       }
     }
+    let refusal = run refusedPattern(&mut self.resolver,
+      &mut self.query, &instance, location, false, span)
+    if let Option<Shared<Result<Answer, NoRejection>>>.Some {value: refused} = move refusal {
+      run recordRoot(&mut request.*, Family.Validity, &module, b"", &refused)
+      return run anchorCanonicalAnswer(&mut self.resolver, &refused, sourceOwner, span)
+    }
     let name = run internBackendInstance(&mut self.resolver, &instance, false)
     let answer = run demandRaw(&mut self.resolver, &mut self.query, Key {
       family: Family.Mir, module: location.module, name: name, declaration: location.declaration, member: instanceMember(&instance), external: false,
@@ -57666,8 +57840,9 @@ impl Semantic {
   }
   /// Demands MIR for one complete semantic environment before runtime identity can be reused.
   /// Header validation and admission precede the exact-application query cache; target callees
-  /// remain body-lazy. The instance key numbers the application's caller regions canonically;
-  /// `'static` and region sharing remain exact evidence even when emitted instructions coincide.
+  /// remain body-lazy. The instance key numbers the application's caller regions canonically.
+  /// Every region pattern shares one backend body; a pattern other than the one that publishes it
+  /// first proves its own `'static` and sharing evidence through its Validity key.
   pub effect fn demandApplicationMir(self: &mut Self, request: &mut Request, application: &Application) -> Shared<Result<Answer, NoRejection>>
   ! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
     let declaredModule = Application.bodyDeclaration(application)
@@ -57701,6 +57876,12 @@ impl Semantic {
       _ => { return run Shared.make<Result<Answer, NoRejection>>(Result.succeed<Answer, NoRejection>(memberRejected(
         run reject(&self.resolver, &module, RejectionCode.UnknownMember, span), Vector.make<Dependency>()))) }
     }
+    let refusal = run refusedPattern(&mut self.resolver,
+      &mut self.query, &instance, location, false, span)
+    if let Option<Shared<Result<Answer, NoRejection>>>.Some {value: refused} = move refusal {
+      run recordRoot(&mut request.*, Family.Validity, &module, b"", &refused)
+      return run anchorCanonicalAnswer(&mut self.resolver, &refused, declaredModule, span)
+    }
     let name = run internBackendInstance(&mut self.resolver, &instance, false)
     let answer = run demandRaw(&mut self.resolver, &mut self.query, Key {
       family: Family.Mir, module: location.module, name: name, declaration: location.declaration, member: usize.ZERO, external: false,
@@ -57721,6 +57902,12 @@ impl Semantic {
       Option<InstanceLocation>.Some {value} => value
       _ => { return run Shared.make<Result<Answer, NoRejection>>(Result.succeed<Answer, NoRejection>(memberRejected(
         run reject(&self.resolver, &module, RejectionCode.UnknownMember, querySpan), Vector.make<Dependency>()))) }
+    }
+    let refusal = run refusedPattern(&mut self.resolver,
+      &mut self.query, instance, location, observing, querySpan)
+    if let Option<Shared<Result<Answer, NoRejection>>>.Some {value: refused} = move refusal {
+      run recordRoot(&mut request.*, Family.Validity, &module, b"", &refused)
+      return run anchorCanonicalAnswer(&mut self.resolver, &refused, sourceOwner, span)
     }
     let name = run internBackendInstance(&mut self.resolver, instance, observing)
     let answer = run demandRaw(&mut self.resolver, &mut self.query, Key {
@@ -57761,6 +57948,12 @@ impl Semantic {
           ),
         )
       }
+    }
+    let refusal = run refusedPattern(&mut self.resolver,
+      &mut self.query, instance, location, observing, querySpan)
+    if let Option<Shared<Result<Answer, NoRejection>>>.Some {value: refused} = move refusal {
+      run recordRoot(&mut request.*, Family.Validity, &module, b"", &refused)
+      return run anchorCanonicalAnswer(&mut self.resolver, &refused, sourceOwner, span)
     }
     let name = run internBackendInstance(&mut self.resolver, instance, observing)
     let key = Key {
@@ -58186,6 +58379,45 @@ impl Semantic {
       }
       let member = instanceMember(&instance)
       let backendName = run internBackendInstance(&mut self.resolver, &instance, observing)
+      let callerModule = run resolvedModule(&self.resolver, location.module)
+      // Drop glue passes its root on to the child glue and Drop hook it reaches; a function's
+      // own references start outside any cleanup.
+      let mut passed = Option.none<Shared<Type>>()
+      let mut generatedGlue = false
+      if let Option<Shared<Type>>.Some {value: glued} = move InstanceKey.glueType(&instance) {
+        generatedGlue = true
+        passed = Option.some<Shared<Type>>(move glued)
+        if let Option<Shared<Type>>.Some {value: root} = &entered.cleanup {
+          passed = Option.some<Shared<Type>>(Shared.clone<Type>(&root))
+        }
+      }
+      // Another region pattern of a published body checks only its own validity evidence, then
+      // walks the exact instances that pattern reaches.
+      if !run representsInstance(&self.resolver, backendName, &instance) {
+        let checkedKey = run validityKey(&mut self.resolver, &instance, location, observing)
+        let checked = run demandRaw(&mut self.resolver, &mut self.query, checkedKey, Span.make(usize.ZERO, usize.ZERO))
+        if run walkFailure(&self.resolver, &checked, &instance, &entered.module, entered.span, &mut gaps, &mut refusals) {
+          continue
+        }
+        let validated = Shared.with<Result<Answer, NoRejection>,
+          Option<Shared<Vector<MirReference>>>>(&checked, answerValidatedReferences)
+        if let Option<Shared<Vector<MirReference>>>.Some {value: reached} = move validated {
+          if Shared.with<Result<Answer, NoRejection>, bool>(&checked, answerValidatedObserves) { observes = true }
+          let count = Shared.with<Vector<MirReference>, usize>(&reached, fn(listed: &Vector<MirReference>) -> usize {
+            return Vector.length<MirReference>(listed)
+          })
+          let mut edge = usize.ZERO
+          while edge < count {
+            let reference = Shared.with<Vector<MirReference>, MirReference>(&reached, fn(listed: &Vector<MirReference>) -> MirReference {
+              let entries = Vector.asSlice<MirReference>(listed)
+              return copyReference(&entries[edge])
+            })
+            run enterReached(&mut pending, &reference, &callerModule, &entered.module, entered.span, generatedGlue, &passed)
+            edge = edge + usize.ONE
+          }
+        }
+        continue
+      }
       let key = Key {
         family: Family.EmissionInputs,
         module: location.module,
@@ -58201,36 +58433,8 @@ impl Semantic {
         Span.make(usize.ZERO, usize.ZERO),
       )
       let answer = run demandPreparedText(&mut self.resolver, &mut self.query, key, &prepared)
-      let canonicalFailure = Shared.with<Result<Answer, NoRejection>, Option<CanonicalizationFailure>>(&answer, answerCanonicalizationFailure)
-      if let Option<CanonicalizationFailure>.Some {..} = move canonicalFailure {
-        run Vector.append<Shared<Rejection>>(&mut refusals, run reject(&self.resolver, &entered.module,
-          RejectionCode.Unsupported, entered.span))
-        continue
-      }
-      let rejected = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(
-        &answer,
-        answerRejection,
-      )
-      if let Option<Shared<Rejection>>.Some {value} = move rejected {
-        let code = Shared.with<Rejection, Option<GapCode>>(&value, fn(diagnostic: &Rejection) -> Option<GapCode> {
-          return BackendGap.forRejection(diagnostic.code)
-        })
-        if let Option<GapCode>.Some {value: gapCode} = move code {
-          let identity = InstanceKey.identity(&instance)
-          run Vector.append<Shared<BackendGap>>(&mut gaps,
-            run Shared.make<BackendGap>(BackendGap.fromRejection(gapCode, &identity, &value)))
-          continue
-        }
-        run Vector.append<Shared<Rejection>>(&mut refusals, move value)
-        continue
-      }
-      let gap = Shared.with<Result<Answer, NoRejection>, Option<Shared<BackendGap>>>(
-        &answer,
-        answerBackendGap,
-      )
       // Validate every exact application before collecting its content answer.
-      if let Option<Shared<BackendGap>>.Some {value} = move gap {
-        run Vector.append<Shared<BackendGap>>(&mut gaps, move value)
+      if run walkFailure(&self.resolver, &answer, &instance, &entered.module, entered.span, &mut gaps, &mut refusals) {
         continue
       }
       let index = Shared.with<Result<Answer, NoRejection>, Option<usize>>(
@@ -58266,39 +58470,10 @@ impl Semantic {
           run Vector.append<Shared<BackendGap>>(&mut gaps,
             run Shared.make<BackendGap>(BackendGap.make(GapCode.Suspension, &identity, boundary.span)))
         }
-        let callerModule = run resolvedModule(&self.resolver, location.module)
-        // Drop glue passes its root on to the child glue and Drop hook it reaches; a function's
-        // own references start outside any cleanup.
-        let mut passed = Option.none<Shared<Type>>()
-        let mut generatedGlue = false
-        if let Option<Shared<Type>>.Some {value: glued} = move InstanceKey.glueType(&instance) {
-          generatedGlue = true
-          passed = Option.some<Shared<Type>>(move glued)
-          if let Option<Shared<Type>>.Some {value: root} = &entered.cleanup {
-            passed = Option.some<Shared<Type>>(Shared.clone<Type>(&root))
-          }
-        }
         let references = Vector.asSlice<MirReference>(&functions[selectedMir].references)
         let mut edge = usize.ZERO
         while edge < references.length {
-          // Generated glue references have no authored origin. Carry the demand-local cleanup
-          // request through every generated descendant instead of publishing its synthetic zero.
-          let mut requestSpan = references[edge].origin.span
-          let mut requestModule = run ModuleId.copy(&callerModule)
-          if generatedGlue {
-            requestSpan = entered.span
-            requestModule = run ModuleId.copy(&entered.module)
-          }
-          run Vector.append<BackendVisit>(
-            &mut pending,
-            BackendVisit.Enter {
-              key: InstanceKey.copy(&references[edge].key),
-              edge: Edge.copy(&references[edge].edge),
-              span: requestSpan,
-              module: move requestModule,
-              cleanup: copyCleanupRoot(&passed),
-            },
-          )
+          run enterReached(&mut pending, &references[edge], &callerModule, &entered.module, entered.span, generatedGlue, &passed)
           edge = edge + usize.ONE
         }
       }
@@ -58328,6 +58503,62 @@ struct CleanupAnswer {
   root: Shared<Type>
   candidate: Shared<Type>
   within: bool
+}
+
+// Records a walked answer's refusal or gap. A canonicalization failure refuses the requesting
+// site; a rejection with a coverage code is a gap.
+effect fn walkFailure(resolver: &Resolver, answer: &Shared<Result<Answer, NoRejection>>, instance: &InstanceKey,
+  module: &ModuleId, span: Span, gaps: &mut Vector<Shared<BackendGap>>, refusals: &mut Vector<Shared<Rejection>>) -> bool
+! OutOfMemoryError ? &mut Allocator {
+  let canonicalFailure = Shared.with<Result<Answer, NoRejection>, Option<CanonicalizationFailure>>(answer, answerCanonicalizationFailure)
+  if let Option<CanonicalizationFailure>.Some {..} = move canonicalFailure {
+    run Vector.append<Shared<Rejection>>(&mut refusals.*, run reject(resolver, module, RejectionCode.Unsupported, span))
+    return true
+  }
+  let rejected = Shared.with<Result<Answer, NoRejection>, Option<Shared<Rejection>>>(answer, answerRejection)
+  if let Option<Shared<Rejection>>.Some {value} = move rejected {
+    let code = Shared.with<Rejection, Option<GapCode>>(&value, fn(diagnostic: &Rejection) -> Option<GapCode> {
+      return BackendGap.forRejection(diagnostic.code)
+    })
+    if let Option<GapCode>.Some {value: gapCode} = move code {
+      let identity = InstanceKey.identity(instance)
+      run Vector.append<Shared<BackendGap>>(&mut gaps.*, run Shared.make<BackendGap>(BackendGap.fromRejection(gapCode, &identity, &value)))
+      return true
+    }
+    run Vector.append<Shared<Rejection>>(&mut refusals.*, move value)
+    return true
+  }
+  let gap = Shared.with<Result<Answer, NoRejection>, Option<Shared<BackendGap>>>(answer, answerBackendGap)
+  if let Option<Shared<BackendGap>>.Some {value} = move gap {
+    run Vector.append<Shared<BackendGap>>(&mut gaps.*, move value)
+    return true
+  }
+  return false
+}
+
+// Queues one reached instance. Generated glue references have no authored origin, so they carry
+// the demand-local cleanup request through every generated descendant instead of a synthetic zero.
+effect fn enterReached(pending: &mut Vector<BackendVisit>, reference: &MirReference, callerModule: &ModuleId,
+  enteredModule: &ModuleId, enteredSpan: Span, generatedGlue: bool, passed: &Option<Shared<Type>>) -> ()
+! OutOfMemoryError ? &mut Allocator {
+  let mut requestSpan = reference.origin.span
+  let mut requestModule = run ModuleId.copy(callerModule)
+  if generatedGlue {
+    requestSpan = enteredSpan
+    requestModule = run ModuleId.copy(enteredModule)
+  }
+  run Vector.append<BackendVisit>(&mut pending.*, BackendVisit.Enter {
+    key: InstanceKey.copy(&reference.key),
+    edge: Edge.copy(&reference.edge),
+    span: requestSpan,
+    module: move requestModule,
+    cleanup: copyCleanupRoot(passed),
+  })
+  return ()
+}
+
+fn copyReference(reference: &MirReference) -> MirReference {
+  return MirReference {key: InstanceKey.copy(&reference.key), edge: Edge.copy(&reference.edge), origin: reference.origin}
 }
 
 fn copyCleanupRoot(root: &Option<Shared<Type>>) -> Option<Shared<Type>> {
@@ -58703,6 +58934,7 @@ effect fn assembleEmissionChecked(
   return BackendBuild.Module {text: move text, uncheckedBodies: unchecked, plan: move plan}
 }
 
+// The walk visits each exact region pattern once; patterns of one backend instance share its body.
 effect fn applicationVisited(visited: &[InstanceKey], lookup: &InternIndex, instance: &InstanceKey) -> bool
 ! OutOfMemoryError
 ? &mut Allocator {
@@ -58926,9 +59158,14 @@ effect fn enterChainNode(semantic: &mut Semantic, draft: &mut ClosureDraft, key:
     Option<InstanceLocation>.None => { return Option.some<StaticClosure>(run closureGap(GapCode.CalleeModule, &application, span)) }
   }
   let backendName = run internBackendInstance(&mut semantic.resolver, &key, false)
-  let instanceAnswer = run demandRaw(&mut semantic.resolver, &mut semantic.query, Key {
+  let mut instanceAnswer = run demandRaw(&mut semantic.resolver, &mut semantic.query, Key {
     family: Family.EmissionInputs, module: location.module, name: backendName, declaration: location.declaration, member: usize.ZERO, external: false,
   }, Span.make(usize.ZERO, usize.ZERO))
+  let refusal = run refusedPattern(&mut semantic.resolver,
+    &mut semantic.query, &key, location, false, Span.make(usize.ZERO, usize.ZERO))
+  if let Option<Shared<Result<Answer, NoRejection>>>.Some {value: refused} = move refusal {
+    instanceAnswer = move refused
+  }
   let instanceCanonicalFailure = Shared.with<Result<Answer, NoRejection>, Option<CanonicalizationFailure>>(&instanceAnswer, answerCanonicalizationFailure)
   if let Option<CanonicalizationFailure>.Some {..} = move instanceCanonicalFailure {
     return Option.some<StaticClosure>(StaticClosure.Rejected {diagnostic: run reject(&semantic.resolver,

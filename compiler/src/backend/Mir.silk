@@ -2094,7 +2094,7 @@ effect fn samePartition(builder: &Builder, parent: &Place, existing: &Vector<usi
       || !prefixPath(Vector.asSlice<Projection>(&stored.projections), Vector.asSlice<Projection>(&actual.projections)) { return false }
     let mut sameGlue = false
     if let Option<InstanceKey>.Some {value: priorGlue} = &nodes[prior[at]].glue {
-      sameGlue = run InstanceKey.sameApplication(&priorGlue, &children[at].glue)
+      sameGlue = run InstanceKey.sameInstance(&priorGlue, &children[at].glue)
     }
     if !sameGlue { return false }
     at = at + usize.ONE
