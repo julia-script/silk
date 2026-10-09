@@ -21833,9 +21833,47 @@ effect fn inferFromBoundAt(
       &contract,
       span,
     ) }
+    Constraint.Provides {provider, selector, source} => {
+      run inferFromProvides(callOwner, declared, &mut inferred.*, &provider, &selector, &source)
+    }
     _ => ()
   }
   return Option.none<Shared<Rejection>>()
+}
+
+// A `provides` bound whose provider still mentions the callee's open binders, such as the
+// region a written `&mut P` elides, is proved only by the caller's own matching premise. The one
+// premise with the same selector and source row whose provider unifies fixes those binders; with
+// none or several, they stay open and the bound is proved or rejected as before.
+effect fn inferFromProvides(callOwner: &Shared<DeclarationId>, declared: &[Constraint], inferred: &mut Vector<Binding>,
+  provider: &Shared<Type>, selector: &Shared<Row>, source: &Shared<Row>) -> () ! OutOfMemoryError ? &mut Allocator {
+  let fresh = run DeclarationId.copyShared(callOwner)
+  let current = Vector.asSlice<Binding>(&inferred.*)
+  let wanted = run Type.applyBindings(provider, current, true)
+  if !run typeMentionsOwner(&wanted, &fresh) { return () }
+  let wantedSelector = run Row.applyBindings(selector, current, true)
+  let wantedSource = run Row.applyBindings(source, current, true)
+  let mut variables = Vector.make<Shared<DeclarationId>>()
+  run Vector.append<Shared<DeclarationId>>(&mut variables, Shared.clone<DeclarationId>(callOwner))
+  let mut selected = Option.none<Vector<Binding>>()
+  let mut at = usize.ZERO
+  while at < declared.length {
+    if let Constraint.Provides {provider: offered, selector: premiseSelector, source: premiseSource} = &declared[at] {
+      if run Row.equalsShared(&wantedSelector, &premiseSelector) && run Row.equalsShared(&wantedSource, &premiseSource) {
+        let mut trial = run copyBindings(Vector.asSlice<Binding>(&inferred.*))
+        let matched = run Type.unify(&wanted, &offered, Vector.asSlice<Shared<DeclarationId>>(&variables), Comparison.Exact,
+          &mut trial)
+        let unified = match move matched { Unification.Unified => true _ => false }
+        if unified {
+          if let Option<Vector<Binding>>.Some {..} = &selected { return () }
+          selected = Option.some<Vector<Binding>>(move trial)
+        }
+      }
+    }
+    at = at + usize.ONE
+  }
+  if let Option<Vector<Binding>>.Some {value} = move selected { inferred.* = move value }
+  return ()
 }
 
 // Each bound may contribute arguments from its own uniquely selected, coherent direct
