@@ -312,6 +312,9 @@ pub struct MirFunction {
   pub observes: bool
   /// The texts each originating `FailureContext` writes, by origin (N3).
   pub contexts: Vector<ContextText>
+  /// The first explicit suspension boundary this function runs, which makes it a suspension
+  /// origin (SUSP-001); absent for an instance that runs none.
+  pub suspension: Option<Origin>
 }
 
 /// The identity of each canonical member of a failure slot's type (one when it is not a union),
@@ -531,6 +534,9 @@ pub union RunPlan {
   /// instance `callback`, with no selected failure, then drops the state (failure observer note N1).
   /// `state` is the state's address type.
   Observe {pub inner: usize, pub state: Shared<Type>, pub stateDrop: Option<Shared<Type>>, pub callback: InstanceKey},
+  /// Runs part 0, the deferred child, at an explicit suspension boundary (SUSP-001). Its run is
+  /// ordinary; the instance that reaches it becomes a suspension origin.
+  Suspend {pub inner: usize},
 }
 
 /// One alternative of a finite Effect join and the step that runs it.
@@ -4933,7 +4939,8 @@ effect fn lowerReplace(builder: &mut Builder, body: &Shared<TypedBody>, hir: &Mo
 
 // `run systemAllocationAcquire(layout)`: validates the request, then acquires `bytes + alignment - 1`
 // bytes (at least one) from `malloc` and aligns the base inside them. A refused request or a null
-// result fails with `StorageFailure` before any allocation is owned (SUSP-015).
+// result fails with `StorageFailure` before any allocation is owned (SUSP-015); a null result is
+// passed to `free` first.
 effect fn lowerAcquisition(builder: &mut Builder, body: &Shared<TypedBody>, hir: &Module, node: BodyNodeId, ty: &Shared<Type>,
   origin: Origin) -> Operand ! Gap | CanonicalizationFailure | OutOfMemoryError ? &mut Allocator {
   let owner = InstanceKey.identity(&builder.function.key)
@@ -4994,7 +5001,16 @@ effect fn lowerAcquisition(builder: &mut Builder, body: &Shared<TypedBody>, hir:
   let missing = run storageCondition(&mut builder.*, InfixOperator.Equals, Operand.Copy {place: place(raw)},
     Operand.Null {ty: Shared.clone<Type>(&address)}, origin)
   let acquired = run block(&mut builder.*, origin)
-  terminate(&mut builder.*, Terminator.Branch {condition: move missing, thenBlock: failed, elseBlock: acquired, origin: origin})
+  let released = run block(&mut builder.*, origin)
+  terminate(&mut builder.*, Terminator.Branch {condition: move missing, thenBlock: released, elseBlock: acquired, origin: origin})
+  // A null result is still released, as the bootstrap does: `free(NULL)` is inert, and an
+  // unoptimized build keeps the call the allocator observes.
+  resume(&mut builder.*, released)
+  let mut releasing = Vector.make<Operand>()
+  run Vector.append<Operand>(&mut releasing, Operand.Copy {place: place(raw)})
+  let unit = run Shared.make<Type>(Type.Unit)
+  drop run callAllocator(&mut builder.*, &plan, usize.ONE, move releasing, &unit, origin)
+  terminate(&mut builder.*, Terminator.Goto {target: failed, origin: origin})
   resume(&mut builder.*, failed)
   let refusal = run storageValue(&mut builder.*, &failureType, Rvalue.Aggregate {fields: Vector.make<AggregateField>()}, origin)
   run propagateFailure(&mut builder.*, refusal, &failureType, origin)
@@ -5108,6 +5124,11 @@ effect fn lowerStorage(builder: &mut Builder, body: &Shared<TypedBody>, hir: &Mo
   if operation == StorageOperation.Replace { return run lowerReplace(&mut builder.*, body, hir, node, ty, origin) }
   // Only a run executes the allocation boundary; a stored acquisition Effect has no runner.
   if operation == StorageOperation.SystemAllocationAcquire { return run unsupported(&owner, origin, GapCode.EffectForm) }
+  // The execution package's layout and transitions are not lowered yet; the family is typed only.
+  if operation == StorageOperation.ExecutionLayout || operation == StorageOperation.ExecutionFromAllocation
+    || operation == StorageOperation.ExecutionNotifyInitial {
+    return run unsupported(&owner, origin, GapCode.CoreType)
+  }
   let plan = match move takeStorage(&mut builder.*, node) {
     Option<StoragePlan>.Some {value} => value
     Option<StoragePlan>.None => { return run unsupported(&owner, origin, GapCode.TypedForm) }
@@ -5816,6 +5837,12 @@ effect fn executePlan(builder: &mut Builder, steps: &[RunPlan], step: usize, env
       let protectedPart = run projectedPart(environment, usize.ZERO)
       run executePlan(&mut builder.*, steps, inner, &protectedPart, output, sink, &mut bound.*, origin)
       drop Vector.pop<BoundPlace>(&mut bound.*)
+    }
+    RunPlan.Suspend {inner} => {
+      let marked = match &builder.function.suspension { Option<Origin>.Some {..} => true Option<Origin>.None => false }
+      if !marked { builder.function.suspension = Option.some<Origin>(origin) }
+      let deferredPart = run projectedPart(environment, usize.ZERO)
+      run executePlan(&mut builder.*, steps, inner, &deferredPart, output, sink, &mut bound.*, origin)
     }
     RunPlan.Observe {inner, state, stateDrop, callback} => {
       // The body runs under the record `[callback, &mut state]` with no selected failure (N1, N2).
@@ -6981,7 +7008,7 @@ impl MirFunction {
       references: move references,
       externs: Vector.make<Shared<DeclarationId>>(),
       observes: false,
-      contexts: Vector.make<ContextText>(),
+      contexts: Vector.make<ContextText>(), suspension: Option.none<Origin>(),
     }
   }
   /// Makes one C export shim as ordinary MIR: its C-classified scalar and pointer lanes pass
@@ -7035,7 +7062,7 @@ impl MirFunction {
       references: move references,
       externs: Vector.make<Shared<DeclarationId>>(),
       observes: false,
-      contexts: Vector.make<ContextText>(),
+      contexts: Vector.make<ContextText>(), suspension: Option.none<Origin>(),
     }
   }
   /// Lowers a closed body while preserving its unfinished safety status, without reading a callee body.
@@ -7141,7 +7168,7 @@ impl MirFunction {
         references: Vector.make<Reference>(),
         externs: Vector.make<Shared<DeclarationId>>(),
         observes: false,
-        contexts: Vector.make<ContextText>(),
+        contexts: Vector.make<ContextText>(), suspension: Option.none<Origin>(),
       },
       current: usize.ZERO,
       live: true,
@@ -7321,7 +7348,7 @@ effect fn instanceView(builder: &Builder, body: &Shared<TypedBody>, id: BodyNode
     View.Storage {ty, operation, node, origin} => View.Storage {
       ty: run RuntimeType.applyBindings(&ty, bindings, projections), operation: operation, node: node, origin: origin,
     }
-    View.Run {ty, value, origin} => View.Run {ty: run Type.applyBindings(&ty, bindings, true), value: value, origin: origin}
+    View.Run {ty, value, origin} => View.Run {ty: run RuntimeType.applyBindings(&ty, bindings, projections), value: value, origin: origin}
     View.Fail {value, origin} => View.Fail {value: value, origin: origin}
     View.Boolean {value, origin} => View.Boolean {value: value, origin: origin}
     View.Unit {origin} => View.Unit {origin: origin}
