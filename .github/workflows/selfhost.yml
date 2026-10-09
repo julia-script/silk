@@ -26,7 +26,7 @@ jobs:
   # Authored N0 is independent of the corpus compiler, whose inputs are formatted in place.
   native-seed:
     name: Authored native seed (N0)
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -75,7 +75,7 @@ jobs:
   native-seed-restore:
     name: Restore authored native seed
     needs: native-seed
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -96,7 +96,7 @@ jobs:
   native-self-build:
     name: Experimental native self-build (N1)
     needs: native-seed
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -180,7 +180,7 @@ jobs:
 
   corpus:
     name: Selfhost native corpus
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -354,7 +354,7 @@ jobs:
   cases:
     name: Selfhost cases (${{ matrix.shard }})
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -423,7 +423,7 @@ jobs:
     name: Focused Linux Silk
     if: always()
     needs: [corpus, cases, native-seed-restore]
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-silk
     steps:
       - name: Require every shard
         env:
