@@ -89,13 +89,13 @@ impl EmissionPlan {
     return ()
   }
 
-  /// Finds an exact semantic application, not a lifetime-erased base or a shortened symbol.
+  /// Finds an instance by code identity, not by an erased runtime family or a shortened symbol.
   pub effect fn lookup(self: &Self, key: &InstanceKey) -> Option<usize>
   ! OutOfMemoryError ? &mut Allocator {
     let listed = Vector.asSlice<Resolution>(&self.resolutions)
     let mut at = InternIndex.first(&self.resolutionLookup, InstanceKey.runtimeHash(key))
     while at != usize.MAX {
-      if run InstanceKey.sameApplication(&listed[at].key, key) {
+      if run InstanceKey.sameInstance(&listed[at].key, key) {
         return Option.some<usize>(listed[at].identity)
       }
       at = InternIndex.after(&self.resolutionLookup, at)

@@ -3468,7 +3468,7 @@ effect fn internBackendInstance(resolver: &mut Resolver, instance: &InstanceKey,
   let known = Vector.asSlice<BackendInstance>(&resolver.backendInstances)
   let mut at = InternIndex.first(&resolver.backendInstanceLookup, hashed)
   while at != usize.MAX {
-    if known[at].observing == observing && run InstanceKey.sameApplication(&known[at].key, instance) {
+    if known[at].observing == observing && run InstanceKey.sameInstance(&known[at].key, instance) {
       return at
     }
     at = InternIndex.after(&resolver.backendInstanceLookup, at)
@@ -50325,7 +50325,7 @@ effect fn resolveEmissionInputs(
     }
     at = at + usize.ONE
   }
-  let mut coordinates = RuntimeEncoding.coordinates()
+  let mut coordinates = RuntimeEncoding.codeCoordinates()
   let initialFunctions = Vector.asSlice<MirFunction>(&resolver.mirValues)
   let recipe = run InstanceRecipe.make(&initialFunctions[mirIndex])
   let callees = Vector.asSlice<InstanceKey>(&recipe.callees)
@@ -58708,7 +58708,7 @@ effect fn applicationVisited(visited: &[InstanceKey], lookup: &InternIndex, inst
 ? &mut Allocator {
   let mut at = InternIndex.first(lookup, InstanceKey.runtimeHash(instance))
   while at != usize.MAX {
-    if run InstanceKey.sameApplication(&visited[at], instance) {
+    if run InstanceKey.sameInstance(&visited[at], instance) {
       return true
     }
     at = InternIndex.after(lookup, at)

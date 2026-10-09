@@ -61,7 +61,7 @@ pub effect fn content(
   foreign: &[CAbi.Signature],
   signatures: &[u8],
 ) -> Bytes ! OutOfMemoryError ? &mut Allocator {
-  let mut coordinates = RuntimeEncoding.coordinates()
+  let mut coordinates = RuntimeEncoding.codeCoordinates()
   let recipe = run InstanceRecipe.make(function)
   let encoded = run encodings(&recipe, &mut coordinates)
   return run contentWith(
