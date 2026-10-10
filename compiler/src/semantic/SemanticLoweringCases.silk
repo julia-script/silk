@@ -8883,6 +8883,77 @@ fn droppedAfterResult(blocks: &[MirBlock], local: usize) -> bool {
   return dropped
 }
 
+test effect fn movedMatchBindingsTransferAtConsumingReads() -> ()
+! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("moved-match-bindings.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let text = """
+struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+union Outcome { Failed { code: i32 }, Made { token: Token } }
+fn make() -> Outcome { return Outcome.Made { token: Token { value: 7 } } }
+fn bound() -> i32 {
+  let outcome = make()
+  let token = match move outcome {
+    Outcome.Failed {code} => { return code }
+    Outcome.Made {token} => token
+  }
+  return token.value
+}
+fn returned() -> Token {
+  let outcome = make()
+  return match move outcome {
+    Outcome.Failed {code} => Token { value: code }
+    Outcome.Made {token} => token
+  }
+}
+fn assigned() -> i32 {
+  let mut held = Token { value: 0 }
+  let outcome = make()
+  held = match move outcome {
+    Outcome.Failed {code} => Token { value: code }
+    Outcome.Made {token} => token
+  }
+  return held.value
+}
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let bound = run Semantic.demandMir(&mut store, &mut request, &id, b"bound") |> Effect.provideMut<Allocator>(&mut allocator)
+  let returned = run Semantic.demandMir(&mut store, &mut request, &id, b"returned") |> Effect.provideMut<Allocator>(&mut allocator)
+  let assigned = run Semantic.demandMir(&mut store, &mut request, &id, b"assigned") |> Effect.provideMut<Allocator>(&mut allocator)
+  // The Failed arm cleans its subject. The Made arm transfers the payload it bound, so it never
+  // cleans it: only its receiver does.
+  run Testing.expect(mirDrops(&store, &bound) == 2, "a let initialized from a moved binding is the payload's one drop site")
+  run Testing.expect(mirDrops(&store, &returned) == usize.ONE, "a returned moved binding leaves no drop on its arm")
+  run Testing.expect(mirDrops(&store, &assigned) == 3, "an assigned moved binding is dropped only by its receiver, beside the replaced value")
+  return ()
+}
+
+// The drop statements of a MIR function, or MAX when the answer has no MIR.
+fn mirDrops(store: &Semantic, answer: &Shared<Result<Answer, NoRejection>>) -> usize {
+  let selected = Shared.with<Result<Answer, NoRejection>, Option<usize>>(answer, selectedMirIndex)
+  if let Option<usize>.Some {value: index} = move selected {
+    if let Option<&MirFunction>.Some {value: function} = move Semantic.mirAt(store, index) {
+      let blocks = Vector.asSlice<MirBlock>(&function.blocks)
+      let mut count = usize.ZERO
+      let mut at = usize.ZERO
+      while at < blocks.length {
+        let statements = Vector.asSlice<MirStatement>(&blocks[at].statements)
+        let mut position = usize.ZERO
+        while position < statements.length {
+          if let MirStatement.Drop {..} = &statements[position] { count = count + usize.ONE }
+          position = position + usize.ONE
+        }
+        at = at + usize.ONE
+      }
+      return count
+    }
+  }
+  return usize.MAX
+}
+
 test effect fn fallibleRunsUseFailureEdgesAndOutSlots() -> ()
 ! InvalidModulePath | Cycle | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
   let mut allocator = Allocator.systemAllocatorProvider()

@@ -40796,7 +40796,7 @@ effect fn transferCallableReturn(resolver: &mut Resolver, owner: &mut Query<Word
           Result<BodyNodeId, Shared<Rejection>>.Success {value} => value
           Result<BodyNodeId, Shared<Rejection>>.Failure {error} => { return Result.failResult<BodyNodeId, Shared<Rejection>>(move error) }
         }
-        if selected.index != armNode.index { run replaceCallableReturnArm(&mut nodes.*, node, at, selected) }
+        if selected.index != armNode.index { run replaceMatchArmResult(&mut nodes.*, node, at, selected) }
       }
       at = at + usize.ONE
     }
@@ -40838,7 +40838,65 @@ effect fn transferCallableReturn(resolver: &mut Resolver, owner: &mut Query<Word
   return Result.failResult<BodyNodeId, Shared<Rejection>>(run reject(&resolver.*, module, code, span))
 }
 
-effect fn replaceCallableReturnArm(nodes: &mut Vector<BodyNode>, node: BodyNodeId, arm: usize, result: BodyNodeId) -> ()
+// A `match move` binding owns its part of the subject, so a consuming position that reads it by
+// value transfers it as `move` would (MATCH-002), recording the same cleanup hole. A match yielding
+// such a binding transfers it on that arm. A Copy binding is only read, and any other operand is
+// left as checked.
+effect fn transferMovedPattern(resolver: &mut Resolver, owner: &mut Query<Word, Answer, NoRejection>,
+  dependencies: &mut Vector<Dependency>, module: &ModuleId, cursor: &AuthoredCursor,
+  nodes: &mut Vector<BodyNode>, node: BodyNodeId, constraints: &[Constraint]) -> Result<BodyNodeId, Shared<Rejection>>
+! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError ? &mut Allocator {
+  let mut armResults = Vector.make<BodyNodeId>()
+  let mut moved = false
+  match &Vector.asSlice<BodyNode>(&nodes.*)[node.index].kind {
+    BodyNodeKind.Expression {form: BodyExpression.PatternBinding {access, ..}, ..} => { moved = access == BodyBindingAccess.Moved }
+    BodyNodeKind.Expression {form: BodyExpression.Match {arms, ..}, ..} => {
+      let listed = Vector.asSlice<BodyMatchArm>(&arms)
+      let mut at = usize.ZERO
+      while at < listed.length {
+        run Vector.append<BodyNodeId>(&mut armResults, listed[at].result)
+        at = at + usize.ONE
+      }
+    }
+    _ => ()
+  }
+  let results = Vector.asSlice<BodyNodeId>(&armResults)
+  let mut at = usize.ZERO
+  while at < results.length {
+    let transferred = run transferMovedPattern(&mut resolver.*, &mut owner.*, &mut dependencies.*, module, cursor,
+      &mut nodes.*, results[at], constraints)
+    let selected = match move transferred {
+      Result<BodyNodeId, Shared<Rejection>>.Success {value} => value
+      Result<BodyNodeId, Shared<Rejection>>.Failure {error} => { return Result.failResult<BodyNodeId, Shared<Rejection>>(move error) }
+    }
+    if selected.index != results[at].index { run replaceMatchArmResult(&mut nodes.*, node, at, selected) }
+    at = at + usize.ONE
+  }
+  if !moved { return Result.succeed<BodyNodeId, Shared<Rejection>>(node) }
+  let actual = match move bodyExpressionType(Vector.asSlice<BodyNode>(&nodes.*), &node) {
+    Option<Shared<Type>>.Some {value} => move value
+    _ => { fail RevisionMismatch {} }
+  }
+  let origin = Vector.asSlice<BodyNode>(&nodes.*)[node.index].origin
+  let copied = run copyType(&mut resolver.*, &mut owner.*, &mut dependencies.*, &actual, constraints, origin.span)
+  let copy = match move copied {
+    Result<bool, Shared<Rejection>>.Success {value} => value
+    Result<bool, Shared<Rejection>>.Failure {error} => { return Result.failResult<BodyNodeId, Shared<Rejection>>(move error) }
+  }
+  if copy { return Result.succeed<BodyNodeId, Shared<Rejection>>(node) }
+  let selected = run consumedPlace(&mut resolver.*, &mut owner.*, &mut dependencies.*, module, cursor,
+    Vector.asSlice<BodyNode>(&nodes.*), node, false, false, origin.span, origin.span, constraints)
+  let consumed = match move selected {
+    Result<Option<BodyConsumedPlace>, Shared<Rejection>>.Success {value} => move value
+    Result<Option<BodyConsumedPlace>, Shared<Rejection>>.Failure {error} => { return Result.failResult<BodyNodeId, Shared<Rejection>>(move error) }
+  }
+  let transfer = BodyNodeId {index: Vector.length<BodyNode>(&nodes.*)}
+  run Vector.append<BodyNode>(&mut nodes.*, BodyNode {origin: origin, kind: BodyNodeKind.Expression {
+    ty: move actual, form: BodyExpression.Move {value: node, consumed: move consumed}}})
+  return Result.succeed<BodyNodeId, Shared<Rejection>>(transfer)
+}
+
+effect fn replaceMatchArmResult(nodes: &mut Vector<BodyNode>, node: BodyNodeId, arm: usize, result: BodyNodeId) -> ()
 ! RevisionMismatch | OutOfMemoryError ? &mut Allocator {
   let previous = Vector.remove<BodyNode>(&mut nodes.*, node.index)
   if let BodyNodeKind.Expression {ty, form} = move previous.kind {
@@ -43380,7 +43438,15 @@ effect fn checkPlaceAssignment(
     false,
     unsafeAllowed, false,
   )
-  let mut replacementNode = match move replacement {
+  let checkedReplacement = match move replacement {
+    Result<BodyNodeId, Shared<Rejection>>.Success {value: acceptedNode} => acceptedNode
+    Result<BodyNodeId, Shared<Rejection>>.Failure {error} => {
+      return Result.failResult<BodyNodeId, Shared<Rejection>>(move error)
+    }
+  }
+  let transferred = run transferMovedPattern(&mut resolver.*, &mut owner.*, &mut dependencies.*, module, cursor,
+    &mut nodes.*, checkedReplacement, constraints)
+  let mut replacementNode = match move transferred {
     Result<BodyNodeId, Shared<Rejection>>.Success {value: acceptedNode} => acceptedNode
     Result<BodyNodeId, Shared<Rejection>>.Failure {error} => {
       return Result.failResult<BodyNodeId, Shared<Rejection>>(move error)
@@ -43616,6 +43682,14 @@ effect fn checkStatements(
           match move expression {
             Result<BodyNodeId, Shared<Rejection>>.Success {value: node} => {
               let mut returnedNode = node
+              if !opaqueResult && !callableResult {
+                let transferred = run transferMovedPattern(&mut resolver.*, &mut owner.*, &mut dependencies.*,
+                  module, cursor, &mut nodes.*, node, constraints)
+                match move transferred {
+                  Result<BodyNodeId, Shared<Rejection>>.Success {value} => { returnedNode = value }
+                  Result<BodyNodeId, Shared<Rejection>>.Failure {error} => { return Result.failResult<bool, Shared<Rejection>>(move error) }
+                }
+              }
               if opaqueResult || callableResult {
                 let returnSpan = Vector.asSlice<BodyNode>(&nodes.*)[node.index].origin.span
                 let mut failure = Option.none<Shared<Rejection>>()
@@ -43806,6 +43880,14 @@ effect fn checkStatements(
             Result<BodyNodeId, Shared<Rejection>>.Failure {error} => {
               return Result.failResult<bool, Shared<Rejection>>(move error)
             }
+          }
+        }
+        let transferred = run transferMovedPattern(&mut resolver.*, &mut owner.*, &mut dependencies.*, module, cursor,
+          &mut nodes.*, initializerNode, constraints)
+        initializerNode = match move transferred {
+          Result<BodyNodeId, Shared<Rejection>>.Success {value} => value
+          Result<BodyNodeId, Shared<Rejection>>.Failure {error} => {
+            return Result.failResult<bool, Shared<Rejection>>(move error)
           }
         }
         let checkedNodes = Vector.asSlice<BodyNode>(&nodes.*)
@@ -44068,6 +44150,14 @@ effect fn checkStatements(
               return Result.failResult<bool, Shared<Rejection>>(run reject(&resolver.*, module, RejectionCode.UndeclaredFailure, valueSpan))
             }
             return Result.failResult<bool, Shared<Rejection>>(move error)
+          }
+        }
+        if !isMove {
+          let transferred = run transferMovedPattern(&mut resolver.*, &mut owner.*, &mut dependencies.*, module, cursor,
+            &mut nodes.*, operand, constraints)
+          operand = match move transferred {
+            Result<BodyNodeId, Shared<Rejection>>.Success {value: node} => node
+            Result<BodyNodeId, Shared<Rejection>>.Failure {error} => { return Result.failResult<bool, Shared<Rejection>>(move error) }
           }
         }
         // `fail move value` transfers the operand exactly as a `move` expression does (FAIL-002).
