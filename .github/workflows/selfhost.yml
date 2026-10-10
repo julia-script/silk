@@ -12,6 +12,9 @@ on:
       - selfhost-*
       - julia/step*
 
+env:
+  SILK_SEMANTIC_CACHE_DIR: ${{ github.workspace }}/.scratch/semantic-cache
+
 permissions:
   contents: read
   actions: read
@@ -41,6 +44,13 @@ jobs:
       - uses: ./.github/actions/setup-linux-llvm
       - uses: ./.github/actions/download-bootstrap
         id: bootstrap
+      # Checked bodies are dependency-validated; test pass results remain uncached.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.SILK_SEMANTIC_CACHE_DIR }}
+          key: silk-semantic-v2-${{ runner.os }}-${{ steps.bootstrap.outputs.sha }}-native-seed-${{ github.sha }}
+          restore-keys: |
+            silk-semantic-v2-${{ runner.os }}-${{ steps.bootstrap.outputs.sha }}-native-seed-
       - name: Check snapshot and seed receipt contracts
         uses: ./.github/actions/check-native-contracts
       - name: Export exact committed authored inputs
@@ -202,6 +212,13 @@ jobs:
         id: bootstrap
         with:
           verification: 'true'
+      # Checked bodies are dependency-validated; test pass results remain uncached.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.SILK_SEMANTIC_CACHE_DIR }}
+          key: silk-semantic-v2-${{ runner.os }}-${{ steps.bootstrap.outputs.sha }}-corpus-${{ github.sha }}
+          restore-keys: |
+            silk-semantic-v2-${{ runner.os }}-${{ steps.bootstrap.outputs.sha }}-corpus-
       - name: Record bootstrap provenance
         env:
           BOOTSTRAP_SHA: ${{ steps.bootstrap.outputs.sha }}
@@ -401,6 +418,13 @@ jobs:
       - uses: ./.github/actions/setup-linux-llvm
       - uses: ./.github/actions/download-bootstrap
         id: bootstrap
+      # Checked bodies are dependency-validated; test pass results remain uncached.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.SILK_SEMANTIC_CACHE_DIR }}
+          key: silk-semantic-v2-${{ runner.os }}-${{ steps.bootstrap.outputs.sha }}-cases-${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            silk-semantic-v2-${{ runner.os }}-${{ steps.bootstrap.outputs.sha }}-cases-${{ matrix.shard }}-
       # Source tests run on the checkout as written; the corpus job verifies formatter safety.
       - name: Run ${{ matrix.shard }} source tests
         shell: bash
