@@ -62092,11 +62092,40 @@ effect fn sectionEvidence(inference: &Shared<Result<Answer, NoRejection>>, fresh
           run Type.collectOwned(&shape, fresh, &mut types.*, &mut lifetimes.*, &mut rows.*)
         }
       }
+      // A written Effect environment that a remaining operand's region bounds from above is
+      // fixed by that operand at the invocation, as a direct call fixes it from what it captures.
+      let outlives = Shared.with<Result<Answer, NoRejection>, Option<Constraint>>(inference,
+        fn(answer: &Result<Answer, NoRejection>) -> Option<Constraint> { return signatureConstraintAt(answer, at) })
+      if let Option<Constraint>.Some {value: Constraint.Outlives {longer, shorter}} = move outlives {
+        let boundedBy = run Type.applyLifetimeBindings(&longer, inferred)
+        let bounded = run Type.applyLifetimeBindings(&shorter, inferred)
+        let mut above = Vector.make<usize>()
+        run Type.collectOwnedLifetime(&boundedBy, fresh, &mut above)
+        let mut below = Vector.make<usize>()
+        run Type.collectOwnedLifetime(&bounded, fresh, &mut below)
+        if Vector.length<usize>(&below) == usize.ONE && sharesOrdinal(&above, &lifetimes.*) {
+          let environment = Vector.asSlice<usize>(&below)[usize.ZERO]
+          if !containsOrdinal(&lifetimes.*, environment) && Shared.with<Result<Answer, NoRejection>, bool>(inference,
+            fn(answer: &Result<Answer, NoRejection>) -> bool { return signatureEnvironmentBinder(answer, environment) }) {
+            run Vector.append<usize>(&mut lifetimes.*, environment)
+          }
+        }
+      }
       at = at + usize.ONE
     }
     expanded = before != Vector.length<usize>(&types.*) + Vector.length<usize>(&lifetimes.*) + Vector.length<usize>(&rows.*)
   }
   return true
+}
+
+fn sharesOrdinal(left: &Vector<usize>, right: &Vector<usize>) -> bool {
+  let listed = Vector.asSlice<usize>(left)
+  let mut at = usize.ZERO
+  while at < listed.length {
+    if containsOrdinal(right, listed[at]) { return true }
+    at = at + usize.ONE
+  }
+  return false
 }
 
 // Construction and later staging share the same bound-versus-free binder selection rule.
@@ -62536,6 +62565,65 @@ effect fn sectionCapturedParameters(resolver: &mut Resolver, owner: &mut Query<W
   return Result.succeed<Vector<Shared<Type>>, Shared<Rejection>>(move captured)
 }
 
+fn boundOrdinal(bindings: &[Binding], owner: &DeclarationId, ordinal: usize) -> bool {
+  return match move bindingArgument(bindings, owner, ordinal) { Option<Argument>.Some {..} => true Option<Argument>.None => false }
+}
+
+// A deferred written Effect environment that no remaining operand names is the meet of the
+// regions its bounds place above it, as a direct call takes the region its captured input
+// retains. Those regions are fixed by the invocation's operands.
+effect fn boundedSectionEnvironments(opened: &Shared<Result<Answer, NoRejection>>, fresh: &DeclarationId,
+  remaining: usize, seed: &mut Vector<Binding>, held: &[Binding]) -> () ! OutOfMemoryError ? &mut Allocator {
+  let facts = match move Shared.with<Result<Answer, NoRejection>, Option<SignatureFacts>>(opened, signatureFacts) {
+    Option<SignatureFacts>.Some {value} => move value
+    _ => { return () }
+  }
+  let mut types = Vector.make<usize>()
+  let mut named = Vector.make<usize>()
+  let mut rows = Vector.make<usize>()
+  let mut at = usize.ZERO
+  while at < remaining {
+    let parameter = Shared.with<Result<Answer, NoRejection>, Option<Shared<Type>>>(opened,
+      fn(answer: &Result<Answer, NoRejection>) -> Option<Shared<Type>> { return signatureParameter(answer, at) })
+    if let Option<Shared<Type>>.Some {value} = move parameter {
+      let applied = run Type.applyBindings(&value, Vector.asSlice<Binding>(&seed.*), true)
+      run Type.collectOwned(&applied, fresh, &mut types, &mut named, &mut rows)
+    }
+    at = at + usize.ONE
+  }
+  let mut environment = usize.ZERO
+  while environment < facts.binders {
+    let open = !containsOrdinal(&named, environment)
+      && !boundOrdinal(Vector.asSlice<Binding>(&seed.*), fresh, environment)
+      && !boundOrdinal(held, fresh, environment)
+      && Shared.with<Result<Answer, NoRejection>, bool>(opened,
+        fn(answer: &Result<Answer, NoRejection>) -> bool { return signatureEnvironmentBinder(answer, environment) })
+    if open {
+      let mut above = Vector.make<Shared<Lifetime>>()
+      let mut bound = usize.ZERO
+      while bound < facts.constraints {
+        let found = Shared.with<Result<Answer, NoRejection>, Option<Constraint>>(opened,
+          fn(answer: &Result<Answer, NoRejection>) -> Option<Constraint> { return signatureConstraintAt(answer, bound) })
+        if let Option<Constraint>.Some {value: Constraint.Outlives {longer, shorter}} = move found {
+          let mut below = Vector.make<usize>()
+          run Type.collectOwnedLifetime(&shorter, fresh, &mut below)
+          if Vector.length<usize>(&below) == usize.ONE && Vector.asSlice<usize>(&below)[usize.ZERO] == environment {
+            run Vector.append<Shared<Lifetime>>(&mut above, run Type.applyLifetimeBindings(&longer, Vector.asSlice<Binding>(&seed.*)))
+          }
+        }
+        bound = bound + usize.ONE
+      }
+      if Vector.length<Shared<Lifetime>>(&above) != usize.ZERO {
+        let region = run Lifetime.meet(Vector.asSlice<Shared<Lifetime>>(&above))
+        run Vector.append<Binding>(&mut seed.*, Binding {declaration: run Shared.make<DeclarationId>(run DeclarationId.copy(fresh)),
+          ordinal: environment, value: Argument.Lifetime {value: move region}})
+      }
+    }
+    environment = environment + usize.ONE
+  }
+  return ()
+}
+
 // With `holdLifetimes`, selected target lifetimes stay open binders and are appended to `held` as
 // inference evidence, so an invocation can tell a lifetime its section bound from a written one.
 effect fn sectionSchemaSignature(resolver: &mut Resolver, owner: &mut Query<Word, Answer, NoRejection>,
@@ -62584,6 +62672,7 @@ effect fn sectionSchemaSignature(resolver: &mut Resolver, owner: &mut Query<Word
     Option<CallableFacts>.Some {value} => Vector.length<Shared<Type>>(&value.parameters)
     _ => { return Result.failResult<Shared<Result<Answer, NoRejection>>, Shared<Rejection>>(run reject(&resolver.*, module, RejectionCode.Unsupported, span)) }
   }
+  run boundedSectionEnvironments(&opened, fresh, remaining, &mut seed, Vector.asSlice<Binding>(&held.*))
   let mut parameters = Vector.make<Shared<Type>>()
   at = usize.ZERO
   while at < remaining {

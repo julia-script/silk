@@ -3783,6 +3783,32 @@ fn main() -> i32 {
     |> Effect.provideMut<Allocator>(&mut allocator)
 }
 
+// A section's written Effect environment that its remaining operand's region bounds is fixed by
+// that operand at the invocation, not by the supplied suffix, which captures nothing.
+test effect fn sectionEnvironmentsFollowTheOperandThatBoundsThem() -> ()
+! Cycle | InvalidModulePath | RevisionMismatch | OutOfMemoryError | AssertionError<'static> {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let id = run module("section-environment-bound.silk") |> Effect.provideMut<Allocator>(&mut allocator)
+  let text = """import silk.effect { Effect }
+struct Owner { value: i32 }
+struct Guard { offset: i32 }
+effect<'data> fn failed<'data>(owner: &'data Owner) -> never ! &'data Owner { fail owner }
+effect<'held> fn recovered<'data: 'held, 'held>(owner: &'data Owner, guard: Guard) -> i32 {
+  return owner.value + guard.offset
+}
+effect fn body() -> i32 {
+  let owner = Owner { value: 40 }
+  return run Effect.catchAll(failed(&owner), recovered(Guard { offset: 2 }))
+}
+"""
+  let mut store = run staticSemantic(&id, text, MachineTarget.forId(TargetId.X8664UnknownLinuxGnu))
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut request = Request.make()
+  let body = run Semantic.demandBody(&mut store, &mut request, &id, b"body") |> Effect.provideMut<Allocator>(&mut allocator)
+  run Testing.expect(succeeded(&body), "a recovery section's environment is the region of the failure it receives")
+  return ()
+}
+
 // The schema is shared by the consumer instances. Inspect their retained MIR rather than
 // choosing an executable target from the comparison contract used during admission.
 effect fn contextualGenericSectionClaims(text: string<'static>, selected: usize, deferred: usize) -> ()
