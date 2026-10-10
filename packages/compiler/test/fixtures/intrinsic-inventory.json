@@ -4993,7 +4993,7 @@
     },
     {
       "operation": "Intrinsic.layoutOf",
-      "signature": "fn Intrinsic.layoutOf<T>() -> Layout",
+      "signature": "fn Intrinsic.layoutOf<T>() -> (usize, usize)",
       "unsafe": false,
       "admission": "Representation",
       "consumer": "silk/layout.of",

@@ -45,17 +45,25 @@ it('keeps generated pair results unavailable as closed callable and witness cont
     owner: AuthoredIdentity.module('file', 'result-policy'),
     path: [],
   }
-  const generated = { ...signature, result: Intrinsic.generatedUsizePair }
   assert.deepEqual(
-    CallResolution.builtinFunctionReference(generated, 'Intrinsic', 'layoutOf', anchor),
+    CallResolution.builtinFunctionReference(signature, 'Intrinsic', 'layoutOf', anchor),
     {
       _tag: 'Unavailable',
       anchor,
     },
   )
-  assert.strictEqual(Intrinsic.closedResultType(generated.result), undefined)
+  assert.deepEqual(signature.result, Intrinsic.generatedUsizePair)
+  assert.strictEqual(Intrinsic.closedResultType(signature.result), undefined)
+  const closedSignature = CallResolution.builtinSignature('Intrinsic', 'stringByteLength')
+  if (closedSignature === undefined)
+    return unreachable('expected the existing closed string primitive')
   assert.strictEqual(
-    CallResolution.builtinFunctionReference(signature, 'Intrinsic', 'layoutOf', anchor)._tag,
+    CallResolution.builtinFunctionReference(
+      closedSignature,
+      'Intrinsic',
+      'stringByteLength',
+      anchor,
+    )._tag,
     'ResolvedBuiltin',
   )
   const parameter = Type.parameter({ module: 'result-policy', name: 'closed' }, 0, 'T')

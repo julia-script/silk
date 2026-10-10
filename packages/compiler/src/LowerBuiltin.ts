@@ -152,11 +152,50 @@ const lowerBuiltinOperation = (
   }
   const witnessCall = lowerInterfaceWitnessCall(fn, expression, argumentLocals)
   if (witnessCall !== undefined) return finishBuiltin(witnessCall)
-  if (
-    expression.operation === 'LayoutOf' ||
-    expression.operation === 'SharedLayout' ||
-    expression.operation === 'ExecutionLayout'
-  ) {
+  if (expression.operation === 'LayoutOf') {
+    const raw = expression.typeArguments.at(0)
+    const element = raw === undefined ? undefined : fn.semanticArgument(raw)
+    const measured =
+      element !== undefined && Type.isTypeArgument(element)
+        ? Layout.entry(fn.layout, element)
+        : undefined
+    const resultLayout = Layout.entry(fn.layout, fn.semantic(expression.type))
+    const type = fn.type(expression.type)
+    if (
+      measured === undefined ||
+      resultLayout?.representation._tag !== 'Aggregate' ||
+      resultLayout.representation.fields.length !== 2 ||
+      type?._tag !== 'Nominal'
+    )
+      return undefined
+    const bytes = resultLayout.representation.fields.find((field) => field.id.ordinal === 0)
+    const alignment = resultLayout.representation.fields.find((field) => field.id.ordinal === 1)
+    if (bytes === undefined || alignment === undefined) return undefined
+    const fields = [
+      { field: bytes.id, measurement: measured.size },
+      { field: alignment.id, measurement: measured.alignment },
+    ].map(({ field, measurement }) => {
+      const value = fn.alloc(usize)
+      fn.emit({
+        _tag: 'Literal',
+        destination: value,
+        type: usize,
+        value: BigInt(measurement),
+        provenance: generated(expression.span),
+      })
+      return { field, value }
+    })
+    const destination = fn.alloc(type)
+    fn.emit({
+      _tag: 'Construct',
+      destination,
+      type,
+      fields,
+      provenance: generated(expression.span),
+    })
+    return finishBuiltin(destination)
+  }
+  if (expression.operation === 'SharedLayout' || expression.operation === 'ExecutionLayout') {
     const raw = expression.typeArguments.at(0)
     const semanticRaw = raw === undefined ? undefined : fn.semanticArgument(raw)
     const element =
